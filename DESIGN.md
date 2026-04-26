@@ -4565,12 +4565,65 @@ Continuation is a special pattern where the user explicitly says
 3. Surfaces `feedback.md` (or the run config's
    `feedback_for_continuation` field) prominently to the meta-agent
    and to every agent's first-iteration prompt.
-4. Reuses the prior run's hired personas if their slots are still
-   appropriate, so persona memory carries forward.
+4. **Re-runs the meta-agent** to evaluate whether the team needs to
+   change for the new ask. See "Meta-agent re-evaluation" below.
 
-The meta-agent's first proposal under continuation typically opens with
-"this is a continuation of run_xyz. Reading the feedback first..." —
-this is built into its system prompt for continuation runs.
+#### Meta-agent re-evaluation on continuation
+
+The meta-agent's role on a continuation is **not** to rubber-stamp the
+prior team — it's to ask "given what changed and what's being asked
+now, is the prior team still right?"
+
+The proposal step on a continuation run reads:
+
+- The prior project's team config (roles, depends_on, model_tiers, RBAC)
+- The prior run's `meta.json` (status, iteration count, completed_agents)
+- The prior run's `feedback.md` (or the new ask the user just typed)
+- The prior personas' public reputation summaries (NOT their full memory
+  — that's still injected per-agent at Layer 4 by the runner)
+
+It then produces a *delta proposal*:
+
+| Action | When |
+|---|---|
+| Keep team unchanged | New ask is small / refinement of prior work |
+| Drop a role | That role's work is locked in; new ask doesn't touch it |
+| Add a role | New ask introduces a domain the prior team didn't cover (e.g. "now add a UI" → add visual_checker) |
+| Swap model tier | New ask is much smaller (downgrade) or much harder (upgrade) |
+| Replace a persona | Prior persona's memory shows poor fit for new ask, or is unavailable |
+| Re-hire same persona | Same role, same memory carries forward — the default for unchanged roles |
+
+The user reviews and approves the *delta*, not a fresh team. The studio's
+Propose view on continuation shows two columns: "prior team" and
+"proposed for this run", with diff annotations on each role.
+
+Persona memory carries forward by default — that's the whole point of
+persistent specialists. The meta-agent only proposes a different persona
+when the new ask is genuinely outside the prior persona's specialty.
+
+#### What this preserves
+
+- **Persona memory** — patterns, episodes, working style all stay with
+  the persona; if re-hired they bring it forward
+- **Project rules** (§36) — `data/projects/{id}/persona_rules/*.md`
+  continues to apply across continuations
+- **Prior run's working state** — seeded into `working/` so agents
+  start from where the prior run ended
+- **Prior run's git history** — bundled for reference, not branched off
+  (per rule 85: "fresh git history in `working/`")
+
+#### What this re-evaluates
+
+- **Team composition** — roles, dependencies, tools, RBAC scopes
+- **Model tier per role** — cheaper/heavier as the ask warrants
+- **Persona-to-role mapping** — usually preserved, can change
+
+The meta-agent's proposal under continuation typically opens with:
+"This is a continuation of `run_xyz`. The prior team was [A, B, C]
+and they shipped [...]. The new ask is [...]. I recommend keeping A
+and B, swapping C's model tier from solid to heavy, and adding D
+because [...]." — this is built into its system prompt for
+continuation runs.
 
 ### Privacy: existing repos may contain secrets
 

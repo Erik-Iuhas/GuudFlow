@@ -84,18 +84,33 @@ mutual-exclusion. One chunk, two endpoints.
       vs "Create blank project"
 - [ ] Blank route: `Studio.tsx` opens with an empty agents array
 
+### Chunk 8 — "Continue from run" entry point (~1 hr)
+- [ ] On a Run page, add a "Continue from this run" button (visible only
+      after the run reaches a terminal state — complete/failed/max_iter)
+- [ ] Routes to a continuation flow: pre-fills the prior run id, prompts
+      for new ask / feedback, hands off to Phase D's continuation-aware
+      proposal
+- [ ] Stores the continuation intent on the project so the next run's
+      meta-agent step picks it up
+
 **Phase D-prime exit:** user can upload a PDF, paste a git URL, point
 at a local directory, attach a prior run; runs spawned afterward have
 those visible at `/workspace/inputs/`.
 
 ---
 
-## Phase D — Real meta-agent proposal (~4 hrs, depends on D-prime)
+## Phase D — Real meta-agent proposal (~7 hrs, depends on D-prime)
 
 Goal: `/api/meta/propose` reads project inputs and returns a tailored
-proposal that mentions specific files.
+proposal. Two flavours:
+- **Greenfield / fresh-with-inputs:** propose a team from scratch
+  informed by uploaded specs / source repos.
+- **Continuation:** read the prior run's team + outputs + new ask,
+  produce a delta proposal (keep / drop / add / swap-tier /
+  replace-persona) so the user approves what's *changing* rather than
+  re-approving the whole team. DESIGN §33 "Meta-agent re-evaluation".
 
-### Chunk 1 — `MetaAgent.run()` implementation (~2 hrs)
+### Chunk 1 — `MetaAgent.run()` for greenfield + uploads (~2 hrs)
 - [ ] Read `inputs/README.md` if present
 - [ ] Read top-N input files within token budget (reuse
       `core/context_manager.py` logic, adapted to read from inputs/)
@@ -118,8 +133,37 @@ proposal that mentions specific files.
       input file paths it mentions (`src/auth.py`, `inputs/uploads/spec.pdf`)
       as clickable links
 
+### Chunk 4 — Continuation-aware proposals (~2 hrs)
+DESIGN §33's "Meta-agent re-evaluation on continuation" — when a run is a
+continuation, the meta-agent produces a *delta proposal*, not a
+greenfield team.
+
+- [ ] Detect continuation context: project's inputs include a
+      `from_run_{id}/` dir, OR API call passes `prior_run_id`
+- [ ] Extend `MetaAgent.run()` to load the prior run's `meta.json`,
+      prior team config, and prior personas' reputation summaries
+      (NOT full memory — that stays per-persona)
+- [ ] Switch the system prompt for continuation: produce delta
+      annotations (keep / drop / add / swap-tier / replace-persona /
+      re-hire) per role with rationale
+- [ ] Return shape: `{ rationale, prior_team, proposed_team, deltas[] }`
+- [ ] `Propose.tsx`: when `deltas` present, render two columns
+      (prior vs proposed) with the delta annotation badge per role
+
+### Chunk 5 — Continuation runner integration (~1 hr)
+- [ ] When a run is started against a project that has a continuation
+      input, the runner uses the meta-agent's delta proposal as the
+      effective team config (not the project's stored config — the
+      project's stored config is the *base*, the delta is per-run)
+- [ ] OR, simpler: the user approves the delta, which mutates the
+      project's stored config for this run, and the next run starts
+      from that updated config (loses delta history but simpler)
+- [ ] Decision recorded in `decisions.md` once implemented
+
 **Phase D exit:** "describe a goal + show me your inputs, get a smart
-team that names your files."
+team that names your files. **Or — continue from a prior run, get a
+delta proposal that says exactly what's changing about the team and
+why, with prior persona memory carrying forward where it still fits.**"
 
 ---
 
