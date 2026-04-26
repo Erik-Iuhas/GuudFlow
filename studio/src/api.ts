@@ -104,6 +104,18 @@ export const runsApi = {
       { text, priority },
       true,
     ),
+  /** Phase G-prime.2 — re-enqueue a Job for a failed/paused run. The
+   *  worker resumes from persisted board.jsonl + artifacts.json
+   *  rather than seeding fresh. Studio's "Resume" button (G.3) calls
+   *  this. 400 if run is complete, 404 if unknown, 409 if already
+   *  has an active job. */
+  resume: (id: string) =>
+    request<{
+      accepted: boolean;
+      run_id: string;
+      job_id: string;
+      project_id: string;
+    }>("POST", `/api/runs/${encodeURIComponent(id)}/resume`, undefined, true),
 };
 
 // ── Personas ───────────────────────────────────────────────────────────────

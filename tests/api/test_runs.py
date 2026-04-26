@@ -277,6 +277,92 @@ async def test_post_approval_requires_auth(client, app):
     assert r.status_code == 401
 
 
+async def test_resume_unknown_run_404(client, auth_header):
+    r = await client.post(
+        "/api/runs/run_ghost/resume", headers=auth_header,
+    )
+    assert r.status_code == 404
+
+
+async def test_resume_completed_run_400(client, auth_header, write_run):
+    """Resuming a successfully-completed run is meaningless."""
+    write_run("run_done", project_id="p1")  # default status is "complete"
+    r = await client.post(
+        "/api/runs/run_done/resume", headers=auth_header,
+    )
+    assert r.status_code == 400
+
+
+async def test_resume_failed_run_enqueues_job(
+    client, auth_header, write_run, app, data_root: Path,
+):
+    """Happy path: a run with status != complete and no active job
+    gets a new Job enqueued with payload.resume = True."""
+    import json
+    write_run("run_fail", project_id="p1")
+    # Override status to "failed".
+    rd = data_root / "runs" / "run_fail"
+    meta = json.loads((rd / "meta.json").read_text(encoding="utf-8"))
+    meta["status"] = "failed"
+    (rd / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    r = await client.post(
+        "/api/runs/run_fail/resume", headers=auth_header,
+    )
+    assert r.status_code == 202, r.text
+    body = r.json()
+    assert body["accepted"] is True
+    assert body["run_id"] == "run_fail"
+    assert body["job_id"].startswith("job_")
+    assert body["project_id"] == "p1"
+
+    # Verify the job is on the queue with the resume flag.
+    job = await app.state.queue.get(body["job_id"])
+    assert job is not None
+    assert job.run_id == "run_fail"
+    assert job.payload.get("resume") is True
+
+
+async def test_resume_when_job_already_active_409(
+    client, auth_header, write_run, app, data_root: Path,
+):
+    """Don't double-enqueue. If a job for this run is already queued
+    or running, return 409."""
+    import json
+    from worker.queue import Job
+    write_run("run_active", project_id="p1")
+    rd = data_root / "runs" / "run_active"
+    meta = json.loads((rd / "meta.json").read_text(encoding="utf-8"))
+    meta["status"] = "running"
+    (rd / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    # Pre-populate the queue with an active job for this run.
+    await app.state.queue.enqueue(Job(
+        job_id="job_existing",
+        project_id="p1",
+        run_id="run_active",
+        payload={},
+    ))
+
+    r = await client.post(
+        "/api/runs/run_active/resume", headers=auth_header,
+    )
+    assert r.status_code == 409
+    assert "job_existing" in r.json()["detail"]
+
+
+async def test_resume_requires_auth(client, write_run, data_root: Path):
+    import json
+    write_run("run_auth", project_id="p1")
+    rd = data_root / "runs" / "run_auth"
+    meta = json.loads((rd / "meta.json").read_text(encoding="utf-8"))
+    meta["status"] = "failed"
+    (rd / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+
+    r = await client.post("/api/runs/run_auth/resume")
+    assert r.status_code == 401
+
+
 async def test_post_approval_idempotent_returns_404_after_decided(client, app, auth_header):
     """Once decided, the same id can't be decided again — keeps the
     semantics simple (each gate fires once)."""

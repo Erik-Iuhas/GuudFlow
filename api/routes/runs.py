@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from api.auth import require_bearer
 from core.signals import Signal, SignalType
+from worker.queue import JOB_QUEUED, JOB_RUNNING, Job
 
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -166,3 +168,72 @@ async def download_deliverable(request: Request, run_id: str, path: str):
     if not target.is_file():
         raise HTTPException(status_code=404, detail=f"deliverable {path!r} not found")
     return FileResponse(target)
+
+
+@router.post(
+    "/{run_id}/resume",
+    dependencies=[Depends(require_bearer)],
+    status_code=202,
+)
+async def resume_run(request: Request, run_id: str) -> dict:
+    """Re-enqueue a Job for an existing run (Phase G-prime.2).
+
+    The worker dequeues the job, sees `payload.resume == True`, calls
+    `core.run_loader.restore_workspace` to rebuild the workspace from
+    disk (board.jsonl + artifacts.json), and drives the scheduler from
+    the restored state. Completed agents don't re-run; failed agents
+    pick up where they left off.
+
+    Status codes:
+    - 202: job enqueued, returns the new `job_id` (run_id is reused)
+    - 400: run is already complete (no point resuming)
+    - 404: run doesn't exist on disk
+    - 409: a non-terminal job exists for this run (queued or running)
+    """
+    meta = await _store(request).get(run_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+
+    status = (meta.get("status") or "").lower()
+    if status == "complete":
+        raise HTTPException(
+            status_code=400,
+            detail=f"run {run_id!r} is already complete; nothing to resume",
+        )
+
+    queue = request.app.state.queue
+    existing_jobs = await queue.list(limit=500)
+    active = [
+        j for j in existing_jobs
+        if j.run_id == run_id and j.status in (JOB_QUEUED, JOB_RUNNING)
+    ]
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"run {run_id!r} already has an active job "
+                f"({active[0].job_id}, status={active[0].status})"
+            ),
+        )
+
+    project_id = meta.get("project_id")
+    if not project_id:
+        raise HTTPException(
+            status_code=500,
+            detail=f"run {run_id!r} meta has no project_id",
+        )
+
+    job_id = f"job_{uuid4().hex[:10]}"
+    await queue.enqueue(Job(
+        job_id=job_id,
+        project_id=project_id,
+        run_id=run_id,
+        payload={"resume": True},
+    ))
+
+    return {
+        "accepted": True,
+        "run_id": run_id,
+        "job_id": job_id,
+        "project_id": project_id,
+    }
