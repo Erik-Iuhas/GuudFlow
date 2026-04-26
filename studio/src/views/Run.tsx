@@ -7,12 +7,30 @@ import {
   projectsApi,
   runsApi,
 } from "../api";
+import { ApprovalCard } from "../components/ApprovalCard";
 import { BoardFeed } from "../components/BoardFeed";
 import { CommentBox } from "../components/CommentBox";
 import { GitLogTab } from "../components/GitLogTab";
 import { QuipFeed } from "../components/QuipFeed";
 import { ScreenshotPane } from "../components/ScreenshotPane";
 import type { RunMeta, Signal } from "../types";
+
+/** Unresolved approval gates: APPROVAL_NEEDED signals whose matching
+ *  GRANTED / DENIED hasn't landed on the board yet. */
+function unresolvedApprovals(signals: Signal[]): Signal[] {
+  const resolved = new Set<string>();
+  for (const s of signals) {
+    if (s.type === "APPROVAL_GRANTED" || s.type === "APPROVAL_DENIED") {
+      const m = (s.detail || "").match(/approval_id=([^;]+)/);
+      if (m) resolved.add(m[1].trim());
+    }
+  }
+  return signals.filter((s) => {
+    if (s.type !== "APPROVAL_NEEDED") return false;
+    const m = (s.detail || "").match(/approval_id=([^;]+)/);
+    return !!m && !resolved.has(m[1].trim());
+  });
+}
 
 const TERMINAL_STATUSES = new Set([
   "complete",
@@ -147,6 +165,13 @@ export function Run() {
             </div>
           </div>
           {error && <div className="error">{error}</div>}
+
+          {/* Pending approval gates (Phase C.0.5). Surfaced inline at
+              the top of the run view so the user can grant/deny without
+              hunting through the board. */}
+          {runId && unresolvedApprovals(signals).map((sig) => (
+            <ApprovalCard key={sig.id} runId={runId} signal={sig} />
+          ))}
         </div>
 
         <div className="run-board">

@@ -33,6 +33,20 @@ class SignalType(str, Enum):
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
 
+    # Auto-escalation (DESIGN §23) — the runner posts this when an
+    # agent's REJECTED count crosses the project's threshold; tech_lead
+    # wakes on it and posts a focused ACTION recommendation back.
+    ESCALATION = "ESCALATION"
+
+    # Approval gates (Phase C.0.5) — runner-initiated cost-control
+    # gates. Distinct from HUMAN_NEEDED (in-character agent questions).
+    # The runner posts APPROVAL_NEEDED before a gated event (HEAVY-tier
+    # dispatch, iteration breach, run start with cost preview), pauses,
+    # and resumes when the user POSTs APPROVAL_GRANTED or APPROVAL_DENIED.
+    APPROVAL_NEEDED = "APPROVAL_NEEDED"
+    APPROVAL_GRANTED = "APPROVAL_GRANTED"
+    APPROVAL_DENIED = "APPROVAL_DENIED"
+
     USER_COMMENT = "USER_COMMENT"
     USER_COMMENT_PRIORITY = "USER_COMMENT_PRIORITY"
 

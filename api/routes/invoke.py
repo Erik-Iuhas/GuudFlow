@@ -24,17 +24,53 @@ router = APIRouter(prefix="/api/invoke", tags=["invoke"])
 
 @router.post(
     "/{project_id}",
-    status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(require_bearer)],
 )
 async def invoke_project(
     request: Request,
     project_id: str,
     body: dict | None = Body(default=None),
-) -> dict:
+):
+    """Trigger a run.
+
+    Phase C.0.5: when the project's `approval_gates.pre_run_cost_preview`
+    is on (default), the first POST returns the cost estimate with HTTP
+    200 and `requires_approval: true`. The client (studio) shows the
+    user the cost; on confirm, the client POSTs again with
+    `confirm: true` and the run actually enqueues with HTTP 202.
+    """
+    from fastapi.responses import JSONResponse
+    from worker.job_runner import serialise_project
+    from core.cost_estimate import estimate_run_cost
+
     project = await request.app.state.project_store.get(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+
+    body = body or {}
+    confirm = bool(body.get("confirm", False))
+
+    project_cfg = serialise_project(project)
+    gates = project_cfg.approval_gates or {}
+    preview_on = bool(gates.get("pre_run_cost_preview", True))
+
+    if preview_on and not confirm:
+        estimate = estimate_run_cost(project_cfg)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "accepted": False,
+                "requires_approval": True,
+                "gate": "pre_run_cost_preview",
+                "estimated_cost": estimate.to_dict(),
+                "project_id": project_id,
+                "message": (
+                    "Pre-run cost preview is on for this project. "
+                    "POST again with `confirm: true` (and any other "
+                    "payload fields) to actually start the run."
+                ),
+            },
+        )
 
     run_id = f"run_{uuid4().hex[:10]}"
     job_id = f"job_{uuid4().hex[:10]}"
@@ -42,17 +78,20 @@ async def invoke_project(
         job_id=job_id,
         project_id=project_id,
         run_id=run_id,
-        payload=body or {},
+        payload=body,
     )
     await request.app.state.queue.enqueue(job)
 
-    return {
-        "accepted": True,
-        "run_id": run_id,
-        "job_id": job_id,
-        "project_id": project_id,
-        "enqueued_at": datetime.now(timezone.utc).isoformat(),
-    }
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content={
+            "accepted": True,
+            "run_id": run_id,
+            "job_id": job_id,
+            "project_id": project_id,
+            "enqueued_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
 
 
 @router.get("/mcp/manifest")

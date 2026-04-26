@@ -83,6 +83,45 @@ def test_serialise_project_handles_missing_keys():
     assert p.rbac == {}
 
 
+# ── approval_gates round-trip (Phase C.0.5) ────────────────────────────────
+
+
+def test_serialise_project_baselines_approval_gates_when_missing():
+    """Projects without `approval_gates` get the opinionated baseline."""
+    p = serialise_project({"project_id": "p", "goal": "x"})
+    assert p.approval_gates["pre_run_cost_preview"] is True
+    assert p.approval_gates["heavy_tier_mid_run_dispatch"] is True
+    assert p.approval_gates["iteration_breach_at"] == 2
+
+
+def test_serialise_project_preserves_explicit_approval_gates():
+    """User-set values pass through; baseline defaults fill any gaps."""
+    p = serialise_project({
+        "project_id": "p",
+        "goal": "x",
+        "approval_gates": {
+            "pre_run_cost_preview": False,
+            "token_budget_usd": 5.00,
+            # heavy_tier_mid_run_dispatch + iteration_breach_at omitted
+        },
+    })
+    assert p.approval_gates["pre_run_cost_preview"] is False
+    assert p.approval_gates["token_budget_usd"] == 5.00
+    # Defaults still fill missing keys.
+    assert p.approval_gates["heavy_tier_mid_run_dispatch"] is True
+    assert p.approval_gates["iteration_breach_at"] == 2
+
+
+def test_serialise_project_handles_non_dict_approval_gates():
+    """Defensive: a malformed approval_gates value falls back to baseline."""
+    p = serialise_project({
+        "project_id": "p", "goal": "x",
+        "approval_gates": "not a dict",
+    })
+    assert isinstance(p.approval_gates, dict)
+    assert p.approval_gates["pre_run_cost_preview"] is True
+
+
 # ── JobRunner end-to-end ───────────────────────────────────────────────────
 
 

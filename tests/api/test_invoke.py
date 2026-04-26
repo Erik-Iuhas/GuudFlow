@@ -9,17 +9,71 @@ async def test_invoke_unknown_project_404(client, auth_header):
 
 
 async def test_invoke_returns_202_with_run_id(client, auth_header):
-    """DESIGN §10: invoke returns 202 immediately with run_id."""
+    """DESIGN §10: invoke returns 202 immediately with run_id.
+
+    Phase C.0.5: with the default `pre_run_cost_preview` gate on, the
+    second POST (with confirm: true) is the one that returns 202.
+    """
     await client.post("/api/projects", json={
         "project_id": "p1", "goal": "x",
     }, headers=auth_header)
-    r = await client.post("/api/invoke/p1", json={"context": "test"}, headers=auth_header)
+    r = await client.post(
+        "/api/invoke/p1",
+        json={"context": "test", "confirm": True},
+        headers=auth_header,
+    )
     assert r.status_code == 202
     body = r.json()
     assert body["accepted"] is True
     assert body["run_id"].startswith("run_")
     assert body["job_id"].startswith("job_")
     assert body["project_id"] == "p1"
+
+
+async def test_invoke_returns_cost_preview_when_gate_on(client, auth_header):
+    """Phase C.0.5: with `pre_run_cost_preview` on (the baseline), the
+    first POST returns 200 with `requires_approval: true` + a cost
+    estimate. The run is NOT enqueued on this leg."""
+    await client.post(
+        "/api/projects",
+        json={"project_id": "p_preview", "goal": "x"},
+        headers=auth_header,
+    )
+    r = await client.post(
+        "/api/invoke/p_preview",
+        json={},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["accepted"] is False
+    assert body["requires_approval"] is True
+    assert body["gate"] == "pre_run_cost_preview"
+    assert "estimated_cost" in body
+    assert "total_usd" in body["estimated_cost"]
+
+
+async def test_invoke_skips_preview_when_gate_disabled(client, auth_header):
+    """Project explicitly disables pre_run_cost_preview → first POST
+    enqueues immediately."""
+    await client.post(
+        "/api/projects",
+        json={
+            "project_id": "p_no_gate",
+            "goal": "x",
+            "approval_gates": {
+                "pre_run_cost_preview": False,
+            },
+        },
+        headers=auth_header,
+    )
+    r = await client.post(
+        "/api/invoke/p_no_gate",
+        json={},
+        headers=auth_header,
+    )
+    assert r.status_code == 202
+    assert r.json()["accepted"] is True
 
 
 async def test_invoke_requires_auth(client):
@@ -30,7 +84,11 @@ async def test_invoke_requires_auth(client):
 async def test_invoke_enqueues_job(client, auth_header, app):
     await client.post("/api/projects", json={"project_id": "p1", "goal": "x"},
                       headers=auth_header)
-    r = await client.post("/api/invoke/p1", json={}, headers=auth_header)
+    r = await client.post(
+        "/api/invoke/p1",
+        json={"confirm": True},
+        headers=auth_header,
+    )
     body = r.json()
 
     job = await app.state.queue.get(body["job_id"])
@@ -42,7 +100,11 @@ async def test_invoke_enqueues_job(client, auth_header, app):
 async def test_job_status_endpoint(client, auth_header):
     await client.post("/api/projects", json={"project_id": "p1", "goal": "x"},
                       headers=auth_header)
-    r = await client.post("/api/invoke/p1", json={}, headers=auth_header)
+    r = await client.post(
+        "/api/invoke/p1",
+        json={"confirm": True},
+        headers=auth_header,
+    )
     job_id = r.json()["job_id"]
 
     r = await client.get(f"/api/invoke/{job_id}/status", headers=auth_header)

@@ -23,7 +23,9 @@ then `await runner.run()` drives the whole thing.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,7 +62,13 @@ from core.tool_manifest import (
     ToolManifest,
     ToolManifestBuilder,
 )
-from core.workspace import AgentState, Artifact, CommitRecord, Workspace
+from core.workspace import (
+    AgentState,
+    ApprovalRequest,
+    Artifact,
+    CommitRecord,
+    Workspace,
+)
 
 
 ScreenshotCallback = Callable[[Path, str], Awaitable[Path]]
@@ -95,7 +103,12 @@ class AgentConfig:
 @dataclass
 class ProjectConfig:
     """The project's run-time config. The meta-agent produces this
-    (Stage 5+); for tests and dev runs it can be hand-constructed."""
+    (Stage 5+); for tests and dev runs it can be hand-constructed.
+
+    `escalation_thresholds` (DESIGN §23): mapping of escalation handler
+    role -> rejection count that triggers them. Default `{tech_lead: 2}`.
+    Set a threshold to 0 to disable that handler.
+    """
 
     project_id: str
     goal: str
@@ -103,6 +116,22 @@ class ProjectConfig:
     rbac: dict[str, RoleRBAC] = field(default_factory=dict)
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
     max_iterations: int = 5
+    escalation_thresholds: dict[str, int] = field(
+        default_factory=lambda: {"tech_lead": 2},
+    )
+    # Approval gates (Phase C.0.5). Maps gate-name → enabled flag (or
+    # threshold for `iteration_breach_at`). Defaults are opinionated:
+    # cost preview before run + confirm before HEAVY-tier mid-run
+    # dispatch + confirm at iteration breach >= 2.
+    approval_gates: dict[str, Any] = field(
+        default_factory=lambda: {
+            "pre_run_cost_preview": True,
+            "heavy_tier_mid_run_dispatch": True,
+            "iteration_breach_at": 2,
+            "per_iteration": False,
+            "token_budget_usd": None,
+        },
+    )
 
 
 # Default model id per tier. The runner may override via project config.
@@ -143,12 +172,25 @@ class AgentRunner:
         self.max_wall_seconds = max_wall_seconds
         self.docker_manager = docker_manager
 
+        # Escalation tracking (DESIGN §23, Phase C.3). _rejection_counts
+        # accumulates REJECTED signals per upstream role; once a role
+        # crosses an escalation threshold, the corresponding handler in
+        # `project.escalation_thresholds` (e.g. tech_lead) is dispatched.
+        # `_escalations_fired[handler] = {roles already escalated for}`
+        # so each (handler, role) pair fires at most once per run.
+        self._rejection_counts: dict[str, int] = {}
+        self._escalations_fired: dict[str, set[str]] = {}
+        self._escalation_tasks: list[asyncio.Task] = []
+
         # Set up workspace state.
         self.workspace = Workspace(
             run_id=run_id,
             goal=project.goal,
             max_iterations=project.max_iterations,
         )
+        # Subscribe to the board so we can count REJECTED signals and
+        # fire escalations when thresholds are crossed.
+        self.workspace.subscribe(self._on_signal_for_escalation)
         # Run-level deadline — checked by the scheduler.
         if max_wall_seconds is not None:
             import time as _time
@@ -373,6 +415,10 @@ class AgentRunner:
         scheduler = Scheduler(specs, self.workspace, scope="pipeline")
         result = await scheduler.run()
 
+        # Wait for any in-flight escalation handlers (Phase C.3) so
+        # their signals land before memory_writer / quip_engine fire.
+        await self._await_escalation_tasks()
+
         # Post-run: trigger memory_writer if any persona agents participated.
         if self.memory_writer is not None:
             try:
@@ -431,14 +477,27 @@ class AgentRunner:
             )
             workspace.completed_agents.append(cfg.role)
             workspace.agent_states[cfg.role] = AgentState.COMPLETE
+
+            # Reviewer signal type: parse the artifact text. Anything
+            # starting with "REJECTED" → REJECTED signal (no merge);
+            # otherwise APPROVED. Non-reviewers always get COMPLETE.
+            if cfg.is_reviewer:
+                if (artifact_text or "").lstrip().upper().startswith("REJECTED"):
+                    final_signal = SignalType.REJECTED
+                else:
+                    final_signal = SignalType.APPROVED
+            else:
+                final_signal = SignalType.COMPLETE
+
             await agent.signal(
                 workspace,
-                SignalType.APPROVED if cfg.is_reviewer else SignalType.COMPLETE,
+                final_signal,
                 summary=f"{cfg.role} complete",
                 detail=commit_hash,
             )
-            # If this was a reviewer with APPROVED, merge upstream agent branches.
-            if cfg.is_reviewer:
+            # On APPROVED only: merge upstream agent branches into main.
+            # REJECTED leaves the branches alone for the next iteration.
+            if cfg.is_reviewer and final_signal is SignalType.APPROVED:
                 for dep_role in cfg.depends_on:
                     branch = workspace.git.agent_branches.get(dep_role)
                     if branch:
@@ -563,6 +622,227 @@ class AgentRunner:
         return info.hash
 
     # ── Memory writer ───────────────────────────────────────────────────────
+
+    # ── Approval gates (Phase C.0.5) ────────────────────────────────────────
+
+    def _is_gate_enabled(self, gate_name: str) -> bool:
+        """Read a boolean gate from project config. Falls back to True
+        for the baseline-ON gates if the config dict is missing the key
+        (so projects pre-dating C.0.5 still get the safer defaults)."""
+        gates = self.project.approval_gates or {}
+        if gate_name in gates:
+            return bool(gates[gate_name])
+        # Baseline ON for the cost-control gates.
+        return gate_name in (
+            "pre_run_cost_preview",
+            "heavy_tier_mid_run_dispatch",
+        )
+
+    async def _request_approval(
+        self,
+        kind: str,
+        summary: str,
+        estimated_cost_usd: float | None = None,
+        context: dict[str, Any] | None = None,
+        triggered_by: str | None = None,
+    ) -> bool:
+        """Pause the runner until the user grants or denies an approval
+        request. Posts an APPROVAL_NEEDED signal, parks the gated
+        operation in `workspace.pending_approvals`, and awaits the
+        matching APPROVAL_GRANTED / APPROVAL_DENIED signal posted by
+        the HTTP route.
+
+        Returns True on grant, False on deny. The caller is responsible
+        for skipping the gated work on False.
+        """
+        from uuid import uuid4
+
+        request = ApprovalRequest(
+            id=f"appr_{uuid4().hex[:10]}",
+            kind=kind,
+            summary=summary,
+            estimated_cost_usd=estimated_cost_usd,
+            context=dict(context or {}),
+            triggered_by=triggered_by,
+            iteration=self.workspace.iteration,
+        )
+        self.workspace.pending_approvals.append(request)
+
+        decided = asyncio.Event()
+        decision_holder: list[SignalType] = []
+
+        def _on_signal(sig: Signal) -> None:
+            if sig.type not in (SignalType.APPROVAL_GRANTED, SignalType.APPROVAL_DENIED):
+                return
+            if not sig.detail or f"approval_id={request.id}" not in sig.detail:
+                return
+            decision_holder.append(sig.type)
+            decided.set()
+
+        unsubscribe = self.workspace.subscribe(_on_signal)
+        try:
+            self.workspace.post_signal(Signal(
+                type=SignalType.APPROVAL_NEEDED,
+                summary=summary,
+                detail=(
+                    f"approval_id={request.id}; kind={kind}; "
+                    f"estimated_cost_usd={estimated_cost_usd}"
+                ),
+                from_agent="runner",
+                iteration=self.workspace.iteration,
+            ))
+            await decided.wait()
+        finally:
+            unsubscribe()
+
+        return decision_holder and decision_holder[0] is SignalType.APPROVAL_GRANTED
+
+    # ── Escalation (DESIGN §23, Phase C.3) ──────────────────────────────────
+
+    def _on_signal_for_escalation(self, sig: Signal) -> None:
+        """Workspace subscriber. Counts REJECTED signals and triggers
+        escalation handlers when thresholds are crossed.
+
+        REJECTED is posted by reviewers when their final artifact text
+        starts with "REJECTED". The rejected upstream role(s) are taken
+        from the reviewer's `depends_on` — that's the work that didn't
+        pass review.
+        """
+        if sig.type is not SignalType.REJECTED:
+            return
+        if not sig.from_agent:
+            return
+        reviewer_cfg = next(
+            (c for c in self.project.agents if c.role == sig.from_agent),
+            None,
+        )
+        if reviewer_cfg is None:
+            return
+        for target in reviewer_cfg.depends_on:
+            self._rejection_counts[target] = self._rejection_counts.get(target, 0) + 1
+            self._maybe_escalate(target)
+
+    def _maybe_escalate(self, target_role: str) -> None:
+        """If `target_role` has crossed any threshold in
+        `project.escalation_thresholds`, dispatch the matching handler.
+        Each (handler, target) pair fires at most once per run."""
+        count = self._rejection_counts.get(target_role, 0)
+        for handler_role, threshold in self.project.escalation_thresholds.items():
+            if threshold <= 0:
+                continue  # 0 disables this handler entirely
+            if count < threshold:
+                continue
+            already = self._escalations_fired.setdefault(handler_role, set())
+            if target_role in already:
+                continue
+            already.add(target_role)
+            self._dispatch_escalation(handler_role, target_role, count)
+
+    def _dispatch_escalation(
+        self,
+        handler_role: str,
+        target_role: str,
+        rejection_count: int,
+    ) -> None:
+        """Post an ESCALATION signal and (if the handler is in the
+        project config) spawn its agent on a side task. The handler's
+        run() executes alongside the scheduler's pipeline."""
+        handler_cfg = next(
+            (c for c in self.project.agents if c.role == handler_role),
+            None,
+        )
+        # Always post the ESCALATION signal so it's visible on the board.
+        self.workspace.post_signal(Signal(
+            type=SignalType.ESCALATION,
+            summary=f"escalating {target_role} to {handler_role}",
+            detail=(
+                f"target_role={target_role}; rejection_count={rejection_count}; "
+                f"handler={'configured' if handler_cfg else 'missing'}"
+            ),
+            from_agent="runner",
+            iteration=self.workspace.iteration,
+        ))
+        if handler_cfg is None:
+            # Threshold was crossed but the project doesn't include the
+            # handler. We've logged it on the board; nothing to dispatch.
+            return
+
+        async def _run_handler() -> None:
+            try:
+                if handler_role not in self.agents:
+                    self._build_handler_agent(handler_cfg)
+                handler_agent = self.agents[handler_role]
+                handler_agent.iteration = self.workspace.iteration
+                await handler_agent.signal(
+                    self.workspace, SignalType.STARTED,
+                    summary=f"started ({handler_role}) — escalation",
+                )
+                await self._drive_agent_run(handler_agent, handler_cfg)
+                await handler_agent.signal(
+                    self.workspace, SignalType.COMPLETE,
+                    summary=f"{handler_role} done — escalation",
+                )
+            except Exception as e:
+                logging.getLogger(__name__).exception(
+                    "escalation handler %s crashed", handler_role,
+                )
+                self.workspace.post_signal(Signal(
+                    type=SignalType.FAILED,
+                    summary=f"{handler_role} failed: {e}",
+                    from_agent="runner",
+                ))
+
+        try:
+            task = asyncio.create_task(_run_handler(), name=f"escalation:{handler_role}")
+            self._escalation_tasks.append(task)
+        except RuntimeError:
+            # No running loop (shouldn't happen during a real run, but
+            # defensively swallow so escalation can't take down the run).
+            pass
+
+    def _build_handler_agent(self, cfg: AgentConfig) -> None:
+        """Build a single agent + inject runtime handles. Mirrors what
+        `_build_agents` does for one role, used to lazily build escalation
+        handlers that the scheduler isn't running."""
+        agent = self.agent_factory(cfg)
+        agent.role = cfg.role
+        agent.description = cfg.description
+        agent.depends_on = list(cfg.depends_on)
+        agent.system_prompt = cfg.system_prompt
+        agent.declared_local_tools = list(cfg.declared_local_tools)
+        agent.declared_mcp_servers = list(cfg.declared_mcp_servers)
+        agent._llm = self.llm
+        agent._model = TIER_TO_MODEL.get(cfg.model_tier, TIER_TO_MODEL["solid"])
+        agent._broker = self.broker
+        agent._context_manager = self.context_manager
+        agent._manifest = self.manifest_builder.build_for_agent(
+            role=cfg.role,
+            declared_local_tools=cfg.declared_local_tools,
+            declared_mcp_servers=cfg.declared_mcp_servers,
+        )
+        agent._local_tools = self._instantiate_local_tools(cfg.role)
+        agent._current_task = self.project.goal
+        self.agents[cfg.role] = agent
+
+    async def _await_escalation_tasks(self) -> None:
+        """Wait for any in-flight escalation handlers to finish so their
+        signals land before the run is declared done.
+
+        Awaits each task sequentially — CLAUDE.md hard rule 2 forbids
+        concurrent task aggregation outside the scheduler. Sequential
+        wait is fine here: handlers are typically one side-task per
+        (handler, target) pair and don't depend on each other, so the
+        only "cost" is wall-clock vs parallel — acceptable for an
+        at-most-handful side-channel.
+        """
+        for task in self._escalation_tasks:
+            try:
+                await task
+            except Exception:
+                # Handlers post their own FAILED signals; we don't
+                # propagate exceptions from side tasks back into the
+                # main run.
+                pass
 
     async def _run_memory_writer(self, result: SchedulerResult) -> None:
         """Run the memory_writer once per persona that participated.

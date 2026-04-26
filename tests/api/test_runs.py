@@ -186,3 +186,109 @@ async def test_post_comment_notifies_subscribers(client, app, auth_header):
     assert len(received) == 1
     assert received[0].type.value == "USER_COMMENT"
     assert received[0].summary == "live"
+
+
+# ── POST /api/runs/{id}/approval/{approval_id} (Phase C.0.5) ───────────────
+
+
+def _register_workspace_with_approval(app, run_id: str, approval_id: str, kind: str = "test"):
+    from core.workspace import ApprovalRequest, Workspace
+    ws = Workspace(run_id=run_id, goal="x")
+    ws.pending_approvals.append(ApprovalRequest(
+        id=approval_id, kind=kind, summary="pls approve",
+    ))
+    app.state.run_registry.runs[run_id] = ws
+    return ws
+
+
+async def test_post_approval_grant_records_decision_and_signals(client, app, auth_header):
+    ws = _register_workspace_with_approval(app, "run_appr", "appr_xyz")
+    r = await client.post(
+        "/api/runs/run_appr/approval/appr_xyz",
+        json={"decision": "grant", "note": "lgtm"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert body["decision"] == "granted"
+    assert body["type"] == "APPROVAL_GRANTED"
+
+    # Pending approval is now decided.
+    req = next(a for a in ws.pending_approvals if a.id == "appr_xyz")
+    assert req.decision == "granted"
+    assert req.decision_note == "lgtm"
+
+    # The matching APPROVAL_GRANTED signal landed on the board.
+    types = [s.type.value for s in ws.board]
+    assert "APPROVAL_GRANTED" in types
+    granted = next(s for s in ws.board if s.type.value == "APPROVAL_GRANTED")
+    assert "approval_id=appr_xyz" in (granted.detail or "")
+
+
+async def test_post_approval_deny(client, app, auth_header):
+    ws = _register_workspace_with_approval(app, "run_appr", "appr_xyz")
+    r = await client.post(
+        "/api/runs/run_appr/approval/appr_xyz",
+        json={"decision": "deny"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    assert r.json()["decision"] == "denied"
+    types = [s.type.value for s in ws.board]
+    assert "APPROVAL_DENIED" in types
+
+
+async def test_post_approval_404_for_unknown_run(client, auth_header):
+    r = await client.post(
+        "/api/runs/run_ghost/approval/appr_x",
+        json={"decision": "grant"},
+        headers=auth_header,
+    )
+    assert r.status_code == 404
+
+
+async def test_post_approval_404_for_unknown_approval_id(client, app, auth_header):
+    _register_workspace_with_approval(app, "run_appr", "appr_xyz")
+    r = await client.post(
+        "/api/runs/run_appr/approval/appr_other",
+        json={"decision": "grant"},
+        headers=auth_header,
+    )
+    assert r.status_code == 404
+
+
+async def test_post_approval_rejects_invalid_decision(client, app, auth_header):
+    _register_workspace_with_approval(app, "run_appr", "appr_xyz")
+    r = await client.post(
+        "/api/runs/run_appr/approval/appr_xyz",
+        json={"decision": "MAYBE"},
+        headers=auth_header,
+    )
+    assert r.status_code == 400
+
+
+async def test_post_approval_requires_auth(client, app):
+    _register_workspace_with_approval(app, "run_appr", "appr_xyz")
+    r = await client.post(
+        "/api/runs/run_appr/approval/appr_xyz",
+        json={"decision": "grant"},
+    )
+    assert r.status_code == 401
+
+
+async def test_post_approval_idempotent_returns_404_after_decided(client, app, auth_header):
+    """Once decided, the same id can't be decided again — keeps the
+    semantics simple (each gate fires once)."""
+    _register_workspace_with_approval(app, "run_appr", "appr_xyz")
+    await client.post(
+        "/api/runs/run_appr/approval/appr_xyz",
+        json={"decision": "grant"},
+        headers=auth_header,
+    )
+    r = await client.post(
+        "/api/runs/run_appr/approval/appr_xyz",
+        json={"decision": "deny"},
+        headers=auth_header,
+    )
+    assert r.status_code == 404

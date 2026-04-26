@@ -104,6 +104,34 @@ class PackageRequest:
 
 
 @dataclass
+class ApprovalRequest:
+    """Runner-initiated cost-control gate (Phase C.0.5).
+
+    The runner posts an APPROVAL_NEEDED signal and parks the gated
+    operation until the user POSTs `/api/runs/{id}/approval/{id}` with
+    `grant` or `deny`. Distinct from `HumanRequest`: that's an
+    in-character agent question; this is the system asking permission
+    to spend tokens.
+
+    `kind` is a stable string identifier used by the runner to decide
+    *what* to do on grant — e.g. `"heavy_tier_dispatch"` resumes the
+    side-task spawn that was paused.
+    """
+
+    id: str
+    kind: str  # "heavy_tier_dispatch" | "iteration_breach" | "pre_run_cost" | ...
+    summary: str
+    estimated_cost_usd: float | None = None
+    context: dict[str, Any] = field(default_factory=dict)
+    triggered_by: str | None = None  # role that caused the gate, if any
+    decision: str | None = None  # None | "granted" | "denied"
+    decision_note: str | None = None
+    iteration: int = 0
+    requested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    decided_at: datetime | None = None
+
+
+@dataclass
 class RepoMapEntry:
     path: str
     type: str
@@ -155,6 +183,7 @@ class Workspace:
     pending_screenshots: list[PendingScreenshot] = field(default_factory=list)
     git: GitState = field(default_factory=GitState)
     pending_package_requests: list[PackageRequest] = field(default_factory=list)
+    pending_approvals: list[ApprovalRequest] = field(default_factory=list)
 
     iteration: int = 0
     completed_agents: list[str] = field(default_factory=list)
@@ -217,6 +246,37 @@ class Workspace:
         """Return user_board signals this role has not yet absorbed.
         Agents call this from check_user_board()."""
         return [s for s in self.user_board if role not in s.seen_by]
+
+    def find_pending_approval(self, approval_id: str) -> "ApprovalRequest | None":
+        """Look up a pending approval by id. Returns None if there's
+        no match or the approval has already been decided."""
+        for req in self.pending_approvals:
+            if req.id == approval_id and req.decision is None:
+                return req
+        return None
+
+    def record_approval(
+        self,
+        approval_id: str,
+        decision: str,
+        note: str | None = None,
+    ) -> "ApprovalRequest | None":
+        """Mark a pending approval as decided. Returns the updated
+        ApprovalRequest or None if not found / already decided.
+        Caller is responsible for posting the matching APPROVAL_GRANTED
+        / APPROVAL_DENIED signal afterwards (so subscribers fire after
+        state is set)."""
+        req = self.find_pending_approval(approval_id)
+        if req is None:
+            return None
+        if decision not in ("granted", "denied"):
+            raise ValueError(
+                f"decision must be 'granted' or 'denied', got {decision!r}"
+            )
+        req.decision = decision
+        req.decision_note = note
+        req.decided_at = datetime.now(timezone.utc)
+        return req
 
     def signals_of_type(self, *types: SignalType) -> list[Signal]:
         """Read-only filter. Useful for the scheduler scanning for COMPLETE,

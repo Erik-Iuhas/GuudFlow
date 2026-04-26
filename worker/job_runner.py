@@ -78,6 +78,33 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         scopes = list((entry or {}).get("allowed_scopes") or [])
         rbac[role] = RoleRBAC(role=role, allowed_scopes=scopes)
 
+    raw_thresholds = data.get("escalation_thresholds") or {}
+    escalation_thresholds: dict[str, int] = {}
+    if isinstance(raw_thresholds, dict):
+        for role, count in raw_thresholds.items():
+            try:
+                escalation_thresholds[str(role)] = int(count)
+            except (TypeError, ValueError):
+                continue
+    if not escalation_thresholds:
+        escalation_thresholds = {"tech_lead": 2}
+
+    # Approval gates (Phase C.0.5). Read from stored config; fall back
+    # to the baseline (cost preview ON, HEAVY-tier dispatch ON, iteration
+    # breach at 2). Unknown keys pass through so future gates can be
+    # added without bumping the schema.
+    raw_gates = data.get("approval_gates") or {}
+    if not isinstance(raw_gates, dict):
+        raw_gates = {}
+    approval_gates: dict[str, Any] = {
+        "pre_run_cost_preview": True,
+        "heavy_tier_mid_run_dispatch": True,
+        "iteration_breach_at": 2,
+        "per_iteration": False,
+        "token_budget_usd": None,
+    }
+    approval_gates.update(raw_gates)
+
     return ProjectConfig(
         project_id=data.get("project_id", ""),
         goal=data.get("goal", ""),
@@ -85,6 +112,8 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         rbac=rbac,
         mcp_servers=list(data.get("mcp_servers") or []),
         max_iterations=int(data.get("max_iterations", 5)),
+        escalation_thresholds=escalation_thresholds,
+        approval_gates=approval_gates,
     )
 
 

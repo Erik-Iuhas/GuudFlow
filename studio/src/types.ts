@@ -27,6 +27,7 @@ export interface ProjectConfig {
   rbac?: Record<string, RoleRBAC>;
   mcp_servers?: unknown[];
   max_iterations?: number;
+  approval_gates?: Partial<ApprovalGates>;
 }
 
 export interface RunMeta {
@@ -79,6 +80,39 @@ export interface MetaProposal {
   agents: AgentConfig[];
   rbac: Record<string, RoleRBAC>;
 }
+
+// ── Approval gates (Phase C.0.5) ───────────────────────────────────────────
+
+export interface ApprovalGates {
+  pre_run_cost_preview: boolean;
+  heavy_tier_mid_run_dispatch: boolean;
+  iteration_breach_at: number | null;
+  per_iteration: boolean;
+  token_budget_usd: number | null;
+}
+
+export interface CostEstimate {
+  total_usd: number;
+  by_role: Record<string, number>;
+  notes: string[];
+}
+
+export type InvokeOutcome =
+  | {
+      accepted: true;
+      run_id: string;
+      job_id: string;
+      project_id: string;
+      enqueued_at: string;
+    }
+  | {
+      accepted: false;
+      requires_approval: true;
+      gate: string;
+      estimated_cost: CostEstimate;
+      project_id: string;
+      message: string;
+    };
 
 // ── Project inputs (D-prime §33) ───────────────────────────────────────────
 

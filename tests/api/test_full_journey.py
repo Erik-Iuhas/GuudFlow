@@ -161,7 +161,13 @@ async def test_full_user_journey(
 
     # ── 4. User invokes a run ──────────────────────────────────────────
     monkeypatch.setenv("AGENTFLOW_MODE", "dev")
-    r = await client.post(f"/api/invoke/{PROJECT_ID}", json={}, headers=auth_header)
+    # Phase C.0.5: pre_run_cost_preview is on by default — pass
+    # confirm=true to skip the cost-preview leg in this e2e test.
+    r = await client.post(
+        f"/api/invoke/{PROJECT_ID}",
+        json={"confirm": True},
+        headers=auth_header,
+    )
     assert r.status_code == 202, r.text
     invoke_body = r.json()
     run_id = invoke_body["run_id"]

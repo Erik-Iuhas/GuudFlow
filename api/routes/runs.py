@@ -43,6 +43,69 @@ async def get_run_board(request: Request, run_id: str) -> list[dict]:
     return board
 
 
+@router.post("/{run_id}/approval/{approval_id}", dependencies=[Depends(require_bearer)])
+async def post_approval_decision(
+    request: Request,
+    run_id: str,
+    approval_id: str,
+    body: dict = Body(...),
+) -> dict:
+    """Resolve a pending approval gate (Phase C.0.5).
+
+    The runner posts an APPROVAL_NEEDED signal and parks until the
+    user calls this endpoint with `decision: "grant"|"deny"`. On
+    success, the matching APPROVAL_GRANTED / APPROVAL_DENIED signal
+    is posted to the active workspace and the runner's awaiting
+    subscriber resumes.
+
+    Returns 404 if the run isn't active or the approval id isn't pending.
+    """
+    raw_decision = (body.get("decision") or "").strip().lower()
+    if raw_decision not in ("grant", "deny"):
+        raise HTTPException(
+            status_code=400,
+            detail="decision must be 'grant' or 'deny'",
+        )
+    note = body.get("note")
+    if note is not None and not isinstance(note, str):
+        raise HTTPException(status_code=400, detail="note must be a string")
+
+    registry = request.app.state.run_registry
+    workspace = await registry.get(run_id)
+    if workspace is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"run {run_id!r} is not active",
+        )
+
+    decision_word = "granted" if raw_decision == "grant" else "denied"
+    req = workspace.record_approval(approval_id, decision_word, note=note)
+    if req is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"approval {approval_id!r} not pending on run {run_id!r}",
+        )
+
+    sig_type = (
+        SignalType.APPROVAL_GRANTED if decision_word == "granted"
+        else SignalType.APPROVAL_DENIED
+    )
+    signal = Signal(
+        type=sig_type,
+        summary=f"approval {decision_word}: {req.summary}",
+        detail=f"approval_id={req.id}; kind={req.kind}",
+        from_agent="user",
+        iteration=workspace.iteration,
+    )
+    workspace.post_signal(signal)
+    return {
+        "ok": True,
+        "approval_id": req.id,
+        "decision": decision_word,
+        "type": sig_type.value,
+    }
+
+
 @router.post("/{run_id}/comment", dependencies=[Depends(require_bearer)])
 async def post_user_comment(
     request: Request,

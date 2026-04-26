@@ -2,6 +2,7 @@
 
 import type {
   InputsState,
+  InvokeOutcome,
   InvokeResponse,
   MetaProposal,
   PersonaSummary,
@@ -221,7 +222,18 @@ export const metaApi = {
 };
 
 export const invokeApi = {
-  invoke: (projectId: string, payload: unknown = {}) =>
+  /** First call returns cost-preview when the gate is on; second call
+   *  with `confirm: true` actually enqueues. Studio handles both shapes. */
+  invoke: (projectId: string, payload: Record<string, unknown> = {}) =>
+    request<InvokeOutcome>(
+      "POST",
+      `/api/invoke/${encodeURIComponent(projectId)}`,
+      payload,
+      true,
+    ),
+  /** @deprecated Use `invoke` and check the return type. Kept for any
+   *  existing callers; same wire shape but typed as the always-202 case. */
+  invokeAndExpectAccepted: (projectId: string, payload: unknown = {}) =>
     request<InvokeResponse>(
       "POST",
       `/api/invoke/${encodeURIComponent(projectId)}`,
@@ -235,6 +247,27 @@ export const invokeApi = {
       finished_at?: string | null;
       error?: string | null;
     }>("GET", `/api/invoke/${jobId}/status`, undefined, true),
+};
+
+export const approvalsApi = {
+  /** Resolve a pending approval gate. Used by ApprovalCard. */
+  decide: (
+    runId: string,
+    approvalId: string,
+    decision: "grant" | "deny",
+    note?: string,
+  ) =>
+    request<{
+      ok: boolean;
+      approval_id: string;
+      decision: "granted" | "denied";
+      type: "APPROVAL_GRANTED" | "APPROVAL_DENIED";
+    }>(
+      "POST",
+      `/api/runs/${encodeURIComponent(runId)}/approval/${encodeURIComponent(approvalId)}`,
+      { decision, note },
+      true,
+    ),
 };
 
 // ── WebSocket helper ───────────────────────────────────────────────────────

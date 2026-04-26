@@ -6,7 +6,15 @@ import { CostStrip } from "../components/CostStrip";
 import type { AgentConfig, ProjectConfig, RunMeta } from "../types";
 import { Inputs } from "./Inputs";
 
-type Tab = "team" | "inputs";
+type Tab = "team" | "inputs" | "settings";
+
+const DEFAULT_GATES = {
+  pre_run_cost_preview: true,
+  heavy_tier_mid_run_dispatch: true,
+  iteration_breach_at: 2 as number | null,
+  per_iteration: false,
+  token_budget_usd: null as number | null,
+};
 
 export function Studio() {
   const { id } = useParams<{ id: string }>();
@@ -89,11 +97,28 @@ export function Studio() {
     }
   }
 
-  async function runNow() {
+  // Phase C.0.5: pre_run_cost_preview gate may intercept the first
+  // POST. We open a confirm modal showing the estimate, then re-POST
+  // with confirm=true.
+  const [costGate, setCostGate] = useState<null | {
+    estimate: { total_usd: number };
+    message: string;
+  }>(null);
+
+  async function runNow(confirm = false) {
     if (!id) return;
     try {
-      const res = await invokeApi.invoke(id, {});
-      navigate(`/runs/${res.run_id}`);
+      const res = await invokeApi.invoke(id, confirm ? { confirm: true } : {});
+      if (res.accepted) {
+        setCostGate(null);
+        navigate(`/runs/${res.run_id}`);
+        return;
+      }
+      // Cost preview gate intercepted — surface the estimate.
+      setCostGate({
+        estimate: res.estimated_cost,
+        message: res.message,
+      });
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     }
@@ -116,7 +141,7 @@ export function Studio() {
           <button onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </button>
-          <button className="primary" onClick={runNow}>
+          <button className="primary" onClick={() => void runNow(false)}>
             Run now
           </button>
         </div>
@@ -136,6 +161,12 @@ export function Studio() {
           onClick={() => setTab("inputs")}
         >
           Inputs
+        </button>
+        <button
+          className={`tab ${tab === "settings" ? "tab-active" : ""}`}
+          onClick={() => setTab("settings")}
+        >
+          Settings
         </button>
       </div>
 
@@ -221,9 +252,163 @@ export function Studio() {
             </table>
           )}
         </>
-      ) : (
+      ) : tab === "inputs" ? (
         id && <Inputs projectId={id} />
+      ) : (
+        <SettingsTab
+          gates={{ ...DEFAULT_GATES, ...(project.approval_gates ?? {}) }}
+          onChange={(next) =>
+            setProject({
+              ...project,
+              approval_gates: next,
+            })
+          }
+        />
       )}
+
+      {/* Phase C.0.5: pre-run cost preview gate. Studio shows the
+          estimate and either confirms or backs out. */}
+      {costGate && (
+        <div className="modal-backdrop" onClick={() => setCostGate(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Confirm run</h3>
+            <p>{costGate.message}</p>
+            <div
+              className="card"
+              style={{ background: "#f0f9ff", borderColor: "#bae6fd" }}
+            >
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted small">Estimated worst-case cost</span>
+                <strong style={{ fontSize: 18 }}>
+                  ${costGate.estimate.total_usd.toFixed(2)}
+                </strong>
+              </div>
+            </div>
+            <p className="muted small" style={{ marginTop: 8 }}>
+              This is a worst-case figure (every agent runs every iteration to
+              max). Real spend is usually lower. To turn this gate off, edit
+              the project's approval gates settings.
+            </p>
+            <div className="row" style={{ marginTop: 12, gap: 8 }}>
+              <button
+                className="primary"
+                onClick={() => void runNow(true)}
+              >
+                Confirm and run
+              </button>
+              <button onClick={() => setCostGate(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── Settings tab (Phase C.0.5: approval gates) ────────────────────────────
+
+interface SettingsTabProps {
+  gates: typeof DEFAULT_GATES;
+  onChange: (next: typeof DEFAULT_GATES) => void;
+}
+
+function SettingsTab({ gates, onChange }: SettingsTabProps) {
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Approval gates</h2>
+      <p className="muted small">
+        Pause and confirm before the team spends tokens on big actions.
+        These changes save with the project on the next click of Save.
+      </p>
+
+      <div className="settings-grid">
+        <Toggle
+          label="Pre-run cost preview"
+          help="Show the cost estimate before each run starts. Click Confirm to proceed."
+          checked={gates.pre_run_cost_preview}
+          onChange={(v) => onChange({ ...gates, pre_run_cost_preview: v })}
+        />
+        <Toggle
+          label="Confirm HEAVY-tier mid-run dispatch"
+          help="Pause before tech_lead / architect (HEAVY tier) is auto-spawned mid-run."
+          checked={gates.heavy_tier_mid_run_dispatch}
+          onChange={(v) => onChange({ ...gates, heavy_tier_mid_run_dispatch: v })}
+        />
+        <NumberOrOff
+          label="Iteration-breach threshold"
+          help="Pause when the scheduler would respawn the rejected agent for iteration ≥ N. Off disables."
+          value={gates.iteration_breach_at}
+          onChange={(v) => onChange({ ...gates, iteration_breach_at: v })}
+        />
+        <Toggle
+          label="Confirm every iteration"
+          help="Heavy-handed; opt-in for high-stakes runs."
+          checked={gates.per_iteration}
+          onChange={(v) => onChange({ ...gates, per_iteration: v })}
+        />
+        <NumberOrOff
+          label="Token-budget pause ($)"
+          help="Pause when cumulative cost crosses this dollar amount. Off disables."
+          value={gates.token_budget_usd}
+          onChange={(v) => onChange({ ...gates, token_budget_usd: v })}
+          step={0.5}
+        />
+      </div>
+    </div>
+  );
+}
+
+function Toggle(props: {
+  label: string;
+  help: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="settings-row">
+      <label>
+        <input
+          type="checkbox"
+          checked={props.checked}
+          onChange={(e) => props.onChange(e.target.checked)}
+        />{" "}
+        {props.label}
+      </label>
+      <p className="muted small">{props.help}</p>
+    </div>
+  );
+}
+
+function NumberOrOff(props: {
+  label: string;
+  help: string;
+  value: number | null;
+  onChange: (v: number | null) => void;
+  step?: number;
+}) {
+  const enabled = props.value !== null;
+  return (
+    <div className="settings-row">
+      <label>
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => props.onChange(e.target.checked ? (props.value ?? 2) : null)}
+        />{" "}
+        {props.label}
+      </label>
+      {enabled && (
+        <input
+          type="number"
+          step={props.step ?? 1}
+          min={0}
+          value={props.value ?? 0}
+          onChange={(e) => props.onChange(parseFloat(e.target.value || "0"))}
+          style={{ marginTop: 4, width: 100 }}
+        />
+      )}
+      <p className="muted small">{props.help}</p>
     </div>
   );
 }
