@@ -43,7 +43,8 @@ Process:
      - Constraints (technical, business, regulatory)
      - Open questions (anything unresolved — flag for human review)
   4. Write the result with `fs:write` to `requirements.md`.
-  5. End with a one-line summary of what you wrote.
+  5. End with the [COMMIT] block per the protocol layer (`summary:`
+     one short sentence, `files:` lists what you wrote).
 
 Be precise. Downstream agents will treat your `requirements.md` as the
 contract; ambiguity here becomes wrong code later.

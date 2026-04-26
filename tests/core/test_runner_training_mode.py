@@ -118,13 +118,13 @@ async def test_training_mode_run_produces_rubric_score_and_tags_episode(
             arguments={"path": "hello.py",
                        "content": "def greet():\n    return 'hi'\n"},
         )]),
-        MockTurn(text="Wrote hello.py"),
+        MockTurn(text="[COMMIT]\n  summary: wrote greet()\n  files: hello.py"),
         MockTurn(tool_calls=[ToolCall(
             id="rev_t1",
             name="git-diff",
             arguments={"branch_a": "agent/developer", "branch_b": "main"},
         )]),
-        MockTurn(text="APPROVED"),
+        MockTurn(text="[VERIFY] PASS"),
     ])
 
     run_root = tmp_path / "runs" / "run_training"
@@ -213,7 +213,7 @@ async def test_production_mode_skips_rubric_scorer(tmp_path: Path):
         max_iterations=1,
     )
 
-    llm = MockLLMClient([MockTurn(text="done")])
+    llm = MockLLMClient([MockTurn(text="[COMMIT]\n  summary: done\n  files: (none)")])
     runner = AgentRunner(
         project=project,
         run_id="run_prod",

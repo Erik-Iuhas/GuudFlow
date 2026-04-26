@@ -311,10 +311,10 @@ async def test_reviewer_rejected_text_posts_rejected_signal(tmp_path: Path):
         },
         max_iterations=2,
     )
-    # dev says "done"; reviewer says "REJECTED: missing tests".
+    # dev posts a [COMMIT]; reviewer posts a [VERIFY] FAIL.
     llm = MockLLMClient([
-        MockTurn(text="done"),
-        MockTurn(text="REJECTED: missing tests"),
+        MockTurn(text="[COMMIT]\n  summary: done\n  files: (none)"),
+        MockTurn(text="[VERIFY] FAIL\n  detail: missing tests"),
     ])
     runner = AgentRunner(
         project=proj, run_id="r1",
@@ -342,8 +342,8 @@ async def test_reviewer_approved_text_still_emits_approved(tmp_path: Path):
         max_iterations=2,
     )
     llm = MockLLMClient([
-        MockTurn(text="done"),
-        MockTurn(text="APPROVED"),
+        MockTurn(text="[COMMIT]\n  summary: done\n  files: (none)"),
+        MockTurn(text="[VERIFY] PASS"),
     ])
     runner = AgentRunner(
         project=proj, run_id="r1",
@@ -447,9 +447,9 @@ async def test_three_agent_run_with_architect_happy_path(tmp_path: Path):
         max_iterations=2,
     )
     llm = MockLLMClient([
-        MockTurn(text="done"),       # dev
-        MockTurn(text="APPROVED"),   # reviewer
-        MockTurn(text="APPROVED"),   # architect
+        MockTurn(text="[COMMIT]\n  summary: done\n  files: (none)"),  # dev
+        MockTurn(text="[VERIFY] PASS"),                                # reviewer
+        MockTurn(text="[VERIFY] PASS"),                                # architect
     ])
     runner = AgentRunner(
         project=proj, run_id="r1",

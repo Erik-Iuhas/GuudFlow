@@ -417,3 +417,107 @@ def parse(raw: str) -> ProtocolMessage:
         raise ValueError(f"unknown protocol message type {msg_type!r}")
 
     return _DISPATCH[msg_type](raw, lines)
+
+
+# ── Compact end-of-turn block (DESIGN §18 — agent-facing form) ─────────────
+#
+# Distinct from the full ProtocolMessage above: this is the short structured
+# block an agent emits at the end of its LLM turn, before the runner has a
+# commit hash. The runner extracts it from the LLM response, stores the
+# rendered form as the artifact, and (for reviewers) drives the
+# APPROVED/REJECTED signal off `result`. Verbose reasoning above the block
+# is NOT posted to the board.
+
+CompactKind = Literal["COMMIT", "VERIFY", "ACTION", "ASK", "ANSWER", "STATUS"]
+
+_COMPACT_KINDS: frozenset[str] = frozenset({
+    "COMMIT", "VERIFY", "ACTION", "ASK", "ANSWER", "STATUS",
+})
+
+
+@dataclass
+class CompactBlock:
+    """End-of-turn structured summary the LLM produces."""
+
+    kind: str
+    fields: dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.kind not in _COMPACT_KINDS:
+            raise ValueError(f"unknown compact block kind {self.kind!r}")
+        if self.kind == "VERIFY":
+            result = self.fields.get("result", "").upper()
+            if result not in ("PASS", "FAIL"):
+                raise ValueError("VERIFY block requires result: PASS|FAIL")
+            if result == "FAIL" and not self.fields.get("detail", "").strip():
+                raise ValueError("VERIFY FAIL requires a specific detail:")
+            self.fields["result"] = result
+        if self.kind == "COMMIT" and not self.fields.get("summary", "").strip():
+            raise ValueError("COMMIT block requires summary:")
+        if self.kind == "ACTION":
+            for required in ("target", "verb", "subject"):
+                if not self.fields.get(required, "").strip():
+                    raise ValueError(f"ACTION block requires {required}:")
+        if self.kind == "ASK":
+            for required in ("to", "question"):
+                if not self.fields.get(required, "").strip():
+                    raise ValueError(f"ASK block requires {required}:")
+        if self.kind == "ANSWER":
+            for required in ("to", "answer"):
+                if not self.fields.get(required, "").strip():
+                    raise ValueError(f"ANSWER block requires {required}:")
+        if self.kind == "STATUS" and not self.fields.get("description", "").strip():
+            raise ValueError("STATUS block requires description:")
+
+
+_COMPACT_HEADER = re.compile(r"^\[(COMMIT|VERIFY|ACTION|ASK|ANSWER|STATUS)\]\s*(.*)$")
+_COMPACT_FIELD = re.compile(r"^([a-z][a-z_]*)\s*:\s*(.*)$")
+
+
+def extract_trailing(text: str) -> CompactBlock | None:
+    """Find the last `[KIND]`-headed compact block in `text` and parse it.
+
+    Returns None if no recognisable block is present at the tail. Anything
+    before the block is treated as internal reasoning and discarded.
+    Raises ValueError if the trailing block is malformed (caller decides
+    whether to retry or fail).
+    """
+    if not text or not text.strip():
+        return None
+
+    lines = text.splitlines()
+    header_idx: int | None = None
+    for i in range(len(lines) - 1, -1, -1):
+        if _COMPACT_HEADER.match(lines[i].strip()):
+            header_idx = i
+            break
+    if header_idx is None:
+        return None
+
+    block_lines = [ln for ln in lines[header_idx:] if ln.strip()]
+    head_match = _COMPACT_HEADER.match(block_lines[0].strip())
+    assert head_match is not None  # guaranteed by the loop above
+    kind = head_match.group(1)
+    inline = head_match.group(2).strip()
+
+    fields: dict[str, str] = {}
+    if kind == "VERIFY" and inline:
+        fields["result"] = inline.split()[0].upper()
+
+    for line in block_lines[1:]:
+        m = _COMPACT_FIELD.match(line.strip())
+        if not m:
+            raise ValueError(f"malformed compact block line: {line!r}")
+        fields[m.group(1)] = m.group(2).strip()
+
+    return CompactBlock(kind=kind, fields=fields)
+
+
+def render_compact(block: CompactBlock) -> str:
+    """Render a CompactBlock to its canonical short text form for storage."""
+    head = f"[{block.kind}]"
+    if block.kind == "VERIFY":
+        head = f"[VERIFY] {block.fields['result']}"
+    body_keys = [k for k in block.fields if not (block.kind == "VERIFY" and k == "result")]
+    body = "\n".join(f"  {k}: {block.fields[k]}" for k in body_keys)
+    return head if not body else f"{head}\n{body}"

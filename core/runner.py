@@ -46,6 +46,7 @@ from agents.tools.fs import (
     FsWrite,
 )
 from agents.tools.git import GitDiff, GitLog, GitRead, GitStatus
+from core import protocol
 from core.context_manager import ContextManager
 from core.credentials_broker import CredentialsBroker
 from core.file_workspace import FileWorkspace
@@ -691,7 +692,7 @@ class AgentRunner:
             await agent.signal(workspace, SignalType.STARTED, summary=f"started ({cfg.role})")
 
             try:
-                artifact_text = await self._drive_agent_run(agent, cfg)
+                drive_result = await self._drive_agent_run(agent, cfg)
             except Exception as e:
                 workspace.agent_states[cfg.role] = AgentState.FAILED
                 await agent.signal(
@@ -704,22 +705,33 @@ class AgentRunner:
             # Auto-commit any uncommitted changes on the agent's branch.
             commit_hash = await self._auto_commit(cfg.role, workspace)
 
+            # `drive_result` is either a parsed CompactBlock (the runner
+            # extracted a trailing protocol block from the LLM response)
+            # or a raw string (subclasses that override `run()` and the
+            # explicit failure paths inside `_generic_tool_use_loop`).
+            artifact_text, verify_result = self._artifact_from_drive_result(drive_result)
+
             # Record the artifact (Phase G-prime.1: routes through
             # set_artifact so the persister fires).
             workspace.set_artifact(cfg.role, Artifact(
                 agent_role=cfg.role,
                 type="text",
-                content=artifact_text or "",
+                content=artifact_text,
                 iteration=workspace.iteration,
             ))
             workspace.completed_agents.append(cfg.role)
             workspace.agent_states[cfg.role] = AgentState.COMPLETE
 
-            # Reviewer signal type: parse the artifact text. Anything
-            # starting with "REJECTED" → REJECTED signal (no merge);
-            # otherwise APPROVED. Non-reviewers always get COMPLETE.
+            # Reviewer verdict comes from the parsed [VERIFY] block. If
+            # the agent overrode run() and returned a raw string, fall
+            # back to the legacy "REJECTED" string sniff.
             if cfg.is_reviewer:
-                if (artifact_text or "").lstrip().upper().startswith("REJECTED"):
+                if verify_result is not None:
+                    final_signal = (
+                        SignalType.APPROVED if verify_result == "PASS"
+                        else SignalType.REJECTED
+                    )
+                elif artifact_text.lstrip().upper().startswith("REJECTED"):
                     final_signal = SignalType.REJECTED
                 else:
                     final_signal = SignalType.APPROVED
@@ -770,14 +782,17 @@ class AgentRunner:
 
         return runner
 
-    async def _drive_agent_run(self, agent: BaseAgent, cfg: AgentConfig) -> str:
+    async def _drive_agent_run(
+        self,
+        agent: BaseAgent,
+        cfg: AgentConfig,
+    ) -> "protocol.CompactBlock | str":
         """Run the agent's tool-use loop.
 
-        For agents that override `run()`, defer to it. Otherwise, drive a
-        generic LLM tool-use loop until the model returns end_turn.
+        For agents that override `run()`, defer to it (returns a raw
+        string — the override owns its output format). Otherwise, drive
+        a generic LLM tool-use loop and return a parsed CompactBlock.
         """
-        # Subclasses can implement run() directly. Detect by checking
-        # whether run is the BaseAgent default (which raises).
         cls_run = type(agent).run
         if cls_run is not BaseAgent.run:
             return await agent.run(self.workspace)
@@ -785,16 +800,35 @@ class AgentRunner:
         # Generic prompt-defined agent: drive a tool-use loop.
         return await self._generic_tool_use_loop(agent, cfg)
 
-    async def _generic_tool_use_loop(self, agent: BaseAgent, cfg: AgentConfig) -> str:
+    @staticmethod
+    def _artifact_from_drive_result(
+        result: "protocol.CompactBlock | str",
+    ) -> tuple[str, str | None]:
+        """Translate `_drive_agent_run` output into (artifact_text,
+        verify_result). `verify_result` is "PASS"/"FAIL"/None — used by
+        reviewers to drive APPROVED/REJECTED."""
+        if isinstance(result, protocol.CompactBlock):
+            verify_result: str | None = None
+            if result.kind == "VERIFY":
+                verify_result = result.fields.get("result")
+            return protocol.render_compact(result), verify_result
+        return result or "", None
+
+    async def _generic_tool_use_loop(
+        self,
+        agent: BaseAgent,
+        cfg: AgentConfig,
+    ) -> "protocol.CompactBlock | str":
         task_prompt = (
             f"Project goal: {self.project.goal}\n\n"
             f"Your role: {cfg.role}. {cfg.description}\n\n"
             f"Use the available tools to complete your work, then return a final "
-            f"response describing what you did."
+            f"response ending with the required protocol block (see system prompt)."
         )
         messages: list[LLMMessage] = [LLMMessage(role="user", content=task_prompt)]
         guard = LoopGuard(cfg.loop_guard)
         nudges: list[str] = []  # accumulated for the next user turn
+        protocol_retries_used = 0
 
         for iteration in range(cfg.max_tool_iterations):
             if guard.deadline_exceeded():
@@ -853,8 +887,40 @@ class AgentRunner:
                     nudges.clear()
                 continue
 
-            # end_turn or anything else — return the text.
-            return response.text or ""
+            # end_turn (or anything else): the LLM has stopped calling
+            # tools. Extract the trailing protocol block. On miss / parse
+            # error, send one nudge and re-enter the loop. Strict.
+            text = response.text or ""
+            try:
+                block = protocol.extract_trailing(text)
+                parse_error: str | None = None
+            except ValueError as e:
+                block = None
+                parse_error = str(e)
+
+            if block is not None:
+                return block
+
+            if protocol_retries_used >= 1:
+                detail = parse_error or "no [COMMIT]/[VERIFY]/[ACTION]/[STATUS] block found at end of response"
+                raise RuntimeError(
+                    f"agent {cfg.role!r} failed to emit a valid protocol block "
+                    f"after retry: {detail}"
+                )
+            protocol_retries_used += 1
+
+            messages.append(LLMMessage(role="assistant", content=text))
+            nudge_msg = (
+                "[PROTOCOL] Your last response did not end with a valid "
+                "compact protocol block. Re-emit your final answer ending "
+                "with one of [COMMIT] / [VERIFY] / [ACTION] / [STATUS] as "
+                "specified in the system prompt. Block must be the last "
+                "thing in your response, with required fields filled in."
+            )
+            if parse_error:
+                nudge_msg += f"\nParse error: {parse_error}"
+            messages.append(LLMMessage(role="user", content=nudge_msg))
+            continue
 
         return "(max tool iterations reached)"
 

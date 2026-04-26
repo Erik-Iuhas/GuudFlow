@@ -40,7 +40,7 @@ async def test_runner_nudges_on_repeated_identical_failure(tmp_path: Path):
         MockTurn(tool_calls=[bad_call]),
         MockTurn(tool_calls=[bad_call_2]),
         MockTurn(tool_calls=[bad_call_3]),
-        MockTurn(text="(giving up — file does not exist)"),
+        MockTurn(text="[STATUS]\n  description: giving up — file does not exist"),
     ])
 
     runner = AgentRunner(
@@ -63,7 +63,10 @@ async def test_runner_nudges_on_repeated_identical_failure(tmp_path: Path):
         )
     ]
     assert messages_seen, "expected a [LOOP GUARD] nudge to appear in some LLM call"
-    assert "(giving up" in result
+    # Result is a CompactBlock; the runner converts it to artifact text downstream.
+    from core.protocol import CompactBlock
+    assert isinstance(result, CompactBlock)
+    assert "giving up" in result.fields["description"]
 
 
 async def test_runner_aborts_on_wall_clock_deadline(tmp_path: Path):

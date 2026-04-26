@@ -598,6 +598,58 @@ class BaseAgent:
             for d in self._manifest.descriptors
         ]
 
+    # ── Protocol output primer (§18) ───────────────────────────────────────
+
+    def _protocol_output_primer(self) -> str:
+        """Layer 6.5: instruct the LLM to end its turn with a short
+        structured block. Verbose prose above the block is treated as
+        internal reasoning and discarded — only the block reaches the
+        board, so other agents pay tokens for structure, not essays.
+        """
+        kind = getattr(type(self), "archetype_kind", "") or ""
+        if kind == "reviewer":
+            specific = (
+                "Your turn MUST end with a [VERIFY] block:\n"
+                "    [VERIFY] PASS\n"
+                "  or, on rejection (detail is required and must be specific):\n"
+                "    [VERIFY] FAIL\n"
+                "      detail: <one sentence naming the blocking issue>\n"
+            )
+        elif kind == "escalation_handler":
+            specific = (
+                "Your turn MUST end with an [ACTION] block:\n"
+                "    [ACTION]\n"
+                "      target: <role to act>\n"
+                "      verb: FIX|REVISIT|CLARIFY|APPROVE|REJECT|SKIP\n"
+                "      subject: <one short noun phrase>\n"
+            )
+        elif kind == "specialist":
+            specific = (
+                "Your turn MUST end with a [COMMIT] block:\n"
+                "    [COMMIT]\n"
+                "      summary: <one short sentence on what you produced>\n"
+                "      files: <comma-separated paths or `(none)`>\n"
+            )
+        else:
+            specific = (
+                "Your turn MUST end with one of these compact blocks:\n"
+                "    [COMMIT]    summary: ... ; files: ...\n"
+                "    [VERIFY]    PASS  /  FAIL  detail: ...\n"
+                "    [ACTION]    target: ... ; verb: ... ; subject: ...\n"
+                "    [STATUS]    description: <one short sentence>\n"
+            )
+        return (
+            "PROTOCOL OUTPUT — non-negotiable.\n\n"
+            "Reason internally however you need; communicate externally "
+            "in protocol. Anything you write before the trailing block is "
+            "treated as internal reasoning and DROPPED before other "
+            "agents see it. Do not summarise, do not editorialise, do "
+            "not include emoji or markdown headings in the block.\n\n"
+            + specific
+            + "\nNo prose after the block. The block is the last thing "
+            "in your response."
+        )
+
     # ── Effective system prompt (§20 + §31 + §36) ──────────────────────────
 
     async def effective_system_prompt(
@@ -671,6 +723,7 @@ class BaseAgent:
             "voice of your role. Do not explain what you did — the work "
             "is the evidence. One short statement of outcome is enough."
         )
+        parts.append(self._protocol_output_primer())
         parts.append("Make this something you are proud of.")
 
         return "\n\n".join(parts)

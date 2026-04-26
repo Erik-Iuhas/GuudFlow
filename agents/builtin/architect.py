@@ -51,9 +51,8 @@ Process:
      problem? Did we cut the right corner? Are obvious next-step
      concerns surfaced?
   4. Decide PASS or FAIL on the design as a whole.
-  5. End with one final response: "APPROVED" if the design is
-     coherent, or "REJECTED: <one-line summary of the structural
-     issue>" otherwise.
+  5. End with the [VERIFY] block per the protocol layer. On FAIL, the
+     `detail:` is your one-line summary of the structural issue.
 
 Be skeptical. The team is competent at execution; your value is in
 spotting the kind of subtle "we built the wrong thing" miss that only
