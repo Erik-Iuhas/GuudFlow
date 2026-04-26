@@ -197,24 +197,51 @@ def test_dedupe_role_names_preserves_order():
     assert out == ["alpha", "beta", "alpha_2", "gamma", "beta_2"]
 
 
-def test_suggest_persona_id_uses_unused_adjective():
-    """First call gets the first adjective."""
-    pid = suggest_persona_id("frontend", existing_ids=set())
-    assert pid == "frontend-aria-v1"
+def test_suggest_persona_id_uses_first_name():
+    """First call returns the first curated name + the role."""
+    pid, display = suggest_persona_id("frontend", existing_ids=set())
+    assert pid == "mike-frontend-v1"
+    assert display == "Mike"
 
 
-def test_suggest_persona_id_skips_taken_adjectives():
-    """If `frontend-aria-v1` is taken, returns the next adjective."""
-    pid = suggest_persona_id("frontend", existing_ids={"frontend-aria-v1"})
-    assert pid == "frontend-nova-v1"
+def test_suggest_persona_id_skips_taken_names():
+    """If `mike-frontend-v1` is taken, returns the next curated name."""
+    pid, display = suggest_persona_id(
+        "frontend", existing_ids={"mike-frontend-v1"},
+    )
+    assert pid == "sarah-frontend-v1"
+    assert display == "Sarah"
 
 
-def test_suggest_persona_id_falls_back_when_all_adjectives_taken():
-    """When every adjective is exhausted, fall back to numeric suffix."""
-    taken = {f"foo-{adj}-v1" for adj in (
-        "aria", "nova", "atlas", "echo", "vega", "lyra", "orion",
-        "ember", "sage", "kai", "iris", "rowan", "june",
-    )}
-    pid = suggest_persona_id("foo", existing_ids=taken)
-    assert pid.startswith("foo-v")
+def test_suggest_persona_id_honours_name_hint():
+    """When the meta-agent suggests a name (e.g. matched to the
+    persona's character), try it first."""
+    pid, display = suggest_persona_id(
+        "backend", existing_ids=set(), name_hint="Devon",
+    )
+    assert pid == "devon-backend-v1"
+    assert display == "Devon"
+
+
+def test_suggest_persona_id_skips_taken_hint():
+    """A taken hint falls back to the curated list."""
+    pid, display = suggest_persona_id(
+        "backend", existing_ids={"devon-backend-v1"}, name_hint="Devon",
+    )
+    assert pid == "mike-backend-v1"
+    assert display == "Mike"
+
+
+def test_suggest_persona_id_falls_back_when_all_names_taken():
+    """When every curated name is exhausted for a role, bump version."""
+    base_names = (
+        "mike", "sarah", "alex", "jamie", "taylor", "casey", "morgan",
+        "jordan", "riley", "sam", "drew", "quinn", "rowan", "skyler",
+        "blake", "harper", "kai", "lee", "river",
+    )
+    taken = {f"{n}-foo-v1" for n in base_names}
+    pid, display = suggest_persona_id("foo", existing_ids=taken)
+    # Falls back to bumping version on the first name.
+    assert pid == "mike-foo-v2"
+    assert display == "Mike"
     assert pid not in taken

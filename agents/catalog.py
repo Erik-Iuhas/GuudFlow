@@ -124,30 +124,77 @@ def dedupe_role_names(roles: list[str]) -> list[str]:
     return out
 
 
-def suggest_persona_id(role: str, existing_ids: set[str]) -> str:
-    """Generate a globally-unique persona id for a new hire (Phase D.0).
+def suggest_persona_id(
+    role: str,
+    existing_ids: set[str],
+    name_hint: str | None = None,
+    used_display_names: set[str] | None = None,
+) -> tuple[str, str]:
+    """Generate a globally-unique persona id + display name for a new
+    hire (Phase D.0).
 
-    Format: `{role}-{adjective}-v1`, falling back to `{role}-v{n}` if
-    every adjective collides. The meta-agent uses this when
-    recommending "create new persona" so the id doesn't conflict with
-    the existing roster.
+    Returns `(persona_id, display_name)`.
 
-    Adjective list is small + intentional: not random, not exhaustive.
-    Real personas can be renamed later by the user; this just gets the
-    initial id past the uniqueness check.
+    Format: `{name_lower}-{role}-v1` (e.g. `mike-frontend-v1`,
+    display="Mike"). The display name is what shows up in quips and
+    UI (`Mike: ship it.`); the id is the directory key in
+    `data/personas/{persona_id}/`. Embedding the name in the id makes
+    it human-recognisable in logs / file paths too.
+
+    `name_hint` is tried first if provided (the meta-agent can suggest
+    a name that fits the persona's character). Otherwise we walk a
+    curated first-name list and pick the first unused combination.
+
+    `used_display_names` is the meta-agent's pass-through of "names
+    already taken in this team". When set, the suggester avoids those
+    names so a 3-agent team reads like 3 different humans
+    (Mike-dev / Sarah-reviewer / Alex-writer) rather than 3 Mikes.
+
+    Falls back to bumping the version (`mike-frontend-v2`) if every
+    name collides for this role.
+
+    Real personas can be renamed via `data/personas/{id}/profile.json`
+    after the fact — this is just the initial unique id.
     """
-    adjectives = (
-        "aria", "nova", "atlas", "echo", "vega", "lyra", "orion",
-        "ember", "sage", "kai", "iris", "rowan", "june",
+    # Curated short list of common, ungendered-ish first names. Not
+    # exhaustive; the goal is "a name a human would recognise as a
+    # name", not perfect coverage.
+    base_names = (
+        "mike", "sarah", "alex", "jamie", "taylor", "casey", "morgan",
+        "jordan", "riley", "sam", "drew", "quinn", "rowan", "skyler",
+        "blake", "harper", "kai", "lee", "river",
     )
-    for adj in adjectives:
-        candidate = f"{role}-{adj}-v1"
-        if candidate not in existing_ids:
-            return candidate
+
+    # Try the hint first if given, then walk the curated list.
+    candidates = (
+        (name_hint.lower(),) + base_names if name_hint else base_names
+    )
+
+    used_display = used_display_names or set()
+
+    # First pass: skip names already in use as display names (so a
+    # team feels like multiple humans, not Mike+Mike+Mike).
+    for name in candidates:
+        candidate_id = f"{name}-{role}-v1"
+        display = name.capitalize()
+        if candidate_id in existing_ids or display in used_display:
+            continue
+        return (candidate_id, display)
+
+    # Fallback: relax the display-name uniqueness, just dodge id
+    # collisions. (E.g. team with 20+ agents could exhaust the list.)
+    for name in candidates:
+        candidate_id = f"{name}-{role}-v1"
+        if candidate_id not in existing_ids:
+            return (candidate_id, name.capitalize())
+
+    # All names taken at v1 for this role — bump version on the first
+    # name. Safe upper bound on n because existing_ids is finite.
+    first = candidates[0]
     n = 2
-    while f"{role}-v{n}" in existing_ids:
+    while f"{first}-{role}-v{n}" in existing_ids:
         n += 1
-    return f"{role}-v{n}"
+    return (f"{first}-{role}-v{n}", first.capitalize())
 
 
 def list_all_archetypes() -> list[ArchetypeMeta]:
