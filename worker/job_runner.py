@@ -180,7 +180,7 @@ def default_runner_factory(
         run_id=run_id,
         run_root=run_root,
         llm=llm,
-        memory_writer=MemoryWriter(),
+        memory_writer=MemoryWriter(llm=llm),
         docker_manager=docker_manager,
     )
 

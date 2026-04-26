@@ -221,3 +221,233 @@ async def test_persona_without_dir_attribute_is_skipped(tmp_path: Path):
     # Should not raise.
     await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
                              run_root=tmp_path, personas={"developer": p})
+
+
+# ── Phase F.3.1 — pattern distillation ─────────────────────────────────────
+
+
+from core.llm import MockLLMClient, MockTurn, ToolCall
+
+
+def _seed_episodes(persona: Persona, count: int, tags: list[str]) -> None:
+    """Seed `count` episodes that all share the given tags."""
+    for i in range(count):
+        persona.episodes.append(Episode(
+            episode_id=f"ep_seed_{i}",
+            run_id=f"run_seed_{i}",
+            task_context=f"task {i}",
+            what_i_tried="implementation",
+            tags=list(tags),
+            timestamp=_ts(i + 1),
+        ))
+
+
+async def test_distillation_skipped_when_llm_is_none(tmp_path: Path):
+    """Without an LLM, the writer never produces new patterns even with
+    a strong cluster."""
+    p, d = _persona(tmp_path)
+    _seed_episodes(p, 4, ["jwt", "auth"])
+    assert len(p.patterns) == 0
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter()  # llm=None
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    patterns = json.loads((d / "patterns.json").read_text(encoding="utf-8"))["patterns"]
+    assert patterns == []
+
+
+async def test_distillation_emits_pattern_for_strong_cluster(tmp_path: Path):
+    """Cluster of 4 episodes sharing two tags + LLM emits pattern → new
+    emerging pattern lands with confidence 0.6 and source episodes
+    cited."""
+    p, d = _persona(tmp_path)
+    _seed_episodes(p, 4, ["jwt", "auth"])
+
+    llm = MockLLMClient([MockTurn(tool_calls=[ToolCall(
+        id="t1",
+        name="emit_pattern",
+        arguments={
+            "title": "Verify JWT issuer",
+            "lesson": "Always validate the iss claim on incoming JWTs.",
+            "applies_when": ["jwt", "auth"],
+        },
+    )])])
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    patterns = json.loads((d / "patterns.json").read_text(encoding="utf-8"))["patterns"]
+    assert len(patterns) == 1
+    assert patterns[0]["title"] == "Verify JWT issuer"
+    assert patterns[0]["status"] == STATUS_EMERGING
+    assert patterns[0]["confidence"] == 0.6
+    assert sorted(patterns[0]["applies_when"]) == ["auth", "jwt"]
+    # source_episodes covers the cluster (≥3 of the seeded ids).
+    assert len(patterns[0]["source_episodes"]) >= 3
+
+
+async def test_distillation_emit_no_pattern_adds_nothing(tmp_path: Path):
+    p, d = _persona(tmp_path)
+    _seed_episodes(p, 4, ["jwt", "auth"])
+
+    llm = MockLLMClient([MockTurn(tool_calls=[ToolCall(
+        id="t1",
+        name="emit_no_pattern",
+        arguments={"reason": "outcomes mixed, no clear lesson"},
+    )])])
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    patterns = json.loads((d / "patterns.json").read_text(encoding="utf-8"))["patterns"]
+    assert patterns == []
+
+
+async def test_distillation_llm_failure_does_not_break_run(tmp_path: Path):
+    """Empty MockLLMClient queue raises AssertionError on call. The
+    writer must catch and continue, leaving the rest of the pipeline
+    intact (episode written, reputation updated)."""
+    p, d = _persona(tmp_path)
+    _seed_episodes(p, 4, ["jwt", "auth"])
+
+    llm = MockLLMClient([])  # empty — will raise on first call
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    # No patterns synthesized.
+    patterns = json.loads((d / "patterns.json").read_text(encoding="utf-8"))["patterns"]
+    assert patterns == []
+    # But episode was still recorded and reputation refreshed.
+    eps = (d / "episodes.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(eps) >= 1
+    rep = json.loads((d / "reputation.json").read_text(encoding="utf-8"))
+    assert rep["total_episodes"] >= 1
+
+
+async def test_distillation_skipped_when_cluster_below_threshold(tmp_path: Path):
+    """Only 2 episodes share a tag pair → no LLM call (would have raised
+    on empty queue if it had been called)."""
+    p, d = _persona(tmp_path)
+    _seed_episodes(p, 2, ["jwt", "auth"])
+
+    llm = MockLLMClient([])  # empty — proves the LLM was not called
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    # No assertion error means the LLM was not called.
+    assert llm.calls == []
+
+
+async def test_distillation_dedupes_against_existing_pattern(tmp_path: Path):
+    """LLM returns a lesson identical to an existing pattern → drop."""
+    p, d = _persona(tmp_path)
+    _seed_episodes(p, 4, ["jwt", "auth"])
+    p.patterns.append(Pattern(
+        pattern_id="pat_existing",
+        title="Old title",
+        lesson="Always validate the iss claim on incoming JWTs.",
+        applies_when=["jwt"],
+        status=STATUS_ACTIVE,
+        confidence=0.8,
+        first_observed=_ts(60),
+    ))
+
+    llm = MockLLMClient([MockTurn(tool_calls=[ToolCall(
+        id="t1",
+        name="emit_pattern",
+        arguments={
+            "title": "Verify JWT issuer",
+            "lesson": "Always validate the iss claim on incoming JWTs.",
+            "applies_when": ["jwt"],
+        },
+    )])])
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    patterns = json.loads((d / "patterns.json").read_text(encoding="utf-8"))["patterns"]
+    # Original survives, no duplicate added.
+    assert len(patterns) == 1
+    assert patterns[0]["pattern_id"] == "pat_existing"
+
+
+async def test_distillation_skips_episodes_already_covered(tmp_path: Path):
+    """Episodes already cited as source of an active pattern are NOT
+    re-clustered — the LLM has already extracted whatever lesson lived
+    in them."""
+    p, d = _persona(tmp_path)
+    _seed_episodes(p, 4, ["jwt", "auth"])
+    # Pattern claims all seeded episodes as its evidence already.
+    p.patterns.append(Pattern(
+        pattern_id="pat_existing",
+        title="Existing JWT pattern",
+        lesson="Existing lesson",
+        applies_when=["jwt"],
+        status=STATUS_ACTIVE,
+        confidence=0.8,
+        source_episodes=[f"ep_seed_{i}" for i in range(4)],
+        first_observed=_ts(60),
+    ))
+
+    llm = MockLLMClient([])  # empty — proves no LLM call
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    assert llm.calls == []
+
+
+async def test_distillation_caps_at_three_clusters(tmp_path: Path):
+    """Many candidate clusters → at most MAX_DISTILL_CALLS_PER_RUN LLM
+    calls. Caps token spend on chatty personas."""
+    p, d = _persona(tmp_path)
+    # Seed 5 distinct clusters by tag-pair.
+    pairs = [
+        ["jwt", "auth"],
+        ["redis", "cache"],
+        ["sql", "migration"],
+        ["graphql", "schema"],
+        ["docker", "deploy"],
+    ]
+    for i, tags in enumerate(pairs):
+        for j in range(4):
+            p.episodes.append(Episode(
+                episode_id=f"ep_p{i}_{j}",
+                run_id=f"r_{i}_{j}",
+                task_context=f"task {i}-{j}",
+                tags=list(tags),
+                timestamp=_ts(i * 10 + j + 1),
+            ))
+
+    # Queue 3 emit_no_pattern responses; if a 4th call happens the queue
+    # is empty and will raise → but the writer catches it, so we just
+    # measure llm.calls afterward.
+    llm = MockLLMClient([
+        MockTurn(tool_calls=[ToolCall(
+            id=f"t{i}", name="emit_no_pattern", arguments={"reason": "n/a"}
+        )])
+        for i in range(3)
+    ])
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    assert len(llm.calls) == 3

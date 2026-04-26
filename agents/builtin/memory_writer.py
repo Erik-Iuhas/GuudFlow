@@ -33,6 +33,7 @@ from typing import Any
 from uuid import uuid4
 
 from agents.base import BaseAgent
+from core.llm import LLMClient
 from agents.persona import (
     AntiPattern,
     DEFAULT_HALF_LIFE_DAYS,
@@ -60,18 +61,31 @@ NARROW_CLUSTER_FAILURE_RATE = 0.5
 FLIP_FAILURE_STREAK = 5
 ARCHIVE_SCOPE_RATIO = 0.30
 
+# Phase F.3.1 distillation thresholds.
+DISTILL_RECENT_EPISODE_LIMIT = 50  # consider only the last N non-stale episodes
+DISTILL_MIN_CLUSTER_SIZE = 3       # cluster must contain ≥3 episodes
+DISTILL_MIN_SHARED_TAGS = 2        # cluster members share ≥2 tags
+MAX_DISTILL_CALLS_PER_RUN = 3      # cap LLM calls per persona per run
+EMERGING_SEED_CONFIDENCE = 0.6     # §34 — emerging patterns start at 0.6
+
 
 class MemoryWriter(BaseAgent):
     """Post-run memory synthesizer. Constructed by the runner; the runner
     calls `on_run_complete` after the scheduler finishes.
+
+    When constructed with an `llm` client (Phase F.3), the writer
+    additionally performs LLM-driven pattern distillation and pattern→
+    anti-pattern flip detection. With `llm=None`, behaviour collapses
+    to the deterministic Stage-5 path (no synthesis, no flips).
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, llm: LLMClient | None = None, **kwargs):
         super().__init__(
             role=kwargs.pop("role", "memory_writer"),
             description="Post-run persona memory synthesizer.",
             **kwargs,
         )
+        self._llm = llm
 
     async def on_run_complete(
         self,
@@ -88,14 +102,16 @@ class MemoryWriter(BaseAgent):
         """
         for role, persona in personas.items():
             try:
-                self._update_persona(persona, role, workspace, run_id)
+                await self._update_persona(persona, role, workspace, run_id)
             except Exception:
                 # Memory write must never fail the run.
                 continue
 
     # ── Per-persona update ─────────────────────────────────────────────────
 
-    def _update_persona(self, persona: Persona, role: str, workspace, run_id: str) -> None:
+    async def _update_persona(
+        self, persona: Persona, role: str, workspace, run_id: str
+    ) -> None:
         # 1. Record episode.
         episode = self._build_episode(persona, role, workspace, run_id)
         persona.episodes.append(episode)
@@ -109,11 +125,22 @@ class MemoryWriter(BaseAgent):
         for ap in persona.anti_patterns:
             ap.confidence = round(compute_confidence(ap, persona.profile.recency_half_life_days, now), 4)
 
+        # 3. LLM-driven pattern distillation from recent episode clusters
+        #    (Phase F.3.1). Skipped entirely when no LLM was injected, so
+        #    `MemoryWriter()` retains its deterministic Stage-5 contract.
+        if self._llm is not None:
+            try:
+                await self._distill_patterns(persona, now)
+            except Exception:
+                # Synthesis must never fail the run; fall through with
+                # whatever distillation produced before the failure.
+                pass
+
         # 5. Update reputation aggregates.
         self._refresh_reputation(persona)
 
         # 6. Reconciliation pass.
-        self._reconcile(persona, now)
+        await self._reconcile(persona, now)
 
         # Persist atomically.
         self._save(persona)
@@ -158,6 +185,60 @@ class MemoryWriter(BaseAgent):
             training=False,
         )
 
+    # ── 3. LLM-driven pattern distillation (§34, Phase F.3.1) ──────────────
+
+    async def _distill_patterns(self, persona: Persona, now: datetime) -> None:
+        """Find recent episode clusters that share themes and ask the LLM
+        whether each cluster supports a new emerging pattern.
+
+        Bounded by `MAX_DISTILL_CALLS_PER_RUN` so a chatty persona doesn't
+        spend tokens explosively. Falls back silently on any per-cluster
+        error — the broader reconciliation pass still runs.
+        """
+        clusters = _build_episode_clusters(persona)
+        if not clusters:
+            return
+
+        for cluster in clusters[:MAX_DISTILL_CALLS_PER_RUN]:
+            tool_args = await self._call_distill_llm(persona, cluster)
+            if tool_args is None:
+                continue
+            new_pattern = _build_pattern_from_tool_args(
+                tool_args, cluster, now
+            )
+            if new_pattern is None:
+                continue
+            if _duplicates_existing_pattern(new_pattern, persona):
+                continue
+            persona.patterns.append(new_pattern)
+
+    async def _call_distill_llm(
+        self, persona: Persona, cluster: "_EpisodeCluster"
+    ) -> dict[str, Any] | None:
+        """Render the prompt and call the LLM. Returns the structured
+        `emit_pattern` arguments dict, or None if the LLM declined / the
+        call failed / the response was malformed.
+        """
+        try:
+            from core.llm import LLMMessage  # local to keep import cheap
+            response = await self._llm.complete(  # type: ignore[union-attr]
+                system=DISTILL_SYSTEM_PROMPT,
+                messages=[LLMMessage(role="user", content=_render_distill_user(persona, cluster))],
+                tools=[EMIT_PATTERN_TOOL, EMIT_NO_PATTERN_TOOL],
+                max_tokens=1024,
+            )
+        except Exception:
+            return None
+
+        if not response.tool_calls:
+            return None
+        call = response.tool_calls[0]
+        if call.name != "emit_pattern":
+            return None
+        if not isinstance(call.arguments, dict):
+            return None
+        return call.arguments
+
     # ── 5. Reputation ───────────────────────────────────────────────────────
 
     def _refresh_reputation(self, persona: Persona) -> None:
@@ -175,7 +256,7 @@ class MemoryWriter(BaseAgent):
 
     # ── 6. Reconciliation pass (§34) ────────────────────────────────────────
 
-    def _reconcile(self, persona: Persona, now: datetime) -> None:
+    async def _reconcile(self, persona: Persona, now: datetime) -> None:
         # 6a. Contradiction reconciliation FIRST — checks ACTIVE patterns
         #     for overlapping applies_when and supersedes the loser.
         #     Must run before lifecycle transitions so we compare against
@@ -428,3 +509,223 @@ def _parse_iso(s: str) -> datetime | None:
         return datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+# ── Phase F.3.1 — pattern distillation helpers ─────────────────────────────
+
+
+from dataclasses import dataclass as _dataclass
+from itertools import combinations as _combinations
+
+
+@_dataclass
+class _EpisodeCluster:
+    """Recent episodes that co-occur on a shared pair of tags. The
+    LLM is asked whether the cluster supports a single new pattern."""
+
+    shared_tags: tuple[str, str]
+    episodes: list[Episode]
+
+
+DISTILL_SYSTEM_PROMPT = (
+    "You are the memory_writer for a software-engineering persona. You "
+    "review small clusters of past episodes that share themes and decide "
+    "whether they justify a new emerging pattern in the persona's memory.\n\n"
+    "Be conservative. Emit a pattern ONLY when the episodes share a clear, "
+    "actionable lesson — not just the same topic. If the episodes are "
+    "merely related (same area of the codebase, same kind of task) but the "
+    "lesson is fuzzy or the outcomes are mixed, call emit_no_pattern with "
+    "the reason instead. A weak pattern hurts the persona more than no "
+    "pattern at all.\n\n"
+    "Patterns are seeded as 'emerging' (low weight) — they will be "
+    "promoted only after the persona applies them in real future runs. "
+    "Your job is to spot the lesson, not to score it."
+)
+
+
+EMIT_PATTERN_TOOL: dict[str, Any] = {
+    "name": "emit_pattern",
+    "description": "Record a new emerging pattern distilled from this episode cluster.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Short imperative title — what the persona should do.",
+            },
+            "lesson": {
+                "type": "string",
+                "description": "One-paragraph explanation of WHY and WHEN, grounded in the episodes shown.",
+            },
+            "applies_when": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Tags / contexts this pattern applies to. Reuse cluster tags where appropriate.",
+            },
+        },
+        "required": ["title", "lesson", "applies_when"],
+    },
+}
+
+
+EMIT_NO_PATTERN_TOOL: dict[str, Any] = {
+    "name": "emit_no_pattern",
+    "description": "Decline to emit a pattern from this cluster.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "Why this cluster doesn't support a pattern (mixed outcomes, fuzzy lesson, etc).",
+            },
+        },
+        "required": ["reason"],
+    },
+}
+
+
+def _build_episode_clusters(persona: Persona) -> list[_EpisodeCluster]:
+    """Surface candidate clusters: pairs of tags that co-occur in
+    `DISTILL_MIN_CLUSTER_SIZE`+ recent non-stale episodes whose
+    member episodes are not already covered by a non-archived pattern.
+
+    Clusters are returned largest-first so the per-run cap picks the
+    strongest signals.
+    """
+    recent = [
+        ep for ep in reversed(persona.episodes)
+        if ep.staleness != "stale" and not ep.training
+    ][:DISTILL_RECENT_EPISODE_LIMIT]
+    if len(recent) < DISTILL_MIN_CLUSTER_SIZE:
+        return []
+
+    covered = _covered_episode_ids(persona)
+
+    # Tag-pair → episode list.
+    pair_to_eps: dict[tuple[str, str], list[Episode]] = {}
+    for ep in recent:
+        if ep.episode_id in covered:
+            continue
+        tags = sorted(set(ep.tags))
+        for pair in _combinations(tags, DISTILL_MIN_SHARED_TAGS):
+            pair_to_eps.setdefault(pair, []).append(ep)
+
+    clusters: list[_EpisodeCluster] = []
+    seen_signatures: set[frozenset[str]] = set()
+    for pair, eps in pair_to_eps.items():
+        if len(eps) < DISTILL_MIN_CLUSTER_SIZE:
+            continue
+        # Dedupe overlapping clusters by member-id signature.
+        signature = frozenset(ep.episode_id for ep in eps)
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        clusters.append(_EpisodeCluster(shared_tags=pair, episodes=eps))
+
+    clusters.sort(key=lambda c: len(c.episodes), reverse=True)
+    return clusters
+
+
+def _covered_episode_ids(persona: Persona) -> set[str]:
+    """Episodes already cited as `source_episodes` of a non-archived
+    pattern or anti-pattern shouldn't be re-distilled — the LLM has
+    already extracted whatever signal lived there."""
+    out: set[str] = set()
+    for p in persona.patterns:
+        if p.status not in (STATUS_ARCHIVED, STATUS_SUPERSEDED):
+            out.update(p.source_episodes)
+    for ap in persona.anti_patterns:
+        if ap.status not in (STATUS_ARCHIVED, STATUS_SUPERSEDED):
+            out.update(ap.source_episodes)
+    return out
+
+
+def _render_distill_user(persona: Persona, cluster: _EpisodeCluster) -> str:
+    lines: list[str] = []
+    lines.append(
+        f"Persona: {persona.profile.name} ({persona.profile.specialty})."
+    )
+    lines.append(
+        f"Cluster shared tags: {', '.join(cluster.shared_tags)}."
+    )
+    lines.append("")
+    lines.append("Existing patterns this persona already knows (skip duplicating):")
+    if persona.patterns:
+        for p in persona.patterns:
+            if p.status in (STATUS_ARCHIVED, STATUS_SUPERSEDED):
+                continue
+            lines.append(f"- {p.title}: {p.lesson}")
+    else:
+        lines.append("- (none)")
+    lines.append("")
+    lines.append(f"Cluster episodes ({len(cluster.episodes)}):")
+    for ep in cluster.episodes:
+        lines.append(f"--- episode {ep.episode_id} ---")
+        if ep.task_context:
+            lines.append(f"task: {ep.task_context}")
+        if ep.what_i_tried:
+            lines.append(f"tried: {ep.what_i_tried[:300]}")
+        if ep.what_worked:
+            lines.append(f"worked: {ep.what_worked[:200]}")
+        if ep.what_failed:
+            lines.append(f"failed: {ep.what_failed[:200]}")
+        if ep.feedback_verbatim:
+            lines.append(f"feedback: {ep.feedback_verbatim[:200]}")
+    return "\n".join(lines)
+
+
+def _build_pattern_from_tool_args(
+    args: dict[str, Any],
+    cluster: _EpisodeCluster,
+    now: datetime,
+) -> Pattern | None:
+    title = (args.get("title") or "").strip()
+    lesson = (args.get("lesson") or "").strip()
+    if not title or not lesson:
+        return None
+
+    raw_applies = args.get("applies_when") or []
+    if not isinstance(raw_applies, list):
+        return None
+    applies_when = [
+        str(t).strip().lower() for t in raw_applies if isinstance(t, (str, int))
+    ]
+    applies_when = [t for t in applies_when if t]
+    if not applies_when:
+        # Default to the cluster's shared tags so retrieval can still hit.
+        applies_when = list(cluster.shared_tags)
+
+    now_iso = now.isoformat()
+    return Pattern(
+        pattern_id=f"pat_{uuid4().hex[:10]}",
+        title=title,
+        lesson=lesson,
+        applies_when=applies_when,
+        applies_when_excludes=[],
+        confidence=EMERGING_SEED_CONFIDENCE,
+        status=STATUS_EMERGING,
+        applications=[],
+        lifetime_applications=0,
+        lifetime_successes=0,
+        source_episodes=[ep.episode_id for ep in cluster.episodes],
+        superseded_by=None,
+        user_pinned=False,
+        first_observed=now_iso,
+        last_state_change=now_iso,
+    )
+
+
+def _duplicates_existing_pattern(new_pattern: Pattern, persona: Persona) -> bool:
+    """Belt-and-suspenders dedupe: if the LLM proposes a lesson identical
+    to an existing pattern's lesson, drop the duplicate. The system
+    prompt already shows existing patterns; this catches the rare case
+    where the LLM ignores the hint."""
+    target = new_pattern.lesson.strip().lower()
+    if not target:
+        return False
+    for p in persona.patterns:
+        if p.status in (STATUS_ARCHIVED, STATUS_SUPERSEDED):
+            continue
+        if p.lesson.strip().lower() == target:
+            return True
+    return False
