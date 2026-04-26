@@ -183,6 +183,70 @@ backends.
 
 ---
 
+## Phase G — Studio polish for workflow review (~2-3 days)
+
+The Stage 8 frontend hits the exit criteria but it's intentionally
+MVP-functional — every view works, nothing is *designed-for-comprehension*.
+Real users want to scan a workflow, not read it line by line. Three
+concrete gaps user feedback flagged:
+
+### Workflow at a glance
+- [ ] **`PipelineGraph` component** — DAG view of agents with `depends_on`
+      edges. Node states (pending / ready / running / complete / failed /
+      waiting_for_human). Used in both Studio (config preview) and Run
+      (live state).
+- [ ] **Project list as cards, not table** — last-run status badge,
+      run count, time since last run, quick "run again" button.
+- [ ] **Run history mini-chart** on each project card — sparkline of
+      recent runs (success / failed / partial).
+
+### Per-agent stage cards in the Run view
+- [ ] **`AgentStateCard`** — replaces or augments BoardFeed for the
+      "what's each agent doing right now" question:
+      `[role] state · iter N · last commit abc1234 · claimed: auth.py · 2 unread comments`
+- [ ] Group board signals by iteration internally so the agent card
+      can render "iteration 2: 3 commits, 1 reject, 1 fix"
+- [ ] Hover-to-expand to see the iteration's signal stream
+
+### Git tracking that's actually visual
+- [ ] **Branch graph** — replace flat `GitLogTab` with a real branch
+      visualization: lanes per agent branch, commits as nodes, merges
+      as bridges, conflicts highlighted. Could use a small library
+      (e.g. `@gitgraph/react`) or hand-roll SVG; either way, not
+      heavy.
+- [ ] **Inline diff viewer** — click a commit, see the diff in a
+      slide-out panel. Backend already has board signals carrying
+      commit hashes; frontend just needs to render the diff.
+- [ ] **Per-file timeline** — pick a path (`src/auth.py`), see every
+      commit that touched it across all branches, with an iteration
+      tag.
+
+### Better empty / loading states
+- [ ] When a project has no runs: show a "What happens when you click
+      Run?" card with the proposed pipeline preview, not "no runs
+      yet".
+- [ ] When a run has no signals yet: animated placeholder showing
+      "scheduler is starting agents..." with the expected first agent
+      highlighted.
+
+### Other polish that came up
+- [ ] Optimistic updates for project edits in Studio (currently full
+      PUT-then-reload)
+- [ ] Toast notifications for async API errors (currently inline error
+      blocks in each view)
+- [ ] Dark-mode CSS variables (light mode only today)
+
+**Unblocks:** "I can look at this run and understand what's happening
+in 5 seconds." Today you have to read the board chronologically —
+fine for debugging, terrible for review.
+
+**Files:** new `studio/src/components/PipelineGraph.tsx`,
+`AgentStateCard.tsx`, `BranchGraph.tsx`, `DiffPanel.tsx`; updates to
+`views/Projects.tsx` (cards) and `views/Run.tsx` (new layout); a
+small grouping helper in `studio/src/lib/`.
+
+---
+
 ## Phase F — Long-term moat features (each is a project)
 
 These are designed in DESIGN.md but aren't on the critical path. Pick
@@ -216,6 +280,7 @@ them up when real users tell you which one matters.
 | ...let someone else run the repo | Phase A (done) |
 | ...deploy to production safely | Phase B + Phase E |
 | ...let real users show up with rich asks (PDFs, repos, prior runs) | **Phase D-prime + Phase D** |
+| ...let users **review** a run easily (the headline UX question) | **Phase G** (studio polish) |
 | ...demo a real interactive run | Phase C + Phase D |
 | ...make agents genuinely smarter over time | Phase F (training camp + memory synthesis) |
 
