@@ -349,6 +349,20 @@ class JobRunner:
                     error=f"resume state restoration failed: {e}",
                 )
                 return
+            # Phase G.3 — synthetic banner signal so the studio's Run
+            # view can show "resumed from iteration N, with K
+            # completed agents." Posted via the workspace itself so
+            # the persister captures it for future resumes.
+            from core.signals import Signal as _Signal, SignalType as _SignalType
+            restored_workspace.post_signal(_Signal(
+                type=_SignalType.STARTED,
+                summary=(
+                    f"resumed from iteration {restored_workspace.iteration} "
+                    f"({len(restored_workspace.completed_agents)} agents already complete)"
+                ),
+                from_agent="runner",
+                iteration=restored_workspace.iteration,
+            ))
 
         # 3. Verify LLM client is configured.
         llm = self.llm or _build_default_llm()

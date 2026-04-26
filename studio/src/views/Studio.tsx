@@ -4,6 +4,7 @@ import { ApiError, invokeApi, projectsApi, runsApi } from "../api";
 import { AgentCard } from "../components/AgentCard";
 import { CostStrip } from "../components/CostStrip";
 import { PipelineGraph } from "../components/PipelineGraph";
+import { ResumeButton } from "../components/ResumeButton";
 import type { AgentConfig, ProjectConfig, RunMeta } from "../types";
 import { Inputs } from "./Inputs";
 
@@ -248,9 +249,17 @@ export function Studio() {
                     <td className="small muted">{r.created_at?.replace("T", " ").split(".")[0]}</td>
                     <td className="small">{(r.completed_agents ?? []).join(", ")}</td>
                     <td>
-                      <Link to={`/runs/${r.run_id}`}>
-                        <button>Watch</button>
-                      </Link>
+                      <div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
+                        <Link to={`/runs/${r.run_id}`}>
+                          <button>Watch</button>
+                        </Link>
+                        {/* Phase G.3 — quick-resume from the run history
+                            list. Same backend as the Run view's button. */}
+                        {r.status !== "complete" && r.status !== "running" &&
+                         r.status !== "queued" && (
+                          <ResumeButton runId={r.run_id} onResumed={() => void load()} />
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

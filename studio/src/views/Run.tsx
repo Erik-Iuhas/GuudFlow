@@ -59,6 +59,7 @@ export function Run() {
   const [feedback, setFeedback] = useState("");
   const [continueBusy, setContinueBusy] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const [resuming, setResuming] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -107,6 +108,22 @@ export function Run() {
       if (e instanceof ApiError && e.status !== 404) {
         setError(e.detail);
       }
+    }
+  }
+
+  async function handleResume() {
+    if (!runId) return;
+    setResuming(true);
+    setError(null);
+    try {
+      await runsApi.resume(runId);
+      // Re-load meta + reconnect — the websocket should pick up
+      // the new signals (including the synthetic "resumed" banner).
+      await loadMeta();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setResuming(false);
     }
   }
 
@@ -167,6 +184,18 @@ export function Run() {
                 {connected ? "● live" : "○ disconnected"}
               </span>
               <span>{signals.length} signals</span>
+              {/* Phase G.3 — resume button on failed/non-complete runs.
+                  Calls runsApi.resume() (G-prime.2 backend). */}
+              {meta && meta.status !== "complete" && isTerminal(meta.status) && (
+                <button
+                  className="primary small"
+                  onClick={() => void handleResume()}
+                  disabled={resuming}
+                  title="Re-enqueue from the persisted state"
+                >
+                  {resuming ? "Resuming…" : "Resume run"}
+                </button>
+              )}
               {meta && isTerminal(meta.status) && meta.project_id && (
                 <button
                   className="primary small"
@@ -179,6 +208,27 @@ export function Run() {
             </div>
           </div>
           {error && <div className="error">{error}</div>}
+
+          {/* Phase G.3 — banner showing this run was resumed from a
+              prior point. Reads the synthetic STARTED signal posted
+              by the worker's resume branch. */}
+          {(() => {
+            const resumedSig = signals.find(
+              (s) =>
+                s.from_agent === "runner" &&
+                s.type === "STARTED" &&
+                s.summary.startsWith("resumed from iteration"),
+            );
+            if (!resumedSig) return null;
+            return (
+              <div className="card resumed-banner">
+                <strong>Resumed run</strong>
+                <span className="small muted" style={{ marginLeft: 8 }}>
+                  {resumedSig.summary}
+                </span>
+              </div>
+            );
+          })()}
 
           {/* Pending approval gates (Phase C.0.5). Surfaced inline at
               the top of the run view so the user can grant/deny without
