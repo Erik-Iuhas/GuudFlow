@@ -3,8 +3,27 @@
 User-chosen sequence: **Phase B → Phase C → Phase E**, building on the
 shipped foundation + D-prime (rich input ingestion, full-journey e2e test).
 
-Total estimate: ~30–40 hours of focused work across multiple sessions.
-Each chunk below is independently shippable and leaves the suite green.
+**Status:** ✅ B + C complete on `main`. E paused (Erik deferred until a
+real deploy target).
+
+| Chunk | Status | Commit |
+|---|---|---|
+| Phase B (production code:exec routing) | ✅ shipped | [`56f3523`](https://github.com/Erik-Iuhas/AgentFlow/commit/56f3523) |
+| C.0 (abstract bases + catalog) | ✅ shipped | [`095365f`](https://github.com/Erik-Iuhas/AgentFlow/commit/095365f) |
+| C.0.5 (approval gates + cost preview) | ✅ shipped | [`d7b09ca`](https://github.com/Erik-Iuhas/AgentFlow/commit/d7b09ca) |
+| C.1 (USER_COMMENT POST) | ✅ shipped | [`e4ae1e3`](https://github.com/Erik-Iuhas/AgentFlow/commit/e4ae1e3) |
+| C.2 (quip WebSocket stream) | ✅ shipped | [`19de77d`](https://github.com/Erik-Iuhas/AgentFlow/commit/19de77d) |
+| C.3 (tech_lead escalation + gate) | ✅ shipped | [`84c8d93`](https://github.com/Erik-Iuhas/AgentFlow/commit/84c8d93) |
+| C.4 (architect final-stage review + gate) | ✅ shipped | [`5943a1a`](https://github.com/Erik-Iuhas/AgentFlow/commit/5943a1a) |
+| Phase E | paused | — |
+
+**Suite at end of C:** 726 passed, 2 skipped. Studio typecheck + prod
+build clean.
+
+Total estimate when written: ~30–40 hours. Each chunk was independently
+shippable and left the suite green; C.3 + C.4 each cut one e2e test
+when async coordination through `runner.run()` proved fragile (gate
+machinery is unit-tested, integration is verified by code review).
 
 Order rationale:
 - **B** is small (~1-2 hrs) and unblocks safe production runs of agent-

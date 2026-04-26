@@ -1,8 +1,8 @@
 # AgentFlow Build Board
 
-**Current stage:** ✅ Initial build + Phase A + D-prime + B shipped.
+**Current stage:** ✅ Initial build + Phase A + D-prime + B + C shipped.
 **Last updated:** 2026-04-26
-**Tests:** 638 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
+**Tests:** 726 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
 
 ## Stage status
 - [x] Stage 1 — Foundation primitives  (29/29 tests)
@@ -29,17 +29,26 @@
 | 9     | 50-100k   | ~30k   | within budget; image-only, build deferred    |
 
 ## Next action
-**Phase D-prime shipped (8/8 chunks).** Backend ingestion (uploads, git/local-path source repo with secret scan, prior-run attach) + run initializer wired into the worker + Studio Inputs tab + blank-project + continue-from-run entry points. 624 backend tests passing, studio typecheck + prod build clean.
+**Phases B + C shipped.** Production code:exec routing through the
+sandbox container (B), full live-run interactivity + cost-control
+gates (C: abstract bases, approval gates, USER_COMMENT, quip stream,
+tech_lead escalation, architect final-review). 726 backend tests
+passing, studio typecheck + prod build clean.
 
-**Recommended next:** **Phase D** (real meta-agent proposal that reads `inputs/`) — see [.claude/progress/plan-dprime-d-g.md](plan-dprime-d-g.md#phase-d--real-meta-agent-proposal-7-hrs-depends-on-d-prime). Phase G (studio polish) is independent and can run in parallel.
+**Recommended next:** **Phase D** (real meta-agent proposal that
+reads `inputs/` + the agent catalog shipped in C.0). Phase G (studio
+polish for workflow review) is independent and the headline UX
+upgrade. Phase E (production deploy) is paused until there's a real
+target.
 
 - ✅ **D-prime** — shipped 2026-04-26
-- **D** (real meta-agent proposal that reads `inputs/`) — next
-- **B** (`code:exec` → DockerManager.exec_in() routing in production)
-- **C** (live USER_COMMENT POST + real quip stream + tech-lead escalation auto-detection)
-- **E** (Redis queue + KubeJobManager + Helm — when there's a deploy target)
-- **F** (Training Camp, real LLM-driven memory synthesis, persona chat, etc.)
+- ✅ **B** — shipped 2026-04-26 ([`56f3523`](https://github.com/Erik-Iuhas/AgentFlow/commit/56f3523))
+- ✅ **C** — shipped 2026-04-26 (C.0 → C.0.5 → C.1 → C.2 → C.3 → C.4)
+- **D** (real meta-agent proposal that reads `inputs/` + catalog) — next recommended
 - **G** (studio polish for workflow review — independent, can run in parallel)
+- **E** (Redis queue + KubeJobManager + Helm — when there's a deploy target)
+- **F** (Training Camp, real LLM-driven memory synthesis, worker-archetype markdown, persona chat, etc.)
+- **H** (speculative — visual_checker Playwright + UICanvas)
 
 ## Deferred follow-ons
 [followups.md](followups.md) is the running inventory of punted items. ROADMAP.md groups them into shippable phases.

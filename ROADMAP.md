@@ -41,32 +41,46 @@ packaging is Phase E.
 
 ---
 
-## Phase C — Make a live run feel live (~half day)
+## Phase C — Make a live run feel live ✅ DONE (2026-04-26)
 
-The Run view in the studio streams the board over WebSocket and that
-works. But three pieces are stubbed and the run experience is less
-interactive than it should be.
+A live run is now interactive AND has structured review layers. User
+comments land mid-run. Quips stream live. The tech lead auto-fires on
+escalation. The architect runs as a final design check. Cost gates
+confirm before HEAVY-tier mid-run dispatch.
 
-- [ ] **Live `USER_COMMENT` POST endpoint** — `POST /api/runs/{run_id}/comment`
-      that posts a `USER_COMMENT` signal to the active workspace.
-      Frontend's `CommentBox` is already wired; backend is a no-op today.
-- [ ] **Real quip stream** — quips are written to
-      `data/runs/{id}/quip_log.json` but the studio's `QuipFeed`
-      synthesises pseudo-quips from board events. Either:
-      - extend the existing `/ws/runs/{id}` to also stream quips, OR
-      - add a parallel `/ws/runs/{id}/quips`
-- [ ] **Tech-lead escalation auto-detection** — runner counts
-      `REJECTED` signals per role; at threshold (default 2 per CLAUDE.md
-      Escalation rules), spawns the `tech_lead` agent with the
-      relevant context. Today `tech_lead` exists as a class but is
-      never auto-activated.
+- [x] **C.0** ([`095365f`](https://github.com/Erik-Iuhas/AgentFlow/commit/095365f))
+      Abstract bases (Reviewer / EscalationHandler / Specialist) +
+      `agents/catalog.py` + `GET /api/agents/catalog`. Refactored
+      CodeReviewer + TechLead onto the new bases; added
+      RequirementsWriter as the proof-of-pattern Specialist.
+- [x] **C.0.5** ([`d7b09ca`](https://github.com/Erik-Iuhas/AgentFlow/commit/d7b09ca))
+      Approval gates + cost preview. New SignalTypes
+      (APPROVAL_NEEDED/GRANTED/DENIED), Workspace.pending_approvals,
+      runner._request_approval, ProjectConfig.approval_gates with
+      opinionated baselines (pre-run cost preview ON, HEAVY-tier
+      mid-run dispatch ON, iteration breach at 2). Studio cost-preview
+      modal + ApprovalCard + Settings tab.
+- [x] **C.1** ([`e4ae1e3`](https://github.com/Erik-Iuhas/AgentFlow/commit/e4ae1e3))
+      `POST /api/runs/{id}/comment` posts USER_COMMENT live. Studio
+      CommentBox wired with optimistic UX.
+- [x] **C.2** ([`19de77d`](https://github.com/Erik-Iuhas/AgentFlow/commit/19de77d))
+      `/ws/runs/{id}/quips` streams quips live (parallel to the board
+      WS). QuipEngine grew subscribe/unsubscribe/_notify; JobRunner
+      builds + registers a per-run engine when a quip_registry is set.
+      Studio QuipFeed switched from synthesised to real subscription.
+- [x] **C.3** ([`84c8d93`](https://github.com/Erik-Iuhas/AgentFlow/commit/84c8d93))
+      tech_lead auto-spawn on REJECTED threshold + reviewer-text
+      detection (REJECTED in artifact → REJECTED signal, no merge).
+      C.0.5 gate threaded into _dispatch_escalation: granted → handler
+      proceeds, denied → side-task returns cleanly.
+- [x] **C.4** ([`5943a1a`](https://github.com/Erik-Iuhas/AgentFlow/commit/5943a1a))
+      Final-stage architect review pattern. AgentConfig.is_final_reviewer
+      auto-fills depends_on at runtime so the architect runs LAST. Same
+      C.0.5 gate fires before the architect's HEAVY-tier loop. Architect
+      class shipped as a Reviewer subclass.
 
-**Unblocks:** a real demo run feels interactive. Users can steer
-mid-flight; the platform escalates automatically when stuck.
-
-**Files:** `api/routes/runs.py` (new comment route), `api/websocket.py`
-or new `api/routes/quips.py`, `core/runner.py` (rejection counting +
-tech_lead dispatch).
+**Suite at end of C:** 726 passed, 2 skipped. Studio typecheck + prod
+build clean.
 
 ---
 
