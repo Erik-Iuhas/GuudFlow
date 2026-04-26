@@ -67,6 +67,11 @@ async function request<T>(
 
 // ── Projects ───────────────────────────────────────────────────────────────
 
+export interface RoadmapResponse {
+  content: string;
+  exists: boolean;
+}
+
 export const projectsApi = {
   list: () => request<ProjectConfig[]>("GET", "/api/projects"),
   get: (id: string) => request<ProjectConfig>("GET", `/api/projects/${id}`),
@@ -76,6 +81,20 @@ export const projectsApi = {
     request<ProjectConfig>("PUT", `/api/projects/${id}`, project, true),
   remove: (id: string) =>
     request<void>("DELETE", `/api/projects/${id}`, undefined, true),
+  /** Phase K.0 — read the project's roadmap.md. Returns content="" +
+   *  exists=false when the file doesn't exist (default state for new
+   *  projects). */
+  getRoadmap: (id: string) =>
+    request<RoadmapResponse>("GET", `/api/projects/${encodeURIComponent(id)}/roadmap`),
+  /** Phase K.0 — write the project's roadmap.md. Empty content
+   *  removes the file (so the runner's prompt layer is omitted). */
+  updateRoadmap: (id: string, content: string) =>
+    request<RoadmapResponse>(
+      "PUT",
+      `/api/projects/${encodeURIComponent(id)}/roadmap`,
+      { content },
+      true,
+    ),
 };
 
 // ── Runs ───────────────────────────────────────────────────────────────────

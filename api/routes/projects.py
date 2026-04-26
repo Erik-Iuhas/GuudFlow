@@ -60,3 +60,76 @@ async def delete_project(request: Request, project_id: str):
     if not ok:
         raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Phase K.0 — project roadmap document ──────────────────────────────────
+
+
+@router.get("/{project_id}/roadmap")
+async def get_roadmap(request: Request, project_id: str) -> dict:
+    """Return the project's roadmap.md (Phase K.0).
+
+    Empty / missing file is a valid first-class state — projects
+    without a roadmap behave exactly as today's runs do, just with
+    no extra prompt layer for the team. Returns
+    `{ "content": "...", "exists": bool }` so the caller can
+    distinguish empty-file from never-created.
+
+    404 if the project itself doesn't exist.
+    """
+    store = _store(request)
+    if await store.get(project_id) is None:
+        raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+
+    path = store.roadmap_path(project_id)
+    if not path.is_file():
+        return {"content": "", "exists": False}
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"failed to read roadmap: {e}")
+    return {"content": content, "exists": True}
+
+
+@router.put(
+    "/{project_id}/roadmap",
+    dependencies=[Depends(require_bearer)],
+)
+async def update_roadmap(
+    request: Request,
+    project_id: str,
+    body: dict = Body(...),
+) -> dict:
+    """Write the project's roadmap.md. Empty body → file is removed
+    so an empty roadmap is indistinguishable from never-created
+    (the layer is omitted in either case).
+
+    Body: `{ "content": "..." }`.
+    """
+    store = _store(request)
+    if await store.get(project_id) is None:
+        raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+
+    content = body.get("content", "")
+    if not isinstance(content, str):
+        raise HTTPException(status_code=400, detail="content must be a string")
+
+    path = store.roadmap_path(project_id)
+    if content.strip() == "":
+        # Empty roadmap — remove the file so the runner skips the layer.
+        # Idempotent: missing file is fine.
+        if path.is_file():
+            try:
+                path.unlink()
+            except OSError as e:
+                raise HTTPException(
+                    status_code=500, detail=f"failed to clear roadmap: {e}"
+                )
+        return {"content": "", "exists": False}
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"failed to write roadmap: {e}")
+    return {"content": content, "exists": True}

@@ -482,3 +482,15 @@ button.small { padding: 2px 8px; font-size: 12px; }
   margin-left: auto;
 }
 .toast-close:hover { color: #1f2937; background: none; }
+
+/* ─── Phase K.2 — roadmap tab ────────────────────────────────────────── */
+
+.roadmap-hint {
+  background: #fefce8; border-color: #fde68a;
+  margin-bottom: 12px;
+}
+.roadmap-hint pre {
+  background: white; border: 1px solid #fde68a;
+  padding: 8px 12px; border-radius: 4px;
+  white-space: pre-wrap;
+}

@@ -1,8 +1,8 @@
 # AgentFlow Build Board
 
-**Current stage:** ✅ Initial build + Phase A + D-prime + B + C + D + F + G-prime + G shipped.
+**Current stage:** ✅ Initial build + Phase A + D-prime + B + C + D + F + G-prime + G + K shipped.
 **Last updated:** 2026-04-26
-**Tests:** 885 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
+**Tests:** 899 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
 
 ## Stage status
 - [x] Stage 1 — Foundation primitives  (29/29 tests)
@@ -37,10 +37,6 @@ closed (G.7 inline fix); seed personas Mike/Sarah/Alex install via
 button gives first-timers a known-good run on day one.
 
 **Recommended next** (after Erik test-drives the current product):
-- **Phase K** (~half day) — project roadmap.md + team reads at
-  run start. Unblocks "build an app over many runs" with team
-  continuity. Designed light-touch; full Agile ceremonies are
-  back-pocket for if real users ask.
 - **F.5** (persona author depth) — makes individual cycles
   smarter (scaffolding, packaging, curated reference URLs,
   richer scenario kinds).
@@ -71,10 +67,13 @@ button gives first-timers a known-good run on day one.
   G.5 auto-tag review points + tags panel, G.6 toasts.
   Deferred: branch graph, diff viewer, dark mode (each is its
   own lift, not blocking any user story).
-- **K** (future, ~half day) — project context: a `roadmap.md`
-  the team reads at run start so a project gains continuity
-  across runs. Light-touch, NOT full Agile. Plan in
-  [plan-k.md](plan-k.md).
+- ✅ **K** — shipped 2026-04-26. Project context: roadmap.md the
+  team reads at run start. Three chunks: K.0 storage + endpoints
+  (8 tests), K.1 runner reads + threads as Layer 3.8 in agent
+  prompts (7 tests), K.2 studio Roadmap tab. Empty roadmap is a
+  first-class state — layer is omitted entirely. Light-touch
+  (~half day); the fuller "LLM Agile" framework stays in the
+  back pocket if real users ask for ceremonies.
 - **F.5** (future) — persona author depth: publish, scenario
   authoring, richer scenario kinds, scaffolding templates,
   curated reference-URL training

@@ -205,6 +205,11 @@ def default_runner_factory(
     personas_root = (
         Path(data_root) / "personas" if data_root is not None else None
     )
+    # Phase K.1 — project_dir so AgentRunner can read the roadmap.md.
+    project_dir = (
+        Path(data_root) / "projects" / project.project_id
+        if data_root is not None else None
+    )
     return AgentRunner(
         project=project,
         run_id=run_id,
@@ -216,6 +221,7 @@ def default_runner_factory(
         training_scenarios_root=scenarios_root,
         restored_workspace=restored_workspace,
         personas_root=personas_root,
+        project_dir=project_dir,
     )
 
 

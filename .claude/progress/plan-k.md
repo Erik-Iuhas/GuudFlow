@@ -1,4 +1,4 @@
-# Active plan — Phase K — Project context (continuous app building)
+# Active plan — Phase K — Project context (continuous app building) ✅ SHIPPED 2026-04-26
 
 Status: planned. Estimated ~half a day across 3 chunks. Light-touch
 extension to existing primitives — explicitly NOT a full Agile
@@ -32,7 +32,7 @@ maintains the roadmap; the system reads it.
 
 ---
 
-## K.0 — Roadmap document storage + API (~1 hr)
+## K.0 — Roadmap document storage + API ✅ SHIPPED
 
 ### What lands
 
@@ -53,7 +53,7 @@ Commit: `feat(api): project roadmap storage + endpoints (Phase K.0)`
 
 ---
 
-## K.1 — Runner reads roadmap into agent prompts (~1-2 hrs)
+## K.1 — Runner reads roadmap into agent prompts ✅ SHIPPED
 
 ### What lands
 
@@ -89,7 +89,7 @@ Commit: `feat(runner): thread project roadmap into agent prompts (Phase K.1)`
 
 ---
 
-## K.2 — Studio "Roadmap" tab on project page (~1-2 hrs)
+## K.2 — Studio "Roadmap" tab on project page ✅ SHIPPED
 
 ### What lands
 

@@ -54,6 +54,12 @@ class ProjectStore:
     def from_run_meta_path(self, project_id: str, run_id: str) -> Path:
         return self.inputs_dir(project_id) / f"from_run_{run_id}.meta.json"
 
+    def roadmap_path(self, project_id: str) -> Path:
+        """Phase K.0 — project context document. Free-form markdown
+        the user owns; team reads it at run start. Optional first-
+        class — projects without a roadmap behave exactly as today."""
+        return self.project_dir(project_id) / "context" / "roadmap.md"
+
     def iter_from_runs(self, project_id: str) -> list[dict[str, Any]]:
         """Return metadata for every attached prior run, sorted newest-first."""
         inputs = self.inputs_dir(project_id)

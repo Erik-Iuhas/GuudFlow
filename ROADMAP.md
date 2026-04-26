@@ -510,7 +510,7 @@ not "set up a project + invoke + scrape working/."
 
 ---
 
-## Phase K — Project context (continuous app building, future)
+## Phase K — Project context ✅ SHIPPED 2026-04-26
 
 After test-driving G, the natural next ask is "let me iterate on a
 project across many runs and have the team understand where we
@@ -524,13 +524,20 @@ Light-touch — explicitly NOT a full Agile framework rewrite. Three
 chunks, ~half a day total. Plan in
 [`.claude/progress/plan-k.md`](.claude/progress/plan-k.md).
 
-- [ ] **K.0** — `data/projects/{id}/context/roadmap.md` storage +
-      GET/PUT endpoints. Free-form markdown the user owns.
-- [ ] **K.1** — Runner threads `roadmap.md` into agent prompts as
-      a new layer between project rules and persona memory. Empty
-      roadmap → layer omitted.
-- [ ] **K.2** — Studio "Roadmap" tab on the project page. Editor
-      + save. Reads/writes via K.0's endpoints.
+- [x] **K.0** — `data/projects/{id}/context/roadmap.md` storage +
+      `GET/PUT /api/projects/{id}/roadmap` endpoints. Empty content
+      removes the file (so the runner's prompt layer is omitted).
+      8 new tests in `test_projects.py`.
+- [x] **K.1** — `AgentRunner` accepts `project_dir`, reads
+      `context/roadmap.md` once at construction, threads the content
+      into each agent's `_project_context` (Layer 3.8 in the prompt
+      stack — between project rules and persona memory). Worker
+      passes `data_root/projects/{project_id}` through. 7 new tests
+      in `test_project_context_layer.py`.
+- [x] **K.2** — Studio Roadmap tab on the project page. Markdown
+      editor + save/clear actions. Empty-state hint with a suggested
+      shape. Footer indicates whether the roadmap is currently
+      threaded into runs ("Layer 3.8") or skipped (empty).
 
 What this intentionally does NOT add: Sprint object, Scrum Master
 archetype, Definition-of-Done formalism, backlog data model, auto-

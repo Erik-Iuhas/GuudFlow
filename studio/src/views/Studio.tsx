@@ -5,10 +5,11 @@ import { AgentCard } from "../components/AgentCard";
 import { CostStrip } from "../components/CostStrip";
 import { PipelineGraph } from "../components/PipelineGraph";
 import { ResumeButton } from "../components/ResumeButton";
+import { RoadmapTab } from "../components/RoadmapTab";
 import type { AgentConfig, ProjectConfig, RunMeta } from "../types";
 import { Inputs } from "./Inputs";
 
-type Tab = "team" | "inputs" | "settings";
+type Tab = "team" | "inputs" | "roadmap" | "settings";
 
 const DEFAULT_GATES = {
   pre_run_cost_preview: true,
@@ -165,6 +166,12 @@ export function Studio() {
           Inputs
         </button>
         <button
+          className={`tab ${tab === "roadmap" ? "tab-active" : ""}`}
+          onClick={() => setTab("roadmap")}
+        >
+          Roadmap
+        </button>
+        <button
           className={`tab ${tab === "settings" ? "tab-active" : ""}`}
           onClick={() => setTab("settings")}
         >
@@ -269,6 +276,8 @@ export function Studio() {
         </>
       ) : tab === "inputs" ? (
         id && <Inputs projectId={id} />
+      ) : tab === "roadmap" ? (
+        id && <RoadmapTab projectId={id} />
       ) : (
         <SettingsTab
           gates={{ ...DEFAULT_GATES, ...(project.approval_gates ?? {}) }}

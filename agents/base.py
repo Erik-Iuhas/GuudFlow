@@ -115,6 +115,10 @@ class BaseAgent:
     _llm: LLMClient | None = None
     _model: str = "claude-sonnet-4-6"
     _project_rules: str = ""
+    # Phase K.1 — project's roadmap.md (free-form markdown the user
+    # owns). Empty / unset = layer is omitted from the effective
+    # prompt; same observable behaviour as today's runs.
+    _project_context: str = ""
     _current_task: str = ""
 
     # Per-instance current iteration (set by runner per attempt).
@@ -608,6 +612,7 @@ class BaseAgent:
           3. stake_framing
           3.5. teammate_brief (§23)
           3.7. project_rules (§36)
+          3.8. project_context (Phase K.1) — roadmap.md
           4. memory (§26 / §34) — recalled, not full dump
           5. base prompt + tool catalog from manifest (§31)
           6. CoT primer
@@ -633,6 +638,13 @@ class BaseAgent:
             parts.append("YOUR TEAMMATES:\n\n" + teammate_brief)
         if self._project_rules:
             parts.append("PROJECT RULES (this project specifically):\n\n" + self._project_rules)
+        if self._project_context:
+            parts.append(
+                "PROJECT CONTEXT (the team's shared understanding of "
+                "where this project is — read it, work in service of "
+                "it, don't repeat what's already done):\n\n"
+                + self._project_context
+            )
 
         if self.persona is not None and self.persona.has_memory() and self._current_task:
             recall = await self.persona.recall(self._current_task)

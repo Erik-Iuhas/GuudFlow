@@ -176,6 +176,7 @@ class AgentRunner:
         training_scenarios_root: Path | None = None,
         restored_workspace: "Workspace | None" = None,
         personas_root: Path | None = None,
+        project_dir: Path | None = None,
     ):
         self.project = project
         self.run_id = run_id
@@ -202,6 +203,20 @@ class AgentRunner:
         # this, every demo / training / hired-persona run completes
         # without updating reputation — silent product failure.
         self.personas_root = Path(personas_root) if personas_root else None
+        # Phase K.1 — project-level roadmap document. Read once at
+        # construction; threaded into each agent's prompt as Layer 3.8.
+        # Empty / missing file → empty string → layer omitted (no
+        # difference from today's runs).
+        self._project_context = ""
+        if project_dir is not None:
+            roadmap_path = Path(project_dir) / "context" / "roadmap.md"
+            if roadmap_path.is_file():
+                try:
+                    content = roadmap_path.read_text(encoding="utf-8")
+                    if content.strip():
+                        self._project_context = content
+                except OSError:
+                    pass
 
         # Escalation tracking (DESIGN §23, Phase C.3). _rejection_counts
         # accumulates REJECTED signals per upstream role; once a role
@@ -523,6 +538,10 @@ class AgentRunner:
             )
             agent._local_tools = self._instantiate_local_tools(cfg.role)
             agent._current_task = self.project.goal
+            # Phase K.1 — project context (roadmap.md). Empty when the
+            # project has no roadmap; layer is then omitted from the
+            # effective prompt.
+            agent._project_context = self._project_context
             # Phase G.7 — auto-attach the persona from cfg.persona_id.
             # The persona's directory must exist under personas_root;
             # malformed / missing persona dirs are tolerated silently
