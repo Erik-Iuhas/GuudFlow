@@ -1,17 +1,22 @@
 """/api/meta — proposal generation.
 
 DESIGN §7. The meta-agent reads the goal + inputs + agent catalog +
-persona roster and proposes a team. Phase D.2 wires the real
-LLM-driven `MetaAgent` (built in D.1) when the request includes a
-`project_id`. Without one, falls back to the deterministic skeleton —
-the studio's Propose view can still produce a sensible default for
-the very-first-project case where there's no project storage yet.
+persona roster and proposes a team. Always calls the LLM (post-Phase
+D bug fix: the studio's Propose view doesn't have a project_id at
+proposal time — the project hasn't been created yet — so gating the
+LLM on project_id meant every greenfield Propose got the same static
+skeleton).
 
-Auth model:
-  - Required for the LLM-driven path (real LLM cost; needs the bearer
-    token used elsewhere for credentialed routes).
-  - Skeleton path is open (no LLM cost; useful as a "what does a
-    proposal look like" preview).
+When `project_id` is provided + exists, the meta-agent additionally
+reads the project's `inputs/` (uploads, source repo, prior runs).
+Without one, it proposes from goal + roster + archetype catalog
+alone, which is the normal greenfield flow.
+
+The deterministic skeleton is still the floor — it fires only when
+the LLM call itself crashes (no key, network error, malformed
+response). That keeps the route resilient.
+
+Auth: bearer required (real LLM cost on every call).
 """
 
 from __future__ import annotations
@@ -122,17 +127,31 @@ async def propose(
         raise HTTPException(status_code=400, detail="goal is required")
 
     project_id = body.get("project_id")
-    if project_id is None:
-        # Skeleton path — no LLM, no project lookup.
-        return _skeleton_response(goal)
-
-    project_store = request.app.state.project_store
-    project = await project_store.get(project_id)
-    if project is None:
+    if project_id is not None and not isinstance(project_id, str):
         raise HTTPException(
-            status_code=404,
-            detail=f"project {project_id!r} not found",
+            status_code=400, detail="project_id must be a string",
         )
+
+    prior_run_id = body.get("prior_run_id")
+    if prior_run_id is not None and not isinstance(prior_run_id, str):
+        raise HTTPException(
+            status_code=400, detail="prior_run_id must be a string",
+        )
+
+    # Greenfield (no project_id) is the normal Propose-view path: the
+    # user is asking the meta-agent to design a team for a goal before
+    # the project even exists. We still call the LLM; we just don't
+    # have project inputs to read. read_meta_inputs() handles a
+    # missing inputs/ dir gracefully (returns an empty MetaInputs).
+    project: dict[str, Any] | None = None
+    if project_id is not None:
+        project_store = request.app.state.project_store
+        project = await project_store.get(project_id)
+        if project is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"project {project_id!r} not found",
+            )
 
     persona_store = getattr(request.app.state, "persona_store", None)
     roster: list[dict[str, Any]] = []
@@ -142,37 +161,36 @@ async def propose(
         except Exception:
             roster = []
 
-    prior_run_id = body.get("prior_run_id")
-    if prior_run_id is not None and not isinstance(prior_run_id, str):
-        raise HTTPException(
-            status_code=400, detail="prior_run_id must be a string",
-        )
-
     # When prior_run_id is given, the project's CURRENT stored agents
     # config IS the prior team (D-prime's "Continue from this run"
     # button stamps pending_continuation without overwriting agents
-    # until the user approves the new proposal). We pass both:
-    #   - prior_team_roles: just the role names, fed into the
-    #     continuation prompt so the LLM knows what existed
-    #   - prior_team: the full agent dicts, fed to compute_deltas
-    #     so the studio can show keep/drop/add/swap_tier/replace_persona
+    # until the user approves the new proposal). Continuation is only
+    # meaningful when project_id is also provided.
     prior_team_roles: list[str] | None = None
     prior_team: list[dict[str, Any]] | None = None
-    if prior_run_id is not None:
+    if prior_run_id is not None and project is not None:
         stored_agents = list(project.get("agents") or [])
         prior_team_roles = [
             str(a.get("role")) for a in stored_agents if a.get("role")
         ]
         prior_team = stored_agents
 
-    project_dir = request.app.state.data_root / "projects" / str(project_id)
+    # `project_dir` is used to locate `inputs/`. For greenfield
+    # proposals (no project_id) we point at a path that doesn't exist
+    # yet — read_meta_inputs returns empty inputs in that case.
+    if project_id is not None:
+        project_dir = request.app.state.data_root / "projects" / project_id
+        meta_project_id = project_id
+    else:
+        project_dir = request.app.state.data_root / "projects" / "_greenfield"
+        meta_project_id = "_greenfield"
 
     meta = MetaAgent()
     meta._llm = _build_meta_llm(request)
     try:
         proposal: TeamProposal = await meta.propose(
             project_dir=project_dir,
-            project_id=str(project_id),
+            project_id=meta_project_id,
             goal=goal,
             roster=roster,
             prior_run_id=prior_run_id,

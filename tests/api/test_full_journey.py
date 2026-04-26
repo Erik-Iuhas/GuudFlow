@@ -80,6 +80,33 @@ async def test_full_user_journey(
     write_persona(PERSONA_ID, name="Aria", specialty="developer")
 
     # ── 1. Meta-agent proposes a team ──────────────────────────────────
+    # Post-fix (2026-04-26): /api/meta/propose always invokes the LLM,
+    # so the journey test injects a mock that emits a developer +
+    # reviewer team. Earlier the route returned a static skeleton when
+    # no project_id was provided; that path is gone.
+    app.state.meta_llm = MockLLMClient([MockTurn(tool_calls=[ToolCall(
+        id="meta_journey",
+        name="propose_team",
+        arguments={
+            "rationale": "Tiny module — developer + reviewer is enough.",
+            "agents": [
+                {
+                    "role": "developer",
+                    "archetype": "backend_dev",
+                    "depends_on": [],
+                    "persona": {"action": "create_new", "name_hint": "Aria"},
+                },
+                {
+                    "role": "reviewer",
+                    "archetype": "code_reviewer",
+                    "depends_on": ["developer"],
+                    "is_reviewer": True,
+                    "persona": {"action": "create_new"},
+                },
+            ],
+        },
+    )])])
+
     r = await client.post(
         "/api/meta/propose",
         json={"goal": "Add a hello.py module"},

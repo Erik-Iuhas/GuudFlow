@@ -15,28 +15,82 @@ def _ensure_builtins():
     register_builtins()
 
 
-# ── Back-compat skeleton path (no project_id) ──────────────────────────────
+# ── Greenfield path (no project_id — LLM still drives) ─────────────────────
 
 
-async def test_propose_returns_skeleton(client, auth_header):
+async def test_propose_without_project_id_invokes_llm(
+    client, auth_header, app,
+):
+    """Greenfield Propose-view flow: user types a goal, no project
+    exists yet. The LLM is invoked anyway with goal + roster +
+    archetype catalog. Without this, every greenfield proposal would
+    be the same static skeleton — exactly the bug surfaced in live
+    testing 2026-04-26."""
+    app.state.meta_llm = MockLLMClient([MockTurn(tool_calls=[ToolCall(
+        id="m1", name="propose_team",
+        arguments={
+            "rationale": "JWT auth needs a backend_dev + reviewer.",
+            "agents": [
+                {
+                    "role": "auth_dev",
+                    "archetype": "backend_dev",
+                    "depends_on": [],
+                    "persona": {"action": "create_new", "name_hint": "Sarah"},
+                },
+                {
+                    "role": "auth_reviewer",
+                    "archetype": "code_reviewer",
+                    "depends_on": ["auth_dev"],
+                    "is_reviewer": True,
+                    "persona": {"action": "create_new"},
+                },
+            ],
+        },
+    )])])
+
     r = await client.post(
         "/api/meta/propose",
-        json={"goal": "Build a JWT auth flow"},
+        json={"goal": "Build a JWT auth flow"},  # no project_id
         headers=auth_header,
     )
     assert r.status_code == 200
     body = r.json()
-    assert "rationale" in body
-    assert len(body["agents"]) >= 1
-    # Includes a developer + reviewer baseline.
+    # LLM-driven role names (not the static "developer"/"reviewer"
+    # the deterministic skeleton would produce).
     roles = {a["role"] for a in body["agents"]}
-    assert "developer" in roles
-    assert "reviewer" in roles
-    assert "rbac" in body
-    # New shape from D.1's TeamProposal.to_dict().
+    assert "auth_dev" in roles
+    assert "auth_reviewer" in roles
+    # New shape from D.1's TeamProposal.to_dict() still present.
     assert "persona_hires" in body
     assert "warnings" in body
     assert "deltas" in body
+
+
+async def test_propose_without_project_id_falls_back_on_llm_failure(
+    client, auth_header, app,
+):
+    """If the LLM crashes during a greenfield proposal, return the
+    deterministic skeleton + a warning — same fail-soft contract as
+    the project_id path."""
+
+    class ExplodingLLM:
+        async def complete(self, **kwargs):
+            raise RuntimeError("anthropic 503")
+
+    app.state.meta_llm = ExplodingLLM()
+
+    r = await client.post(
+        "/api/meta/propose",
+        json={"goal": "x"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    roles = {a["role"] for a in body["agents"]}
+    assert "developer" in roles
+    assert "reviewer" in roles
+    assert any("anthropic 503" in w for w in body["warnings"]) or \
+        "anthropic 503" in body["rationale"]
 
 
 async def test_propose_requires_goal(client, auth_header):
