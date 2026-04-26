@@ -9,11 +9,17 @@ review-specific system prompt; the loop's tool calls (git:diff,
 fs:read, etc.) are mediated by the manifest. The runner sets
 `is_reviewer=True` on the AgentConfig so the runner knows to merge
 on APPROVED.
+
+As of Phase C.0, CodeReviewer extends the abstract `Reviewer` base
+(`agents/abstract.py`) so the catalog can list it alongside future
+reviewer flavours (architect, security) with the same metadata shape.
 """
 
 from __future__ import annotations
 
-from agents.base import BaseAgent
+from typing import ClassVar
+
+from agents.abstract import Reviewer
 
 
 REVIEWER_SYSTEM_PROMPT = """\
@@ -37,12 +43,22 @@ become production bugs.
 """
 
 
-class CodeReviewer(BaseAgent):
-    """A reviewer agent. Subclasses `BaseAgent`; relies on the runner's
+class CodeReviewer(Reviewer):
+    """A reviewer agent. Subclasses `Reviewer`; relies on the runner's
     generic tool-use loop. The system prompt is the only thing this
     needs over the prompt-defined default."""
 
     role: str = "code_reviewer"
+
+    archetype_description: ClassVar[str] = (
+        "Reviews upstream agent work via git diffs and decides "
+        "APPROVED / REJECTED."
+    )
+    archetype_when_to_use: ClassVar[str] = (
+        "Use as a quality gate after any agent that produces code "
+        "changes. Reviewer's `depends_on` should list the agents "
+        "whose branches are under review."
+    )
 
     def __init__(self, **kwargs):
         super().__init__(

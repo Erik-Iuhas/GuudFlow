@@ -77,11 +77,219 @@ Commit: `feat(core): route code:exec through DockerManager in production (Phase 
 
 ---
 
-## Phase C — Make a live run feel live (~1 day, 3 chunks)
+## Phase C — Make a live run feel live (~1.5 days, 5 chunks)
 
 Goal: the Run view stops being a passive log. Users post comments to a
 running team, see real quips streamed live, and the runner escalates to
-the tech lead automatically when work keeps getting rejected.
+the tech lead automatically when work keeps getting rejected. The team
+itself gains a layered class hierarchy so adding new agent archetypes
+(escalation handlers, reviewers, specialists) is a one-prompt change
+rather than copy-pasting dispatch wiring.
+
+### Chunk 0 — Agent archetype foundation + catalog (~4-5 hrs)
+
+User feedback (post-C.2): general-purpose agents that share similar
+controls should be abstract classes; specific workers (frontend dev,
+requirements writer) should share a base with different permissions;
+the meta-agent needs a catalog of available archetypes when proposing
+a team.
+
+This chunk lands **before** C.3 + C.4 so they can build on the shared
+bases rather than each shipping a one-off class.
+
+#### Abstract bases — `agents/abstract.py` (new)
+
+- `Reviewer(BaseAgent)` — reads diffs, evaluates work, decides
+  APPROVED / REJECTED. Concrete subclasses provide `system_prompt`;
+  the base provides the standard review flow. CodeReviewer + Architect
+  both extend.
+- `EscalationHandler(BaseAgent)` — wakes on a workspace event (runner
+  dispatches it; the handler doesn't go through the scheduler).
+  Concrete subclasses provide `system_prompt`. TechLead extends.
+  ITAgent stays as-is for now (its batch-processing `run()` is a
+  different shape — could extend later if useful).
+- `Specialist(BaseAgent)` — does the actual work: writes code, fills
+  artifacts, commits. Concrete subclasses provide `system_prompt` +
+  class-level defaults for `declared_local_tools` /
+  `default_model_tier` / `default_rbac_scopes`. Frontend, backend,
+  requirements writer all extend with different defaults but inherit
+  the same loop.
+
+#### Refactor existing builtins
+
+- `CodeReviewer` → extends `Reviewer`
+- `TechLead` → extends `EscalationHandler`
+- `ITAgent` — unchanged in this chunk
+- `MemoryWriter`, `VisualChecker`, `TestRunner` — unchanged (synthesis /
+  side-task agents; their shape doesn't fit any of the three bases
+  cleanly)
+
+#### Ship one concrete `Specialist` to prove the pattern
+
+- `RequirementsWriter(Specialist)` — system prompt for "turn user goal
+  + uploads into a structured requirements artifact"; default tools
+  `[fs:read, fs:list, fs:write, doc:pdf, doc:docx, doc:markdown]`;
+  default RBAC scopes `[fs:write, doc:*]`. Other specialists
+  (frontend, backend, tester) added on demand once the pattern is
+  validated.
+
+#### Catalog — `agents/catalog.py` (new)
+
+```python
+@dataclass
+class ArchetypeMeta:
+    name: str                          # role_type registered in agents/registry.py
+    abstract_base: str                 # "Reviewer" | "EscalationHandler" | "Specialist"
+    description: str                   # what the agent does
+    when_to_use: str                   # meta-agent selection criterion
+    default_model_tier: str            # "heavy" | "solid" | "fast"
+    default_tools: list[str]
+    default_rbac_scopes: list[str]
+
+AGENT_ARCHETYPES: list[ArchetypeMeta] = [
+    ArchetypeMeta(name="code_reviewer", abstract_base="Reviewer", ...),
+    ArchetypeMeta(name="tech_lead", abstract_base="EscalationHandler", ...),
+    ArchetypeMeta(name="architect", abstract_base="Reviewer", ...),
+    ArchetypeMeta(name="requirements_writer", abstract_base="Specialist", ...),
+    # ITAgent, MemoryWriter, etc. can be added with abstract_base="None"
+    # once we decide whether they belong in the catalog.
+]
+```
+
+#### API endpoint
+
+`GET /api/agents/catalog` — returns the archetype list. Read-only,
+no auth required (it's purely informational). Used by:
+- Meta-agent (Phase D) when proposing a team — picks from this
+- Studio (Phase G or later) — shows what's available when a user
+  manually customises
+
+#### Tests
+
+- `tests/agents/test_abstract.py` (new):
+  - `Reviewer` base: a minimal subclass produces APPROVED / REJECTED
+    via the inherited flow.
+  - `EscalationHandler` base: a minimal subclass can be registered and
+    woken via the runner's dispatch path.
+  - `Specialist` base: a minimal subclass inherits class-level
+    defaults; instantiation respects `default_tools`.
+- `tests/agents/test_catalog.py` (new): catalog has expected entries;
+  lookup-by-name works; every entry's `name` is also in the registry.
+- `tests/api/test_agents_catalog.py` (new): GET endpoint returns the
+  catalog as JSON.
+- All existing tests for `CodeReviewer`, `TechLead` keep passing —
+  refactor must be behaviour-preserving.
+
+Commit: `feat(agents): abstract bases (Reviewer/EscalationHandler/Specialist) + catalog (Phase C.0)`
+
+### Chunk 1 — Live `USER_COMMENT` POST endpoint — **SHIPPED [`e4ae1e3`](https://github.com/Erik-Iuhas/AgentFlow/commit/e4ae1e3)**
+### Chunk 2 — Real quip stream over WebSocket — **SHIPPED [`19de77d`](https://github.com/Erik-Iuhas/AgentFlow/commit/19de77d)**
+
+(Original positions in the chunk numbering kept for the commit
+references; C.0 lands as a prerequisite for C.3 + C.4.)
+
+### Chunk 0.5 — Approval gates + cost control (~4-5 hrs)
+
+User feedback (post-C.0): today the only approval gate is the meta-
+agent proposal at run start. Once approved, the team takes off and can
+iterate, dispatch HEAVY-tier handlers (tech_lead, architect), and burn
+unbounded tokens with no further confirmation. Lands **before C.3**
+because C.3 is the first big-spend mid-run dispatch we'd want to gate.
+
+#### Mechanism
+
+- New `SignalType` values: `APPROVAL_NEEDED`, `APPROVAL_GRANTED`,
+  `APPROVAL_DENIED`. Parallel to `HUMAN_NEEDED` but for system-
+  initiated cost gates, not in-character agent questions.
+- `Workspace.pending_approvals: list[ApprovalRequest]` — dataclass with
+  `id`, `kind` (e.g. `"heavy_tier_dispatch"`), `summary`,
+  `estimated_cost_usd`, `context`, `triggered_by`.
+- Runner emits `APPROVAL_NEEDED` before any gated event, awaits a
+  matching `APPROVAL_GRANTED` / `APPROVAL_DENIED` on the user_board,
+  then proceeds (grant) or aborts the gated operation (deny).
+- `POST /api/runs/{run_id}/approval/{approval_id}` — body
+  `{decision: "grant"|"deny", note?: str}`. Auth required.
+- Studio: inline approval card on the Run view (like HUMAN_NEEDED
+  today) + a "Approval gates" tab in project Settings to toggle which
+  gates apply.
+
+#### Baseline defaults (opinionated, configurable per project)
+
+| Gate | Default | Why |
+|---|---|---|
+| `pre_run_cost_preview` | ON | Show estimated cost from `agent count × model tier × max_iterations × max_tool_iterations` BEFORE `POST /invoke` actually enqueues. User clicks "Run" with cost visible. |
+| `heavy_tier_mid_run_dispatch` | ON | Before tech_lead (C.3) or architect (C.4) — any HEAVY-tier agent triggered after the initial proposal — actually fires. |
+| `iteration_breach_at` | 2 (int) | After a rejection, before the scheduler respawns the rejected agent for iteration ≥ N. Set to `null` to disable. |
+| `per_iteration` | OFF | Heavy-handed — opt-in for high-stakes runs. |
+| `token_budget_usd` | null (off) | Pause when cumulative estimated cost crosses this threshold. |
+
+#### Project config schema
+
+```json
+{
+  "approval_gates": {
+    "pre_run_cost_preview": true,
+    "heavy_tier_mid_run_dispatch": true,
+    "iteration_breach_at": 2,
+    "per_iteration": false,
+    "token_budget_usd": null
+  }
+}
+```
+
+`serialise_project` reads these with sane defaults. Existing projects
+without the field get the baseline.
+
+#### Files
+
+- `core/signals.py` — three new signal types
+- `core/workspace.py` — `pending_approvals` field + helpers
+- `core/runner.py` — new `_request_approval(kind, summary, ...)` that
+  posts `APPROVAL_NEEDED` and awaits resolution. Used internally
+  before HEAVY-tier dispatches and (later) iteration breaches.
+- `core/runner.py:ProjectConfig.approval_gates: dict` — config field
+- `worker/job_runner.py:serialise_project` — round-trips
+  `approval_gates`
+- `api/routes/runs.py` — `POST /api/runs/{id}/approval/{approval_id}`
+- `api/routes/invoke.py` — when `pre_run_cost_preview` is on, returns
+  `{accepted: false, requires_approval: true, estimated_cost_usd: ...}`
+  on first POST; second POST with `confirm=true` enqueues
+- `studio/src/components/ApprovalCard.tsx` (new) — inline gate prompt
+- `studio/src/views/Studio.tsx` — Settings tab with toggles
+- `studio/src/api.ts` — `approvalsApi.grant/deny`
+
+#### Cost estimation
+
+Reuse the existing `studio/src/components/CostStrip.tsx` logic on the
+backend: `estimated_cost_usd = sum_over_agents(tier_cost_per_call ×
+max_tool_iterations × max_iterations)`. Cheap, deterministic; same
+shape the studio already shows pre-run.
+
+#### Tests
+
+- Approval signal round-trip: post `APPROVAL_NEEDED` → POST `/approval`
+  → workspace updates correctly
+- Disabled gate (`heavy_tier_mid_run_dispatch: false`) lets dispatch
+  through with no pause
+- Pre-run cost preview: first invoke returns 402-style "needs
+  confirmation" with estimate; second invoke with `confirm=true` enqueues
+- Project config round-trips `approval_gates` through
+  `serialise_project`
+- Iteration-breach gate fires at the configured threshold and not before
+- Studio settings tab persists toggles via `PUT /api/projects/{id}`
+  (component-level smoke is enough; backend test owns the contract)
+
+Commit: `feat(api): approval gates + cost preview baseline (Phase C.0.5)`
+
+#### How C.3 + C.4 use this
+
+- **C.3 (tech_lead dispatch)**: in `_dispatch_escalation`, before
+  posting `ESCALATION` and creating the side task, call
+  `await self._request_approval(kind="heavy_tier_dispatch", ...)`.
+  Granted → proceed; denied → post a system signal explaining and
+  skip dispatch.
+- **C.4 (architect review)**: same hook before the auto-injected
+  architect's `run()` is dispatched.
 
 ### Chunk 1 — Live `USER_COMMENT` POST endpoint (~1 hr)
 

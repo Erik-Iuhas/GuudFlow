@@ -18,6 +18,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from agents.builtin import register_builtins
+from api.routes import agents as agents_router
 from api.routes import inputs as inputs_router
 from api.routes import invoke as invoke_router
 from api.routes import meta as meta_router
@@ -33,6 +35,12 @@ from worker.queue import InMemoryJobQueue
 
 def _data_root() -> Path:
     return Path(os.environ.get("AGENTFLOW_DATA_DIR", "./data")).resolve()
+
+
+# Register catalog-able builtins at module import so `GET /api/agents/catalog`
+# is populated even when the lifespan hasn't fired (test app, single-shot
+# scripts). Idempotent.
+register_builtins()
 
 
 @asynccontextmanager
@@ -102,6 +110,7 @@ def create_app() -> FastAPI:
 
     app.include_router(projects_router.router)
     app.include_router(inputs_router.router)
+    app.include_router(agents_router.router)
     app.include_router(runs_router.router)
     app.include_router(personas_router.router)
     app.include_router(meta_router.router)
