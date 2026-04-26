@@ -90,3 +90,105 @@ def get_archetype(name: str) -> ArchetypeMeta | None:
         return None
     cls = registry.get(name)
     return _archetype_meta_from_class(name, cls)
+
+
+def dedupe_role_names(roles: list[str]) -> list[str]:
+    """Ensure role names are unique within a team (Phase D.0).
+
+    The meta-agent's system prompt instructs it to use descriptive
+    distinct names (e.g. `auth_dev`, `api_dev` instead of
+    `developer_1`, `developer_2`), but if the LLM produces collisions
+    anyway this helper appends `_2`, `_3`, ... suffixes deterministically.
+
+    Order is preserved. Names that don't collide are returned unchanged.
+
+    Belt-and-suspenders: the scheduler ALSO raises on duplicate roles
+    (`core/scheduler.py:95`) so even if this helper is bypassed, a
+    collision still surfaces — just less gracefully.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in roles:
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+            continue
+        # Collision — append a numeric suffix until unique.
+        n = 2
+        candidate = f"{name}_{n}"
+        while candidate in seen:
+            n += 1
+            candidate = f"{name}_{n}"
+        seen.add(candidate)
+        out.append(candidate)
+    return out
+
+
+def suggest_persona_id(role: str, existing_ids: set[str]) -> str:
+    """Generate a globally-unique persona id for a new hire (Phase D.0).
+
+    Format: `{role}-{adjective}-v1`, falling back to `{role}-v{n}` if
+    every adjective collides. The meta-agent uses this when
+    recommending "create new persona" so the id doesn't conflict with
+    the existing roster.
+
+    Adjective list is small + intentional: not random, not exhaustive.
+    Real personas can be renamed later by the user; this just gets the
+    initial id past the uniqueness check.
+    """
+    adjectives = (
+        "aria", "nova", "atlas", "echo", "vega", "lyra", "orion",
+        "ember", "sage", "kai", "iris", "rowan", "june",
+    )
+    for adj in adjectives:
+        candidate = f"{role}-{adj}-v1"
+        if candidate not in existing_ids:
+            return candidate
+    n = 2
+    while f"{role}-v{n}" in existing_ids:
+        n += 1
+    return f"{role}-v{n}"
+
+
+def list_all_archetypes() -> list[ArchetypeMeta]:
+    """Union of the runtime catalog (`list_archetypes()`) and the
+    YAML doc catalog (`docs/worker-archetypes.yaml`).
+
+    Used by the meta-agent (Phase D) at proposal time so it can pick
+    from BOTH shipped concrete classes AND described-only archetypes.
+    Runtime entries win on name conflict — the shipped class is
+    authoritative because it carries actual code.
+
+    YAML entries that fail to load (file missing, malformed) don't
+    crash the call; they're skipped silently and the runtime catalog
+    alone is returned. Drift is loud (the parser raises) when the
+    YAML is loaded directly via `core.archetype_doc.load_archetypes`,
+    but the catalog endpoint stays available even with a broken doc.
+    """
+    runtime = list_archetypes()
+    runtime_names = {m.name for m in runtime}
+
+    try:
+        from core.archetype_doc import load_archetypes
+        doc_entries = load_archetypes()
+    except Exception:
+        doc_entries = []
+
+    extras: list[ArchetypeMeta] = []
+    for entry in doc_entries:
+        if entry.name in runtime_names:
+            continue  # shipped class wins
+        meta_dict = entry.to_meta_dict()
+        extras.append(ArchetypeMeta(
+            name=meta_dict["name"],
+            abstract_base=meta_dict["abstract_base"],
+            description=meta_dict["description"],
+            when_to_use=meta_dict["when_to_use"],
+            default_model_tier=meta_dict["default_model_tier"],
+            default_tools=meta_dict["default_tools"],
+            default_rbac_scopes=meta_dict["default_rbac_scopes"],
+        ))
+
+    out = runtime + extras
+    out.sort(key=lambda m: (m.abstract_base, m.name))
+    return out

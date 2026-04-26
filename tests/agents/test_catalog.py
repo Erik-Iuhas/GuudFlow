@@ -7,8 +7,11 @@ import pytest
 from agents.builtin import register_builtins
 from agents.catalog import (
     ArchetypeMeta,
+    dedupe_role_names,
     get_archetype,
+    list_all_archetypes,
     list_archetypes,
+    suggest_persona_id,
 )
 from agents.registry import registry
 
@@ -127,3 +130,91 @@ def test_archetype_meta_is_frozen():
     )
     with pytest.raises(Exception):
         meta.name = "y"  # type: ignore[misc]
+
+
+# ── list_all_archetypes (Phase D.0: runtime ∪ YAML) ────────────────────────
+
+
+def test_list_all_includes_runtime_and_yaml():
+    """The union contains shipped archetypes (runtime) AND described
+    ones (YAML)."""
+    metas = list_all_archetypes()
+    names = {m.name for m in metas}
+    # Shipped (runtime catalog).
+    assert "code_reviewer" in names
+    assert "tech_lead" in names
+    # Described only (YAML — not concrete classes yet).
+    assert "frontend_dev" in names
+    assert "backend_dev" in names
+    assert "security_reviewer" in names
+
+
+def test_list_all_runtime_wins_on_conflict():
+    """When a name appears in BOTH the runtime catalog and the YAML,
+    the runtime entry takes precedence (shipped class is authoritative)."""
+    metas = list_all_archetypes()
+    by_name = {m.name: m for m in metas}
+    # code_reviewer is in both. The runtime one has its description
+    # taken from the class docstring / archetype_description, NOT
+    # from the YAML's responsibility first line. Verify by checking
+    # we got a single entry and it's identifiable.
+    assert "code_reviewer" in by_name
+    cr = by_name["code_reviewer"]
+    # The runtime ArchetypeMeta uses the class's archetype_description.
+    assert "diff" in cr.description.lower() or "reviewer" in cr.description.lower()
+
+
+def test_list_all_sorted_deterministically():
+    """Output sorted by (abstract_base, name) so the meta-agent's
+    prompt is stable across runs (better cache behaviour)."""
+    metas = list_all_archetypes()
+    keys = [(m.abstract_base, m.name) for m in metas]
+    assert keys == sorted(keys)
+
+
+# ── Naming helpers (Phase D.0) ─────────────────────────────────────────────
+
+
+def test_dedupe_role_names_preserves_unique():
+    assert dedupe_role_names(["a", "b", "c"]) == ["a", "b", "c"]
+
+
+def test_dedupe_role_names_appends_suffix_on_collision():
+    assert dedupe_role_names(["dev", "dev", "dev"]) == ["dev", "dev_2", "dev_3"]
+
+
+def test_dedupe_role_names_skips_existing_suffixes():
+    """If `dev_2` is already taken by an explicit role, the dedupe
+    helper picks `dev_3` instead — collision-free."""
+    out = dedupe_role_names(["dev", "dev_2", "dev"])
+    # First two are unique; third collides with "dev" → must avoid
+    # "dev_2" (already in list), use "dev_3".
+    assert out == ["dev", "dev_2", "dev_3"]
+
+
+def test_dedupe_role_names_preserves_order():
+    out = dedupe_role_names(["alpha", "beta", "alpha", "gamma", "beta"])
+    assert out == ["alpha", "beta", "alpha_2", "gamma", "beta_2"]
+
+
+def test_suggest_persona_id_uses_unused_adjective():
+    """First call gets the first adjective."""
+    pid = suggest_persona_id("frontend", existing_ids=set())
+    assert pid == "frontend-aria-v1"
+
+
+def test_suggest_persona_id_skips_taken_adjectives():
+    """If `frontend-aria-v1` is taken, returns the next adjective."""
+    pid = suggest_persona_id("frontend", existing_ids={"frontend-aria-v1"})
+    assert pid == "frontend-nova-v1"
+
+
+def test_suggest_persona_id_falls_back_when_all_adjectives_taken():
+    """When every adjective is exhausted, fall back to numeric suffix."""
+    taken = {f"foo-{adj}-v1" for adj in (
+        "aria", "nova", "atlas", "echo", "vega", "lyra", "orion",
+        "ember", "sage", "kai", "iris", "rowan", "june",
+    )}
+    pid = suggest_persona_id("foo", existing_ids=taken)
+    assert pid.startswith("foo-v")
+    assert pid not in taken

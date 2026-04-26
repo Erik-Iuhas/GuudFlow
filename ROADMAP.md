@@ -267,32 +267,16 @@ them up when real users tell you which one matters.
       tournament mode, ranking board for hiring decisions. Critical
       for smaller-model users who need to bootstrap persona quality
       without paying for production runs.
-- [ ] **Worker archetype catalog — markdown** (`docs/worker-archetypes.md`)
-      — Living human-readable reference of every worker the meta-agent
-      could propose. Two purposes:
-      1. **Brainstorming space** for archetypes not yet built —
-         `frontend_dev`, `backend_dev`, `tester`, `migrations_writer`,
-         `data_analyst`, `security_reviewer`, `accessibility_reviewer`,
-         `incident_responder`, etc. — with proposed responsibilities,
-         default tools, default RBAC scopes, default model tier, when
-         to use, and related training-camp scenarios that exercise
-         each archetype.
-      2. **Hand-written prose** that the runtime catalog
-         (`GET /api/agents/catalog`, shipped C.0) doesn't capture —
-         design rationale, "anti-patterns we tried that didn't work",
-         persona variations within an archetype (e.g. "minimalist
-         frontend_dev" vs "framework-heavy frontend_dev"), and
-         training-camp readiness for each.
-      Lives in Phase F because new archetypes mostly emerge from
-      training-camp experimentation — that's where you discover
-      "we needed a `migrations_writer` archetype" by running scenarios
-      that lacked one. The markdown is the design surface; entries
-      graduate to actual classes (extending C.0's abstract bases:
-      Reviewer / EscalationHandler / Specialist) and get registered
-      in the runtime catalog once validated. Two-way sync between
-      doc and catalog is part of this work — a small generator script
-      that emits a "shipped" table from `agents/catalog.py` so the
-      doc stays accurate without manual book-keeping.
+- [ ] **Persona variations + training-camp readiness for each
+      archetype** — extending `docs/worker-archetypes.md` (initial
+      version lands in Phase D.0) with persona variations within each
+      archetype (e.g. "minimalist frontend_dev" vs "framework-heavy
+      frontend_dev") and training-camp scenarios that exercise each.
+      The Phase F training-camp work is what produces these
+      variations through tournament-mode runs — they get added to the
+      doc as they're validated. A small generator that emits a
+      "shipped vs described" status table from `agents/catalog.py` is
+      part of this.
 - [ ] **Real `memory_writer` LLM synthesis** (DESIGN §34) — the
       data-layer reconciliation works (lifecycle transitions,
       contradiction reconciliation, episode staleness). The LLM-driven
