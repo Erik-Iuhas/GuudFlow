@@ -67,6 +67,8 @@ DISTILL_MIN_CLUSTER_SIZE = 3       # cluster must contain ≥3 episodes
 DISTILL_MIN_SHARED_TAGS = 2        # cluster members share ≥2 tags
 MAX_DISTILL_CALLS_PER_RUN = 3      # cap LLM calls per persona per run
 EMERGING_SEED_CONFIDENCE = 0.6     # §34 — emerging patterns start at 0.6
+MAX_FLIP_CALLS_PER_RUN = 3         # cap LLM calls for flip detection per run
+ANTI_PATTERN_SEED_CONFIDENCE = 0.78  # §34 example — anti-pattern initial confidence
 
 
 class MemoryWriter(BaseAgent):
@@ -267,8 +269,19 @@ class MemoryWriter(BaseAgent):
         # 6b. Context narrowing — examine recent failures by tag.
         self._narrow_contexts(persona)
 
-        # 6c. Lifecycle state transitions on whatever remains in
-        #     emerging/active/declining after supersedence.
+        # 6c. Pattern → anti-pattern flipping (Phase F.3.2) runs BEFORE
+        #     lifecycle transitions: a pattern with 5+ consecutive failures
+        #     would otherwise archive in this same run, freezing it before
+        #     the LLM gets a chance to extract a "what worked" alternative.
+        #     Flip-or-archive — flip wins if the LLM can name an alternative.
+        if self._llm is not None:
+            try:
+                await self._detect_flips(persona, now)
+            except Exception:
+                pass
+
+        # 6d. Lifecycle state transitions on whatever remains in
+        #     emerging/active/declining after supersedence + flips.
         for p in persona.patterns:
             if p.user_pinned:
                 continue
@@ -277,11 +290,6 @@ class MemoryWriter(BaseAgent):
             if ap.user_pinned:
                 continue
             self._transition_state(ap, now)
-
-        # 6d. Pattern → anti-pattern flipping.
-        # (Detection requires "what worked" alternatives in source episodes;
-        # implemented as a hook so the §34 mechanic is wired without
-        # over-fitting heuristics. The LLM-driven version lands later.)
 
         # 6e. Episode staleness.
         self._mark_episode_staleness(persona)
@@ -348,6 +356,66 @@ class MemoryWriter(BaseAgent):
                     continue
                 _set_status(loser, STATUS_SUPERSEDED)
                 loser.superseded_by = winner.pattern_id
+
+    async def _detect_flips(self, persona: Persona, now: datetime) -> None:
+        """Patterns with FLIP_FAILURE_STREAK consecutive failed applications
+        are candidates for becoming anti-patterns. Ask the LLM to confirm
+        the flip and supply the 'what worked' alternative; on success,
+        create an AntiPattern and supersede the original.
+
+        Bounded by `MAX_FLIP_CALLS_PER_RUN` for the same reason
+        distillation is bounded — token spend control on chatty personas.
+        """
+        candidates: list[Pattern] = []
+        for p in persona.patterns:
+            if p.status in (STATUS_ARCHIVED, STATUS_SUPERSEDED):
+                continue
+            if p.user_pinned:
+                continue
+            consecutive_failures = 0
+            for app in reversed(p.applications):
+                if app.outcome == "failed":
+                    consecutive_failures += 1
+                else:
+                    break
+            if consecutive_failures >= FLIP_FAILURE_STREAK:
+                candidates.append(p)
+
+        for pattern in candidates[:MAX_FLIP_CALLS_PER_RUN]:
+            tool_args = await self._call_flip_llm(persona, pattern)
+            if tool_args is None:
+                continue
+            anti = _build_anti_pattern_from_flip(tool_args, pattern, now)
+            if anti is None:
+                continue
+            persona.anti_patterns.append(anti)
+            _set_status(pattern, STATUS_SUPERSEDED)
+            pattern.superseded_by = anti.anti_pattern_id
+
+    async def _call_flip_llm(
+        self, persona: Persona, pattern: Pattern
+    ) -> dict[str, Any] | None:
+        try:
+            from core.llm import LLMMessage
+            response = await self._llm.complete(  # type: ignore[union-attr]
+                system=FLIP_SYSTEM_PROMPT,
+                messages=[LLMMessage(
+                    role="user",
+                    content=_render_flip_user(persona, pattern),
+                )],
+                tools=[EMIT_FLIP_TOOL, EMIT_NO_FLIP_TOOL],
+                max_tokens=1024,
+            )
+        except Exception:
+            return None
+        if not response.tool_calls:
+            return None
+        call = response.tool_calls[0]
+        if call.name != "emit_flip":
+            return None
+        if not isinstance(call.arguments, dict):
+            return None
+        return call.arguments
 
     def _mark_episode_staleness(self, persona: Persona) -> None:
         """An episode contributing only to archived/superseded patterns
@@ -729,3 +797,120 @@ def _duplicates_existing_pattern(new_pattern: Pattern, persona: Persona) -> bool
         if p.lesson.strip().lower() == target:
             return True
     return False
+
+
+# ── Phase F.3.2 — pattern→anti-pattern flip helpers ────────────────────────
+
+
+FLIP_SYSTEM_PROMPT = (
+    "You are reviewing a pattern that has accumulated repeated recent "
+    "failures. Decide whether the pattern should be flipped into an "
+    "anti-pattern (an explicit rule for what NOT to do, paired with a "
+    "concrete alternative).\n\n"
+    "Flip ONLY when the failures show a clear inverse lesson — i.e. you "
+    "can name what would have worked instead. If failures are scattered "
+    "or the alternative is fuzzy, call emit_no_flip and the lifecycle "
+    "transitions will let the pattern decline naturally.\n\n"
+    "An anti-pattern needs both a `lesson` (why this approach fails now) "
+    "and an `alternative` (what to do instead). Without both, decline."
+)
+
+
+EMIT_FLIP_TOOL: dict[str, Any] = {
+    "name": "emit_flip",
+    "description": "Flip the failing pattern into an anti-pattern with a stated alternative.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "lesson": {
+                "type": "string",
+                "description": "Why this approach now fails — grounded in the recent failure evidence.",
+            },
+            "alternative": {
+                "type": "string",
+                "description": "What the persona should do instead (the 'what worked' counter-evidence).",
+            },
+        },
+        "required": ["lesson", "alternative"],
+    },
+}
+
+
+EMIT_NO_FLIP_TOOL: dict[str, Any] = {
+    "name": "emit_no_flip",
+    "description": "Decline to flip — the pattern should decline naturally instead.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "Why this isn't a clean flip (no clear alternative, scattered failures, etc).",
+            },
+        },
+        "required": ["reason"],
+    },
+}
+
+
+def _render_flip_user(persona: Persona, pattern: Pattern) -> str:
+    lines: list[str] = []
+    lines.append(
+        f"Persona: {persona.profile.name} ({persona.profile.specialty})."
+    )
+    lines.append("")
+    lines.append("Pattern under review:")
+    lines.append(f"- title: {pattern.title}")
+    lines.append(f"- lesson: {pattern.lesson}")
+    lines.append(f"- applies_when: {', '.join(pattern.applies_when)}")
+    lines.append(f"- confidence: {pattern.confidence}")
+    lines.append(f"- status: {pattern.status}")
+    lines.append("")
+    lines.append("Recent applications (most recent last):")
+    for app in pattern.applications[-10:]:
+        lines.append(f"  {app.ts} {app.run_id} → {app.outcome}")
+    lines.append("")
+
+    # Surface source episodes — these contain the 'what worked' evidence
+    # the LLM needs to name a concrete alternative.
+    source_ids = set(pattern.source_episodes)
+    relevant_eps = [
+        ep for ep in persona.episodes if ep.episode_id in source_ids
+    ][:8]
+    if relevant_eps:
+        lines.append("Source episodes (look for 'what_worked' alternatives):")
+        for ep in relevant_eps:
+            lines.append(f"--- episode {ep.episode_id} ---")
+            if ep.what_failed:
+                lines.append(f"failed: {ep.what_failed[:300]}")
+            if ep.what_worked:
+                lines.append(f"worked: {ep.what_worked[:300]}")
+            if ep.feedback_verbatim:
+                lines.append(f"feedback: {ep.feedback_verbatim[:300]}")
+    return "\n".join(lines)
+
+
+def _build_anti_pattern_from_flip(
+    args: dict[str, Any], pattern: Pattern, now: datetime
+) -> AntiPattern | None:
+    lesson = (args.get("lesson") or "").strip()
+    alternative = (args.get("alternative") or "").strip()
+    if not lesson or not alternative:
+        return None
+    now_iso = now.isoformat()
+    return AntiPattern(
+        anti_pattern_id=f"anti_{uuid4().hex[:10]}",
+        title=pattern.title,
+        lesson=lesson,
+        alternative=alternative,
+        applies_when=list(pattern.applies_when),
+        applies_when_excludes=list(pattern.applies_when_excludes),
+        confidence=ANTI_PATTERN_SEED_CONFIDENCE,
+        status=STATUS_EMERGING,
+        applications=[],
+        lifetime_applications=0,
+        lifetime_successes=0,
+        source_episodes=list(pattern.source_episodes),
+        flipped_from=pattern.pattern_id,
+        flipped_at=now_iso,
+        user_pinned=False,
+    )

@@ -413,6 +413,153 @@ async def test_distillation_skips_episodes_already_covered(tmp_path: Path):
     assert llm.calls == []
 
 
+# ── Phase F.3.2 — pattern→anti-pattern flip detection ─────────────────────
+
+
+def _failing_pattern(pattern_id: str, failures: int = 6) -> Pattern:
+    """Build a pattern with `failures` consecutive failed applications.
+    The flip threshold is 5, so 6 ensures candidacy."""
+    apps = [
+        PatternApplication(run_id=f"r_{i}", ts=_ts(failures - i), outcome="failed")
+        for i in range(failures)
+    ]
+    return Pattern(
+        pattern_id=pattern_id,
+        title="useReducer for component state",
+        lesson="Reach for useReducer when state has multiple sub-fields.",
+        applies_when=["react"],
+        confidence=0.18,
+        status=STATUS_DECLINING,
+        applications=apps,
+        lifetime_applications=20,
+        lifetime_successes=2,
+        source_episodes=["ep_src_1", "ep_src_2", "ep_src_3"],
+        first_observed=_ts(180),
+    )
+
+
+async def test_flip_skipped_when_llm_is_none(tmp_path: Path):
+    """Without an LLM, no flip can happen — the pattern proceeds through
+    the deterministic lifecycle transition and archives. No anti-pattern
+    is ever created without an LLM to name the alternative."""
+    p, d = _persona(tmp_path)
+    p.patterns.append(_failing_pattern("pat_flip_candidate"))
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter()  # llm=None
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    payload = json.loads((d / "patterns.json").read_text(encoding="utf-8"))
+    assert payload["anti_patterns"] == []
+    # Lifecycle transition runs deterministically; the pattern archives
+    # because of low confidence + 3+ recent failures.
+    assert payload["patterns"][0]["status"] == STATUS_ARCHIVED
+
+
+async def test_flip_creates_anti_pattern_on_emit_flip(tmp_path: Path):
+    p, d = _persona(tmp_path)
+    p.patterns.append(_failing_pattern("pat_flip_candidate"))
+
+    llm = MockLLMClient([MockTurn(tool_calls=[ToolCall(
+        id="t1",
+        name="emit_flip",
+        arguments={
+            "lesson": "Reviewers consistently flag useReducer for non-form state as over-engineering.",
+            "alternative": "Use useState directly; reach for useReducer only for true reducer-like state machines.",
+        },
+    )])])
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    payload = json.loads((d / "patterns.json").read_text(encoding="utf-8"))
+    # Original pattern is now superseded with a link.
+    assert len(payload["patterns"]) == 1
+    assert payload["patterns"][0]["status"] == STATUS_SUPERSEDED
+    assert payload["patterns"][0]["superseded_by"] is not None
+    # New anti-pattern carries the alternative + flipped_from link.
+    assert len(payload["anti_patterns"]) == 1
+    anti = payload["anti_patterns"][0]
+    assert anti["flipped_from"] == "pat_flip_candidate"
+    assert anti["flipped_at"]
+    assert "useState" in anti["alternative"]
+    # Linkage is bidirectional.
+    assert payload["patterns"][0]["superseded_by"] == anti["anti_pattern_id"]
+
+
+async def test_flip_no_flip_keeps_pattern(tmp_path: Path):
+    p, d = _persona(tmp_path)
+    p.patterns.append(_failing_pattern("pat_flip_candidate"))
+
+    llm = MockLLMClient([MockTurn(tool_calls=[ToolCall(
+        id="t1",
+        name="emit_no_flip",
+        arguments={"reason": "no clear alternative emerged from the failures"},
+    )])])
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    payload = json.loads((d / "patterns.json").read_text(encoding="utf-8"))
+    assert payload["anti_patterns"] == []
+    # When the LLM declines to flip, the pattern still proceeds through
+    # the deterministic lifecycle transition — same outcome as no LLM.
+    assert payload["patterns"][0]["status"] == STATUS_ARCHIVED
+
+
+async def test_flip_skipped_below_failure_streak(tmp_path: Path):
+    """Pattern with 4 consecutive failures (< 5 threshold) → no LLM call."""
+    p, d = _persona(tmp_path)
+    p.patterns.append(_failing_pattern("pat_short", failures=4))
+
+    llm = MockLLMClient([])  # empty — would raise if called
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    assert llm.calls == []
+
+
+async def test_flip_user_pinned_pattern_not_flipped(tmp_path: Path):
+    p, d = _persona(tmp_path)
+    pinned = _failing_pattern("pat_pinned")
+    pinned.user_pinned = True
+    p.patterns.append(pinned)
+
+    llm = MockLLMClient([])  # empty — would raise if called
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    assert llm.calls == []
+
+
+async def test_flip_llm_failure_does_not_break_run(tmp_path: Path):
+    p, d = _persona(tmp_path)
+    p.patterns.append(_failing_pattern("pat_flip_candidate"))
+
+    llm = MockLLMClient([])  # empty — raises if reached, writer must catch
+
+    ws = Workspace(run_id="r1", goal="x")
+    mw = MemoryWriter(llm=llm)
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    payload = json.loads((d / "patterns.json").read_text(encoding="utf-8"))
+    assert payload["anti_patterns"] == []
+    # Episode still recorded — the run-level pipeline kept working.
+    eps = (d / "episodes.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(eps) >= 1
+
+
 async def test_distillation_caps_at_three_clusters(tmp_path: Path):
     """Many candidate clusters → at most MAX_DISTILL_CALLS_PER_RUN LLM
     calls. Caps token spend on chatty personas."""
