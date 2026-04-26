@@ -79,6 +79,13 @@ class SignalType(str, Enum):
     # change). Agents pick up the new manifest at the next step boundary.
     MANIFEST_INVALIDATED = "MANIFEST_INVALIDATED"
 
+    # Training Camp (DESIGN §35, Phase F.1) — rubric_scorer posts
+    # RUBRIC_SCORE at end-of-training-run with the weighted score and
+    # per-check breakdown. Tournament launcher aggregates per-run scores
+    # and posts TOURNAMENT_RESULT once all participants finish.
+    RUBRIC_SCORE = "RUBRIC_SCORE"
+    TOURNAMENT_RESULT = "TOURNAMENT_RESULT"
+
     PROTOCOL = "PROTOCOL"
 
 

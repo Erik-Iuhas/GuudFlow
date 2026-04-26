@@ -1,0 +1,6 @@
+{
+  "scenario_id": "hello_python_v1",
+  "goal": "Write a `greet(name)` function in `hello.py` that returns the string 'Hello, {name}!'.",
+  "project_type": "python_module",
+  "expected_role_types": ["developer", "reviewer"]
+}

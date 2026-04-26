@@ -1,0 +1,24 @@
+{
+  "auto_checks": [
+    {
+      "name": "hello_py_exists",
+      "type": "files_present",
+      "weight": 0.4,
+      "paths": ["hello.py"]
+    },
+    {
+      "name": "greet_function_defined",
+      "type": "text_contains",
+      "weight": 0.4,
+      "path": "hello.py",
+      "needle": "def greet"
+    },
+    {
+      "name": "hello_string_present",
+      "type": "text_contains",
+      "weight": 0.2,
+      "path": "hello.py",
+      "needle": "Hello"
+    }
+  ]
+}

@@ -165,11 +165,93 @@ complexity until a real user request surfaces.
 
 ---
 
-## F.1 — Training Camp (~2-3 days, deferred until F.3 ships)
+## F.1 — Training Camp (~2-3 days)
 
 DESIGN §35. Toy scenario library, tournament mode, ranking board for
-hiring decisions. Headline moat feature; biggest scope. Plan-f-1.md
-when we get there.
+hiring decisions. Headline moat feature.
+
+### Scope decisions (Erik 2026-04-26)
+
+- **Auto-check types for the first cut: `files_present` + `text_contains` only.**
+  Full `pytest` / `ruff` checks need subprocess execution + output
+  parsing inside the run sandbox — that's Phase F.1.5+ territory.
+  `files_present` and `text_contains` cover ~70% of useful rubric
+  checks at zero infra cost.
+- **Manual checks: deferred.** `manual_checks` show up in the rubric
+  schema for forward-compat but aren't surfaced in the UI yet — F.1
+  ships the auto-graded path.
+- **Tournaments run sequentially in F.1.** Parallel execution would
+  require running N JobRunners or extending the queue to dispatch a
+  fan-out; deferred until there's a real concurrency need. The API
+  shape supports parallel later without changes — only the dispatch
+  internals would shift.
+
+### F.1.0 — Scenario library + signals (~2-3 hrs)
+
+- `data/training_camp/scenarios/` directory layout
+- One seed scenario: `hello_python_v1` (write a `greet()` function)
+- `core/training/__init__.py` + `core/training/scenario.py` —
+  `Scenario` + `Rubric` dataclasses + loader
+- `core/signals.py` — `RUBRIC_SCORE`, `TOURNAMENT_RESULT` types
+- Tests: `tests/core/test_training_scenario.py`
+
+Commit: `feat(training): scenario library + rubric signals (Phase F.1.0)`
+
+### F.1.1 — Rubric scorer + training-mode runner branch (~2-3 hrs)
+
+- `agents/builtin/rubric_scorer.py` — runs `auto_checks` against the
+  workspace, posts `RUBRIC_SCORE` signal with weighted score
+- `core/runner.py` — when `project.mode == "training"`, tag episodes
+  as `training=True` and trigger rubric scorer post-run
+- `agents/builtin/memory_writer.py` — already honours `Episode.training`
+  for reputation; verify the wire-up
+- Tests: `tests/agents/builtin/test_rubric_scorer.py` + integration in
+  `tests/core/test_runner.py`
+
+Commit: `feat(training): rubric scorer + training-mode runner branch (Phase F.1.1)`
+
+### F.1.2 — Training API + tournament launcher (~3-4 hrs)
+
+- `api/routes/training.py` — three endpoints:
+  - `GET /api/training/scenarios` → list available scenarios
+  - `POST /api/training/run` → launch one training run
+    `{persona_id, scenario_id}` returns `run_id`
+  - `POST /api/training/tournament` → launch N training runs
+    `{scenario_id, persona_ids[]}` returns `tournament_id` + per-run
+    `run_id`s; also posts a `TOURNAMENT_RESULT` aggregate when all
+    runs complete (sequential dispatch in F.1)
+- `core/training/tournament.py` — sequential orchestrator that builds
+  N projects (one per persona) and enqueues them
+- Studio: `studio/src/api.ts` — `trainingApi.{listScenarios,run,tournament}`
+- Tests: `tests/api/test_training.py`
+
+Commit: `feat(api): training run + tournament endpoints (Phase F.1.2)`
+
+### F.1.3 — Graduation + ranking board + seed scenarios (~2 hrs)
+
+- `agents/builtin/memory_writer.py` — extend `_refresh_reputation` to
+  set `graduation_status` per §35 criteria (≥3 distinct scenarios,
+  ≥0.7 avg rubric on last 5, ≥1 tournament)
+- `api/routes/personas.py` — `GET /api/personas/rankings?role_type=&scenario=`
+  → leaderboard query over reputation + training episodes
+- Seed scenarios: 3-4 canonical ones beyond `hello_python_v1`:
+  - `python_function_v1` (slightly bigger function with edge cases)
+  - `markdown_doc_v1` (doc writer scenario)
+  - `bug_fix_v1` (fix a broken function with a failing test description)
+- Tests + final integration test that drives a tournament end-to-end
+
+Commit: `feat(training): graduation + ranking + seed scenarios (Phase F.1.3)`
+
+### What this phase does NOT do
+
+- **No subprocess-based auto-checks** (pytest/ruff) — deferred to a
+  follow-up phase where the worker can execute checks in the run's
+  Docker sandbox. Without sandbox isolation, running pytest on
+  agent-generated code is a risk vector.
+- **No parallel tournament execution** — sequential is fine for a
+  3-4 persona tournament; parallel needs queue or runner changes.
+- **No studio UI for the training tab** — that's Phase G material.
+  F.1.2 ships the typed API client method so G can build on it.
 
 ## F.2 — Archetype graduation (~1 day, depends on F.1)
 
