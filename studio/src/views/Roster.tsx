@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, personasApi } from "../api";
+import { PersonaChatBox } from "../components/PersonaChatBox";
+import { RankingsPanel } from "../components/RankingsPanel";
 import type { PersonaSummary } from "../types";
+
+type RosterTab = "all" | "rankings";
 
 export function Roster() {
   const { id } = useParams<{ id?: string }>();
+  const [tab, setTab] = useState<RosterTab>("all");
   const [personas, setPersonas] = useState<PersonaSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<unknown[] | null>(null);
@@ -54,50 +59,81 @@ export function Roster() {
         Your stable of agents. Personas accumulate memory across runs — episodes
         (raw), patterns (distilled), and reputation aggregates.
       </p>
+
+      <div className="tab-row">
+        <button
+          className={`tab ${tab === "all" ? "tab-active" : ""}`}
+          onClick={() => setTab("all")}
+        >
+          All personas
+        </button>
+        <button
+          className={`tab ${tab === "rankings" ? "tab-active" : ""}`}
+          onClick={() => setTab("rankings")}
+        >
+          Leaderboard
+        </button>
+      </div>
+
       {error && <div className="error">{error}</div>}
 
-      <div className="grid-2">
-        <div>
-          {personas.length === 0 ? (
-            <p className="muted">No personas yet. They'll appear here after the first runs that hire them.</p>
-          ) : (
-            personas.map((p) => (
-              <Link
-                to={`/roster/${p.persona_id}`}
-                key={p.persona_id}
-                style={{ display: "block", textDecoration: "none", color: "inherit" }}
-              >
-                <div
-                  className={`card persona-card ${id === p.persona_id ? "selected" : ""}`}
-                  style={{
-                    borderColor: id === p.persona_id ? "#2563eb" : undefined,
-                  }}
+      {tab === "rankings" ? (
+        <RankingsPanel />
+      ) : (
+        <div className="grid-2">
+          <div>
+            {personas.length === 0 ? (
+              <p className="muted">
+                No personas yet. They'll appear here after the first runs that
+                hire them.
+              </p>
+            ) : (
+              personas.map((p) => (
+                <Link
+                  to={`/roster/${p.persona_id}`}
+                  key={p.persona_id}
+                  style={{ display: "block", textDecoration: "none", color: "inherit" }}
                 >
-                  <div className="name">{p.name}</div>
-                  <div className="specialty">{p.specialty}</div>
-                  <div className="reputation">
-                    {p.n_episodes} episodes ·{" "}
-                    {p.reputation?.production?.total_runs ?? 0} production runs
+                  <div
+                    className={`card persona-card ${id === p.persona_id ? "selected" : ""}`}
+                    style={{
+                      borderColor: id === p.persona_id ? "#2563eb" : undefined,
+                    }}
+                  >
+                    <div className="name">{p.name}</div>
+                    <div className="specialty">{p.specialty}</div>
+                    <div className="reputation">
+                      {p.n_episodes} episodes ·{" "}
+                      {p.reputation?.production?.total_runs ?? 0} production runs
+                      {p.reputation?.training?.graduation_status === "graduated" && (
+                        <span
+                          className="tag tag-graduated"
+                          style={{ marginLeft: 8 }}
+                        >
+                          graduated
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </Link>
-            ))
-          )}
-        </div>
+                </Link>
+              ))
+            )}
+          </div>
 
-        <div>
-          {!id ? (
-            <p className="muted small">Select a persona to inspect their memory.</p>
-          ) : (
-            <PersonaDetail
-              personaId={id}
-              episodes={episodes}
-              patterns={patterns}
-              persona={personas.find((p) => p.persona_id === id) ?? null}
-            />
-          )}
+          <div>
+            {!id ? (
+              <p className="muted small">Select a persona to inspect their memory.</p>
+            ) : (
+              <PersonaDetail
+                personaId={id}
+                episodes={episodes}
+                patterns={patterns}
+                persona={personas.find((p) => p.persona_id === id) ?? null}
+              />
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -113,6 +149,9 @@ function PersonaDetail({
   patterns: { patterns: unknown[]; anti_patterns: unknown[] } | null;
   persona: PersonaSummary | null;
 }) {
+  const reputation = persona?.reputation;
+  const graduation = reputation?.training?.graduation_status ?? "ungraduated";
+
   return (
     <div>
       <h2>{persona?.name ?? personaId}</h2>
@@ -122,6 +161,39 @@ function PersonaDetail({
           <p style={{ margin: "4px 0 0 0" }}>{persona.character}</p>
         </div>
       )}
+
+      {/* Phase G.0 — reputation card with graduation badge + production / training split */}
+      <div className="card reputation-card">
+        <div className="row" style={{ alignItems: "center" }}>
+          <h3 style={{ margin: 0, flex: 1 }}>Reputation</h3>
+          <span className={`tag tag-${graduation}`}>{graduation}</span>
+        </div>
+        <div className="grid-2" style={{ marginTop: 12 }}>
+          <div>
+            <div className="muted small">Production</div>
+            <div className="metric">
+              {reputation?.production?.total_runs ?? 0}
+              <span className="metric-label"> runs</span>
+            </div>
+            {reputation?.production?.reviewer_first_pass_rate !== undefined && (
+              <div className="small muted">
+                first-pass approval:{" "}
+                {(reputation.production.reviewer_first_pass_rate * 100).toFixed(0)}%
+              </div>
+            )}
+          </div>
+          <div>
+            <div className="muted small">Training</div>
+            <div className="metric">
+              {reputation?.training?.total_runs ?? 0}
+              <span className="metric-label"> runs</span>
+            </div>
+            <div className="small muted">
+              {reputation?.active_patterns ?? 0} active patterns
+            </div>
+          </div>
+        </div>
+      </div>
 
       <h2>Patterns ({patterns?.patterns.length ?? 0})</h2>
       {patterns && patterns.patterns.length === 0 && (
@@ -146,6 +218,38 @@ function PersonaDetail({
         );
       })}
 
+      {/* Phase G.0 — anti-patterns rendered alongside patterns. Same data source
+          (patterns.json) but distinct visual treatment. */}
+      {patterns && patterns.anti_patterns.length > 0 && (
+        <>
+          <h2>Anti-patterns ({patterns.anti_patterns.length})</h2>
+          {patterns.anti_patterns.map((ap, i) => {
+            const a = ap as {
+              title: string;
+              lesson: string;
+              alternative: string;
+              status: string;
+              confidence: number;
+            };
+            return (
+              <div className="card anti-pattern-card" key={i}>
+                <div style={{ fontWeight: 600 }}>{a.title}</div>
+                <div className="small muted">{a.lesson}</div>
+                {a.alternative && (
+                  <div className="small" style={{ marginTop: 6 }}>
+                    <strong>Instead:</strong> {a.alternative}
+                  </div>
+                )}
+                <div className="small" style={{ marginTop: 4 }}>
+                  <span className="tag tag-anti">{a.status}</span>{" "}
+                  confidence {a.confidence?.toFixed(2)}
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
       <h2>Recent episodes ({episodes?.length ?? 0})</h2>
       {episodes && episodes.length === 0 && (
         <p className="muted small">No episodes yet.</p>
@@ -156,11 +260,23 @@ function PersonaDetail({
           task_context?: string;
           tags?: string[];
           timestamp?: string;
+          training?: boolean;
+          rubric_score?: number | null;
         };
         return (
           <div className="card" key={i}>
             <div className="small muted">
               {ep.timestamp?.replace("T", " ").split(".")[0]}
+              {ep.training && (
+                <span className="tag tag-training" style={{ marginLeft: 8 }}>
+                  training
+                </span>
+              )}
+              {ep.rubric_score !== null && ep.rubric_score !== undefined && (
+                <span className="small muted" style={{ marginLeft: 8 }}>
+                  rubric: {ep.rubric_score.toFixed(2)}
+                </span>
+              )}
             </div>
             <div>{ep.task_context}</div>
             <div className="small" style={{ marginTop: 4 }}>
@@ -171,6 +287,9 @@ function PersonaDetail({
           </div>
         );
       })}
+
+      {/* Phase G.0 — chat with this persona via F.4 endpoint */}
+      <PersonaChatBox personaId={personaId} />
     </div>
   );
 }

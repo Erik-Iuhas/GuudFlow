@@ -319,3 +319,41 @@ button.small { padding: 2px 8px; font-size: 12px; }
 }
 .settings-row label { display: inline-flex; align-items: center; gap: 8px; }
 .settings-row p { margin: 4px 0 0 24px; }
+
+/* ─── Phase G.0 — roster review ──────────────────────────────────────── */
+
+.tab-row { display: flex; gap: 4px; margin: 12px 0; border-bottom: 1px solid #e2e8f0; }
+.tab {
+  background: none; border: none;
+  padding: 8px 14px; border-bottom: 2px solid transparent;
+  cursor: pointer; color: #64748b; font-size: 14px;
+}
+.tab:hover { color: #1e293b; }
+.tab-active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
+
+.tag-graduated { background: #dcfce7; color: #166534; }
+.tag-ungraduated { background: #f1f5f9; color: #64748b; }
+.tag-training { background: #fef3c7; color: #92400e; }
+.tag-anti { background: #fee2e2; color: #991b1b; }
+
+.reputation-card { background: #f8fafc; border-color: #e2e8f0; }
+.metric { font-size: 24px; font-weight: 600; color: #1e293b; }
+.metric-label { font-size: 14px; font-weight: 400; color: #64748b; }
+
+.anti-pattern-card { border-left: 3px solid #ef4444; }
+
+.chat-box { margin-top: 16px; background: #f8fafc; }
+.chat-history {
+  max-height: 320px; overflow-y: auto;
+  border: 1px solid #e2e8f0; border-radius: 6px;
+  padding: 10px; margin: 8px 0; background: white;
+}
+.chat-turn { padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+.chat-turn:last-child { border-bottom: none; }
+.chat-role { font-size: 11px; text-transform: uppercase; color: #64748b; letter-spacing: 0.4px; }
+.chat-text { margin-top: 2px; white-space: pre-wrap; }
+.chat-recall { margin-top: 4px; font-size: 11px; }
+.chat-turn-user { background: #eff6ff; border-radius: 4px; padding: 6px 8px; margin: 4px 0; border-bottom: none; }
+.chat-turn-loading { font-style: italic; }
+.chat-input-row { display: flex; gap: 8px; }
+.chat-input-row input { flex: 1; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
