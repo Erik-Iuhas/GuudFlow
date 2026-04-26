@@ -13,6 +13,7 @@ export interface AgentConfig {
   model_tier?: ModelTier;
   agent_class_role_type?: string | null;
   is_reviewer?: boolean;
+  is_final_reviewer?: boolean;
   max_tool_iterations?: number;
 }
 
@@ -75,10 +76,29 @@ export interface InvokeResponse {
   enqueued_at: string;
 }
 
+export interface PersonaHire {
+  role: string;
+  action: "hire_existing" | "create_new";
+  persona_id: string;
+  display_name: string;
+  rationale: string;
+}
+
+export interface RoleDelta {
+  role: string;
+  action: "keep" | "drop" | "add" | "swap_tier" | "replace_persona";
+  rationale?: string;
+  from_state?: Record<string, unknown> | null;
+  to_state?: Record<string, unknown> | null;
+}
+
 export interface MetaProposal {
   rationale: string;
   agents: AgentConfig[];
   rbac: Record<string, RoleRBAC>;
+  persona_hires?: PersonaHire[];
+  warnings?: string[];
+  deltas?: RoleDelta[];
 }
 
 // ── Approval gates (Phase C.0.5) ───────────────────────────────────────────

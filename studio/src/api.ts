@@ -217,8 +217,23 @@ export const inputsApi = {
 // ── Meta + Invoke ──────────────────────────────────────────────────────────
 
 export const metaApi = {
-  propose: (goal: string) =>
-    request<MetaProposal>("POST", "/api/meta/propose", { goal }, true),
+  /** Phase D.2: pass `projectId` to drive the LLM-based MetaAgent.
+   *  Pass `priorRunId` to trigger the continuation prompt (D.3) — the
+   *  response will populate `deltas` rather than just a fresh team. */
+  propose: (
+    goal: string,
+    options?: { projectId?: string; priorRunId?: string },
+  ) =>
+    request<MetaProposal>(
+      "POST",
+      "/api/meta/propose",
+      {
+        goal,
+        ...(options?.projectId ? { project_id: options.projectId } : {}),
+        ...(options?.priorRunId ? { prior_run_id: options.priorRunId } : {}),
+      },
+      true,
+    ),
 };
 
 export const invokeApi = {
