@@ -40,14 +40,11 @@ from pathlib import Path
 import pytest
 
 from agents.builtin.code_reviewer import CodeReviewer
-from agents.builtin.memory_writer import MemoryWriter
-from agents.persona import Persona
 from agents.registry import registry
 from core.llm import MockLLMClient, MockTurn, ToolCall
-from core.runner import AgentRunner, ProjectConfig
 from worker.docker_manager import DockerManager
 from worker.job_runner import JobRunner, serialise_project
-from worker.queue import JOB_COMPLETE, Job
+from worker.queue import JOB_COMPLETE
 
 
 # ── Test-scoped fixtures ───────────────────────────────────────────────────
@@ -61,43 +58,11 @@ def _register_code_reviewer():
         registry.register("code_reviewer", CodeReviewer)
 
 
-def _persona_attaching_runner_factory(personas_dir: Path):
-    """Build a JobRunner runner_factory that loads each agent's
-    `persona_id` (if any) into a Persona and attaches it after the
-    runner builds its agents.
-
-    NOTE: Production today does NOT auto-load personas from
-    `cfg.persona_id`. The default JobRunner factory builds a runner
-    that skips this step, leaving `agent.persona = None` and turning
-    `memory_writer` into a no-op. Closing that gap (auto-hire on
-    `persona_id`) is its own task; this test wraps the factory so the
-    journey can verify the persona-memory lifecycle end-to-end without
-    waiting on that change.
-    """
-
-    def factory(project: ProjectConfig, run_id: str, run_root: Path, llm, **kwargs):
-        runner = AgentRunner(
-            project=project,
-            run_id=run_id,
-            run_root=run_root,
-            llm=llm,
-            memory_writer=MemoryWriter(),
-            docker_manager=kwargs.get("docker_manager"),
-        )
-        original_build = runner._build_agents
-
-        def build_with_personas() -> None:
-            original_build()
-            for cfg in project.agents:
-                if cfg.persona_id and cfg.role in runner.agents:
-                    persona = Persona.load(cfg.persona_id, personas_dir)
-                    persona._dir = personas_dir / cfg.persona_id
-                    runner.agents[cfg.role].persona = persona
-
-        runner._build_agents = build_with_personas  # type: ignore[method-assign]
-        return runner
-
-    return factory
+# Note: Phase G.7 auto-loads personas from `cfg.persona_id` in the
+# runner itself (`AgentRunner._build_agents` reads `personas_root` and
+# attaches), so this test relies on the default JobRunner factory.
+# It used to ship a custom factory that wrapped `_build_agents`; that
+# workaround is gone now that production does the right thing.
 
 
 # ── The journey ────────────────────────────────────────────────────────────
@@ -207,7 +172,6 @@ async def test_full_user_journey(
         llm=llm,
         docker_manager=DockerManager(mode="dev"),
         run_registry=app.state.run_registry,
-        runner_factory=_persona_attaching_runner_factory(data_root / "personas"),
     )
 
     job = await app.state.queue.get(job_id)

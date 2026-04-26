@@ -199,6 +199,12 @@ def default_runner_factory(
         Path(data_root) / "training_camp" / "scenarios"
         if data_root is not None else None
     )
+    # Phase G.7 — personas_root so AgentRunner can auto-load personas
+    # from cfg.persona_id. Without this, worker-invoked runs that hire
+    # a persona never actually attach it, and memory_writer is a no-op.
+    personas_root = (
+        Path(data_root) / "personas" if data_root is not None else None
+    )
     return AgentRunner(
         project=project,
         run_id=run_id,
@@ -209,6 +215,7 @@ def default_runner_factory(
         rubric_scorer=RubricScorer(),
         training_scenarios_root=scenarios_root,
         restored_workspace=restored_workspace,
+        personas_root=personas_root,
     )
 
 

@@ -175,6 +175,7 @@ class AgentRunner:
         rubric_scorer: BaseAgent | None = None,
         training_scenarios_root: Path | None = None,
         restored_workspace: "Workspace | None" = None,
+        personas_root: Path | None = None,
     ):
         self.project = project
         self.run_id = run_id
@@ -195,6 +196,12 @@ class AgentRunner:
         self.training_scenarios_root = (
             Path(training_scenarios_root) if training_scenarios_root else None
         )
+        # Phase G.7 (post-G fix). Auto-load personas from cfg.persona_id
+        # at _build_agents time so worker-invoked runs accumulate
+        # memory + reputation just like test-injected runs do. Without
+        # this, every demo / training / hired-persona run completes
+        # without updating reputation — silent product failure.
+        self.personas_root = Path(personas_root) if personas_root else None
 
         # Escalation tracking (DESIGN §23, Phase C.3). _rejection_counts
         # accumulates REJECTED signals per upstream role; once a role
@@ -516,6 +523,19 @@ class AgentRunner:
             )
             agent._local_tools = self._instantiate_local_tools(cfg.role)
             agent._current_task = self.project.goal
+            # Phase G.7 — auto-attach the persona from cfg.persona_id.
+            # The persona's directory must exist under personas_root;
+            # malformed / missing persona dirs are tolerated silently
+            # (memory_writer becomes a no-op for that role rather than
+            # taking the run down).
+            if cfg.persona_id and self.personas_root is not None:
+                try:
+                    from agents.persona import Persona
+                    persona = Persona.load(cfg.persona_id, self.personas_root)
+                    persona._dir = self.personas_root / cfg.persona_id
+                    agent.persona = persona
+                except Exception:
+                    pass
             self.agents[cfg.role] = agent
 
     # ── Main run loop ───────────────────────────────────────────────────────

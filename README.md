@@ -5,9 +5,12 @@ proposes a team, you approve it, and the team runs — with a shared
 workspace, a shared git repo, structured inter-agent communication, and a
 sandboxed code-execution surface.
 
-**Status: initial build complete (all 9 stages shipped, ~530 backend
-tests passing, frontend builds clean).** Production deploy story is
-designed but not fully wired — see [ROADMAP.md](ROADMAP.md) for what's next.
+**Status: phases A, B, C, D-prime, D, F, G-prime, G shipped — 885
+backend tests + studio typecheck/build green.** Phases E (production
+deploy + multi-tenant), I (headless service), F.5 (persona author
+depth), J (knowledge surface) registered as future work; see
+[ROADMAP.md](ROADMAP.md). User stories driving priorities are in
+[docs/USER_STORIES.md](docs/USER_STORIES.md).
 
 ## What it actually is
 
@@ -21,11 +24,21 @@ You approve      tweak agents, model tiers, see live cost estimate
    ↓
 Run starts       agents work in parallel where deps allow, share a board,
                  commit to per-agent git branches, escalate on conflicts,
-                 ask you for input when genuinely blocked
+                 ask you for input when genuinely blocked. Live pipeline
+                 graph + agent state cards in the studio.
    ↓
 Reviewer         approves → branches merge → memory_writer records what
-                 worked into the personas' files for next time
+                 worked into the personas' files for next time. Each
+                 APPROVED merge is auto-tagged as a review point.
+   ↓
+If a run fails   Resume from the persisted state — completed agents
+                 don't re-run.
 ```
+
+**Beyond the run loop:** training camp (toy scenarios + tournaments
++ ranking board), persona chat for one-off consultation, and a
+roster review UI with reputation + graduation status. First-timers
+get seed personas (Mike, Sarah, Alex) and a "Try demo" button.
 
 The full architecture is in [DESIGN.md](DESIGN.md) (37 sections). The
 build plan and stage-by-stage progress is in
@@ -138,7 +151,7 @@ agentflow/
 ├── studio/            ← Vite + React + TS frontend
 ├── sandbox/           ← per-run sandbox Dockerfile (§29)
 ├── data/              ← runs, personas, projects (created on first run)
-├── tests/             ← pytest suite (~530 tests)
+├── tests/             ← pytest suite (885 tests)
 ├── scripts/           ← setup + sandbox build helpers
 ├── DESIGN.md          ← full architecture (37 sections)
 ├── CLAUDE.md          ← operating instructions for AI assistants
@@ -170,18 +183,28 @@ pytest
 cd studio && npm run typecheck
 ```
 
-Backend suite is ~530 tests, runs in ~17 seconds. No real LLM calls (all
+Backend suite is 885 tests, runs in ~35 seconds. No real LLM calls (all
 mocked). No Docker required (DockerManager dev-mode is a stub).
 
 ## What's missing / what's next
 
-**[ROADMAP.md](ROADMAP.md)** has the prioritized list. Short version:
+**[ROADMAP.md](ROADMAP.md)** has the prioritized list. Mode A (the
+interactive studio for the developer-as-user) is the headline product;
+Mode B (headless service) is a future tack-on per
+[docs/USER_STORIES.md](docs/USER_STORIES.md).
 
-- ✅ Phase B — `code:exec` routes through the sandbox container in production
-- Phase C — make a live run feel live (USER_COMMENT POST endpoint, real quip stream, tech-lead escalation, final-stage architect review)
-- Phase D — make the meta-agent actually propose (currently returns a deterministic skeleton)
-- Phase E — production deploy story (Redis queue, KubeJobManager for k8s)
-- Phase F — long-term moat features (Training Camp, real LLM-driven memory synthesis, persona chat)
+Shipped:
+- ✅ Phase B — production `code:exec` through the sandbox container
+- ✅ Phase C — live runs (comments, quip stream, escalation, architect review, approval gates)
+- ✅ Phase D — real meta-agent proposal (reads inputs + roster + 16-archetype catalog)
+- ✅ Phase F — Training Camp + persona chat + memory-writer LLM synthesis
+- ✅ Phase G-prime + G — run resume + studio polish (roster, pipeline graph, onboarding, training tab, review-point tags)
+
+Future:
+- Phase F.5 — persona author depth (publish, scaffolding, curated reference URLs, sandboxed pytest checks)
+- Phase E — production deploy + multi-tenant admin
+- Phase I — headless service (webhooks, structured deliverables, per-consumer API keys)
+- Phase J — knowledge surface (deep-wiki / codebase-doc toolkit)
 
 ## License
 

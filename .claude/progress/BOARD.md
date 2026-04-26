@@ -29,17 +29,25 @@
 | 9     | 50-100k   | ~30k   | within budget; image-only, build deferred    |
 
 ## Next action
-**Phases B + C shipped.** Production code:exec routing through the
-sandbox container (B), full live-run interactivity + cost-control
-gates (C: abstract bases, approval gates, USER_COMMENT, quip stream,
-tech_lead escalation, architect final-review). 726 backend tests
-passing, studio typecheck + prod build clean.
+**Mode A is product-ready for first-user testing.** Phases A + B + C
++ D-prime + D + F + G-prime + G shipped. 885 backend tests pass;
+studio typecheck + prod build clean. The persona auto-load gap is
+closed (G.7 inline fix); seed personas Mike/Sarah/Alex install via
+`scripts/seed_data.py` on fresh setup; the studio's "Try demo"
+button gives first-timers a known-good run on day one.
 
-**Recommended next:** **Phase G** (studio polish for workflow review)
-is the headline UX upgrade. **Phase F** (Training Camp, persona chat,
-graduating archetypes from YAML to shipped classes) is the next big
-content phase. Phase E (production deploy) is paused until there's a
-real target.
+**Recommended next:**
+- **F.5** (persona author depth) — scaffolding, packaging, curated
+  reference URLs, richer scenario kinds. Most-impactful Mode A
+  improvement now that G is done.
+- **Phase J** (knowledge surface) — deep-wiki / codebase-doc
+  toolkit. New archetype + tools.
+- **Phase I** (headless service) — Mode B tack-on. Webhooks +
+  structured deliverables + per-consumer API keys. When there's a
+  real CI consumer.
+- **Phase E** (production deploy + multi-tenant) — Redis +
+  KubeJobManager + Helm + per-user accounts + cost dashboards.
+  Paused until there's a deploy target.
 
 - ✅ **D-prime** — shipped 2026-04-26
 - ✅ **B** — shipped 2026-04-26 ([`56f3523`](https://github.com/Erik-Iuhas/AgentFlow/commit/56f3523))
@@ -62,19 +70,23 @@ real target.
   Deferred: branch graph, diff viewer, dark mode (each is its
   own lift, not blocking any user story).
 - **F.5** (future) — persona author depth: publish, scenario
-  authoring, richer scenario kinds
+  authoring, richer scenario kinds, scaffolding templates,
+  curated reference-URL training
+- **J** (future) — knowledge surface: deep-wiki / codebase-doc
+  toolkit, deep_wiki_writer archetype
 - **I** (future, Mode B tack-on) — headless service: webhook
   callbacks, structured deliverables, per-consumer API keys
-- **E** (paused) — production deploy + multi-tenant admin
-- **E** (Redis queue + KubeJobManager + Helm — when there's a deploy target)
+- **E** (paused) — production deploy (Redis + Kube + Helm) +
+  multi-tenant admin (per-user accounts, cost dashboards, kill
+  switch, audit export)
 - **H** (speculative — visual_checker Playwright + UICanvas)
 
-### Pending follow-ups
-- Persona auto-load gap in `AgentRunner._build_agents` — scheduled
-  remote agent in 14 days will open a PR. Until then, runs invoked via
-  the worker leave `agent.persona = None` even when project config
-  sets `persona_id`, so `memory_writer` is a no-op for those runs.
-  Tests work around this with a custom runner_factory wrapper.
+### Closed follow-ups
+- Persona auto-load gap (was: scheduled remote agent in 14 days) —
+  closed inline 2026-04-26 during the pre-test review. Runner
+  reads `cfg.persona_id` and attaches via `Persona.load` from
+  `personas_root` (threaded through by the worker). Journey test's
+  custom factory wrapper removed.
 
 ## Deferred follow-ons
 [followups.md](followups.md) is the running inventory of punted items. ROADMAP.md groups them into shippable phases.

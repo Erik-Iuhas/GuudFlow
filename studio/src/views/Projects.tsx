@@ -90,6 +90,16 @@ export function Projects() {
           reviewer: { allowed_scopes: [] },
         },
         max_iterations: 3,
+        // Disable approval gates on the demo so first-timer's
+        // "Try demo → Run now" goes directly to a run without the
+        // cost-preview interstitial. Real projects keep gates on.
+        approval_gates: {
+          pre_run_cost_preview: false,
+          heavy_tier_mid_run_dispatch: false,
+          iteration_breach_at: 0,
+          per_iteration: false,
+          token_budget_usd: null,
+        },
       });
       navigate(`/projects/${created.project_id}`);
     } catch (e) {
