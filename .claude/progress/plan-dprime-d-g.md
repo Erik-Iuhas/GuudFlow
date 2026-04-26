@@ -23,14 +23,27 @@ runner makes those visible to agents under `inputs/`.
 - [ ] `DELETE /api/projects/{id}/inputs/uploads/{filename}` — remove an upload
 - [ ] Tests: upload happy path, bad project_id, list endpoint, delete
 
-### Chunk 2 — Git URL ingestion + secret scan (~2 hrs)
+### Chunk 2 — Source-repo ingestion (git URL + local path) + secret scan (~2.5 hrs)
+
+Git URL and local-path are the same §33 source kind ("seed for working/"),
+just from different inputs. Same destination, same secret-scan, same
+mutual-exclusion. One chunk, two endpoints.
+
 - [ ] `POST /api/projects/{id}/inputs/git` — clones a public repo into
       `data/projects/{id}/inputs/source_repo/`; cleans existing if re-cloning
+- [ ] `POST /api/projects/{id}/inputs/local_path` — copies a directory
+      from the API's filesystem into the same `inputs/source_repo/`.
+      Body: `{ "path": "/abs/path/to/dir" }`.
+      Validates the path is an existing directory. Documents the
+      "API has read access to its own filesystem" caveat — fine for
+      single-user dev, gated by `AGENTFLOW_LOCAL_PATH_ALLOWLIST`
+      (comma-separated path prefixes) for multi-tenant setups.
 - [ ] `core/secret_scan.py` — basic regex/path scan for `.env`, key files,
       common secret patterns; returns list of warnings
-- [ ] Refuse clone if secrets found and `force=true` not set; otherwise
-      strip + warn
-- [ ] Tests: clone via mocked subprocess, secret detection, force override
+- [ ] Refuse the import if secrets found and `force=true` not set;
+      otherwise strip + warn
+- [ ] Tests: clone via mocked subprocess, local-path copy, secret
+      detection, force override, allowlist enforcement
 
 ### Chunk 3 — Continuation route (~1 hr)
 - [ ] `POST /api/projects/{id}/inputs/from_run/{run_id}` — copy a prior run's
@@ -53,12 +66,17 @@ runner makes those visible to agents under `inputs/`.
 - [ ] Test: end-to-end with a project that has uploaded inputs; verify
       run's `inputs/README.md` exists + uploads are present in run dir
 
-### Chunk 6 — Studio Inputs tab (~3 hrs)
-- [ ] `studio/src/api.ts` — input endpoints
+### Chunk 6 — Studio Inputs tab (~3.5 hrs)
+- [ ] `studio/src/api.ts` — input endpoints (upload, git, local_path,
+      from_run, list, delete)
 - [ ] `studio/src/views/Inputs.tsx` (or tab inside Studio.tsx)
 - [ ] `UploadDropzone` component
-- [ ] `GitUrlField` component
+- [ ] `SourceRepoField` component — toggle between "git URL" and
+      "local path" sub-inputs (same destination, mutually exclusive
+      with each other)
 - [ ] `PriorRunPicker` component (selects from this project's prior runs)
+- [ ] Inputs list view — shows current uploads, source_repo (with origin
+      indicator: git/local), attached prior runs; delete button per item
 - [ ] Manual smoke (no automated frontend tests per Stage 8 convention)
 
 ### Chunk 7 — "Create blank project" escape hatch (~30 min)
@@ -66,8 +84,9 @@ runner makes those visible to agents under `inputs/`.
       vs "Create blank project"
 - [ ] Blank route: `Studio.tsx` opens with an empty agents array
 
-**Phase D-prime exit:** user can upload a PDF, paste a git URL, attach a
-prior run; runs spawned afterward have those visible at `/workspace/inputs/`.
+**Phase D-prime exit:** user can upload a PDF, paste a git URL, point
+at a local directory, attach a prior run; runs spawned afterward have
+those visible at `/workspace/inputs/`.
 
 ---
 
