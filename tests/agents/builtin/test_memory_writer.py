@@ -413,6 +413,106 @@ async def test_distillation_skips_episodes_already_covered(tmp_path: Path):
     assert llm.calls == []
 
 
+# ── Phase F.3.3 — deterministic style drift ───────────────────────────────
+
+
+from core.signals import Signal, SignalType
+
+
+def _commit_signal(role: str, summary: str = "feat: x") -> Signal:
+    return Signal(type=SignalType.GIT_COMMIT, summary=summary, from_agent=role)
+
+
+async def test_style_drift_incremental_commits_up(tmp_path: Path):
+    """Multiple commits by role → incremental_commits drifts up from
+    neutral 0.5 toward 1.0."""
+    p, d = _persona(tmp_path)
+    ws = Workspace(run_id="r1", goal="x")
+    ws.iteration = 1
+    ws.board.append(_commit_signal("developer", "feat: a"))
+    ws.board.append(_commit_signal("developer", "feat: b"))
+    ws.board.append(_commit_signal("developer", "feat: c"))
+
+    mw = MemoryWriter()
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    style = json.loads((d / "style.json").read_text(encoding="utf-8"))
+    # 0.5 + 0.1 * (1.0 - 0.5) = 0.55
+    assert style["tendencies"]["incremental_commits"] == 0.55
+
+
+async def test_style_drift_single_commit_down(tmp_path: Path):
+    """Exactly one commit → incremental_commits drifts down toward 0.0."""
+    p, d = _persona(tmp_path)
+    ws = Workspace(run_id="r1", goal="x")
+    ws.iteration = 1
+    ws.board.append(_commit_signal("developer"))
+
+    mw = MemoryWriter()
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    style = json.loads((d / "style.json").read_text(encoding="utf-8"))
+    # 0.5 + 0.1 * (0.0 - 0.5) = 0.45
+    assert style["tendencies"]["incremental_commits"] == 0.45
+
+
+async def test_style_drift_iteration_above_one_means_iterates(tmp_path: Path):
+    p, d = _persona(tmp_path)
+    ws = Workspace(run_id="r1", goal="x")
+    ws.iteration = 3  # signals revision happened
+
+    mw = MemoryWriter()
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    style = json.loads((d / "style.json").read_text(encoding="utf-8"))
+    assert style["tendencies"]["iterates_on_feedback"] == 0.55
+
+
+async def test_style_drift_tests_referenced_when_commit_mentions_test(tmp_path: Path):
+    p, d = _persona(tmp_path)
+    ws = Workspace(run_id="r1", goal="x")
+    ws.iteration = 1
+    ws.board.append(_commit_signal("developer", "test: add unit tests for greet()"))
+
+    mw = MemoryWriter()
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    style = json.loads((d / "style.json").read_text(encoding="utf-8"))
+    assert style["tendencies"]["tests_referenced"] == 0.55
+
+
+async def test_style_drift_compounds_across_runs(tmp_path: Path):
+    """Two consecutive runs with the same incremental signal pull the
+    tendency further from neutral than one run."""
+    p, d = _persona(tmp_path)
+    ws = Workspace(run_id="r1", goal="x")
+    ws.iteration = 1
+    ws.board.append(_commit_signal("developer"))
+    ws.board.append(_commit_signal("developer"))
+
+    mw = MemoryWriter()
+    await mw.on_run_complete(workspace=ws, project=None, run_id="r1",
+                             run_root=tmp_path, personas={"developer": p})
+
+    # Reload persona to simulate a fresh run.
+    p2 = Persona.load(p.profile.persona_id, tmp_path / "personas")
+    p2._dir = d
+    ws2 = Workspace(run_id="r2", goal="x")
+    ws2.iteration = 1
+    ws2.board.append(_commit_signal("developer"))
+    ws2.board.append(_commit_signal("developer"))
+    await mw.on_run_complete(workspace=ws2, project=None, run_id="r2",
+                             run_root=tmp_path, personas={"developer": p2})
+
+    style = json.loads((d / "style.json").read_text(encoding="utf-8"))
+    # 0.5 → 0.55 → 0.595 (round to 4 decimals)
+    assert style["tendencies"]["incremental_commits"] == 0.595
+
+
 # ── Phase F.3.2 — pattern→anti-pattern flip detection ─────────────────────
 
 

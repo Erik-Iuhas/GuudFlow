@@ -69,6 +69,8 @@ MAX_DISTILL_CALLS_PER_RUN = 3      # cap LLM calls per persona per run
 EMERGING_SEED_CONFIDENCE = 0.6     # §34 — emerging patterns start at 0.6
 MAX_FLIP_CALLS_PER_RUN = 3         # cap LLM calls for flip detection per run
 ANTI_PATTERN_SEED_CONFIDENCE = 0.78  # §34 example — anti-pattern initial confidence
+STYLE_DRIFT_ALPHA = 0.1            # per-run nudge weight for style tendencies
+STYLE_TENDENCY_DEFAULT = 0.5       # neutral starting point for new tendencies
 
 
 class MemoryWriter(BaseAgent):
@@ -137,6 +139,12 @@ class MemoryWriter(BaseAgent):
                 # Synthesis must never fail the run; fall through with
                 # whatever distillation produced before the failure.
                 pass
+
+        # 4. Style drift from this run's evidence (Phase F.3.3). Pure
+        #    deterministic tendency updates from board signals — no LLM
+        #    needed; the deeper LLM-driven style synthesis stays deferred
+        #    until a real user request surfaces.
+        self._drift_style(persona, role, workspace)
 
         # 5. Update reputation aggregates.
         self._refresh_reputation(persona)
@@ -240,6 +248,39 @@ class MemoryWriter(BaseAgent):
         if not isinstance(call.arguments, dict):
             return None
         return call.arguments
+
+    # ── 4. Style drift (§26 Layer 3, Phase F.3.3) ──────────────────────────
+
+    def _drift_style(self, persona: Persona, role: str, workspace) -> None:
+        """Drift the persona's working-style tendencies toward what was
+        observed this run.
+
+        Three lightweight observations from the board:
+          - `incremental_commits` — multiple GIT_COMMITs by role (vs one
+            big drop)
+          - `iterates_on_feedback` — run completed in iteration > 1 (the
+            agent had to revise after rejection or scheduler iteration)
+          - `tests_referenced` — at least one GIT_COMMIT by role mentions
+            tests (summary or detail contains "test")
+
+        Drift formula: `t = (1-α)·t + α·observation`, α=0.1. Each
+        observation is 1.0 (true) or 0.0 (false), so a single run nudges
+        the tendency by at most 0.1. Tendencies converge over ~10 runs.
+        """
+        role_commits = [
+            s for s in workspace.board
+            if s.type.value == "GIT_COMMIT" and s.from_agent == role
+        ]
+        incremental = len(role_commits) >= 2
+        iterates = bool(getattr(workspace, "iteration", 0) and workspace.iteration > 1)
+        tests_referenced = any(
+            "test" in (s.summary or "").lower() or "test" in (s.detail or "").lower()
+            for s in role_commits
+        )
+
+        _drift_tendency(persona.style.tendencies, "incremental_commits", incremental)
+        _drift_tendency(persona.style.tendencies, "iterates_on_feedback", iterates)
+        _drift_tendency(persona.style.tendencies, "tests_referenced", tests_referenced)
 
     # ── 5. Reputation ───────────────────────────────────────────────────────
 
@@ -495,6 +536,18 @@ class MemoryWriter(BaseAgent):
             "active_anti_patterns": persona.reputation.active_anti_patterns,
         }
         rep_path.write_text(json.dumps(rep_payload, indent=2, default=str), encoding="utf-8")
+
+        # style.json (Phase F.3.3 — drifted tendencies + relationship maps)
+        style_path = persona_dir / "style.json"
+        style_payload = {
+            "tendencies": dict(persona.style.tendencies),
+            "reviewer_relationships": dict(persona.style.reviewer_relationships),
+            "project_type_performance": dict(persona.style.project_type_performance),
+            "model_compatibility": dict(persona.style.model_compatibility),
+        }
+        style_path.write_text(
+            json.dumps(style_payload, indent=2, default=str), encoding="utf-8"
+        )
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -914,3 +967,22 @@ def _build_anti_pattern_from_flip(
         flipped_at=now_iso,
         user_pinned=False,
     )
+
+
+# ── Phase F.3.3 — style drift helpers ──────────────────────────────────────
+
+
+def _drift_tendency(
+    tendencies: dict[str, float], key: str, observation: bool
+) -> None:
+    """Nudge a tendency score toward `observation` (1.0 if True else 0.0).
+
+    Initialised to STYLE_TENDENCY_DEFAULT on first observation so a
+    persona without prior style data starts neutral and drifts from
+    there. Result clamped to [0.0, 1.0] and rounded to 4 places to
+    keep the persisted JSON readable.
+    """
+    target = 1.0 if observation else 0.0
+    current = tendencies.get(key, STYLE_TENDENCY_DEFAULT)
+    drifted = (1.0 - STYLE_DRIFT_ALPHA) * current + STYLE_DRIFT_ALPHA * target
+    tendencies[key] = round(max(0.0, min(1.0, drifted)), 4)
