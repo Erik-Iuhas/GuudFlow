@@ -1,8 +1,8 @@
 # AgentFlow Build Board
 
-**Current stage:** ✅ Initial build + Phase A + D-prime + B + C + D + F + G-prime shipped.
+**Current stage:** ✅ Initial build + Phase A + D-prime + B + C + D + F + G-prime + G shipped.
 **Last updated:** 2026-04-26
-**Tests:** 880 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
+**Tests:** 885 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
 
 ## Stage status
 - [x] Stage 1 — Foundation primitives  (29/29 tests)
@@ -53,11 +53,14 @@ real target.
   incremental board.jsonl + artifact persistence, run_loader,
   `POST /api/runs/{id}/resume`, worker resume branch. E2E:
   failed run resumes without re-running completed agents.
-- **G** — studio polish, story-backed (re-scoped against
-  [docs/USER_STORIES.md](../../docs/USER_STORIES.md) 2026-04-26).
-  Seven chunks: G.0 roster review, G.1 pipeline graph, G.2
-  onboarding, G.3 resume UI (consumes G-prime), G.4 training
-  tab, G.5 auto-tag review points, G.6 polish.
+- ✅ **G** — shipped 2026-04-26. Studio polish, story-backed.
+  G.0 roster review (reputation + chat + rankings + anti-patterns),
+  G.1 pipeline graph + agent state cards, G.2 onboarding (seed
+  personas + demo project + catalog status), G.3 resume UI,
+  G.4 training tab (scenarios + tournaments + leaderboard),
+  G.5 auto-tag review points + tags panel, G.6 toasts.
+  Deferred: branch graph, diff viewer, dark mode (each is its
+  own lift, not blocking any user story).
 - **F.5** (future) — persona author depth: publish, scenario
   authoring, richer scenario kinds
 - **I** (future, Mode B tack-on) — headless service: webhook

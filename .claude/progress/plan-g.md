@@ -1,4 +1,4 @@
-# Active plan — Phase G — Studio polish for workflow review
+# Active plan — Phase G — Studio polish for workflow review ✅ SHIPPED 2026-04-26
 
 Status: planned. Estimated ~3-5 days across 7 chunks. Re-scoped
 story-first per [docs/USER_STORIES.md](../../docs/USER_STORIES.md)
@@ -23,7 +23,7 @@ independently shippable and verifiable.
 
 ---
 
-## G.0 — Roster review UI (~half day)
+## G.0 — Roster review UI ✅ SHIPPED
 
 ### Story
 Tech lead + persona author both blocked on "see what each persona
@@ -67,7 +67,7 @@ Commit: `feat(studio): roster review with reputation + chat + rankings (Phase G.
 
 ---
 
-## G.1 — Pipeline graph view (~1 day)
+## G.1 — Pipeline graph view ✅ SHIPPED
 
 ### Story
 Solo dev "what's the team doing right now?" — today only the
@@ -109,7 +109,7 @@ Commit: `feat(studio): pipeline graph + agent state cards (Phase G.1)`
 
 ---
 
-## G.2 — Onboarding flow (~half day)
+## G.2 — Onboarding flow ✅ SHIPPED
 
 ### Story
 First-timer's empty-roster, no-demo problem. After install, the
@@ -149,7 +149,7 @@ Commit: `feat(studio): onboarding flow with seed personas + demo (Phase G.2)`
 
 ---
 
-## G.3 — Run resume UI (~2-3 hrs)
+## G.3 — Run resume UI ✅ SHIPPED
 
 ### Story
 "Resume" button on failed/paused runs. Pure frontend on top of
@@ -191,7 +191,7 @@ Commit: `feat(studio): run resume UI consuming G-prime backend (Phase G.3)`
 
 ---
 
-## G.4 — Training tab (~1 day)
+## G.4 — Training tab ✅ SHIPPED
 
 ### Story
 Persona author needs to launch training runs + tournaments + read
@@ -232,7 +232,7 @@ Commit: `feat(studio): training tab — scenarios + tournaments + leaderboard (P
 
 ---
 
-## G.5 — Auto-tag review points + rewind UI (~half day)
+## G.5 — Auto-tag review points + tags panel UI ✅ SHIPPED (rewind action deferred)
 
 ### Story
 "Rewind to a specific known-good state" beyond just "resume from
@@ -271,22 +271,24 @@ Commit: `feat(runner): auto-tag review points + rewind UI (Phase G.5)`
 
 ---
 
-## G.6 — Polish (~half day)
+## G.6 — Polish ✅ SHIPPED (toasts only; rest deferred)
 
-Lower priority once stories are in. Pick from the list as time
-allows.
+Shipped:
+- [x] **Toast notifications** for async API errors —
+      `Toaster.tsx` provides ToastProvider + useToast hook +
+      GlobalErrorHandler. Replaces silent unhandled-rejection
+      failures with visible toasts.
 
+Deferred to a future polish phase (each is real work, lower
+priority than the seven story-backed chunks above):
 - [ ] **Branch graph** — replace flat `GitLogTab` with lanes per
-      agent branch + merges as bridges (`@gitgraph/react`)
+      agent branch + merges as bridges
 - [ ] **Inline diff viewer** — click a commit, slide-out panel
 - [ ] **Per-file timeline** — every commit that touched a path
 - [ ] Project list as cards, not table
 - [ ] Optimistic updates for project edits
-- [ ] Toast notifications for async API errors
-- [ ] Dark-mode CSS variables
-
-Each is a separate small commit. Polish chunk is the only one
-without a strict ordering — ship what feels worth doing first.
+- [ ] Dark-mode CSS variables (requires refactoring all hardcoded
+      colors into CSS variables — substantial change)
 
 ---
 

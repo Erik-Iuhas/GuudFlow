@@ -451,3 +451,34 @@ button.small { padding: 2px 8px; font-size: 12px; }
   font-size: 13px;
 }
 .tags-list li:last-child { border-bottom: none; }
+
+/* ─── Phase G.6 — toasts ─────────────────────────────────────────────── */
+
+.toaster {
+  position: fixed; bottom: 16px; right: 16px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 1000; pointer-events: none;
+  max-width: 420px;
+}
+.toast {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: 6px;
+  background: white; border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
+  font-size: 13px; pointer-events: auto;
+  animation: toast-slide-in 0.2s ease-out;
+}
+@keyframes toast-slide-in {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.toast-info { border-left: 3px solid #2563eb; }
+.toast-success { border-left: 3px solid #10b981; }
+.toast-warn { border-left: 3px solid #f59e0b; }
+.toast-error { border-left: 3px solid #ef4444; }
+.toast-close {
+  background: none; border: none; padding: 0;
+  font-size: 20px; line-height: 1; color: #94a3b8; cursor: pointer;
+  margin-left: auto;
+}
+.toast-close:hover { color: #1f2937; background: none; }

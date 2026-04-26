@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { GlobalErrorHandler, ToastProvider } from "./components/Toaster";
 import { Projects } from "./views/Projects";
 import { Propose } from "./views/Propose";
 import { Roster } from "./views/Roster";
@@ -17,6 +18,21 @@ export function App() {
     setToken(token || null);
   }, [token]);
 
+  return (
+    <ToastProvider>
+      <GlobalErrorHandler />
+      <AppShell token={token} setTokenLocal={setTokenLocal} />
+    </ToastProvider>
+  );
+}
+
+function AppShell({
+  token,
+  setTokenLocal,
+}: {
+  token: string;
+  setTokenLocal: (s: string) => void;
+}) {
   return (
     <div className="shell">
       <header className="topbar">

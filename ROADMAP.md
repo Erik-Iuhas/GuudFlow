@@ -259,7 +259,7 @@ shipped the resume API surface so G's resume UI is pure frontend.
 
 ---
 
-## Phase G — Studio polish for workflow review (~3-5 days, story-backed)
+## Phase G — Studio polish for workflow review ✅ SHIPPED 2026-04-26
 
 Re-scoped against [docs/USER_STORIES.md](docs/USER_STORIES.md) +
 the F-phase endpoints that landed without UI consumers (rankings,
