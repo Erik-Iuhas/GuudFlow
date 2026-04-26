@@ -286,7 +286,6 @@ def test_escalation_posts_signal_even_without_handler_in_config(tmp_path: Path):
     assert runner._escalation_tasks == []
 
 
-@pytest.mark.skip(reason="C.3 in-progress: 2-agent runner.run() + max_iterations=1 setup needs adjustment; the runner-side C.3 wiring is in place but this end-to-end test won't reliably converge until C.3 resumes (see .claude/progress/plan-b-c-e.md)")
 async def test_reviewer_rejected_text_posts_rejected_signal(tmp_path: Path):
     """Phase C.3 reviewer-text detection: when a reviewer's artifact
     starts with REJECTED, the runner posts a REJECTED signal (not
@@ -310,7 +309,7 @@ async def test_reviewer_rejected_text_posts_rejected_signal(tmp_path: Path):
             "dev": RoleRBAC(role="dev", allowed_scopes=[]),
             "reviewer": RoleRBAC(role="reviewer", allowed_scopes=[]),
         },
-        max_iterations=1,
+        max_iterations=2,
     )
     # dev says "done"; reviewer says "REJECTED: missing tests".
     llm = MockLLMClient([
@@ -329,7 +328,6 @@ async def test_reviewer_rejected_text_posts_rejected_signal(tmp_path: Path):
     assert runner._rejection_counts.get("dev") == 1
 
 
-@pytest.mark.skip(reason="C.3 in-progress: see test_reviewer_rejected_text_posts_rejected_signal — same test setup issue, fix lands when C.3 resumes")
 async def test_reviewer_approved_text_still_emits_approved(tmp_path: Path):
     """Backwards compat: existing reviewer behaviour (approval) keeps
     working unchanged. Just the REJECTED branch is new."""
@@ -341,7 +339,7 @@ async def test_reviewer_approved_text_still_emits_approved(tmp_path: Path):
                 declared_local_tools=["fs:read"],
             ),
         ],
-        max_iterations=1,
+        max_iterations=2,
     )
     llm = MockLLMClient([
         MockTurn(text="done"),

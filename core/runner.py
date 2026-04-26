@@ -769,6 +769,30 @@ class AgentRunner:
 
         async def _run_handler() -> None:
             try:
+                # Phase C.0.5 cost gate: HEAVY-tier escalation handlers
+                # are exactly the kind of mid-run dispatch the user
+                # wanted to confirm before spending tokens on. Gate is
+                # ON by default; users can disable per-project via
+                # approval_gates.heavy_tier_mid_run_dispatch.
+                if self._is_gate_enabled("heavy_tier_mid_run_dispatch"):
+                    granted = await self._request_approval(
+                        kind="heavy_tier_mid_run_dispatch",
+                        summary=(
+                            f"Auto-dispatch {handler_role} for stuck "
+                            f"{target_role} ({rejection_count} rejections)"
+                        ),
+                        triggered_by=handler_role,
+                        context={
+                            "target_role": target_role,
+                            "rejection_count": rejection_count,
+                            "handler_role": handler_role,
+                        },
+                    )
+                    if not granted:
+                        # User denied — APPROVAL_DENIED is already on
+                        # the board (audit trail). Nothing else to do.
+                        return
+
                 if handler_role not in self.agents:
                     self._build_handler_agent(handler_cfg)
                 handler_agent = self.agents[handler_role]
