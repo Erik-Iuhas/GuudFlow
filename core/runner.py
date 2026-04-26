@@ -138,6 +138,14 @@ class ProjectConfig:
             "token_budget_usd": None,
         },
     )
+    # Run mode (DESIGN §35, Phase F.1). "production" is the default;
+    # "training" tags episodes as training=True so reputation aggregates
+    # split, and triggers the rubric_scorer at end-of-run.
+    mode: str = "production"
+    # When mode == "training", the rubric_scorer reads this scenario
+    # bundle from disk to score the run. Stored on the project at
+    # invoke time by the training launcher.
+    training_scenario_id: str | None = None
 
 
 # Default model id per tier. The runner may override via project config.
@@ -164,6 +172,8 @@ class AgentRunner:
         agent_factory: "AgentFactory | None" = None,
         max_wall_seconds: float | None = 1800.0,  # 30 min run-level budget
         docker_manager: "DockerManager | None" = None,
+        rubric_scorer: BaseAgent | None = None,
+        training_scenarios_root: Path | None = None,
     ):
         self.project = project
         self.run_id = run_id
@@ -177,6 +187,13 @@ class AgentRunner:
         self.agent_factory = agent_factory or default_agent_factory
         self.max_wall_seconds = max_wall_seconds
         self.docker_manager = docker_manager
+        # Training Camp (DESIGN §35, Phase F.1.1). The rubric_scorer is
+        # optional even in training mode — runs without one will simply
+        # not produce a RUBRIC_SCORE signal.
+        self.rubric_scorer = rubric_scorer
+        self.training_scenarios_root = (
+            Path(training_scenarios_root) if training_scenarios_root else None
+        )
 
         # Escalation tracking (DESIGN §23, Phase C.3). _rejection_counts
         # accumulates REJECTED signals per upstream role; once a role
@@ -438,6 +455,32 @@ class AgentRunner:
         # Wait for any in-flight escalation handlers (Phase C.3) so
         # their signals land before memory_writer / quip_engine fire.
         await self._await_escalation_tasks()
+
+        # Post-run: training rubric scoring (Phase F.1.1) runs first so
+        # the RUBRIC_SCORE signal is on the board before the
+        # memory_writer records its episode. Production runs (no
+        # rubric_scorer / no training_scenario_id) skip this entirely.
+        if (
+            self.project.mode == "training"
+            and self.rubric_scorer is not None
+            and self.training_scenarios_root is not None
+            and hasattr(self.rubric_scorer, "on_run_complete")
+        ):
+            try:
+                await self.rubric_scorer.on_run_complete(  # type: ignore[union-attr]
+                    workspace=self.workspace,
+                    project=self.project,
+                    run_id=self.run_id,
+                    run_root=self.run_root,
+                    scenarios_root=self.training_scenarios_root,
+                )
+            except Exception as e:
+                # Scoring failures shouldn't fail the run.
+                self.workspace.post_signal(Signal(
+                    type=SignalType.FAILED,
+                    summary=f"rubric_scorer failed: {e}",
+                    from_agent="runner",
+                ))
 
         # Post-run: trigger memory_writer if any persona agents participated.
         if self.memory_writer is not None:

@@ -106,7 +106,7 @@ class MemoryWriter(BaseAgent):
         """
         for role, persona in personas.items():
             try:
-                await self._update_persona(persona, role, workspace, run_id)
+                await self._update_persona(persona, role, workspace, run_id, project)
             except Exception:
                 # Memory write must never fail the run.
                 continue
@@ -114,10 +114,13 @@ class MemoryWriter(BaseAgent):
     # ── Per-persona update ─────────────────────────────────────────────────
 
     async def _update_persona(
-        self, persona: Persona, role: str, workspace, run_id: str
+        self, persona: Persona, role: str, workspace, run_id: str, project=None
     ) -> None:
-        # 1. Record episode.
-        episode = self._build_episode(persona, role, workspace, run_id)
+        # 1. Record episode. Episodes from training-mode runs are
+        #    tagged so reputation aggregates can split production vs
+        #    training (DESIGN §35) — both still feed recall().
+        is_training = bool(project is not None and getattr(project, "mode", "production") == "training")
+        episode = self._build_episode(persona, role, workspace, run_id, is_training)
         persona.episodes.append(episode)
 
         # 2. Recency-weighted confidence (read-side already computes this;
@@ -157,7 +160,10 @@ class MemoryWriter(BaseAgent):
 
     # ── 1. Episode ──────────────────────────────────────────────────────────
 
-    def _build_episode(self, persona: Persona, role: str, workspace, run_id: str) -> Episode:
+    def _build_episode(
+        self, persona: Persona, role: str, workspace, run_id: str,
+        is_training: bool = False,
+    ) -> Episode:
         # Find the artifact (if any) for this role.
         artifact = workspace.artifacts.get(role)
         artifact_text = ""
@@ -192,7 +198,7 @@ class MemoryWriter(BaseAgent):
             tags=tags,
             timestamp=datetime.now(timezone.utc).isoformat(),
             staleness="fresh",
-            training=False,
+            training=is_training,
         )
 
     # ── 3. LLM-driven pattern distillation (§34, Phase F.3.1) ──────────────

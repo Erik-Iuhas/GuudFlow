@@ -161,10 +161,11 @@ def _persist_run(run_root: Path, runner: AgentRunner, run_id: str,
 
 
 RunnerFactory = Callable[..., AgentRunner]
-"""Factory signature: (project, run_id, run_root, llm, *, docker_manager=None) -> AgentRunner.
+"""Factory signature: (project, run_id, run_root, llm, *, docker_manager=None,
+data_root=None) -> AgentRunner.
 
-The trailing keyword arg is positional-via-kwarg so existing factories
-that ignore it still work — JobRunner always passes it as a keyword."""
+The trailing keyword args are positional-via-kwarg so existing factories
+that ignore them still work — JobRunner always passes them as keywords."""
 
 
 def default_runner_factory(
@@ -174,7 +175,16 @@ def default_runner_factory(
     llm: LLMClient,
     *,
     docker_manager: DockerManager | None = None,
+    data_root: Path | None = None,
 ) -> AgentRunner:
+    # Phase F.1.1 — wire the rubric_scorer + scenarios root so training
+    # mode produces a RUBRIC_SCORE signal automatically. Production
+    # runs ignore both fields.
+    from agents.builtin.rubric_scorer import RubricScorer
+    scenarios_root = (
+        Path(data_root) / "training_camp" / "scenarios"
+        if data_root is not None else None
+    )
     return AgentRunner(
         project=project,
         run_id=run_id,
@@ -182,6 +192,8 @@ def default_runner_factory(
         llm=llm,
         memory_writer=MemoryWriter(llm=llm),
         docker_manager=docker_manager,
+        rubric_scorer=RubricScorer(),
+        training_scenarios_root=scenarios_root,
     )
 
 
@@ -311,6 +323,7 @@ class JobRunner:
         runner = self.runner_factory(
             project, job.run_id, run_root, llm,
             docker_manager=self.docker,
+            data_root=self.data_root,
         )
 
         # 5. Register live workspace for the WebSocket bridge.
