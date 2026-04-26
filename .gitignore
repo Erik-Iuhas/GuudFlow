@@ -14,6 +14,11 @@ htmlcov/
 data/runs/
 data/projects/
 data/projects.json
+# Runtime-seeded personas. The canonical seed manifest is at
+# `data/_seed/personas/` (committed); `scripts/seed_data.py` copies
+# from there into `data/personas/` on first install.
+data/personas/
+!data/_seed/
 *.log
 .DS_Store
 .idea/

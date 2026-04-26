@@ -14,6 +14,23 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+# Load .env before anything else reads env vars. The Anthropic SDK
+# pulls ANTHROPIC_API_KEY from os.environ at client construction
+# time; the auth bearer pulls AGENTFLOW_API_TOKEN. Both need the
+# .env values present before they're imported anywhere.
+#
+# `override=True` is intentional: an inherited shell environment
+# may have stale or empty values for these keys (Claude Code
+# sessions, IDE-launched terminals, parent CI shells). The .env
+# file is the developer's explicit source of truth — let it win.
+try:
+    from dotenv import load_dotenv  # python-dotenv (in requirements.txt)
+    load_dotenv(override=True)
+except ImportError:
+    # If python-dotenv isn't installed for some reason, fall back to
+    # whatever's already in the process env. Better than crashing.
+    pass
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
