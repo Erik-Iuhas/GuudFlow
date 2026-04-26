@@ -36,18 +36,20 @@ closed (G.7 inline fix); seed personas Mike/Sarah/Alex install via
 `scripts/seed_data.py` on fresh setup; the studio's "Try demo"
 button gives first-timers a known-good run on day one.
 
-**Recommended next:**
-- **F.5** (persona author depth) — scaffolding, packaging, curated
-  reference URLs, richer scenario kinds. Most-impactful Mode A
-  improvement now that G is done.
+**Recommended next** (after Erik test-drives the current product):
+- **Phase K** (~half day) — project roadmap.md + team reads at
+  run start. Unblocks "build an app over many runs" with team
+  continuity. Designed light-touch; full Agile ceremonies are
+  back-pocket for if real users ask.
+- **F.5** (persona author depth) — makes individual cycles
+  smarter (scaffolding, packaging, curated reference URLs,
+  richer scenario kinds).
 - **Phase J** (knowledge surface) — deep-wiki / codebase-doc
   toolkit. New archetype + tools.
 - **Phase I** (headless service) — Mode B tack-on. Webhooks +
-  structured deliverables + per-consumer API keys. When there's a
-  real CI consumer.
-- **Phase E** (production deploy + multi-tenant) — Redis +
-  KubeJobManager + Helm + per-user accounts + cost dashboards.
-  Paused until there's a deploy target.
+  structured deliverables + per-consumer API keys.
+- **Phase E** (production deploy + multi-tenant) — paused until
+  there's a deploy target.
 
 - ✅ **D-prime** — shipped 2026-04-26
 - ✅ **B** — shipped 2026-04-26 ([`56f3523`](https://github.com/Erik-Iuhas/AgentFlow/commit/56f3523))
@@ -69,6 +71,10 @@ button gives first-timers a known-good run on day one.
   G.5 auto-tag review points + tags panel, G.6 toasts.
   Deferred: branch graph, diff viewer, dark mode (each is its
   own lift, not blocking any user story).
+- **K** (future, ~half day) — project context: a `roadmap.md`
+  the team reads at run start so a project gains continuity
+  across runs. Light-touch, NOT full Agile. Plan in
+  [plan-k.md](plan-k.md).
 - **F.5** (future) — persona author depth: publish, scenario
   authoring, richer scenario kinds, scaffolding templates,
   curated reference-URL training

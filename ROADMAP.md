@@ -510,6 +510,43 @@ not "set up a project + invoke + scrape working/."
 
 ---
 
+## Phase K — Project context (continuous app building, future)
+
+After test-driving G, the natural next ask is "let me iterate on a
+project across many runs and have the team understand where we
+are." Most review primitives already exist (reviewer
+APPROVED/REJECTED, auto-tag review points, USER_COMMENT, approval
+gates, continuation runs, persona memory). What's missing is **a
+persistent place where the project's bigger picture lives between
+runs that the team reads in.**
+
+Light-touch — explicitly NOT a full Agile framework rewrite. Three
+chunks, ~half a day total. Plan in
+[`.claude/progress/plan-k.md`](.claude/progress/plan-k.md).
+
+- [ ] **K.0** — `data/projects/{id}/context/roadmap.md` storage +
+      GET/PUT endpoints. Free-form markdown the user owns.
+- [ ] **K.1** — Runner threads `roadmap.md` into agent prompts as
+      a new layer between project rules and persona memory. Empty
+      roadmap → layer omitted.
+- [ ] **K.2** — Studio "Roadmap" tab on the project page. Editor
+      + save. Reads/writes via K.0's endpoints.
+
+What this intentionally does NOT add: Sprint object, Scrum Master
+archetype, Definition-of-Done formalism, backlog data model, auto-
+summarisation. If a user wants formal Agile ceremonies they encode
+them as markdown headings in the roadmap; the team reads markdown.
+The fuller "LLM Agile" framework stays in the back pocket if real
+users ask for it — adding Sprint as a structured concept on top of
+an existing project is a non-breaking extension.
+
+**Unblocks:** continuous app building. The team hired into run 3
+of a project knows what runs 1 + 2 did and what's queued next,
+because the roadmap.md is in their context window. The user
+maintains the roadmap; the system reads it.
+
+---
+
 ## Phase H — Speculative / not on the priority track
 
 Things that are technically interesting and designed in DESIGN.md but
@@ -534,24 +571,30 @@ for the full framing.
 
 | If you want to... | Do |
 |---|---|
-| ...let users resume a crashed run instead of starting over | **Phase G-prime** (foundational, ships before G) |
-| ...polish the daily-driver studio experience | **Phase G** (story-backed; see USER_STORIES) |
+| ...let users resume a crashed run instead of starting over | Phase G-prime ✅ |
+| ...polish the daily-driver studio experience | Phase G ✅ |
+| ...let a project iterate across many runs with team continuity | **Phase K** (future, ~half day) |
 | ...grow persona authoring depth | Phase F.5 (future, 5 sub-areas) |
 | ...ship a deep-wiki / codebase-doc product | Phase J (future) |
 | ...wire AgentFlow into CI / webhooks / scheduled runs | Phase I (future, Mode B tack-on) |
 | ...deploy to production for an org | Phase E (infra + multi-tenant) |
-| ...demo a real interactive run | Already shipped (C + D + F) |
+| ...demo a real interactive run | Already shipped (C + D + F + G) |
 
-Recommended order — the developer-as-user is the current focus,
-so polish comes after the resume foundation:
+Recommended order — the developer-as-user is the current focus.
+G-prime + G shipped 2026-04-26. Next:
 
-- **Now:** **G-prime** (resume backend) — small, foundational,
-  unblocks G's resume UI as pure frontend work.
-- **Then:** **G** (studio polish, story-backed). Seven chunks
-  (G.0 roster → G.6 polish), each tied to a user story.
-- **Then:** **F.5** (persona author depth) — once G unblocks
-  the tech-lead and persona-author archetypes, deepen the
-  authoring experience they need.
+- **Now:** test-drive the demo / studio end-to-end. The
+  pre-test review (commit `aa520a4`) closed the persona auto-load
+  gap and refreshed the README + BOARD; the seed personas
+  install via `scripts/seed_data.py` on fresh setup; demo
+  project's "Try demo" button is wired with approval gates
+  disabled for friction-free first-run.
+- **Then:** **K** (project context, ~half day) — gives projects
+  continuity across runs. The team reads `roadmap.md` at run
+  start. Unblocks "build an app over many runs."
+- **Then:** **F.5** (persona author depth) — make individual
+  cycles smarter (curated reference URLs, scaffolding templates,
+  richer scenario kinds).
 - **When there's a target:** **E** (infra + multi-tenant) for
   shared deployments; **I** (headless service) for CI / webhook
   consumers; **J** (knowledge surface) for the doc-writer
