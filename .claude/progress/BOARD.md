@@ -49,7 +49,15 @@ real target.
   F.4 (persona chat), F.1 (Training Camp: scenarios + rubric +
   tournaments + graduation + rankings), F.2 (catalog status:
   shipped vs described view)
-- **G** (studio polish for workflow review — independent, can run in parallel)
+- **G** — studio polish, story-backed (re-scoped against
+  [docs/USER_STORIES.md](../../docs/USER_STORIES.md) 2026-04-26).
+  First chunks: roster review UI, pipeline graph, onboarding,
+  run resume.
+- **F.5** (future) — persona author depth: publish, scenario
+  authoring, richer scenario kinds
+- **I** (future, Mode B tack-on) — headless service: webhook
+  callbacks, structured deliverables, per-consumer API keys
+- **E** (paused) — production deploy + multi-tenant admin
 - **E** (Redis queue + KubeJobManager + Helm — when there's a deploy target)
 - **H** (speculative — visual_checker Playwright + UICanvas)
 

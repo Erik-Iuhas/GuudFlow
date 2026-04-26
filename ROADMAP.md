@@ -183,6 +183,8 @@ For multi-pod / k8s deployments, today's `InMemoryJobQueue` and
 `DockerManager`-via-socket-mount don't translate cleanly. Skip this
 until you have somewhere to actually deploy.
 
+**Infrastructure (the original E scope):**
+
 - [ ] **Redis-backed `JobQueue`** — `worker/redis_queue.py` implementing
       the `JobQueue` Protocol. Toggle via `AGENTFLOW_QUEUE_BACKEND=redis`.
 - [ ] **`KubeJobManager`** — k8s-native equivalent of `DockerManager`
@@ -197,8 +199,23 @@ until you have somewhere to actually deploy.
 - [ ] Document the deploy walkthrough in `README.md` or
       `deploy/README.md`.
 
-**Unblocks:** real horizontal scaling, multi-tenant deploys, cloud
-production.
+**Multi-tenant + admin (added 2026-04-26 from
+[USER_STORIES.md](docs/USER_STORIES.md) "Org admin" archetype):**
+
+- [ ] **Per-user accounts** — own roster + audit trail per user.
+      Today's single bearer token is fine for self-host; not fine
+      for any deployment with > 1 human.
+- [ ] **Cost dashboards** per user / project / persona — surface
+      "who's burning what" beyond the per-run cost preview.
+- [ ] **Org-level shared roster** — graduated personas everyone
+      in the org can hire, distinct from per-user rosters.
+- [ ] **Admin kill-switch** for in-flight runs — budget overrun /
+      incident response. Today only the worker process can be
+      stopped.
+- [ ] **Audit log export** to SIEM — aggregated `access_log.jsonl`
+      across runs into a queryable / exportable surface.
+
+**Unblocks:** real horizontal scaling, multi-tenant cloud production.
 
 **Files:** new `worker/redis_queue.py`, new `worker/kube_job_manager.py`,
 new `deploy/helm/`, `worker/docker_manager.py` becomes one of two
@@ -313,6 +330,53 @@ them up when real users tell you which one matters.
       prompt-building separable from FastAPI. project_id / run_id
       accepted in the body for forward-compat but not yet layered into
       the prompt — that's a follow-up when a real consumer surfaces.
+- [ ] **F.5 Persona author depth** (future, story-driven) — backs the
+      "Persona author" archetype in [USER_STORIES.md](docs/USER_STORIES.md).
+      Publish a persona (local roster → org or public registry),
+      scenario authoring tooling (scaffold + validate + preview),
+      richer scenario kinds (sandboxed pytest checks, real lint
+      runs), larger scenarios (multi-file refactors). F.1 covers
+      training mechanics; F.5 covers the authoring experience.
+
+---
+
+## Phase I — Headless Service (future, Mode B tack-on)
+
+The user-stories doc captures a second deployment mode: a headless
+service that takes an invoke and returns deliverables, no
+interactive review. The technical primitive exists today
+(`POST /api/invoke` returns 202; status pollable; deliverables
+on disk) but the polish that makes it feel like a product is
+not built. **Mode A is the headline product** — Phase I is the
+tack-on once Mode A is solid (per Erik 2026-04-26).
+
+Scope:
+
+- [ ] **Webhook callbacks** on run completion — caller registers a
+      `callback_url` at invoke time; runner POSTs the final result
+      payload when done. Replaces the poll-only API.
+- [ ] **Structured deliverable formats** per project type — JSON
+      report for code-review projects, unified diff for patch
+      projects, markdown bundle for doc projects. The runner emits
+      a typed envelope rather than "go read the working/ tree."
+- [ ] **API keys per consumer** with per-key rate limits and
+      per-key scopes. Today's single `AGENTFLOW_API_TOKEN` is fine
+      for one developer; not fine for "GitHub Action + internal
+      tools + an SDK consumer all sharing the same key."
+- [ ] **Trusted-token gate bypass** — when an authenticated CI key
+      holds the right scope, skip approval gates that would
+      otherwise hang an unattended run.
+- [ ] **Reference GitHub Action** — a drop-in that wraps the invoke
+      flow for the common "review this PR" pattern.
+
+**Unblocks:** the "Lambda that's a multi-agent team" use case —
+code review on every PR, nightly doc regeneration, scheduled
+audits. Sits on top of Phases C + B; doesn't touch the runner
+internals.
+
+See [docs/USER_STORIES.md](docs/USER_STORIES.md) Mode B section
+for the full motivation and the per-archetype stories this
+unblocks.
 
 ---
 
@@ -333,20 +397,32 @@ specific user request lands or when an adjacent phase makes them cheap.
 
 ## How to pick what's next
 
+**Mode A is the headline product.** Mode B (Phase I) is a
+tack-on. Multi-tenant (expanded Phase E) is paused until there's a
+real deploy target. See [docs/USER_STORIES.md](docs/USER_STORIES.md)
+for the full framing.
+
 | If you want to... | Do |
 |---|---|
-| ...let someone else run the repo | Phase A (done) |
-| ...deploy to production safely | Phase B + Phase E |
-| ...let real users show up with rich asks (PDFs, repos, prior runs) | **Phase D-prime + Phase D** |
-| ...let users **review** a run easily (the headline UX question) | **Phase G** (studio polish) |
-| ...demo a real interactive run | Phase C + Phase D |
-| ...make agents genuinely smarter over time | Phase F (training camp + memory synthesis) |
+| ...polish the daily-driver studio experience | **Phase G** (now story-backed; see USER_STORIES) |
+| ...grow persona authoring depth | Phase F.5 (future) |
+| ...wire AgentFlow into CI / webhooks / scheduled runs | Phase I (future, Mode B tack-on) |
+| ...deploy to production for an org | Phase E (infra + multi-tenant) |
+| ...demo a real interactive run | Already shipped (C + D + F) |
 
-Recommended order depends on your near-term goal:
+Recommended order — the developer-as-user is the current focus,
+so polish comes first:
 
-- **Demo to real users:** **D-prime → D → C → B → E → F** (rich ingestion + smart proposals first; production-grade exec after the UX validates)
-- **Ship to production for trusted users:** **B → E → D-prime → D → C → F** (lock down `code:exec` and the deploy story first; UX polish after)
-- **Default if you're not sure:** **D-prime → D → B → C** (the proposal flow is the platform's headline UX; D-prime is the prerequisite that's currently silent)
+- **Now:** **G** (studio polish, story-backed). Re-grounds against
+  the four story-backed priorities: roster review, pipeline graph,
+  onboarding, run resume.
+- **Next:** **F.5** (persona author depth) — once G unblocks the
+  tech-lead and persona-author archetypes, deepen the authoring
+  experience they need.
+- **When there's a target:** **E** (infra + multi-tenant) for
+  shared deployments; **I** (headless service) for CI / webhook
+  consumers. Order between them depends on which use case shows
+  up first.
 
 Each phase except E is a half-day-to-two-days commitment.
 
