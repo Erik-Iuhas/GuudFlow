@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { ApiError, runsApi } from "../api";
 
 interface Props {
   runId: string;
+  /** Optional override — defaults to runsApi.postComment. Tests inject. */
   onSubmit?: (text: string, priority: "normal" | "high") => Promise<void>;
 }
 
@@ -9,18 +11,35 @@ export function CommentBox({ runId, onSubmit }: Props) {
   const [text, setText] = useState("");
   const [priority, setPriority] = useState<"normal" | "high">("normal");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function send() {
-    if (!text.trim()) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    // Optimistic: clear the textarea immediately. The signal will surface
+    // on the live board via the WebSocket, so the user sees their own
+    // comment appear there as confirmation.
+    setText("");
+    setError(null);
+    setBusy(true);
     try {
-      if (onSubmit) await onSubmit(text, priority);
-      // No backend route yet to POST a USER_COMMENT for an active run —
-      // this is a Stage 8 follow-on. For now, the textarea is wired and
-      // the button is enabled so the UX shape exists.
-      setText("");
-      setError(null);
+      if (onSubmit) {
+        await onSubmit(trimmed, priority);
+      } else {
+        await runsApi.postComment(runId, trimmed, priority);
+      }
     } catch (e) {
-      setError(String(e));
+      // Revert optimistic clear so the user can retry.
+      setText(trimmed);
+      if (e instanceof ApiError && e.status === 410) {
+        setError("This run is no longer active — comments can't land.");
+      } else if (e instanceof ApiError) {
+        setError(e.detail);
+      } else {
+        setError(String(e));
+      }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -38,6 +57,7 @@ export function CommentBox({ runId, onSubmit }: Props) {
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send();
             }}
+            disabled={busy}
           />
           {error && <div className="error" style={{ marginTop: 4 }}>{error}</div>}
         </div>
@@ -46,6 +66,7 @@ export function CommentBox({ runId, onSubmit }: Props) {
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value as "normal" | "high")}
+            disabled={busy}
           >
             <option value="normal">normal</option>
             <option value="high">high</option>
@@ -54,10 +75,10 @@ export function CommentBox({ runId, onSubmit }: Props) {
         <button
           className="primary"
           onClick={send}
-          disabled={!text.trim()}
+          disabled={!text.trim() || busy}
           style={{ alignSelf: "flex-end" }}
         >
-          Post
+          {busy ? "Posting…" : "Post"}
         </button>
       </div>
     </div>

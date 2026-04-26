@@ -70,3 +70,119 @@ async def test_download_missing_deliverable(client, write_run):
     write_run("run_1")
     r = await client.get("/api/runs/run_1/deliverables/nope.txt")
     assert r.status_code == 404
+
+
+# ── POST /api/runs/{id}/comment (Phase C.1) ────────────────────────────────
+
+
+def _register_workspace(app, run_id: str, goal: str = "x"):
+    """Sync registration — bypasses async lock for test simplicity, same
+    pattern as tests/api/test_websocket.py."""
+    from core.workspace import Workspace
+    ws = Workspace(run_id=run_id, goal=goal)
+    app.state.run_registry.runs[run_id] = ws
+    return ws
+
+
+async def test_post_comment_to_active_run(client, app, auth_header):
+    ws = _register_workspace(app, "run_live")
+    r = await client.post(
+        "/api/runs/run_live/comment",
+        json={"text": "use Tailwind, not raw CSS"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert body["type"] == "USER_COMMENT"
+
+    # Signal landed on the workspace board AND on user_board (filtered view).
+    assert len(ws.board) == 1
+    assert ws.board[0].summary == "use Tailwind, not raw CSS"
+    assert ws.board[0].from_user is True
+    assert ws.board[0].priority == "normal"
+    assert len(ws.user_board) == 1
+
+
+async def test_post_comment_high_priority(client, app, auth_header):
+    ws = _register_workspace(app, "run_live")
+    r = await client.post(
+        "/api/runs/run_live/comment",
+        json={"text": "stop, the auth changes are wrong", "priority": "high"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    assert r.json()["type"] == "USER_COMMENT_PRIORITY"
+    assert ws.board[0].priority == "high"
+
+
+async def test_post_comment_to_inactive_run_returns_410(client, auth_header):
+    """A run that isn't registered (finished or never started) returns
+    410 Gone — comments only land mid-run."""
+    r = await client.post(
+        "/api/runs/run_done/comment",
+        json={"text": "too late"},
+        headers=auth_header,
+    )
+    assert r.status_code == 410
+
+
+async def test_post_comment_requires_auth(client, app):
+    _register_workspace(app, "run_live")
+    r = await client.post(
+        "/api/runs/run_live/comment",
+        json={"text": "x"},
+    )
+    assert r.status_code == 401
+
+
+async def test_post_comment_rejects_empty_text(client, app, auth_header):
+    _register_workspace(app, "run_live")
+    r = await client.post(
+        "/api/runs/run_live/comment",
+        json={"text": "   "},
+        headers=auth_header,
+    )
+    assert r.status_code == 400
+
+
+async def test_post_comment_rejects_invalid_priority(client, app, auth_header):
+    _register_workspace(app, "run_live")
+    r = await client.post(
+        "/api/runs/run_live/comment",
+        json={"text": "x", "priority": "URGENT"},
+        headers=auth_header,
+    )
+    assert r.status_code == 400
+
+
+async def test_post_comment_uses_workspace_iteration(client, app, auth_header):
+    """The signal's iteration field reflects the workspace's current
+    iteration so agents can absorb it within the right cycle."""
+    ws = _register_workspace(app, "run_live")
+    ws.iteration = 3
+    r = await client.post(
+        "/api/runs/run_live/comment",
+        json={"text": "iter check"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    assert r.json()["iteration"] == 3
+    assert ws.board[0].iteration == 3
+
+
+async def test_post_comment_notifies_subscribers(client, app, auth_header):
+    """A subscriber on the workspace receives the new USER_COMMENT live —
+    proves the WebSocket bridge would forward it without extra wiring."""
+    ws = _register_workspace(app, "run_live")
+    received: list = []
+    ws.subscribe(lambda sig: received.append(sig))
+    r = await client.post(
+        "/api/runs/run_live/comment",
+        json={"text": "live"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    assert len(received) == 1
+    assert received[0].type.value == "USER_COMMENT"
+    assert received[0].summary == "live"

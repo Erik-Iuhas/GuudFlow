@@ -87,6 +87,22 @@ export const runsApi = {
     ),
   get: (id: string) => request<RunMeta>("GET", `/api/runs/${id}`),
   board: (id: string) => request<Signal[]>("GET", `/api/runs/${id}/board`),
+  postComment: (
+    id: string,
+    text: string,
+    priority: "normal" | "high" = "normal",
+  ) =>
+    request<{
+      ok: boolean;
+      signal_id: string;
+      type: string;
+      iteration: number;
+    }>(
+      "POST",
+      `/api/runs/${encodeURIComponent(id)}/comment`,
+      { text, priority },
+      true,
+    ),
 };
 
 // ── Personas ───────────────────────────────────────────────────────────────
