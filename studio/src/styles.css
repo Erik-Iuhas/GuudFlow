@@ -398,3 +398,18 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .tag-comments { background: #fef3c7; color: #92400e; }
 .tag-status-pending { background: #f1f5f9; color: #475569; }
 .tag-status-waiting_for_human { background: #dbeafe; color: #1e3a8a; }
+
+/* ─── Phase G.2 — onboarding ─────────────────────────────────────────── */
+
+.onboarding-card {
+  background: linear-gradient(135deg, #f0f9ff 0%, #f8fafc 100%);
+  border-color: #bae6fd;
+  padding: 24px;
+}
+.onboarding-options { gap: 16px; margin-top: 16px; }
+.onboarding-option {
+  background: white; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 16px;
+}
+.onboarding-option h3 { margin: 0 0 8px 0; font-size: 16px; }
+.onboarding-option button { margin-top: 8px; }

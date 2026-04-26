@@ -66,7 +66,9 @@ else
 fi
 
 # 6. .env
+FRESH_INSTALL=0
 if [ ! -f ".env" ]; then
+    FRESH_INSTALL=1
     if [ -f ".env.example" ]; then
         cp .env.example .env
         echo "Created .env from .env.example"
@@ -80,6 +82,13 @@ EOF
     fi
 else
     echo ".env already exists — leaving alone"
+fi
+
+# 7. Seed default personas on first install (idempotent — won't
+# overwrite existing personas; safe to skip on re-run).
+if [ "${FRESH_INSTALL}" = "1" ] || [ "${AGENTFLOW_FORCE_SEED:-0}" = "1" ]; then
+    echo "Seeding default personas..."
+    python scripts/seed_data.py || echo "WARN: seed_data.py failed — you can re-run manually"
 fi
 
 echo

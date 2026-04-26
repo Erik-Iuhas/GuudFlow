@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ApiError, personasApi } from "../api";
+import { agentsApi, ApiError, personasApi } from "../api";
+import type { CatalogStatus } from "../api";
 import { PersonaChatBox } from "../components/PersonaChatBox";
 import { RankingsPanel } from "../components/RankingsPanel";
 import type { PersonaSummary } from "../types";
@@ -11,6 +12,7 @@ export function Roster() {
   const { id } = useParams<{ id?: string }>();
   const [tab, setTab] = useState<RosterTab>("all");
   const [personas, setPersonas] = useState<PersonaSummary[]>([]);
+  const [catalog, setCatalog] = useState<CatalogStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<unknown[] | null>(null);
   const [patterns, setPatterns] = useState<{
@@ -20,6 +22,9 @@ export function Roster() {
 
   useEffect(() => {
     void loadList();
+    // Catalog status is best-effort — failures shouldn't block the
+    // rest of the roster view.
+    agentsApi.catalogStatus().then(setCatalog).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -83,10 +88,7 @@ export function Roster() {
         <div className="grid-2">
           <div>
             {personas.length === 0 ? (
-              <p className="muted">
-                No personas yet. They'll appear here after the first runs that
-                hire them.
-              </p>
+              <RosterEmptyState catalog={catalog} />
             ) : (
               personas.map((p) => (
                 <Link
@@ -290,6 +292,61 @@ function PersonaDetail({
 
       {/* Phase G.0 — chat with this persona via F.4 endpoint */}
       <PersonaChatBox personaId={personaId} />
+    </div>
+  );
+}
+
+
+/**
+ * Phase G.2 — first-timer's empty Roster view. Surfaces the
+ * catalog-status snapshot so the user sees the system has 16
+ * archetypes available even before any persona is hired.
+ */
+function RosterEmptyState({ catalog }: { catalog: CatalogStatus | null }) {
+  return (
+    <div>
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>No personas yet</h3>
+        <p className="muted small">
+          Personas appear here after the first runs that hire them.
+          The seed personas (Mike, Sarah, Alex) ship with the install
+          script — if you don't see them, run{" "}
+          <code>python scripts/seed_data.py</code>.
+        </p>
+        <p className="small">
+          New to AgentFlow? <Link to="/projects">Try the demo</Link> on
+          the Projects page — it hires the seed personas for you.
+        </p>
+      </div>
+
+      {catalog && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Available archetypes</h3>
+          <p className="small muted">
+            The meta-agent picks from these when proposing a team.
+            Shipped archetypes have concrete classes; described-only
+            archetypes are prompt-defined from the YAML catalog.
+          </p>
+          <div className="row" style={{ gap: 16, flexWrap: "wrap" }}>
+            <div>
+              <div className="metric">{catalog.n_total}</div>
+              <div className="small muted">total archetypes</div>
+            </div>
+            <div>
+              <div className="metric">{catalog.n_shipped}</div>
+              <div className="small muted">shipped (concrete classes)</div>
+            </div>
+            <div>
+              <div className="metric">{catalog.n_described_only}</div>
+              <div className="small muted">described-only (YAML)</div>
+            </div>
+            <div>
+              <div className="metric">{catalog.n_scenarios}</div>
+              <div className="small muted">training scenarios</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

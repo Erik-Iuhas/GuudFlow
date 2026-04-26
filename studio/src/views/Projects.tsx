@@ -12,6 +12,7 @@ export function Projects() {
   const [blankId, setBlankId] = useState("");
   const [blankGoal, setBlankGoal] = useState("");
   const [blankBusy, setBlankBusy] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
@@ -51,6 +52,55 @@ export function Projects() {
     } catch (e) {
       setProjects(prev);
       setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+
+  async function createDemo() {
+    // Phase G.2 — first-timer's "try this" path. Posts a curated
+    // demo project with the seed personas attached. The user lands
+    // in Studio ready to invoke a run.
+    setDemoBusy(true);
+    try {
+      const created = await projectsApi.create({
+        project_id: "demo-hello-python",
+        goal: "Add a hello.py module that exports greet(name) returning 'Hello, {name}!'",
+        agents: [
+          {
+            role: "developer",
+            description: "Writes the code",
+            system_prompt: "Write a small Python module. Use fs:write to land hello.py with greet(name) returning the right format.",
+            declared_local_tools: ["fs:read", "fs:list", "fs:write"],
+            persona_id: "mike-frontend-v1",
+            model_tier: "fast",
+          },
+          {
+            role: "reviewer",
+            description: "Reviews the developer's work",
+            depends_on: ["developer"],
+            declared_local_tools: ["fs:read", "fs:list", "git:diff", "git:log"],
+            persona_id: "alex-code_reviewer-v1",
+            model_tier: "fast",
+            agent_class_role_type: "code_reviewer",
+            is_reviewer: true,
+            max_tool_iterations: 5,
+          },
+        ],
+        rbac: {
+          developer: { allowed_scopes: ["fs:write"] },
+          reviewer: { allowed_scopes: [] },
+        },
+        max_iterations: 3,
+      });
+      navigate(`/projects/${created.project_id}`);
+    } catch (e) {
+      // If the project already exists (re-clicking demo), just navigate.
+      if (e instanceof ApiError && e.status === 409) {
+        navigate(`/projects/demo-hello-python`);
+        return;
+      }
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setDemoBusy(false);
     }
   }
 
@@ -121,11 +171,7 @@ export function Projects() {
       {loading ? (
         <p className="muted">loading…</p>
       ) : projects.length === 0 ? (
-        <div className="card">
-          <p className="muted">
-            No projects yet. <Link to="/propose">Propose one</Link> to get started.
-          </p>
-        </div>
+        <OnboardingPanel onTryDemo={() => void createDemo()} busy={demoBusy} />
       ) : (
         <table className="list">
           <thead>
@@ -205,6 +251,72 @@ export function Projects() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+/**
+ * Phase G.2 — first-timer's empty Projects view. Replaces the stark
+ * "no projects yet" with a guided next step.
+ */
+function OnboardingPanel({
+  onTryDemo,
+  busy,
+}: {
+  onTryDemo: () => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="card onboarding-card">
+      <h2 style={{ marginTop: 0 }}>Welcome to AgentFlow</h2>
+      <p className="muted">
+        Two paths to your first run, depending on what you want:
+      </p>
+
+      <div className="grid-2 onboarding-options">
+        <div className="onboarding-option">
+          <h3>Try the demo</h3>
+          <p className="small muted">
+            One-click: a curated project (Add a `hello.py` module) with
+            the seed personas (Mike + Alex) pre-staged. Watch a 2-agent
+            run end-to-end before bringing your own work.
+          </p>
+          <button
+            className="primary"
+            onClick={onTryDemo}
+            disabled={busy}
+          >
+            {busy ? "Setting up…" : "Try the demo"}
+          </button>
+        </div>
+
+        <div className="onboarding-option">
+          <h3>Describe your goal</h3>
+          <p className="small muted">
+            The meta-agent reads your goal (and any inputs you attach
+            — PDFs, a git repo, a prior run) and proposes a tailored
+            team. You approve before anything runs.
+          </p>
+          <Link to="/propose">
+            <button className="primary">Propose a team</button>
+          </Link>
+        </div>
+      </div>
+
+      <p className="small muted" style={{ marginTop: 16 }}>
+        Have personas already? Visit the{" "}
+        <Link to="/roster">Roster</Link> to see them and chat directly,
+        or browse the{" "}
+        <a
+          href="https://github.com/Erik-Iuhas/AgentFlow#readme"
+          target="_blank"
+          rel="noreferrer"
+        >
+          README
+        </a>{" "}
+        for the full architecture.
+      </p>
     </div>
   );
 }

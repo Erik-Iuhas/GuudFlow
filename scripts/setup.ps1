@@ -80,7 +80,9 @@ if ($npm) {
 }
 
 # 6. .env
+$freshInstall = $false
 if (-not (Test-Path ".env")) {
+    $freshInstall = $true
     if (Test-Path ".env.example") {
         Copy-Item ".env.example" ".env"
         Write-Host "Created .env from .env.example"
@@ -94,6 +96,17 @@ AGENTFLOW_MODE=dev
     }
 } else {
     Write-Host ".env already exists — leaving alone"
+}
+
+# 7. Seed default personas on first install (idempotent — won't
+# overwrite existing personas; safe to skip on re-run).
+if ($freshInstall -or $env:AGENTFLOW_FORCE_SEED -eq "1") {
+    Write-Host "Seeding default personas..."
+    try {
+        & python scripts/seed_data.py
+    } catch {
+        Write-Warning "seed_data.py failed — you can re-run manually"
+    }
 }
 
 Write-Host ""

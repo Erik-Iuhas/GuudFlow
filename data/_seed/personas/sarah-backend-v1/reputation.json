@@ -1,0 +1,18 @@
+{
+  "production": {
+    "total_runs": 0,
+    "completed_runs": 0,
+    "failed_runs": 0,
+    "average_iterations_to_approval": 0.0
+  },
+  "training": {
+    "total_runs": 0,
+    "completed_runs": 0,
+    "failed_runs": 0,
+    "average_iterations_to_approval": 0.0,
+    "graduation_status": "ungraduated"
+  },
+  "total_episodes": 0,
+  "active_patterns": 0,
+  "active_anti_patterns": 0
+}
