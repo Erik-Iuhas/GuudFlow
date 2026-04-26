@@ -120,7 +120,7 @@ class MemoryWriter(BaseAgent):
         #    tagged so reputation aggregates can split production vs
         #    training (DESIGN §35) — both still feed recall().
         is_training = bool(project is not None and getattr(project, "mode", "production") == "training")
-        episode = self._build_episode(persona, role, workspace, run_id, is_training)
+        episode = self._build_episode(persona, role, workspace, run_id, is_training, project)
         persona.episodes.append(episode)
 
         # 2. Recency-weighted confidence (read-side already computes this;
@@ -162,7 +162,7 @@ class MemoryWriter(BaseAgent):
 
     def _build_episode(
         self, persona: Persona, role: str, workspace, run_id: str,
-        is_training: bool = False,
+        is_training: bool = False, project=None,
     ) -> Episode:
         # Find the artifact (if any) for this role.
         artifact = workspace.artifacts.get(role)
@@ -199,6 +199,11 @@ class MemoryWriter(BaseAgent):
             timestamp=datetime.now(timezone.utc).isoformat(),
             staleness="fresh",
             training=is_training,
+            scenario_id=(
+                getattr(project, "training_scenario_id", "") or ""
+                if is_training and project is not None else ""
+            ),
+            rubric_score=_extract_rubric_score(workspace) if is_training else None,
         )
 
     # ── 3. LLM-driven pattern distillation (§34, Phase F.3.1) ──────────────
@@ -301,7 +306,16 @@ class MemoryWriter(BaseAgent):
         prod.completed_runs = prod.total_runs  # without explicit failure tracking, treat all as completed
 
         train = rep.training
-        train.total_runs = sum(1 for ep in persona.episodes if ep.training)
+        training_episodes = [ep for ep in persona.episodes if ep.training]
+        train.total_runs = len(training_episodes)
+        # Graduation logic (DESIGN §35, Phase F.1.3). The persona graduates
+        # when it has covered breadth (≥3 distinct scenarios) AND shown
+        # consistent quality on its recent training (avg rubric ≥ 0.7
+        # across the last 5 training episodes). The §35 third criterion
+        # ("survived a tournament") is implicit: meeting (1)+(2) requires
+        # ≥5 training runs covering ≥3 scenarios, which already
+        # represents meaningful exposure.
+        train.graduation_status = _compute_graduation_status(training_episodes)
 
     # ── 6. Reconciliation pass (§34) ────────────────────────────────────────
 
@@ -976,6 +990,58 @@ def _build_anti_pattern_from_flip(
 
 
 # ── Phase F.3.3 — style drift helpers ──────────────────────────────────────
+
+
+# ── Phase F.1.3 — graduation + rubric extraction ──────────────────────────
+
+
+GRADUATION_MIN_SCENARIOS = 3
+GRADUATION_RECENT_WINDOW = 5
+GRADUATION_AVG_THRESHOLD = 0.7
+
+
+def _extract_rubric_score(workspace) -> float | None:
+    """Pull the score out of the latest RUBRIC_SCORE signal on the
+    board. Returns None when the rubric_scorer didn't run (production
+    runs, scoring failures with no detail JSON, etc)."""
+    for signal in reversed(workspace.board):
+        # SignalType compared by value to stay decoupled from the
+        # SignalType import here.
+        if str(getattr(signal.type, "value", signal.type)) != "RUBRIC_SCORE":
+            continue
+        detail_raw = signal.detail or ""
+        try:
+            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else detail_raw
+        except json.JSONDecodeError:
+            continue
+        score = detail.get("score") if isinstance(detail, dict) else None
+        if isinstance(score, (int, float)):
+            return float(score)
+    return None
+
+
+def _compute_graduation_status(training_episodes: list[Episode]) -> str:
+    """Apply §35's soft-gate criteria to the persona's training
+    episodes. Returns "graduated" or "ungraduated"."""
+    if len(training_episodes) < GRADUATION_RECENT_WINDOW:
+        return "ungraduated"
+
+    distinct_scenarios = {ep.scenario_id for ep in training_episodes if ep.scenario_id}
+    if len(distinct_scenarios) < GRADUATION_MIN_SCENARIOS:
+        return "ungraduated"
+
+    # Sort by timestamp so "last 5" actually reflects chronology.
+    by_time = sorted(
+        (ep for ep in training_episodes if ep.rubric_score is not None),
+        key=lambda ep: ep.timestamp,
+    )
+    recent = by_time[-GRADUATION_RECENT_WINDOW:]
+    if len(recent) < GRADUATION_RECENT_WINDOW:
+        return "ungraduated"
+    avg = sum(ep.rubric_score for ep in recent) / len(recent)
+    if avg < GRADUATION_AVG_THRESHOLD:
+        return "ungraduated"
+    return "graduated"
 
 
 def _drift_tendency(

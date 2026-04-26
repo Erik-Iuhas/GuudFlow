@@ -87,6 +87,112 @@ async def test_persona_patterns_default_when_missing(client, write_persona):
     assert body["anti_patterns"] == []
 
 
+# ── Phase F.1.3 — rankings ─────────────────────────────────────────────────
+
+
+def _seed_training_episodes(
+    persona_dir, *, scores: list[tuple[str, float]],
+) -> None:
+    """Append training episodes with (scenario_id, rubric_score)."""
+    lines: list[str] = []
+    for i, (scenario_id, score) in enumerate(scores):
+        lines.append(json.dumps({
+            "episode_id": f"ep_{persona_dir.name}_{i}",
+            "run_id": f"r_{persona_dir.name}_{i}",
+            "training": True,
+            "scenario_id": scenario_id,
+            "rubric_score": score,
+            "timestamp": f"2026-04-{20-i:02d}T00:00:00+00:00",
+        }))
+    (persona_dir / "episodes.jsonl").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8",
+    )
+
+
+async def test_rankings_empty_when_no_training_data(client, write_persona):
+    write_persona("aria-v1")
+    r = await client.get("/api/personas/rankings")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+async def test_rankings_orders_by_average_score_descending(
+    client, write_persona,
+):
+    a = write_persona("aria-v1", name="Aria", specialty="frontend")
+    k = write_persona("kai-v1", name="Kai", specialty="backend")
+    n = write_persona("nova-v1", name="Nova", specialty="design")
+    _seed_training_episodes(a, scores=[("s1", 0.9), ("s2", 0.85)])
+    _seed_training_episodes(k, scores=[("s1", 0.7), ("s2", 0.6)])
+    _seed_training_episodes(n, scores=[("s1", 0.95)])
+
+    r = await client.get("/api/personas/rankings")
+    assert r.status_code == 200
+    body = r.json()
+    persona_ids = [row["persona_id"] for row in body]
+    assert persona_ids == ["nova-v1", "aria-v1", "kai-v1"]
+    assert body[0]["average_score"] == 0.95
+    assert body[1]["average_score"] == 0.875
+    assert body[1]["n_runs"] == 2
+
+
+async def test_rankings_filter_by_scenario(client, write_persona):
+    """Filter by scenario isolates per-scenario performance — useful
+    for the meta-agent's 'best developer for X' query."""
+    a = write_persona("aria-v1", name="Aria")
+    k = write_persona("kai-v1", name="Kai")
+    _seed_training_episodes(a, scores=[("s1", 0.9), ("s2", 0.4)])
+    _seed_training_episodes(k, scores=[("s1", 0.6), ("s2", 0.95)])
+
+    r = await client.get("/api/personas/rankings?scenario=s1")
+    body = r.json()
+    persona_ids = [row["persona_id"] for row in body]
+    assert persona_ids == ["aria-v1", "kai-v1"]
+    assert body[0]["average_score"] == 0.9
+
+
+async def test_rankings_filter_by_role_type_substring(client, write_persona):
+    """role_type matches against id + specialty as a substring."""
+    a = write_persona("aria-frontend-v1", name="Aria", specialty="frontend dev")
+    k = write_persona("kai-backend-v1", name="Kai", specialty="backend dev")
+    _seed_training_episodes(a, scores=[("s1", 0.9)])
+    _seed_training_episodes(k, scores=[("s1", 0.95)])
+
+    r = await client.get("/api/personas/rankings?role_type=frontend")
+    body = r.json()
+    assert [row["persona_id"] for row in body] == ["aria-frontend-v1"]
+
+
+async def test_rankings_skips_production_episodes(client, write_persona):
+    """Production episodes shouldn't show up in training rankings even
+    if they have a rubric_score (which they shouldn't)."""
+    a = write_persona("aria-v1")
+    (a / "episodes.jsonl").write_text(
+        json.dumps({
+            "episode_id": "ep_prod",
+            "training": False,
+            "scenario_id": "s1",
+            "rubric_score": 0.99,  # contrived — production ep with score
+        }) + "\n",
+        encoding="utf-8",
+    )
+    r = await client.get("/api/personas/rankings")
+    assert r.json() == []
+
+
+async def test_rankings_respects_limit(client, write_persona):
+    for i in range(5):
+        d = write_persona(f"p{i}-v1")
+        _seed_training_episodes(d, scores=[("s1", 0.5 + i * 0.05)])
+
+    r = await client.get("/api/personas/rankings?limit=2")
+    body = r.json()
+    assert len(body) == 2
+    # Descending — top two are p4-v1 (0.7), p3-v1 (0.65).
+    assert body[0]["persona_id"] == "p4-v1"
+    assert body[1]["persona_id"] == "p3-v1"
+
+
 # ── Phase F.4 — persona chat endpoint ──────────────────────────────────────
 
 

@@ -774,3 +774,119 @@ async def test_distillation_caps_at_three_clusters(tmp_path: Path):
                              run_root=tmp_path, personas={"developer": p})
 
     assert len(llm.calls) == 3
+
+
+# ── Phase F.1.3 — graduation logic ─────────────────────────────────────────
+
+
+from agents.builtin.memory_writer import _compute_graduation_status
+
+
+def _training_episode(
+    *, scenario_id: str, rubric_score: float, ts_offset_days: int = 0,
+) -> Episode:
+    return Episode(
+        episode_id=f"ep_{scenario_id}_{rubric_score}_{ts_offset_days}",
+        run_id=f"r_{scenario_id}_{ts_offset_days}",
+        training=True,
+        scenario_id=scenario_id,
+        rubric_score=rubric_score,
+        timestamp=_ts(ts_offset_days),
+    )
+
+
+def test_graduation_below_window_size_is_ungraduated():
+    """Fewer than 5 training episodes → never graduated, regardless of
+    how good the scores are."""
+    eps = [
+        _training_episode(scenario_id="a", rubric_score=1.0),
+        _training_episode(scenario_id="b", rubric_score=1.0),
+        _training_episode(scenario_id="c", rubric_score=1.0),
+    ]
+    assert _compute_graduation_status(eps) == "ungraduated"
+
+
+def test_graduation_below_three_distinct_scenarios_is_ungraduated():
+    eps = [
+        _training_episode(scenario_id="a", rubric_score=0.9, ts_offset_days=i)
+        for i in range(5)
+    ]
+    assert _compute_graduation_status(eps) == "ungraduated"
+
+
+def test_graduation_below_avg_threshold_is_ungraduated():
+    eps = [
+        _training_episode(scenario_id="a", rubric_score=0.5, ts_offset_days=10),
+        _training_episode(scenario_id="b", rubric_score=0.6, ts_offset_days=8),
+        _training_episode(scenario_id="c", rubric_score=0.5, ts_offset_days=6),
+        _training_episode(scenario_id="a", rubric_score=0.6, ts_offset_days=4),
+        _training_episode(scenario_id="b", rubric_score=0.5, ts_offset_days=2),
+    ]
+    assert _compute_graduation_status(eps) == "ungraduated"
+
+
+def test_graduation_meets_all_criteria():
+    eps = [
+        _training_episode(scenario_id="a", rubric_score=0.8, ts_offset_days=10),
+        _training_episode(scenario_id="b", rubric_score=0.9, ts_offset_days=8),
+        _training_episode(scenario_id="c", rubric_score=0.7, ts_offset_days=6),
+        _training_episode(scenario_id="a", rubric_score=0.8, ts_offset_days=4),
+        _training_episode(scenario_id="b", rubric_score=0.85, ts_offset_days=2),
+    ]
+    assert _compute_graduation_status(eps) == "graduated"
+
+
+def test_graduation_uses_last_5_by_timestamp():
+    """Old bad episodes shouldn't drag down a recently-improving
+    persona — only the last 5 by timestamp count toward the avg."""
+    eps = [
+        _training_episode(scenario_id="a", rubric_score=0.1, ts_offset_days=100),
+        _training_episode(scenario_id="b", rubric_score=0.1, ts_offset_days=99),
+        _training_episode(scenario_id="c", rubric_score=0.1, ts_offset_days=98),
+        _training_episode(scenario_id="a", rubric_score=0.9, ts_offset_days=10),
+        _training_episode(scenario_id="b", rubric_score=0.9, ts_offset_days=8),
+        _training_episode(scenario_id="c", rubric_score=0.9, ts_offset_days=6),
+        _training_episode(scenario_id="a", rubric_score=0.9, ts_offset_days=4),
+        _training_episode(scenario_id="b", rubric_score=0.9, ts_offset_days=2),
+    ]
+    assert _compute_graduation_status(eps) == "graduated"
+
+
+async def test_training_episode_carries_scenario_id_and_rubric_score(
+    tmp_path: Path,
+):
+    """End-to-end-shaped: workspace has a RUBRIC_SCORE signal, project
+    is in training mode → episode captures both fields."""
+    from dataclasses import dataclass
+    from core.signals import Signal, SignalType
+
+    @dataclass
+    class StubProject:
+        mode: str = "training"
+        training_scenario_id: str | None = "scn_x"
+
+    p, d = _persona(tmp_path)
+    ws = Workspace(run_id="r_train", goal="x")
+    ws.iteration = 1
+    ws.board.append(Signal(
+        type=SignalType.RUBRIC_SCORE,
+        summary="rubric score: 0.85",
+        from_agent="rubric_scorer",
+        detail=json.dumps({"score": 0.85, "scenario_id": "scn_x"}),
+    ))
+
+    mw = MemoryWriter()
+    await mw.on_run_complete(
+        workspace=ws, project=StubProject(), run_id="r_train",
+        run_root=tmp_path, personas={"developer": p},
+    )
+
+    eps = [
+        json.loads(line)
+        for line in (d / "episodes.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(eps) == 1
+    assert eps[0]["training"] is True
+    assert eps[0]["scenario_id"] == "scn_x"
+    assert eps[0]["rubric_score"] == 0.85

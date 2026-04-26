@@ -1,0 +1,24 @@
+{
+  "auto_checks": [
+    {
+      "name": "wordcount_py_exists",
+      "type": "files_present",
+      "weight": 0.3,
+      "paths": ["wordcount.py"]
+    },
+    {
+      "name": "function_defined",
+      "type": "text_contains",
+      "weight": 0.35,
+      "path": "wordcount.py",
+      "needle": "def count_words"
+    },
+    {
+      "name": "uses_split",
+      "type": "text_contains",
+      "weight": 0.35,
+      "path": "wordcount.py",
+      "needle": ".split"
+    }
+  ]
+}

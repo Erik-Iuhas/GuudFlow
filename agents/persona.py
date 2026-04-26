@@ -128,6 +128,12 @@ class Episode:
     timestamp: str = ""
     staleness: str = "fresh"  # "fresh" | "aged" | "stale"
     training: bool = False  # §35 — segregates reputation, not memory recall
+    # Phase F.1.3 — training-only fields. Empty / None on production
+    # episodes; populated on training episodes so the memory_writer's
+    # graduation logic and the ranking endpoint can query without
+    # walking the run's board on disk.
+    scenario_id: str = ""
+    rubric_score: float | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "Episode":
@@ -150,6 +156,8 @@ class Episode:
             timestamp=d.get("timestamp", ""),
             staleness=d.get("staleness", "fresh"),
             training=bool(d.get("training", False)),
+            scenario_id=d.get("scenario_id", ""),
+            rubric_score=d.get("rubric_score"),
         )
 
 

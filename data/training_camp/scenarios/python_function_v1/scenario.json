@@ -1,0 +1,6 @@
+{
+  "scenario_id": "python_function_v1",
+  "goal": "Write a `count_words(text)` function in `wordcount.py` that returns the number of whitespace-separated tokens. Empty/whitespace-only inputs return 0.",
+  "project_type": "python_module",
+  "expected_role_types": ["developer", "reviewer"]
+}

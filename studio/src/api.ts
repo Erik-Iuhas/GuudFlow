@@ -181,10 +181,33 @@ export const trainingApi = {
     ),
 };
 
+export interface PersonaRankingRow {
+  persona_id: string;
+  name: string;
+  specialty: string;
+  average_score: number;
+  n_runs: number;
+}
+
 export const personasApi = {
   list: () => request<PersonaSummary[]>("GET", "/api/personas"),
   get: (id: string) =>
     request<PersonaSummary>("GET", `/api/personas/${id}`),
+  /** Phase F.1.3 — leaderboard query. Optional filters: role_type
+   *  (substring match against id + specialty) and scenario id. */
+  rankings: (
+    options?: { role_type?: string; scenario?: string; limit?: number },
+  ) => {
+    const qp = new URLSearchParams();
+    if (options?.role_type) qp.set("role_type", options.role_type);
+    if (options?.scenario) qp.set("scenario", options.scenario);
+    if (options?.limit !== undefined) qp.set("limit", String(options.limit));
+    const qs = qp.toString();
+    return request<PersonaRankingRow[]>(
+      "GET",
+      `/api/personas/rankings${qs ? `?${qs}` : ""}`,
+    );
+  },
   episodes: (id: string, limit = 50) =>
     request<unknown[]>("GET", `/api/personas/${id}/episodes?limit=${limit}`),
   patterns: (id: string) =>

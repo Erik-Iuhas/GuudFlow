@@ -34,6 +34,80 @@ async def list_personas(request: Request) -> list[dict]:
     return await _store(request).list()
 
 
+@router.get("/rankings")
+async def get_rankings(
+    request: Request,
+    role_type: str | None = Query(None),
+    scenario: str | None = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+) -> list[dict]:
+    """Leaderboard query (DESIGN §35, Phase F.1.3).
+
+    Ranks personas by average training rubric score, optionally filtered
+    by `role_type` (substring match against persona id + specialty) or
+    `scenario` (only scores on this scenario id). Routes registered
+    BEFORE `/{persona_id}` so the literal path doesn't get captured as
+    a persona id.
+
+    Score: simple mean of training-episode rubric scores. The §34
+    recency-weighting machinery exists; using it here would bias
+    newer runs which is what we want, but the simple mean is fine
+    for F.1's surface — recency-aware ranking is a follow-up.
+    """
+    store = _store(request)
+    if not store.root.is_dir():
+        return []
+
+    out: list[dict] = []
+    for persona_dir in sorted(store.root.iterdir()):
+        if not persona_dir.is_dir() or persona_dir.name.startswith("_"):
+            continue
+        episodes_path = persona_dir / "episodes.jsonl"
+        if not episodes_path.is_file():
+            continue
+        scores: list[float] = []
+        for line in episodes_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                ep = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not ep.get("training"):
+                continue
+            if scenario and ep.get("scenario_id") != scenario:
+                continue
+            score = ep.get("rubric_score")
+            if isinstance(score, (int, float)):
+                scores.append(float(score))
+        if not scores:
+            continue
+
+        profile_path = persona_dir / "profile.json"
+        try:
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            profile = {}
+
+        if role_type:
+            haystack = (
+                f"{persona_dir.name} {profile.get('specialty','')}"
+            ).lower()
+            if role_type.lower() not in haystack:
+                continue
+
+        out.append({
+            "persona_id": persona_dir.name,
+            "name": profile.get("name", persona_dir.name),
+            "specialty": profile.get("specialty", ""),
+            "average_score": round(sum(scores) / len(scores), 4),
+            "n_runs": len(scores),
+        })
+
+    out.sort(key=lambda r: (-r["average_score"], r["persona_id"]))
+    return out[:limit]
+
+
 @router.get("/{persona_id}")
 async def get_persona(request: Request, persona_id: str) -> dict:
     persona = await _store(request).get(persona_id)

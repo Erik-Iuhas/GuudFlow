@@ -1,0 +1,31 @@
+{
+  "auto_checks": [
+    {
+      "name": "readme_exists",
+      "type": "files_present",
+      "weight": 0.25,
+      "paths": ["README.md"]
+    },
+    {
+      "name": "has_top_heading",
+      "type": "text_contains",
+      "weight": 0.25,
+      "path": "README.md",
+      "needle": "# "
+    },
+    {
+      "name": "has_usage_section",
+      "type": "text_contains",
+      "weight": 0.25,
+      "path": "README.md",
+      "needle": "Usage"
+    },
+    {
+      "name": "has_code_block",
+      "type": "text_contains",
+      "weight": 0.25,
+      "path": "README.md",
+      "needle": "```python"
+    }
+  ]
+}

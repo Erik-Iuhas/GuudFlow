@@ -1,0 +1,6 @@
+{
+  "scenario_id": "markdown_doc_v1",
+  "goal": "Write a `README.md` documenting a fictional `Greeter` library. The README must have a top-level heading, a 'Usage' section, and a fenced code block showing a Python example.",
+  "project_type": "documentation",
+  "expected_role_types": ["doc_writer", "reviewer"]
+}

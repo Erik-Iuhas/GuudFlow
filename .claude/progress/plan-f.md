@@ -165,7 +165,7 @@ complexity until a real user request surfaces.
 
 ---
 
-## F.1 — Training Camp (~2-3 days)
+## F.1 — Training Camp ✅ SHIPPED 2026-04-26
 
 DESIGN §35. Toy scenario library, tournament mode, ranking board for
 hiring decisions. Headline moat feature.
@@ -186,7 +186,7 @@ hiring decisions. Headline moat feature.
   shape supports parallel later without changes — only the dispatch
   internals would shift.
 
-### F.1.0 — Scenario library + signals (~2-3 hrs)
+### F.1.0 — Scenario library + signals ✅ SHIPPED [e27d888]
 
 - `data/training_camp/scenarios/` directory layout
 - One seed scenario: `hello_python_v1` (write a `greet()` function)
@@ -197,7 +197,7 @@ hiring decisions. Headline moat feature.
 
 Commit: `feat(training): scenario library + rubric signals (Phase F.1.0)`
 
-### F.1.1 — Rubric scorer + training-mode runner branch (~2-3 hrs)
+### F.1.1 — Rubric scorer + training-mode runner branch ✅ SHIPPED [71305bd]
 
 - `agents/builtin/rubric_scorer.py` — runs `auto_checks` against the
   workspace, posts `RUBRIC_SCORE` signal with weighted score
@@ -210,7 +210,7 @@ Commit: `feat(training): scenario library + rubric signals (Phase F.1.0)`
 
 Commit: `feat(training): rubric scorer + training-mode runner branch (Phase F.1.1)`
 
-### F.1.2 — Training API + tournament launcher (~3-4 hrs)
+### F.1.2 — Training API + tournament launcher ✅ SHIPPED [537617e]
 
 - `api/routes/training.py` — three endpoints:
   - `GET /api/training/scenarios` → list available scenarios
@@ -227,7 +227,7 @@ Commit: `feat(training): rubric scorer + training-mode runner branch (Phase F.1.
 
 Commit: `feat(api): training run + tournament endpoints (Phase F.1.2)`
 
-### F.1.3 — Graduation + ranking board + seed scenarios (~2 hrs)
+### F.1.3 — Graduation + ranking board + seed scenarios ✅ SHIPPED 2026-04-26
 
 - `agents/builtin/memory_writer.py` — extend `_refresh_reputation` to
   set `graduation_status` per §35 criteria (≥3 distinct scenarios,
