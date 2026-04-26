@@ -108,6 +108,22 @@ export const runsApi = {
 
 // ── Personas ───────────────────────────────────────────────────────────────
 
+export interface PersonaChatRequest {
+  message: string;
+  project_id?: string;
+  run_id?: string;
+}
+
+export interface PersonaChatResponse {
+  reply: string;
+  persona_id: string;
+  recall: {
+    patterns_used: number;
+    anti_patterns_used: number;
+    episodes_used: number;
+  };
+}
+
 export const personasApi = {
   list: () => request<PersonaSummary[]>("GET", "/api/personas"),
   get: (id: string) =>
@@ -118,6 +134,15 @@ export const personasApi = {
     request<{ patterns: unknown[]; anti_patterns: unknown[] }>(
       "GET",
       `/api/personas/${id}/patterns`,
+    ),
+  /** Phase F.4 — chat with a persona outside any active run. Read-only:
+   *  does not mutate persona memory. */
+  chat: (id: string, body: PersonaChatRequest) =>
+    request<PersonaChatResponse>(
+      "POST",
+      `/api/personas/${encodeURIComponent(id)}/chat`,
+      body,
+      true,
     ),
 };
 

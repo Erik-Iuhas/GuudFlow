@@ -176,10 +176,28 @@ when we get there.
 Promote YAML archetypes to shipped concrete classes through tournament
 runs. Depends on F.1 producing validated variations.
 
-## F.4 — Persona chat (~2 hrs, side quest)
+## F.4 — Persona chat ✅ SHIPPED 2026-04-26
 
-DESIGN §37. `POST /api/personas/{id}/chat` for one-off conversations
-outside any run. Independent of F.1-3. Could land any time.
+DESIGN §37. `POST /api/personas/{id}/chat` thin shell over
+`Persona.recall()` + a single LLM call. Read-only (no memory
+mutation), no tools, no scheduler.
+
+Files:
+- `agents/persona_chat.py` — `build_chat_system_prompt()` +
+  `chat_with_persona()` (pure logic, testable without FastAPI)
+- `api/routes/personas.py` — `POST /chat` route with auth, 404 for
+  unknown persona, 400 for empty message, 502 on LLM failure
+- `studio/src/api.ts` — `personasApi.chat()` typed client method
+
+Tests (`tests/api/test_personas.py`): happy path returns reply +
+recall summary; unknown persona → 404; empty message → 400; missing
+auth → 401/403; LLM raises → 502; system prompt includes identity +
+character + memory block when patterns recall.
+
+Project/run-context layering (DESIGN §37 step 3+4) is forward-compat
+in the request body but not yet wired into the prompt — F.4 ships the
+core consultation surface; richer context is a follow-up when there's
+a real user need.
 
 ---
 

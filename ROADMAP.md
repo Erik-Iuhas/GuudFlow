@@ -302,9 +302,13 @@ them up when real users tell you which one matters.
         style.json now persists alongside patterns.json.
       Without an LLM the writer collapses to its deterministic Stage-5
       contract — no regression for callers that don't inject one.
-- [ ] **F.4 Persona chat endpoint** (DESIGN §37) — `POST /api/personas/{id}/chat`
-      for one-off conversations with a persona outside any run. Marked
-      future/optional in the design.
+- [x] **F.4 Persona chat endpoint** ✅ SHIPPED 2026-04-26 (DESIGN §37) —
+      `POST /api/personas/{id}/chat`: read-only consultation surface.
+      Thin shell over `Persona.recall()` + a single LLM call; no tools,
+      no scheduler, no memory mutation. `agents/persona_chat.py` keeps
+      prompt-building separable from FastAPI. project_id / run_id
+      accepted in the body for forward-compat but not yet layered into
+      the prompt — that's a follow-up when a real consumer surfaces.
 
 ---
 
