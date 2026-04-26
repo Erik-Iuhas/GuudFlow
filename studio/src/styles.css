@@ -199,3 +199,51 @@ table.list tr:hover td { background: #fafbfc; }
 .persona-card .name { font-weight: 600; font-size: 14px; }
 .persona-card .specialty { color: #64748b; font-size: 12px; }
 .persona-card .reputation { font-size: 12px; margin-top: 6px; color: #475569; }
+
+/* ─── studio tabs ──────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex; gap: 4px; border-bottom: 1px solid #e2e8f0;
+  margin: 12px 0 16px 0;
+}
+.tab {
+  background: transparent; border: none; padding: 8px 16px;
+  border-bottom: 2px solid transparent; cursor: pointer;
+  color: #64748b; font-size: 14px;
+}
+.tab:hover { color: #0f172a; }
+.tab-active {
+  color: #0f172a; border-bottom-color: #2563eb; font-weight: 600;
+}
+
+/* ─── inputs tab ───────────────────────────────────────────────────────── */
+
+.dropzone {
+  border: 2px dashed #cbd5e1; border-radius: 8px;
+  padding: 24px; text-align: center; background: #f8fafc;
+  transition: border-color 120ms, background 120ms;
+}
+.dropzone-active { border-color: #2563eb; background: #eff6ff; }
+.dropzone-disabled { opacity: 0.6; pointer-events: none; }
+.dropzone-body p { margin: 0 0 8px 0; }
+
+.warn {
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px;
+  padding: 10px 14px; color: #78350f; font-size: 13px;
+}
+.warn ul { margin: 6px 0 6px 20px; }
+
+.tag-source-git_url { background: #ede9fe; color: #5b21b6; }
+.tag-source-local_path { background: #ecfeff; color: #0e7490; }
+
+button.danger {
+  background: #fef2f2; color: #b91c1c; border-color: #fecaca;
+}
+button.danger:hover { background: #fee2e2; }
+button.small { padding: 2px 8px; font-size: 12px; }
+
+.prior-runs-list { list-style: none; padding: 0; margin: 8px 0; }
+.prior-runs-list li {
+  padding: 6px 0; border-bottom: 1px solid #f1f5f9;
+  align-items: center;
+}

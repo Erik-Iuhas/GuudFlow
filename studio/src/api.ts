@@ -1,12 +1,16 @@
 // Thin API client. Handles auth + JSON shape so views can stay focused.
 
 import type {
+  InputsState,
   InvokeResponse,
   MetaProposal,
   PersonaSummary,
+  PriorRunAttachment,
   ProjectConfig,
   RunMeta,
+  SecretFinding,
   Signal,
+  SourceRepoMeta,
 } from "./types";
 
 const TOKEN_KEY = "agentflow.token";
@@ -97,6 +101,99 @@ export const personasApi = {
     request<{ patterns: unknown[]; anti_patterns: unknown[] }>(
       "GET",
       `/api/personas/${id}/patterns`,
+    ),
+};
+
+// ── Inputs (D-prime §33) ───────────────────────────────────────────────────
+
+export interface UploadResponse {
+  uploaded: InputUploadEntry[];
+}
+export interface InputUploadEntry {
+  filename: string;
+  size: number;
+}
+export interface SourceRepoImportSuccess {
+  source_repo: SourceRepoMeta;
+  warnings: SecretFinding[];
+}
+export interface SecretsConflict {
+  status: 409;
+  detail: string;
+  findings: SecretFinding[];
+}
+export interface PriorRunAttachResponse {
+  prior_run: PriorRunAttachment;
+}
+
+async function uploadMultipart(
+  path: string,
+  files: File[],
+): Promise<UploadResponse> {
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f, f.name);
+  const headers: Record<string, string> = {};
+  const t = getToken();
+  if (t) headers["Authorization"] = `Bearer ${t}`;
+  const res = await fetch(path, { method: "POST", headers, body: fd });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const j = await res.json();
+      detail = j.detail || JSON.stringify(j);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as UploadResponse;
+}
+
+export const inputsApi = {
+  list: (projectId: string) =>
+    request<InputsState>("GET", `/api/projects/${encodeURIComponent(projectId)}/inputs`),
+  uploadFiles: (projectId: string, files: File[]) =>
+    uploadMultipart(`/api/projects/${encodeURIComponent(projectId)}/inputs/upload`, files),
+  deleteUpload: (projectId: string, filename: string) =>
+    request<void>(
+      "DELETE",
+      `/api/projects/${encodeURIComponent(projectId)}/inputs/uploads/${encodeURIComponent(filename)}`,
+      undefined,
+      true,
+    ),
+  importGit: (
+    projectId: string,
+    body: { git_url: string; branch?: string; shallow?: boolean; force?: boolean },
+  ) =>
+    request<SourceRepoImportSuccess>(
+      "POST",
+      `/api/projects/${encodeURIComponent(projectId)}/inputs/git`,
+      body,
+      true,
+    ),
+  importLocalPath: (
+    projectId: string,
+    body: { path: string; force?: boolean },
+  ) =>
+    request<SourceRepoImportSuccess>(
+      "POST",
+      `/api/projects/${encodeURIComponent(projectId)}/inputs/local_path`,
+      body,
+      true,
+    ),
+  attachPriorRun: (projectId: string, runId: string, feedback?: string) =>
+    request<PriorRunAttachResponse>(
+      "POST",
+      `/api/projects/${encodeURIComponent(projectId)}/inputs/from_run/${encodeURIComponent(runId)}`,
+      { feedback: feedback ?? "" },
+      true,
+    ),
+  detachPriorRun: (projectId: string, runId: string) =>
+    request<void>(
+      "DELETE",
+      `/api/projects/${encodeURIComponent(projectId)}/inputs/from_run/${encodeURIComponent(runId)}`,
+      undefined,
+      true,
     ),
 };
 

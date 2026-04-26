@@ -12,6 +12,7 @@ build/
 .coverage
 htmlcov/
 data/runs/
+data/projects/
 data/projects.json
 *.log
 .DS_Store

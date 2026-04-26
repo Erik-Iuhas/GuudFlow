@@ -79,3 +79,43 @@ export interface MetaProposal {
   agents: AgentConfig[];
   rbac: Record<string, RoleRBAC>;
 }
+
+// ── Project inputs (D-prime §33) ───────────────────────────────────────────
+
+export interface InputUpload {
+  filename: string;
+  size: number;
+}
+
+export type SourceRepoMeta =
+  | {
+      kind: "git_url";
+      git_url: string;
+      branch: string;
+      shallow: boolean;
+      imported_at: string;
+    }
+  | {
+      kind: "local_path";
+      path: string;
+      imported_at: string;
+    };
+
+export interface PriorRunAttachment {
+  kind: "prior_run";
+  run_id: string;
+  project_id_of_origin?: string | null;
+  attached_at: string;
+  has_feedback: boolean;
+}
+
+export interface InputsState {
+  uploads: InputUpload[];
+  source_repo: SourceRepoMeta | null;
+  prior_runs: PriorRunAttachment[];
+}
+
+export interface SecretFinding {
+  path: string;
+  reason: string;
+}
