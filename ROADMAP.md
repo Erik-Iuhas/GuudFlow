@@ -223,58 +223,129 @@ backends.
 
 ---
 
-## Phase G — Studio polish for workflow review (~2-3 days)
+## Phase G-prime — Run resume backend (~1.5 days, ships before G)
 
-The Stage 8 frontend hits the exit criteria but it's intentionally
-MVP-functional — every view works, nothing is *designed-for-comprehension*.
-Real users want to scan a workflow, not read it line by line. Three
-concrete gaps user feedback flagged:
+Foundational gap surfaced by the user-stories doc: the architecture
+supports mid-run resume conceptually (git workspace + episodes +
+reputation persist) but `board.json` is only written at end-of-run,
+so a crashed run loses its signal trail. G-prime fixes that gap and
+ships the resume API surface so G's resume UI is pure frontend work.
 
-### Workflow at a glance
-- [ ] **`PipelineGraph` component** — DAG view of agents with `depends_on`
-      edges. Node states (pending / ready / running / complete / failed /
-      waiting_for_human). Used in both Studio (config preview) and Run
-      (live state).
-- [ ] **Project list as cards, not table** — last-run status badge,
-      run count, time since last run, quick "run again" button.
-- [ ] **Run history mini-chart** on each project card — sparkline of
-      recent runs (success / failed / partial).
+Plan: [.claude/progress/plan-g-prime.md](.claude/progress/plan-g-prime.md).
 
-### Per-agent stage cards in the Run view
-- [ ] **`AgentStateCard`** — replaces or augments BoardFeed for the
-      "what's each agent doing right now" question:
-      `[role] state · iter N · last commit abc1234 · claimed: auth.py · 2 unread comments`
-- [ ] Group board signals by iteration internally so the agent card
-      can render "iteration 2: 3 commits, 1 reject, 1 fix"
-- [ ] Hover-to-expand to see the iteration's signal stream
+- [ ] **G-prime.0** — Incremental board persistence. Debounced
+      flush of board.json after every signal post (or on a 1s
+      timer, whichever fires first). Crash-safe within seconds.
+- [ ] **G-prime.1** — State restoration loader.
+      `core/run_loader.py:restore_workspace(run_root, project)`
+      reads board.json + git refs and reconstructs a Workspace
+      with the right `agent_states` and `iteration` to pick up.
+- [ ] **G-prime.2** — `POST /api/runs/{id}/resume` endpoint.
+      Re-enqueues a Job with `resume: true`. 404 unknown run, 409
+      if a job for this run is already active.
+- [ ] **G-prime.3** — Worker resume branch. When dequeued job has
+      `resume: true`, call `run_loader.restore_workspace` instead
+      of seeding fresh, then drive the scheduler from the
+      restored state.
 
-### Git tracking that's actually visual
-- [ ] **Branch graph** — replace flat `GitLogTab` with a real branch
-      visualization: lanes per agent branch, commits as nodes, merges
-      as bridges, conflicts highlighted. Could use a small library
-      (e.g. `@gitgraph/react`) or hand-roll SVG; either way, not
-      heavy.
-- [ ] **Inline diff viewer** — click a commit, see the diff in a
-      slide-out panel. Backend already has board signals carrying
-      commit hashes; frontend just needs to render the diff.
-- [ ] **Per-file timeline** — pick a path (`src/auth.py`), see every
-      commit that touched it across all branches, with an iteration
-      tag.
+**Unblocks:** the "Solo dev wants to resume" story, all resume UI
+in G, and (forward) auto-tag rewinds in G.5.
 
-### Better empty / loading states
-- [ ] When a project has no runs: show a "What happens when you click
-      Run?" card with the proposed pipeline preview, not "no runs
-      yet".
-- [ ] When a run has no signals yet: animated placeholder showing
-      "scheduler is starting agents..." with the expected first agent
-      highlighted.
+---
 
-### Other polish that came up
-- [ ] Optimistic updates for project edits in Studio (currently full
-      PUT-then-reload)
-- [ ] Toast notifications for async API errors (currently inline error
-      blocks in each view)
-- [ ] Dark-mode CSS variables (light mode only today)
+## Phase G — Studio polish for workflow review (~3-5 days, story-backed)
+
+Re-scoped against [docs/USER_STORIES.md](docs/USER_STORIES.md) +
+the F-phase endpoints that landed without UI consumers (rankings,
+chat, training, catalog status all have typed clients but no
+components). Old version of this section was feature-listed; new
+version is chunk-ordered by the story it unblocks.
+
+### G.0 — Roster review UI
+
+Replaces today's flat persona list. Story-blocked: tech lead +
+persona author. Consumes three F endpoints with no UI today:
+
+- [ ] Persona detail view: profile + reputation (production +
+      training split) + graduation status badge + recent
+      episodes + active patterns / anti-patterns
+- [ ] Rankings panel — leaderboard via `/api/personas/rankings`,
+      filterable by role-type / scenario
+- [ ] Chat box per persona — `/api/personas/{id}/chat` with the
+      recall-summary surfaced ("this answer drew on N patterns")
+
+### G.1 — Pipeline graph view
+
+- [ ] **`PipelineGraph` component** — DAG view of agents with
+      `depends_on` edges. Node states (pending / ready / running
+      / complete / failed / waiting_for_human). Used in both
+      Studio (config preview) and Run (live state).
+- [ ] **`AgentStateCard`** — `[role] state · iter N · last commit
+      abc1234 · claimed: auth.py · 2 unread comments`. Augments
+      BoardFeed for the "what's each agent doing right now"
+      question.
+- [ ] Group board signals by iteration internally so the agent
+      card can render "iteration 2: 3 commits, 1 reject, 1 fix".
+
+### G.2 — Onboarding flow
+
+Story-blocked: first-timer's empty-roster, no-demo problem.
+
+- [ ] Default personas pre-staged at install (3-5 graduated
+      personas covering common roles)
+- [ ] Demo project with a curated goal + inputs that produces a
+      known-good result
+- [ ] Guided first-run tour pointing at the studio's three live
+      tabs (board, quips, git)
+- [ ] Catalog-status surface — "X archetypes available" panel
+      using `/api/agents/catalog/status`
+- [ ] Better empty states: "What happens when you click Run?"
+      preview card, "scheduler is starting agents..." placeholder
+
+### G.3 — Run resume UI
+
+Pure frontend; consumes G-prime's backend.
+
+- [ ] "Resume" button on failed/paused runs in the Run view
+- [ ] Run history list per project with status badges
+- [ ] Show what was restored ("resumed from iteration 2,
+      developer + reviewer were complete")
+
+### G.4 — Training tab
+
+Consumes the four `/api/training/*` endpoints from F.1.2 — none
+have a UI today. Story-blocked: persona author end-to-end.
+
+- [ ] Scenario picker — list scenarios + show goal +
+      `expected_role_types` + auto-check count
+- [ ] "Train this persona" launcher with persona × scenario
+      selector
+- [ ] Tournament launcher with multi-persona select on the same
+      scenario
+- [ ] Live leaderboard view — auto-polls
+      `/api/training/tournaments/{id}` until `complete: true`,
+      then shows the final ranking
+
+### G.5 — Auto-tag review points + rewind UI
+
+Layered on G-prime.
+
+- [ ] Runner tags git at every APPROVED + iteration boundary
+- [ ] UI shows tags in the Run view + lets user "rewind to tag X"
+      (re-resumes a fresh run from that tag's tree state)
+
+### G.6 — Polish
+
+- [ ] **Branch graph** — replace flat `GitLogTab` with lanes per
+      agent branch + merges as bridges
+- [ ] **Inline diff viewer** — click a commit, slide-out panel
+- [ ] **Per-file timeline** — every commit that touched a path
+- [ ] Project list as cards, not table
+- [ ] Run history sparkline (cards) — DEFERRED to Phase I if
+      headless callers need their own surface
+- [ ] Optimistic updates for project edits
+- [ ] Toast notifications for async API errors
+- [ ] Dark-mode CSS variables
 
 **Unblocks:** "I can look at this run and understand what's happening
 in 5 seconds." Today you have to read the board chronologically —
@@ -332,11 +403,28 @@ them up when real users tell you which one matters.
       the prompt — that's a follow-up when a real consumer surfaces.
 - [ ] **F.5 Persona author depth** (future, story-driven) — backs the
       "Persona author" archetype in [USER_STORIES.md](docs/USER_STORIES.md).
-      Publish a persona (local roster → org or public registry),
-      scenario authoring tooling (scaffold + validate + preview),
-      richer scenario kinds (sandboxed pytest checks, real lint
-      runs), larger scenarios (multi-file refactors). F.1 covers
-      training mechanics; F.5 covers the authoring experience.
+      Five sub-areas, each independently shippable:
+      - **F.5.0 Persona scaffolding from templates** — new endpoint
+        `POST /api/personas/scaffold` that takes a template id
+        (e.g. `godot_expert`, `rust_async_expert`) and produces a
+        persona with character + stake framing + an initial pattern
+        set + curated reference URLs already populated. Beats
+        creating a blank persona and waiting for training to fill it.
+      - **F.5.1 Curated reference-URL training** — extend scenarios
+        to carry `reference_urls`; persona memory gets a fourth
+        layer for curated references; new tool
+        `web:lookup_reference(topic)` checks curated URLs before
+        falling back to `web:search`. Cuts down on blind doc
+        searches at runtime.
+      - **F.5.2 Persona publishing** — local roster → org or public
+        registry. Versioned manifest, signature, reputation export.
+      - **F.5.3 Scenario authoring tooling** — scaffold a new
+        scenario from a template, validate the rubric, preview
+        what an agent would see. (Today: hand-author JSON.)
+      - **F.5.4 Richer scenario kinds** — sandboxed pytest, real
+        lint checks, multi-file refactors. Needs the worker's
+        Docker sandbox surfaced for read-only exec at scoring
+        time.
 
 ---
 
@@ -380,6 +468,42 @@ unblocks.
 
 ---
 
+## Phase J — Knowledge Surface (future, doc-writer toolkit)
+
+The **doc / RFC writer** archetype in
+[USER_STORIES.md](docs/USER_STORIES.md) wants more than the current
+"point a doc team at a codebase and get a draft RFC." They want
+deep-wiki-style codebase documentation — agents that crawl a repo
+intelligently, produce cross-linked wiki output, update
+incrementally as the code changes, and stay accurate over time.
+
+This is its own capability bucket — not a sub-phase of anything
+existing. New tools, a new specialist archetype, new persistent
+output format.
+
+Scope:
+
+- [ ] **`code:summarize`** — tool that walks a directory and
+      produces a structured summary (purpose, public API,
+      dependencies). Tree-sitter-backed; uses repo_map under
+      the hood.
+- [ ] **`wiki:link`** — tool that resolves "this concept is
+      defined in X" cross-references between wiki pages.
+- [ ] **`wiki:update`** — incremental update tool that keeps
+      wiki pages fresh against current code without regenerating
+      from scratch.
+- [ ] **`deep_wiki_writer` archetype** — specialist that uses
+      the above tools, with a system prompt tuned for wiki-style
+      output (concept-oriented, not file-oriented).
+- [ ] **Persistent wiki output** under `data/projects/{id}/wiki/`
+      with a stable navigation tree, versioned via git so updates
+      are reviewable.
+
+**Unblocks:** "document this codebase" as a real product surface,
+not "set up a project + invoke + scrape working/."
+
+---
+
 ## Phase H — Speculative / not on the priority track
 
 Things that are technically interesting and designed in DESIGN.md but
@@ -404,25 +528,28 @@ for the full framing.
 
 | If you want to... | Do |
 |---|---|
-| ...polish the daily-driver studio experience | **Phase G** (now story-backed; see USER_STORIES) |
-| ...grow persona authoring depth | Phase F.5 (future) |
+| ...let users resume a crashed run instead of starting over | **Phase G-prime** (foundational, ships before G) |
+| ...polish the daily-driver studio experience | **Phase G** (story-backed; see USER_STORIES) |
+| ...grow persona authoring depth | Phase F.5 (future, 5 sub-areas) |
+| ...ship a deep-wiki / codebase-doc product | Phase J (future) |
 | ...wire AgentFlow into CI / webhooks / scheduled runs | Phase I (future, Mode B tack-on) |
 | ...deploy to production for an org | Phase E (infra + multi-tenant) |
 | ...demo a real interactive run | Already shipped (C + D + F) |
 
 Recommended order — the developer-as-user is the current focus,
-so polish comes first:
+so polish comes after the resume foundation:
 
-- **Now:** **G** (studio polish, story-backed). Re-grounds against
-  the four story-backed priorities: roster review, pipeline graph,
-  onboarding, run resume.
-- **Next:** **F.5** (persona author depth) — once G unblocks the
-  tech-lead and persona-author archetypes, deepen the authoring
-  experience they need.
+- **Now:** **G-prime** (resume backend) — small, foundational,
+  unblocks G's resume UI as pure frontend work.
+- **Then:** **G** (studio polish, story-backed). Seven chunks
+  (G.0 roster → G.6 polish), each tied to a user story.
+- **Then:** **F.5** (persona author depth) — once G unblocks
+  the tech-lead and persona-author archetypes, deepen the
+  authoring experience they need.
 - **When there's a target:** **E** (infra + multi-tenant) for
   shared deployments; **I** (headless service) for CI / webhook
-  consumers. Order between them depends on which use case shows
-  up first.
+  consumers; **J** (knowledge surface) for the doc-writer
+  product. Order depends on which use case shows up first.
 
 Each phase except E is a half-day-to-two-days commitment.
 

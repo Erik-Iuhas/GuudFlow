@@ -131,11 +131,23 @@ mode and current support level (`✓` shipped, `~` partial, `✗` missing).
   produce a working result without me reading docs. (Today: I
   need to set up an API key, pick a persona, write a goal,
   approve a cost preview — too many steps.)
-- ✗ As a solo dev, I want to **resume** a paused / failed run
-  rather than start over. (Today: a failed run is a dead run.)
+- ~ As a solo dev, I want to **resume** a paused / failed run
+  rather than start over. The architecture supports this — git
+  workspace + episodes + reputation persist; the gap is that
+  board.json only writes at end-of-run, so a crashed run loses
+  its signal trail. **Phase G-prime** ships the backend; the
+  studio button lands in Phase G.
+- ✗ As a solo dev, I want to **rewind to a specific review
+  point** (e.g. when reviewer last approved) rather than just
+  resume from the most recent state. Layered on G-prime via
+  auto-tag-at-APPROVED — Phase G item.
 - ✗ As a solo dev, I want personas I've used to **suggest
   themselves** for similar goals next time. (Today: meta-agent
   re-evaluates from scratch.)
+- ✗ As a solo dev, I want to **pick personas first**, then have
+  the meta-agent orchestrate them into a team. (Today: meta
+  picks the personas; user reviews. Pick-then-orchestrate is a
+  meta-agent v2 phase — future.)
 
 ### Tech lead (Mode A)
 
@@ -193,10 +205,17 @@ mode and current support level (`✓` shipped, `~` partial, `✗` missing).
 - ~ As a writer, I want personas that are *good at writing*, not
   just "doc_writer-v1 fresh from install." (Today: trained
   personas exist; no curated published roster.)
+- ✗ As a writer, I want a **deep-wiki-style codebase
+  documentation toolkit** — agents that crawl a repo, produce
+  cross-linked wiki output, and update incrementally as the code
+  changes. New tools (`code:summarize`, `wiki:link`,
+  `wiki:update`) and a doc-writer specialist tuned for it.
+  Phase J — Knowledge Surface (future).
 - ✗ As a writer, I want a **"document this codebase" headless
   endpoint** that takes a git URL and returns a markdown bundle.
   (Today: I'd need to set up a project, attach the repo, invoke,
   poll, retrieve. Too many steps for a one-shot consumer.)
+  Mode B / Phase I.
 
 ### Persona author (Mode A + Training Camp)
 
@@ -207,14 +226,30 @@ mode and current support level (`✓` shipped, `~` partial, `✗` missing).
 - ✓ As a persona author, I want graduation thresholds so an
   ungraduated persona warns when hired into production.
 - ✗ As a persona author, I want to **publish a persona** to my
-  team's roster (or a public registry) so others can hire it.
-  (Today: `data/personas/{id}/` is local-only.)
+  team's roster (or a public registry) so others can hire it,
+  with versioning and a manifest. (Today: `data/personas/{id}/`
+  is local-only.) Phase F.5.
+- ✗ As a persona author, I want to **scaffold a domain-specialized
+  persona** ("Godot expert", "Rust async expert") from a template
+  rather than starting from a blank profile. The scaffold
+  pre-fills character + stake framing + an initial pattern set
+  + curated reference URLs so the persona starts useful, not
+  empty. Phase F.5.
+- ✗ As a persona author, I want **training to include
+  reference-URL curation**, not just scenarios. Today agents do
+  blind `web:fetch` at runtime and re-discover the same docs over
+  and over. A persona trained with curated references for its
+  domain would have those URLs in memory, callable via
+  `web:lookup_reference(topic)` before falling back to search.
+  Phase F.5.
 - ✗ As a persona author, I want **scenario authoring tooling** —
   scaffold a new scenario from a template, validate the rubric,
   preview what an agent would see. (Today: hand-author JSON.)
-- ✗ As a persona author, I want **larger / richer scenarios** —
-  multi-file refactors, real-pytest checks. (Today: 3 toy
-  scenarios, files_present + text_contains only.)
+  Phase F.5.
+- ✗ As a persona author, I want **richer scenario kinds** —
+  sandboxed pytest, real lint checks, multi-file refactors.
+  (Today: 3 toy scenarios, `files_present` +
+  `text_contains` only.) Phase F.5.
 
 ### First-time user (Mode A onboarding)
 
@@ -253,24 +288,56 @@ mode and current support level (`✓` shipped, `~` partial, `✗` missing).
 
 What's blocking each archetype, mapped to the phase that owns it.
 
+### Phase G-prime — Run resume backend (pre-G, ships first)
+
+Foundational gap surfaced by Erik: the architecture supports
+mid-run resume conceptually but `board.json` is only persisted
+at end-of-run, so a crashed run loses its signal trail. G-prime
+fixes that and ships the resume API surface so G's resume UI is
+pure frontend work.
+
+See [.claude/progress/plan-g-prime.md](../.claude/progress/plan-g-prime.md)
+for the four-chunk plan.
+
 ### Phase G — Studio polish (Mode A, current focus)
 
 Stories ✗/~ in **Solo developer** + **Tech lead** + **First-time
-user**. These are what Phase G should be re-scoped against, not the
-feature-flavoured bullets currently in ROADMAP. Top story-backed
-priorities for G:
+user** + **Persona author**. Re-scoped against the user stories
+plus the F-phase endpoint UIs that landed without consumers
+(rankings, chat, training, catalog status all have typed clients
+but no UI yet).
 
-1. **Roster review UI** — Tech lead can't curate without it;
-   Persona author can't see what their training produced
-2. **Pipeline graph view** — Solo dev "what's the team doing?" +
-   tech lead workflow review (already in G's bullet list)
-3. **Onboarding flow** — first-timer's empty-roster, no-demo
-   problem; biggest "did we lose them in 5 minutes" risk
-4. **Resume failed/paused runs** — solo dev currently has to
-   restart from scratch when a run goes wrong
+Story-backed chunks:
 
-G items that stay as polish but rank below the four above:
-dark mode, toast notifications, project-list-as-cards.
+1. **G.0 — Roster review UI.** Persona detail view with
+   graduation status + episode list + training history. Rankings
+   panel (consumes `/api/personas/rankings`). Chat box per
+   persona (consumes `/api/personas/{id}/chat`). Replaces today's
+   flat persona list. Unblocks tech lead + persona author.
+2. **G.1 — Pipeline graph view.** DAG of agents with `depends_on`
+   edges; node states pending/ready/running/complete/failed.
+   Solo dev "what's the team doing?" answer in one glance.
+3. **G.2 — Onboarding flow.** Default personas pre-staged at
+   install + a demo project + guided first-run tour. Surfaces
+   `/api/agents/catalog/status` so first-timer sees "X
+   archetypes available." Biggest conversion risk today.
+4. **G.3 — Run resume UI.** "Resume" button on failed/paused
+   runs + run history list. Consumes G-prime's backend so this
+   is pure frontend.
+5. **G.4 — Training tab.** Scenario picker, "Train this persona"
+   launcher, tournament launcher with persona-multi-select,
+   leaderboard with auto-refresh. Consumes
+   `/api/training/{scenarios, run, tournament, tournaments/{id}}` —
+   four F.1.2 endpoints currently with no UI consumer. Unblocks
+   persona author end-to-end.
+6. **G.5 — Auto-tag review points + rewind UI.** Git tag at
+   APPROVED + iteration boundaries; UI lets user rewind to a
+   tag, not just resume from latest.
+7. **G.6 — Polish.** Dark mode, toast notifications,
+   project-list-as-cards, optimistic updates for project edits.
+
+G chunks 0–4 each unblock a story-backed archetype. 5–6 are
+polish that rank below.
 
 ### Phase I — Headless Service (Mode B, future)
 
@@ -315,15 +382,22 @@ authoring-experience layer on top.
 ROADMAP's current Phase G is feature-listed (pipeline graph,
 state cards, branch graph, optimistic updates, dark mode). Most
 of those are still good, but the order should follow the story
-priorities above. When we open Phase G, the first plan-g.md
-chunk should be:
+priorities above AND fold in the F-phase endpoint UIs that have
+typed clients but no consuming components yet.
 
-1. **G.0** — Roster review UI (story-backed; biggest unlock for
-   tech lead + persona author)
-2. **G.1** — Pipeline graph component (already designed)
-3. **G.2** — Onboarding flow (default personas, demo project)
-4. **G.3** — Run resume / history
-5. **G.4** — Polish (dark mode, toasts, card layout)
+Plan-g.md chunks (when we open Phase G):
+
+1. **G.0** — Roster review UI (consumes 3 F endpoints: persona
+   detail, rankings, chat)
+2. **G.1** — Pipeline graph
+3. **G.2** — Onboarding (default personas, demo project,
+   catalog-status surface)
+4. **G.3** — Run resume UI (consumes G-prime backend)
+5. **G.4** — Training tab (consumes 4 F.1.2 endpoints —
+   currently no UI for any of them)
+6. **G.5** — Auto-tag review points + rewind UI
+7. **G.6** — Polish (dark mode, toasts, card layout, optimistic
+   project edits)
 
 Mode-B-flavoured items currently sitting in G ("run history
 sparkline" etc.) should move to Phase I when that opens.
