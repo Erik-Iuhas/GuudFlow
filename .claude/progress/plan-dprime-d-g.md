@@ -8,94 +8,82 @@ Each chunk below is independently shippable and leaves the suite green.
 
 ---
 
-## Phase D-prime — Rich input ingestion
+## Phase D-prime — Rich input ingestion ✅ SHIPPED
 
 Goal: a user can attach a PDF, paste a git URL, or pick a prior run; the
-runner makes those visible to agents under `inputs/`.
+runner makes those visible to agents under `inputs/`. **All eight chunks
+shipped on `main`** — see commit hashes below.
 
-### Chunk 1 — Project input storage + upload route (~2 hrs)
-- [ ] Extend `api/storage.py`: `ProjectStore.inputs_dir(project_id)` helper;
-      ensure the dir exists at project create time
-- [ ] New `api/routes/inputs.py` with `POST /api/projects/{id}/inputs/upload`
-      (multipart, single or many files); saves under
-      `data/projects/{id}/inputs/uploads/`
-- [ ] `GET /api/projects/{id}/inputs` — list current inputs (uploads, source_repo, prior runs)
-- [ ] `DELETE /api/projects/{id}/inputs/uploads/{filename}` — remove an upload
-- [ ] Tests: upload happy path, bad project_id, list endpoint, delete
+### Chunk 1 — Project input storage + upload route — [`2bcba3f`](https://github.com/Erik-Iuhas/AgentFlow/commit/2bcba3f)
+- [x] `ProjectStore.project_dir/inputs_dir/uploads_dir` helpers; `create()`
+      materialises uploads dir, `delete()` removes the project tree
+- [x] `POST /api/projects/{id}/inputs/upload` (multipart, multi-file, streamed)
+- [x] `GET /api/projects/{id}/inputs` (forward-compat shape with placeholders)
+- [x] `DELETE /api/projects/{id}/inputs/uploads/{filename}`
+- [x] 16 tests; path-traversal hardening; auth on writes
 
-### Chunk 2 — Source-repo ingestion (git URL + local path) + secret scan (~2.5 hrs)
+### Chunk 2 — Source-repo ingestion (git URL + local path) + secret scan — [`0206868`](https://github.com/Erik-Iuhas/AgentFlow/commit/0206868)
+- [x] `POST /api/projects/{id}/inputs/git` — clone via mockable
+      `core/source_repo.clone_git_repo`
+- [x] `POST /api/projects/{id}/inputs/local_path` with
+      `AGENTFLOW_LOCAL_PATH_ALLOWLIST` gate
+- [x] `core/secret_scan.py` — `.env`, key extensions, SSH key names,
+      private-key blocks, AWS access keys; skips `.git/`
+- [x] 409 on findings; `force=true` strips + warns
+- [x] 43 new tests; `inputs/source_repo.meta.json` sidecar surfaces in `GET`
 
-Git URL and local-path are the same §33 source kind ("seed for working/"),
-just from different inputs. Same destination, same secret-scan, same
-mutual-exclusion. One chunk, two endpoints.
+### Chunk 3 — Continuation route — [`967d416`](https://github.com/Erik-Iuhas/AgentFlow/commit/967d416)
+- [x] `POST /api/projects/{id}/inputs/from_run/{run_id}` — copies prior run's
+      `deliverables/`, optional `feedback` body lands as `feedback.md`
+- [x] `DELETE /api/projects/{id}/inputs/from_run/{run_id}`
+- [x] `iter_from_runs()` helper populates `prior_runs` array on `GET /inputs`
+- [x] 11 new tests
 
-- [ ] `POST /api/projects/{id}/inputs/git` — clones a public repo into
-      `data/projects/{id}/inputs/source_repo/`; cleans existing if re-cloning
-- [ ] `POST /api/projects/{id}/inputs/local_path` — copies a directory
-      from the API's filesystem into the same `inputs/source_repo/`.
-      Body: `{ "path": "/abs/path/to/dir" }`.
-      Validates the path is an existing directory. Documents the
-      "API has read access to its own filesystem" caveat — fine for
-      single-user dev, gated by `AGENTFLOW_LOCAL_PATH_ALLOWLIST`
-      (comma-separated path prefixes) for multi-tenant setups.
-- [ ] `core/secret_scan.py` — basic regex/path scan for `.env`, key files,
-      common secret patterns; returns list of warnings
-- [ ] Refuse the import if secrets found and `force=true` not set;
-      otherwise strip + warn
-- [ ] Tests: clone via mocked subprocess, local-path copy, secret
-      detection, force override, allowlist enforcement
-
-### Chunk 3 — Continuation route (~1 hr)
-- [ ] `POST /api/projects/{id}/inputs/from_run/{run_id}` — copy a prior run's
-      `deliverables/` into `data/projects/{id}/inputs/from_run_{run_id}/`
-- [ ] Optionally include `feedback.md` (passed in body)
-- [ ] Tests: continuation copy happy path, missing run, no deliverables
-
-### Chunk 4 — Run initializer (~3 hrs)
-- [ ] `core/run_initializer.py`:
+### Chunk 4 — Run initializer — [`39defa4`](https://github.com/Erik-Iuhas/AgentFlow/commit/39defa4)
+- [x] `core/run_initializer.py`:
   - `seed_run(project_dir, run_root)` — copies project inputs to run inputs
-  - `generate_inputs_readme(inputs_dir)` — auto-generates `inputs/README.md`
+  - `generate_inputs_readme(inputs_dir)` — DESIGN §33 README index
   - `seed_working_from_source(working_dir, source_repo_dir)` — copies +
-    fresh `git init` + initial seed commit
-  - `bundle_prior_history(prior_run_dir, target)` — `.history.bundle` per §33
-- [ ] Tests for each method
+    fresh `git init` + seed commit, strips upstream `.git/`
+  - `bundle_prior_history(prior_run_working_dir, bundle_path)`
+- [x] 18 new tests
 
-### Chunk 5 — Wire initializer into the worker (~30 min)
-- [ ] `worker/job_runner.py.run_one()` calls `run_initializer.seed_run()`
-      before constructing AgentRunner
-- [ ] Test: end-to-end with a project that has uploaded inputs; verify
-      run's `inputs/README.md` exists + uploads are present in run dir
+### Chunk 5 — Wire initializer into the worker — [`7991343`](https://github.com/Erik-Iuhas/AgentFlow/commit/7991343)
+- [x] `JobRunner._initialize_run()` orchestrates seed_run →
+      seed_working_from_source → bundle_prior_history per attached run →
+      generate_inputs_readme; runs after `run_root.mkdir`, before runner
+- [x] Init failures fail the job cleanly with a descriptive error
+- [x] 6 new tests; e2e covered
 
-### Chunk 6 — Studio Inputs tab (~3.5 hrs)
-- [ ] `studio/src/api.ts` — input endpoints (upload, git, local_path,
-      from_run, list, delete)
-- [ ] `studio/src/views/Inputs.tsx` (or tab inside Studio.tsx)
-- [ ] `UploadDropzone` component
-- [ ] `SourceRepoField` component — toggle between "git URL" and
-      "local path" sub-inputs (same destination, mutually exclusive
-      with each other)
-- [ ] `PriorRunPicker` component (selects from this project's prior runs)
-- [ ] Inputs list view — shows current uploads, source_repo (with origin
-      indicator: git/local), attached prior runs; delete button per item
-- [ ] Manual smoke (no automated frontend tests per Stage 8 convention)
+### Chunk 6 — Studio Inputs tab — [`1afae0e`](https://github.com/Erik-Iuhas/AgentFlow/commit/1afae0e)
+- [x] `inputsApi` in `studio/src/api.ts` (list, upload, delete, importGit,
+      importLocalPath, attachPriorRun, detachPriorRun)
+- [x] Tab system in `Studio.tsx`: Team / Inputs
+- [x] `UploadDropzone` — drag-drop, multi-file, FormData streaming
+- [x] `SourceRepoField` — git URL ↔ local path toggle, secret-finding
+      surface with "Import anyway" force-strip path
+- [x] `PriorRunPicker` — pulls runs for project, optional feedback textarea
+- [x] CSS for tabs, dropzone, warn block, source tags, danger button
 
-### Chunk 7 — "Create blank project" escape hatch (~30 min)
-- [ ] Projects view: dropdown next to "+ New project" → "Propose with goal"
+### Chunk 7 — Create blank project escape hatch — [`b80ff06`](https://github.com/Erik-Iuhas/AgentFlow/commit/b80ff06)
+- [x] Projects view dropdown next to "+ New project": "Propose with goal"
       vs "Create blank project"
-- [ ] Blank route: `Studio.tsx` opens with an empty agents array
+- [x] Blank flow modal asks for project_id (required) + goal (optional),
+      creates with empty agents array, routes to Studio
 
-### Chunk 8 — "Continue from run" entry point (~1 hr)
-- [ ] On a Run page, add a "Continue from this run" button (visible only
-      after the run reaches a terminal state — complete/failed/max_iter)
-- [ ] Routes to a continuation flow: pre-fills the prior run id, prompts
-      for new ask / feedback, hands off to Phase D's continuation-aware
-      proposal
-- [ ] Stores the continuation intent on the project so the next run's
-      meta-agent step picks it up
+### Chunk 8 — Continue from run entry point — [`5627e6d`](https://github.com/Erik-Iuhas/AgentFlow/commit/5627e6d)
+- [x] Run.tsx shows "Continue from this run" only when run is terminal
+      (complete / max_iterations / stuck / deadline_exceeded / errored / failed)
+- [x] Click → modal with feedback textarea
+- [x] Submit attaches the run to the project (Chunk 3 endpoint), stamps
+      `pending_continuation: { run_id, attached_at }` on project config
+      for Phase D's continuation-aware meta-agent, routes to Studio
 
-**Phase D-prime exit:** user can upload a PDF, paste a git URL, point
-at a local directory, attach a prior run; runs spawned afterward have
-those visible at `/workspace/inputs/`.
+**Phase D-prime exit:** ✅ User can upload PDFs, paste a git URL, point at
+a local directory, attach a prior run; runs spawned afterward have those
+visible at `/workspace/inputs/` with an auto-generated README index.
+Studio surfaces all of it in an Inputs tab with blank-project and
+continue-from-run entry points. **Suite: 624 passed, 2 skipped.**
 
 ---
 

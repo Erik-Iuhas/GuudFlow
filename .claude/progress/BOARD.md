@@ -1,8 +1,8 @@
 # AgentFlow Build Board
 
-**Current stage:** ✅ Initial build complete — all 9 stages shipped.
-**Last updated:** 2026-04-25
-**Tests:** 530 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
+**Current stage:** ✅ Initial build complete + Phase D-prime shipped.
+**Last updated:** 2026-04-26
+**Tests:** 624 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
 
 ## Stage status
 - [x] Stage 1 — Foundation primitives  (29/29 tests)
@@ -29,16 +29,17 @@
 | 9     | 50-100k   | ~30k   | within budget; image-only, build deferred    |
 
 ## Next action
-**Initial build complete + Phase A shipped.** All 9 stages green, 530 backend tests passing, studio typecheck + prod build clean. Repo pushed to `Erik-Iuhas/AgentFlow` (private). `setup.sh` / `setup.ps1` / `Dockerfile` / `docker-compose.yml` written. Embeddings deps split into `requirements-optional.txt` (default install is now ~60s).
+**Phase D-prime shipped (8/8 chunks).** Backend ingestion (uploads, git/local-path source repo with secret scan, prior-run attach) + run initializer wired into the worker + Studio Inputs tab + blank-project + continue-from-run entry points. 624 backend tests passing, studio typecheck + prod build clean.
 
-**Pick up from [ROADMAP.md](../../ROADMAP.md).** Three goal-driven sequences are documented; recommended default is **D-prime → D → B → C → E → F**.
+**Recommended next:** **Phase D** (real meta-agent proposal that reads `inputs/`) — see [.claude/progress/plan-dprime-d-g.md](plan-dprime-d-g.md#phase-d--real-meta-agent-proposal-7-hrs-depends-on-d-prime). Phase G (studio polish) is independent and can run in parallel.
 
-- **D-prime** (rich input ingestion: upload API, git URL clone, between-run continuation, runner init step, Studio Inputs tab) is the prerequisite for anything user-facing
-- **D** (real meta-agent proposal that reads `inputs/`)
+- ✅ **D-prime** — shipped 2026-04-26
+- **D** (real meta-agent proposal that reads `inputs/`) — next
 - **B** (`code:exec` → DockerManager.exec_in() routing in production)
 - **C** (live USER_COMMENT POST + real quip stream + tech-lead escalation auto-detection)
 - **E** (Redis queue + KubeJobManager + Helm — when there's a deploy target)
 - **F** (Training Camp, real LLM-driven memory synthesis, persona chat, etc.)
+- **G** (studio polish for workflow review — independent, can run in parallel)
 
 ## Deferred follow-ons
 [followups.md](followups.md) is the running inventory of punted items. ROADMAP.md groups them into shippable phases.
