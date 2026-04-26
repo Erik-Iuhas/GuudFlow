@@ -134,7 +134,7 @@ async def list_inputs(request: Request, project_id: str) -> dict:
     return {
         "uploads": uploads,
         "source_repo": source_repo,
-        "prior_runs": [],
+        "prior_runs": store.iter_from_runs(project_id),
     }
 
 
@@ -250,3 +250,76 @@ async def import_local_path(
         "imported_at": _now_iso(),
     }
     return _finalize_source_repo(target, meta_path, meta, force)
+
+
+# ── Continuation: attach a prior run's deliverables ────────────────────────
+
+
+@router.post("/from_run/{run_id}", dependencies=[Depends(require_bearer)])
+async def attach_prior_run(
+    request: Request,
+    project_id: str,
+    run_id: str,
+    body: dict = Body(default_factory=dict),
+):
+    await _require_project(request, project_id)
+    run_store = request.app.state.run_store
+    run_meta = await run_store.get(run_id)
+    if run_meta is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+
+    deliverables = run_store.deliverables_dir(run_id)
+    if not deliverables.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail=f"run {run_id!r} has no deliverables to attach",
+        )
+
+    store = _store(request)
+    target = store.from_run_dir(project_id, run_id)
+    meta_path = store.from_run_meta_path(project_id, run_id)
+
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
+
+    target_deliverables = target / "deliverables"
+    shutil.copytree(deliverables, target_deliverables)
+
+    feedback = (body.get("feedback") or "").strip()
+    has_feedback = bool(feedback)
+    if has_feedback:
+        (target / "feedback.md").write_text(feedback + "\n", encoding="utf-8")
+
+    meta = {
+        "kind": "prior_run",
+        "run_id": run_id,
+        "project_id_of_origin": run_meta.get("project_id"),
+        "attached_at": _now_iso(),
+        "has_feedback": has_feedback,
+    }
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return {"prior_run": meta}
+
+
+@router.delete(
+    "/from_run/{run_id}",
+    dependencies=[Depends(require_bearer)],
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def detach_prior_run(request: Request, project_id: str, run_id: str):
+    await _require_project(request, project_id)
+    store = _store(request)
+    target = store.from_run_dir(project_id, run_id)
+    meta_path = store.from_run_meta_path(project_id, run_id)
+    if not target.exists() and not meta_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"prior run {run_id!r} not attached to this project",
+        )
+    if target.exists():
+        shutil.rmtree(target)
+    if meta_path.exists():
+        meta_path.unlink()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

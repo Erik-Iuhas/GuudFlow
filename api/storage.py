@@ -48,6 +48,30 @@ class ProjectStore:
     def source_repo_meta_path(self, project_id: str) -> Path:
         return self.inputs_dir(project_id) / "source_repo.meta.json"
 
+    def from_run_dir(self, project_id: str, run_id: str) -> Path:
+        return self.inputs_dir(project_id) / f"from_run_{run_id}"
+
+    def from_run_meta_path(self, project_id: str, run_id: str) -> Path:
+        return self.inputs_dir(project_id) / f"from_run_{run_id}.meta.json"
+
+    def iter_from_runs(self, project_id: str) -> list[dict[str, Any]]:
+        """Return metadata for every attached prior run, sorted newest-first."""
+        inputs = self.inputs_dir(project_id)
+        if not inputs.exists():
+            return []
+        out: list[dict[str, Any]] = []
+        for entry in inputs.iterdir():
+            if not entry.is_file() or not entry.name.startswith("from_run_"):
+                continue
+            if not entry.name.endswith(".meta.json"):
+                continue
+            try:
+                out.append(json.loads(entry.read_text(encoding="utf-8")))
+            except json.JSONDecodeError:
+                continue
+        out.sort(key=lambda m: m.get("attached_at", ""), reverse=True)
+        return out
+
     async def list(self) -> list[dict[str, Any]]:
         async with self._lock:
             data = await self._read_locked()

@@ -520,3 +520,170 @@ async def test_list_includes_source_repo_after_local_import(
 async def test_list_source_repo_null_when_absent(client, project):
     r = await client.get(f"/api/projects/{project}/inputs")
     assert r.json()["source_repo"] is None
+
+
+# ── Continuation: attach / detach a prior run ──────────────────────────────
+
+
+@pytest.fixture
+def prior_run(write_run, data_root):
+    """Materialise a run with deliverables on disk and return its run_id."""
+    def _make(run_id: str = "run_xyz", project_id: str = "p1", files: dict | None = None):
+        run_dir = write_run(run_id, project_id=project_id)
+        deliverables = run_dir / "workspace" / "deliverables"
+        files = files if files is not None else {"app.py": "print('hi')\n"}
+        for rel, content in files.items():
+            target = deliverables / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        return run_id
+    return _make
+
+
+async def test_attach_prior_run_happy_path(client, auth_header, data_root, project, prior_run):
+    run_id = prior_run()
+    r = await client.post(
+        f"/api/projects/{project}/inputs/from_run/{run_id}",
+        json={},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["prior_run"]["kind"] == "prior_run"
+    assert body["prior_run"]["run_id"] == run_id
+    assert body["prior_run"]["has_feedback"] is False
+
+    landed = data_root / "projects" / project / "inputs" / f"from_run_{run_id}" / "deliverables" / "app.py"
+    assert landed.read_text(encoding="utf-8") == "print('hi')\n"
+    assert (data_root / "projects" / project / "inputs" / f"from_run_{run_id}.meta.json").exists()
+
+
+async def test_attach_prior_run_with_feedback(client, auth_header, data_root, project, prior_run):
+    run_id = prior_run()
+    r = await client.post(
+        f"/api/projects/{project}/inputs/from_run/{run_id}",
+        json={"feedback": "Token expiry was not enforced. Please address."},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    assert r.json()["prior_run"]["has_feedback"] is True
+    feedback = data_root / "projects" / project / "inputs" / f"from_run_{run_id}" / "feedback.md"
+    assert "Token expiry" in feedback.read_text(encoding="utf-8")
+
+
+async def test_attach_prior_run_unknown_run(client, auth_header, project):
+    r = await client.post(
+        f"/api/projects/{project}/inputs/from_run/run_ghost",
+        json={},
+        headers=auth_header,
+    )
+    assert r.status_code == 404
+
+
+async def test_attach_prior_run_no_deliverables(client, auth_header, data_root, project, write_run):
+    run_dir = write_run("run_empty")
+    # write_run creates an empty deliverables dir; remove it to simulate missing.
+    import shutil
+    shutil.rmtree(run_dir / "workspace" / "deliverables")
+    r = await client.post(
+        f"/api/projects/{project}/inputs/from_run/run_empty",
+        json={},
+        headers=auth_header,
+    )
+    assert r.status_code == 404
+
+
+async def test_attach_prior_run_unknown_project(client, auth_header, prior_run):
+    run_id = prior_run()
+    r = await client.post(
+        f"/api/projects/ghost/inputs/from_run/{run_id}",
+        json={},
+        headers=auth_header,
+    )
+    assert r.status_code == 404
+
+
+async def test_attach_prior_run_requires_auth(client, project, prior_run):
+    run_id = prior_run()
+    r = await client.post(
+        f"/api/projects/{project}/inputs/from_run/{run_id}",
+        json={},
+    )
+    assert r.status_code == 401
+
+
+async def test_attach_prior_run_replaces_existing(client, auth_header, data_root, project, prior_run):
+    run_id = prior_run(files={"v1.py": "first"})
+    await client.post(
+        f"/api/projects/{project}/inputs/from_run/{run_id}",
+        json={"feedback": "first round"},
+        headers=auth_header,
+    )
+    # Re-attach without feedback — feedback file should disappear too.
+    r = await client.post(
+        f"/api/projects/{project}/inputs/from_run/{run_id}",
+        json={},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    attached = data_root / "projects" / project / "inputs" / f"from_run_{run_id}"
+    assert not (attached / "feedback.md").exists()
+
+
+async def test_detach_prior_run(client, auth_header, data_root, project, prior_run):
+    run_id = prior_run()
+    await client.post(
+        f"/api/projects/{project}/inputs/from_run/{run_id}",
+        json={},
+        headers=auth_header,
+    )
+    r = await client.delete(
+        f"/api/projects/{project}/inputs/from_run/{run_id}",
+        headers=auth_header,
+    )
+    assert r.status_code == 204
+    inputs = data_root / "projects" / project / "inputs"
+    assert not (inputs / f"from_run_{run_id}").exists()
+    assert not (inputs / f"from_run_{run_id}.meta.json").exists()
+
+
+async def test_detach_prior_run_not_attached(client, auth_header, project):
+    r = await client.delete(
+        f"/api/projects/{project}/inputs/from_run/run_ghost",
+        headers=auth_header,
+    )
+    assert r.status_code == 404
+
+
+async def test_detach_prior_run_requires_auth(client, project, prior_run, auth_header):
+    run_id = prior_run()
+    await client.post(
+        f"/api/projects/{project}/inputs/from_run/{run_id}",
+        json={},
+        headers=auth_header,
+    )
+    r = await client.delete(f"/api/projects/{project}/inputs/from_run/{run_id}")
+    assert r.status_code == 401
+
+
+async def test_list_includes_prior_runs(client, auth_header, project, prior_run):
+    run_id_a = prior_run(run_id="run_a", files={"a.py": "1"})
+    run_id_b = prior_run(run_id="run_b", files={"b.py": "2"})
+    await client.post(
+        f"/api/projects/{project}/inputs/from_run/{run_id_a}",
+        json={"feedback": "fix a"},
+        headers=auth_header,
+    )
+    await client.post(
+        f"/api/projects/{project}/inputs/from_run/{run_id_b}",
+        json={},
+        headers=auth_header,
+    )
+    r = await client.get(f"/api/projects/{project}/inputs")
+    assert r.status_code == 200
+    body = r.json()
+    run_ids = sorted(p["run_id"] for p in body["prior_runs"])
+    assert run_ids == ["run_a", "run_b"]
+    by_id = {p["run_id"]: p for p in body["prior_runs"]}
+    assert by_id["run_a"]["has_feedback"] is True
+    assert by_id["run_b"]["has_feedback"] is False
