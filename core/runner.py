@@ -214,6 +214,11 @@ class AgentRunner:
         # Subscribe to the board so we can count REJECTED signals and
         # fire escalations when thresholds are crossed.
         self.workspace.subscribe(self._on_signal_for_escalation)
+        # Phase G-prime.0 — incremental board persistence so a crashed
+        # mid-run leaves a complete trail on disk for the resume loader.
+        # board.jsonl co-exists with the end-of-run consolidated
+        # board.json; both readers and writers tolerate either source.
+        self.workspace.set_board_persister(self._build_board_persister())
         # Run-level deadline — checked by the scheduler.
         if max_wall_seconds is not None:
             import time as _time
@@ -366,6 +371,38 @@ class AgentRunner:
             WebFetch.name: WebFetch(),
             WebSearch.name: WebSearch(),
         }
+
+    # ── Board persister (Phase G-prime.0) ───────────────────────────────────
+
+    def _build_board_persister(self):
+        """Return a callable that appends each new signal to board.jsonl
+        in the run root. JSONL chosen over rewriting board.json so each
+        write is O(1) and crash-safe (POSIX small appends are atomic).
+
+        Returns None if the run root can't be created — the run will
+        proceed without crash-safe persistence; the end-of-run
+        consolidated board.json still gets written by `_persist_run`.
+        """
+        from worker.job_runner import serialise_signal
+
+        try:
+            self.run_root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None
+        board_path = self.run_root / "board.jsonl"
+
+        def _persist(signal: Signal) -> None:
+            try:
+                line = json.dumps(serialise_signal(signal), default=str)
+                with open(board_path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except OSError:
+                # Disk write failures shouldn't break the run. The
+                # consolidated board.json at end-of-run is the
+                # safety net.
+                pass
+
+        return _persist
 
     # ── Git signal callback ─────────────────────────────────────────────────
 

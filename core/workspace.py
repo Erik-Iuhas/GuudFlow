@@ -199,6 +199,14 @@ class Workspace:
     # serialisation; populated by the API's WebSocket bridge.
     _subscribers: list[Callable[[Signal], None]] = field(default_factory=list, repr=False)
 
+    # Board persister — fires after every post_signal so a crashed run
+    # leaves a complete signal trail on disk for resume (Phase G-prime.0).
+    # The runner attaches one when given a run_root; tests / synthetic
+    # workspaces leave it None and behave as before. Persister exceptions
+    # are swallowed for the same reason subscriber exceptions are: a
+    # broken persister can't be allowed to break the workspace.
+    _board_persister: Callable[[Signal], None] | None = field(default=None, repr=False)
+
     # ── Board management ────────────────────────────────────────────────────
 
     def post_signal(self, signal: Signal) -> None:
@@ -221,6 +229,20 @@ class Workspace:
                 sub(signal)
             except Exception:
                 continue
+        if self._board_persister is not None:
+            try:
+                self._board_persister(signal)
+            except Exception:
+                # A broken persister (disk full, permissions) must not
+                # take the run down with it. The end-of-run consolidated
+                # board.json write in `_persist_run` is the safety net.
+                pass
+
+    def set_board_persister(self, callback: Callable[[Signal], None] | None) -> None:
+        """Install (or clear) the persister called after every signal.
+        Distinct from `subscribe()` — only one persister at a time, and
+        it has a single durable purpose (write to disk for resume)."""
+        self._board_persister = callback
 
     def subscribe(self, callback: Callable[[Signal], None]) -> Callable[[], None]:
         """Register a callback for new signals. Returns an unsubscribe

@@ -123,9 +123,33 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
 # ── Persistence ────────────────────────────────────────────────────────────
 
 
+def serialise_signal(sig: Signal) -> dict[str, Any]:
+    """Reusable signal-to-dict mapping. Used by both the end-of-run
+    `_persist_run` (consolidated board.json) and the incremental
+    board persister attached to the workspace (Phase G-prime.0)."""
+    return {
+        "id": str(sig.id),
+        "type": sig.type.value,
+        "summary": sig.summary,
+        "detail": sig.detail,
+        "from_agent": sig.from_agent,
+        "from_user": sig.from_user,
+        "priority": sig.priority,
+        "iteration": sig.iteration,
+        "seen_by": list(sig.seen_by),
+        "timestamp": sig.timestamp.isoformat(),
+    }
+
+
 def _persist_run(run_root: Path, runner: AgentRunner, run_id: str,
                  project_id: str, status: str) -> None:
-    """Write meta.json + board.json so the API can list / read this run."""
+    """Write meta.json + board.json so the API can list / read this run.
+
+    `board.json` is the consolidated end-of-run snapshot — readers (the
+    runs API, the tournament leaderboard) consume it. The incremental
+    `board.jsonl` written by the workspace's board persister
+    (Phase G-prime.0) is the crash-safe trail used by the resume
+    loader; it co-exists with this file."""
     run_root.mkdir(parents=True, exist_ok=True)
     meta = {
         "run_id": run_id,
@@ -140,20 +164,7 @@ def _persist_run(run_root: Path, runner: AgentRunner, run_id: str,
         json.dumps(meta, indent=2, default=str), encoding="utf-8",
     )
 
-    board = []
-    for sig in runner.workspace.board:
-        board.append({
-            "id": str(sig.id),
-            "type": sig.type.value,
-            "summary": sig.summary,
-            "detail": sig.detail,
-            "from_agent": sig.from_agent,
-            "from_user": sig.from_user,
-            "priority": sig.priority,
-            "iteration": sig.iteration,
-            "seen_by": list(sig.seen_by),
-            "timestamp": sig.timestamp.isoformat(),
-        })
+    board = [serialise_signal(sig) for sig in runner.workspace.board]
     (run_root / "board.json").write_text(
         json.dumps(board, indent=2, default=str), encoding="utf-8",
     )
