@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { Projects } from "./views/Projects";
 import { Propose } from "./views/Propose";
-import { Studio } from "./views/Studio";
-import { Run } from "./views/Run";
 import { Roster } from "./views/Roster";
+import { Run } from "./views/Run";
+import { Studio } from "./views/Studio";
+import { Tournament } from "./views/Tournament";
+import { Training } from "./views/Training";
 import { getToken, setToken } from "./api";
 
 export function App() {
@@ -29,6 +31,9 @@ export function App() {
           <NavLink to="/roster" className={({ isActive }) => (isActive ? "active" : "")}>
             Roster
           </NavLink>
+          <NavLink to="/training" className={({ isActive }) => (isActive ? "active" : "")}>
+            Training
+          </NavLink>
         </nav>
         <input
           className="token-input"
@@ -47,6 +52,8 @@ export function App() {
           <Route path="/runs/:runId" element={<Run />} />
           <Route path="/roster" element={<Roster />} />
           <Route path="/roster/:id" element={<Roster />} />
+          <Route path="/training" element={<Training />} />
+          <Route path="/training/tournaments/:id" element={<Tournament />} />
           <Route
             path="*"
             element={
