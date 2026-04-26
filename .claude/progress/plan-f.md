@@ -253,10 +253,37 @@ Commit: `feat(training): graduation + ranking + seed scenarios (Phase F.1.3)`
 - **No studio UI for the training tab** — that's Phase G material.
   F.1.2 ships the typed API client method so G can build on it.
 
-## F.2 — Archetype graduation (~1 day, depends on F.1)
+## F.2 — Archetype graduation ✅ SHIPPED 2026-04-26
 
-Promote YAML archetypes to shipped concrete classes through tournament
-runs. Depends on F.1 producing validated variations.
+Per the roadmap, F.2 is mostly a content phase: tournaments validate
+variations, validated variations get added to
+`docs/worker-archetypes.yaml`, and once an archetype proves itself
+in real runs it graduates to a shipped concrete class. None of that
+is code work — it's authoring + running tournaments.
+
+The platform-side surface F.2 needs is the "shipped vs described"
+view so studio + meta-agent can see what's battle-tested. Shipped
+in this phase:
+
+- `GET /api/agents/catalog/status` — runtime catalog ∪ YAML, each
+  row tagged `shipped: bool` and `n_scenarios` (count of training
+  scenarios whose `expected_role_types` includes the archetype name).
+  Sorted shipped-first. Aggregate counts for the whole catalog at
+  the top of the response.
+- `studio/src/api.ts` — `agentsApi.catalogStatus()` typed client.
+- Tests in `tests/api/test_agents_catalog.py` — 3 new cases covering
+  shipped flag, scenario coverage, and ordering.
+
+The actual "graduate this archetype" workflow stays manual: a
+developer adds a class to `agents/builtin/`, registers it in
+`agents/builtin/__init__.py`, and the YAML row's `shipped` field
+flips on next deploy. F.2 doesn't automate that decision — it
+surfaces the data that informs it.
+
+**Variations schema in YAML**: deferred. Forward-compat-friendly
+to add later without breaking the loader (it raises on unknown
+required fields, ignores unknown optional ones — so adding
+`variations:` later is purely additive).
 
 ## F.4 — Persona chat ✅ SHIPPED 2026-04-26
 

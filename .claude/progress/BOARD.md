@@ -1,8 +1,8 @@
 # AgentFlow Build Board
 
-**Current stage:** ✅ Initial build + Phase A + D-prime + B + C + D + F.3 + F.4 shipped.
+**Current stage:** ✅ Initial build + Phase A + D-prime + B + C + D + F shipped.
 **Last updated:** 2026-04-26
-**Tests:** 800 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
+**Tests:** 852 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
 
 ## Stage status
 - [x] Stage 1 — Foundation primitives  (29/29 tests)
@@ -45,9 +45,10 @@ real target.
 - ✅ **B** — shipped 2026-04-26 ([`56f3523`](https://github.com/Erik-Iuhas/AgentFlow/commit/56f3523))
 - ✅ **C** — shipped 2026-04-26 (C.0 → C.0.5 → C.1 → C.2 → C.3 → C.4)
 - ✅ **D** — shipped 2026-04-26 (D.0 → D.1 → D.2 → D.3 → D.4 → D.5)
-- 🚧 **F** — F.3 (memory_writer LLM synthesis) + F.4 (persona chat)
-  shipped 2026-04-26; F.1 (Training Camp) + F.2 (archetype
-  graduation) remaining
+- ✅ **F** — shipped 2026-04-26. F.3 (memory_writer LLM synthesis),
+  F.4 (persona chat), F.1 (Training Camp: scenarios + rubric +
+  tournaments + graduation + rankings), F.2 (catalog status:
+  shipped vs described view)
 - **G** (studio polish for workflow review — independent, can run in parallel)
 - **E** (Redis queue + KubeJobManager + Helm — when there's a deploy target)
 - **H** (speculative — visual_checker Playwright + UICanvas)

@@ -124,6 +124,36 @@ export interface PersonaChatResponse {
   };
 }
 
+// ── Agent catalog (Phase F.2) ──────────────────────────────────────────────
+
+export interface ArchetypeStatusRow {
+  name: string;
+  abstract_base: string;
+  description: string;
+  when_to_use: string;
+  default_model_tier: string;
+  default_tools: string[];
+  default_rbac_scopes: string[];
+  shipped: boolean;
+  n_scenarios: number;
+}
+
+export interface CatalogStatus {
+  archetypes: ArchetypeStatusRow[];
+  n_total: number;
+  n_shipped: number;
+  n_described_only: number;
+  n_scenarios: number;
+}
+
+export const agentsApi = {
+  /** Phase F.2 — shipped vs described archetype status, with
+   *  per-archetype scenario coverage. Used by the studio's catalog
+   *  view to surface which archetypes have training-camp authoring. */
+  catalogStatus: () => request<CatalogStatus>("GET", "/api/agents/catalog/status"),
+};
+
+
 // ── Training Camp (Phase F.1.2) ────────────────────────────────────────────
 
 export interface TrainingScenario {

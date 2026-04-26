@@ -275,19 +275,23 @@ small grouping helper in `studio/src/lib/`.
 These are designed in DESIGN.md but aren't on the critical path. Pick
 them up when real users tell you which one matters.
 
-- [ ] **F.1 Training Camp** (DESIGN §35) — toy scenario library,
-      tournament mode, ranking board for hiring decisions. Critical
-      for smaller-model users who need to bootstrap persona quality
-      without paying for production runs.
-- [ ] **F.2 Persona variations + training-camp readiness for each
-      archetype** — extending `docs/worker-archetypes.yaml` with
-      persona variations within each archetype (e.g. "minimalist
-      frontend_dev" vs "framework-heavy frontend_dev") and
-      training-camp scenarios that exercise each. F.1 produces these
-      variations through tournament runs — they get added to the YAML
-      as they're validated. A small generator that emits a "shipped
-      vs described" status table from `agents/catalog.py` is part of
-      this.
+- [x] **F.1 Training Camp** ✅ SHIPPED 2026-04-26 (DESIGN §35) —
+      scenario library + rubric scorer + training-mode runner branch +
+      `/api/training` endpoints (run / tournament / leaderboard) +
+      graduation logic + persona rankings. Three seed scenarios ship:
+      `hello_python_v1`, `python_function_v1`, `markdown_doc_v1`.
+      Auto-check kinds: `files_present` + `text_contains`
+      (subprocess-based pytest/ruff deferred to a follow-up that
+      needs sandboxed execution). Tournaments dispatch sequentially
+      through the existing JobQueue; parallel dispatch deferred.
+- [x] **F.2 Archetype catalog status** ✅ SHIPPED 2026-04-26 —
+      `GET /api/agents/catalog/status` returns runtime catalog ∪ YAML,
+      each row tagged shipped vs described-only with per-archetype
+      scenario coverage (count of training scenarios whose
+      `expected_role_types` includes the archetype name). The
+      content side of F.2 (graduating YAML archetypes to shipped
+      concrete classes via tournaments) stays manual — the platform
+      now surfaces the data that informs the decision.
 - [x] **F.3 Real `memory_writer` LLM synthesis** ✅ SHIPPED 2026-04-26
       (DESIGN §34) — three sub-chunks landed:
       - F.3.1 ([`b0bfd23`](https://github.com/Erik-Iuhas/AgentFlow/commit/b0bfd23))
