@@ -23,8 +23,8 @@ def test_register_builtins_is_idempotent():
     """Calling twice doesn't blow up."""
     register_builtins()
     register_builtins()
-    # All three archetypes are present.
-    for name in ("code_reviewer", "tech_lead", "requirements_writer"):
+    # All four archetypes are present.
+    for name in ("code_reviewer", "tech_lead", "requirements_writer", "architect"):
         assert registry.has(name)
 
 
@@ -34,6 +34,16 @@ def test_list_archetypes_includes_each_builtin():
     assert "code_reviewer" in names
     assert "tech_lead" in names
     assert "requirements_writer" in names
+    assert "architect" in names
+
+
+def test_architect_metadata_in_catalog():
+    """Architect is registered as a Reviewer with HEAVY tier."""
+    meta = get_archetype("architect")
+    assert meta is not None
+    assert meta.abstract_base == "reviewer"
+    assert meta.default_model_tier == "heavy"
+    assert "design" in meta.description.lower() or "architect" in meta.description.lower()
 
 
 def test_list_archetypes_groups_by_abstract_base():

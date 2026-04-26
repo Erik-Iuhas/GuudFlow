@@ -17,6 +17,7 @@ fit emerges.
 
 from __future__ import annotations
 
+from agents.builtin.architect import Architect
 from agents.builtin.code_reviewer import CodeReviewer
 from agents.builtin.requirements_writer import RequirementsWriter
 from agents.builtin.tech_lead import TechLead
@@ -27,6 +28,7 @@ _BUILTIN_ARCHETYPES = (
     ("code_reviewer", CodeReviewer),
     ("tech_lead", TechLead),
     ("requirements_writer", RequirementsWriter),
+    ("architect", Architect),
 )
 
 

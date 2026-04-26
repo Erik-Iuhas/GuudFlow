@@ -94,6 +94,12 @@ class AgentConfig:
     model_tier: str = "solid"  # "heavy" | "solid" | "fast"
     agent_class_role_type: str | None = None  # registry lookup; None = generic BaseAgent
     is_reviewer: bool = False
+    # Phase C.4: final-stage reviewer (architect pattern). Auto-depends
+    # on every non-final-reviewer role at runtime so it runs LAST.
+    # Triggers the heavy_tier_mid_run_dispatch gate when enabled per
+    # project. Distinct from is_reviewer (which is one of N peer
+    # reviewers); a final reviewer sees the whole merged result.
+    is_final_reviewer: bool = False
     max_tool_iterations: int = 10  # cap on tool-use loop iterations within one run() call
     # LoopGuard config — per-attempt wall-clock + repetition detection.
     # None means use LoopGuardConfig defaults.
@@ -373,6 +379,20 @@ class AgentRunner:
     # ── Agent setup ─────────────────────────────────────────────────────────
 
     def _build_agents(self) -> None:
+        # Phase C.4: auto-fill depends_on for any is_final_reviewer agent
+        # whose depends_on is empty. The architect (and any other final
+        # reviewer) needs to run AFTER every other non-final agent.
+        # Only fills when empty — if the user explicitly set depends_on
+        # we respect that.
+        non_final_roles = [
+            c.role for c in self.project.agents if not c.is_final_reviewer
+        ]
+        for cfg in self.project.agents:
+            if cfg.is_final_reviewer and not cfg.depends_on:
+                cfg.depends_on = [
+                    r for r in non_final_roles if r != cfg.role
+                ]
+
         for cfg in self.project.agents:
             agent = self.agent_factory(cfg)
             agent.role = cfg.role
@@ -452,6 +472,36 @@ class AgentRunner:
             # state was WAITING_FOR_HUMAN. Just continue — agent's run()
             # decides what to do with new user_board entries.
             agent.iteration = workspace.iteration
+
+            # Phase C.4: final-stage reviewers (architects) trigger the
+            # heavy_tier_mid_run_dispatch gate before they actually
+            # spend tokens. This is the "office loops back with the
+            # architect" confirmation: the team's work is done, the
+            # per-step reviewers have approved, but before the architect
+            # runs its HEAVY-tier design check we ask the user.
+            if cfg.is_final_reviewer and self._is_gate_enabled("heavy_tier_mid_run_dispatch"):
+                granted = await self._request_approval(
+                    kind="heavy_tier_mid_run_dispatch",
+                    summary=f"Run final-stage architect {cfg.role}",
+                    triggered_by=cfg.role,
+                    context={
+                        "role": cfg.role,
+                        "is_final_reviewer": True,
+                        "model_tier": cfg.model_tier,
+                    },
+                )
+                if not granted:
+                    # User said no — record as completed (gate denial is
+                    # the audit) but skip the actual work. The run still
+                    # finishes cleanly without architect output.
+                    workspace.completed_agents.append(cfg.role)
+                    workspace.agent_states[cfg.role] = AgentState.COMPLETE
+                    await agent.signal(
+                        workspace, SignalType.COMPLETE,
+                        summary=f"{cfg.role} skipped (gate denied)",
+                    )
+                    return
+
             await agent.signal(workspace, SignalType.STARTED, summary=f"started ({cfg.role})")
 
             try:

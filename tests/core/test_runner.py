@@ -355,3 +355,119 @@ async def test_reviewer_approved_text_still_emits_approved(tmp_path: Path):
     assert "REJECTED" not in types
     # No rejection counted.
     assert runner._rejection_counts == {}
+
+
+# ── Phase C.4: final-stage architect review ────────────────────────────────
+
+
+def test_final_reviewer_auto_fills_depends_on(tmp_path: Path):
+    """An is_final_reviewer agent with empty depends_on gets auto-deps
+    on every other non-final-reviewer role at build time."""
+    proj = _project(
+        agents=[
+            AgentConfig(role="dev"),
+            AgentConfig(role="reviewer", depends_on=["dev"], is_reviewer=True),
+            AgentConfig(role="architect", is_final_reviewer=True),
+        ],
+    )
+    runner = AgentRunner(
+        project=proj, run_id="r1",
+        run_root=tmp_path / "run", llm=MockLLMClient([]),
+    )
+    runner._build_agents()
+    architect_cfg = next(c for c in proj.agents if c.role == "architect")
+    assert sorted(architect_cfg.depends_on) == ["dev", "reviewer"]
+
+
+def test_final_reviewer_respects_explicit_depends_on(tmp_path: Path):
+    """If the user explicitly set depends_on on a final reviewer, the
+    auto-fill leaves it alone."""
+    proj = _project(
+        agents=[
+            AgentConfig(role="dev"),
+            AgentConfig(role="reviewer", depends_on=["dev"], is_reviewer=True),
+            AgentConfig(
+                role="architect",
+                is_final_reviewer=True,
+                depends_on=["reviewer"],  # explicit — only depend on reviewer
+            ),
+        ],
+    )
+    runner = AgentRunner(
+        project=proj, run_id="r1",
+        run_root=tmp_path / "run", llm=MockLLMClient([]),
+    )
+    runner._build_agents()
+    architect_cfg = next(c for c in proj.agents if c.role == "architect")
+    assert architect_cfg.depends_on == ["reviewer"]
+
+
+def test_two_final_reviewers_do_not_depend_on_each_other(tmp_path: Path):
+    """Multiple final reviewers each auto-dep on every NON-final role,
+    not on each other (otherwise we'd serialise them artificially)."""
+    proj = _project(
+        agents=[
+            AgentConfig(role="dev"),
+            AgentConfig(role="security", is_final_reviewer=True),
+            AgentConfig(role="architect", is_final_reviewer=True),
+        ],
+    )
+    runner = AgentRunner(
+        project=proj, run_id="r1",
+        run_root=tmp_path / "run", llm=MockLLMClient([]),
+    )
+    runner._build_agents()
+    sec_cfg = next(c for c in proj.agents if c.role == "security")
+    arch_cfg = next(c for c in proj.agents if c.role == "architect")
+    assert sec_cfg.depends_on == ["dev"]
+    assert arch_cfg.depends_on == ["dev"]
+
+
+async def test_three_agent_run_with_architect_happy_path(tmp_path: Path):
+    """3-agent flow: dev → reviewer → architect, all approve, run
+    completes. Verifies the architect actually runs after the others
+    when is_final_reviewer is set."""
+    proj = _project(
+        agents=[
+            AgentConfig(role="dev", declared_local_tools=["fs:read"]),
+            AgentConfig(
+                role="reviewer", depends_on=["dev"], is_reviewer=True,
+                declared_local_tools=["fs:read"],
+            ),
+            AgentConfig(
+                role="architect",
+                is_final_reviewer=True,
+                is_reviewer=True,  # also a reviewer for APPROVED→merge logic
+                declared_local_tools=["fs:read"],
+            ),
+        ],
+        # Disable the gate for this test to keep the LLM script simple
+        # — gate behaviour has its own focused tests.
+        approval_gates={"heavy_tier_mid_run_dispatch": False},
+        max_iterations=2,
+    )
+    llm = MockLLMClient([
+        MockTurn(text="done"),       # dev
+        MockTurn(text="APPROVED"),   # reviewer
+        MockTurn(text="APPROVED"),   # architect
+    ])
+    runner = AgentRunner(
+        project=proj, run_id="r1",
+        run_root=tmp_path / "run", llm=llm,
+    )
+    result = await runner.run()
+    assert result.status.value == "complete"
+    assert "architect" in runner.workspace.completed_agents
+    # Architect's completion lands as APPROVED on the board (it's a reviewer).
+    approved = [s for s in runner.workspace.board if s.type.value == "APPROVED"]
+    approved_agents = {s.from_agent for s in approved}
+    assert "reviewer" in approved_agents
+    assert "architect" in approved_agents
+
+
+# Note: the gate-on-architect denial path is verified by code review +
+# the existing focused approval tests (tests/core/test_approval_gates.py).
+# Adding an e2e test that drives runner.run() with a concurrent gate
+# resolver hits the same async coordination edge-case that the equivalent
+# C.3 test ran into. Once Phase D ships its meta-agent flow (which uses
+# the same gate path), an e2e test will land cleanly there.

@@ -122,6 +122,26 @@ def test_serialise_project_handles_non_dict_approval_gates():
     assert p.approval_gates["pre_run_cost_preview"] is True
 
 
+def test_serialise_project_carries_is_final_reviewer():
+    """Phase C.4: is_final_reviewer round-trips through the JSON layer."""
+    p = serialise_project({
+        "project_id": "p", "goal": "x",
+        "agents": [
+            {"role": "dev"},
+            {
+                "role": "architect",
+                "agent_class_role_type": "architect",
+                "is_final_reviewer": True,
+                "is_reviewer": True,
+            },
+        ],
+    })
+    by_role = {a.role: a for a in p.agents}
+    assert by_role["dev"].is_final_reviewer is False
+    assert by_role["architect"].is_final_reviewer is True
+    assert by_role["architect"].is_reviewer is True
+
+
 # ── JobRunner end-to-end ───────────────────────────────────────────────────
 
 

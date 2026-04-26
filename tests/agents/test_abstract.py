@@ -17,6 +17,7 @@ from agents.abstract import (
     Specialist,
 )
 from agents.base import BaseAgent
+from agents.builtin.architect import Architect
 from agents.builtin.code_reviewer import CodeReviewer
 from agents.builtin.requirements_writer import RequirementsWriter
 from agents.builtin.tech_lead import TechLead
@@ -90,7 +91,7 @@ def test_requirements_writer_does_not_grant_code_exec():
 
 
 def test_concrete_archetypes_all_extend_base_agent():
-    for cls in (CodeReviewer, TechLead, RequirementsWriter):
+    for cls in (CodeReviewer, TechLead, RequirementsWriter, Architect):
         assert issubclass(cls, BaseAgent), cls
         assert issubclass(cls, AgentArchetype), cls
 
@@ -99,7 +100,28 @@ def test_concrete_archetypes_construct_with_defaults():
     """Each concrete subclass constructs without error using just role
     + the kwargs BaseAgent expects. Proves the inheritance chain
     doesn't add required positional args."""
-    for cls in (CodeReviewer, TechLead, RequirementsWriter):
+    for cls in (CodeReviewer, TechLead, RequirementsWriter, Architect):
         agent = cls()
         assert isinstance(agent, BaseAgent)
         assert agent.role  # role is set by the subclass
+
+
+# ── Architect (Phase C.4) ──────────────────────────────────────────────────
+
+
+def test_architect_extends_reviewer():
+    assert issubclass(Architect, Reviewer)
+    assert Architect.archetype_kind == "reviewer"
+
+
+def test_architect_defaults_to_heavy_tier():
+    """Architects spend real tokens — HEAVY by default per CLAUDE.md."""
+    assert Architect.default_model_tier == "heavy"
+
+
+def test_architect_inherits_reviewer_tools():
+    """Architect doesn't override default_tools — it gets the standard
+    diff-aware reviewer toolkit from Reviewer."""
+    assert "git:diff" in Architect.default_tools
+    assert "git:log" in Architect.default_tools
+    assert "fs:read" in Architect.default_tools
