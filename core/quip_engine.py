@@ -2,17 +2,18 @@
 
 DESIGN §23: quip board is a SEPARATE log from the main signal board.
 Agents never read it. The runner triggers it on significant events
-(iteration boundaries, approvals, conflicts, end of run). FAST tier
-always — quips are flavour, not reasoning.
+(agent complete, approval/rejection, end of run). FAST tier always —
+quips are flavour, not reasoning.
 
-Stage 5 ships a minimal implementation that writes to
-`data/runs/{run_id}/quip_log.json`. The studio (Stage 8) renders it
-alongside the BoardFeed.
+Each quip is spoken in the voice of a specific agent persona. The
+runner calls set_voices() after _build_agents() so the engine knows
+who is on the team and what their character is.
 """
 
 from __future__ import annotations
 
 import json
+import random
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,35 +25,45 @@ from core.workspace import Workspace
 
 
 @dataclass
+class AgentVoice:
+    role: str       # "developer", "reviewer" — used to select speaker
+    name: str       # display name shown in the quip feed
+    character: str  # character description injected into the system prompt
+
+
+@dataclass
 class Quip:
     ts: str
-    persona: str  # name of the persona that "said" the quip, or "system"
+    persona: str  # display name of the agent that "said" it
+    role: str     # agent role
     text: str
-    event: str  # "iteration_complete" | "approved" | "rejected" | "run_complete" | "conflict"
+    event: str    # "agent_complete" | "approved" | "rejected" | "run_complete"
 
 
 class QuipEngine:
-    """One LLM call per event, writing to the quip log on disk.
+    """One cheap LLM call per event, written to quip_log.json on disk.
 
     The quip log is JSON (a list, atomic-rewrite). Constructor takes the
-    output path; Stage 5's runner sets this to `data/runs/{run_id}/quip_log.json`.
+    output path; the runner sets voices via set_voices() after _build_agents().
     """
 
     FAST_TIER_MODEL = "claude-haiku-4-5-20251001"
-    MAX_TOKENS = 100  # quips are short by design
+    MAX_TOKENS = 80  # quips are short by design
 
-    def __init__(self, llm: LLMClient, log_path: Path | str, persona_name: str = "system"):
+    def __init__(self, llm: LLMClient, log_path: Path | str):
         self.llm = llm
         self.log_path = Path(log_path)
-        self.persona_name = persona_name
+        self._voices: list[AgentVoice] = []
         self._quips: list[Quip] = []
         self._subscribers: list[Callable[[Quip], None]] = []
 
+    def set_voices(self, voices: list[AgentVoice]) -> None:
+        """Called by the runner after _build_agents() so the engine knows
+        each team member's name and character."""
+        self._voices = voices
+
     def subscribe(self, callback: Callable[[Quip], None]) -> Callable[[], None]:
-        """Register a callback for new quips. Returns an unsubscribe
-        function. Used by the API's WebSocket bridge to stream quips
-        live alongside the board feed. Subscribers are notified after the
-        quip is persisted to disk; subscriber exceptions are swallowed."""
+        """Register a callback for new quips. Returns an unsubscribe fn."""
         self._subscribers.append(callback)
 
         def _unsubscribe() -> None:
@@ -63,49 +74,95 @@ class QuipEngine:
 
         return _unsubscribe
 
+    # ── Public event hooks ──────────────────────────────────────────────────
+
+    async def on_agent_complete(self, role: str, workspace: Workspace) -> None:
+        """The completing agent reacts to finishing their work."""
+        voice = self._voice_for(role)
+        n_done = len(workspace.completed_agents)
+        n_total = n_done + len([
+            s for s in workspace.agent_states.values()
+            if s.value not in ("complete", "failed")
+        ])
+        context = (
+            f"You just finished your work. "
+            f"{n_done} of ~{n_total or n_done} agents complete so far."
+        )
+        quip = await self._generate(voice, context, event="agent_complete")
+        self._save(quip)
+
+    async def on_review_verdict(
+        self, role: str, verdict: str, workspace: Workspace
+    ) -> None:
+        """The reviewer reacts to their own APPROVED / REJECTED verdict."""
+        voice = self._voice_for(role)
+        reviewed = ", ".join(workspace.completed_agents[:-1]) or "the work"
+        if verdict == "APPROVED":
+            context = f"You just approved {reviewed}. It passed your review."
+        else:
+            context = f"You just rejected {reviewed}. It did not meet your standard."
+        quip = await self._generate(voice, context, event=verdict.lower())
+        self._save(quip)
+
     async def on_run_complete(self, workspace: Workspace, result: SchedulerResult) -> None:
-        """Generate a final quip summarising how the run went."""
-        prompt = self._summarise_for_quip(workspace, result)
-        quip = await self._generate(prompt, event="run_complete")
-        self._append(quip)
-        self._persist()
-        self._notify(quip)
+        """A randomly chosen team member reacts to the overall run outcome."""
+        voice = self._random_voice()
+        status = result.status.value
+        done = ", ".join(result.completed) or "(none)"
+        failed = ", ".join(result.failed) or "none"
+        context = (
+            f"The run just finished with status: {status}. "
+            f"Completed agents: {done}. Failed: {failed}."
+        )
+        quip = await self._generate(voice, context, event="run_complete")
+        self._save(quip)
 
     async def on_iteration_complete(self, workspace: Workspace, iteration: int) -> None:
-        prompt = (
+        """A randomly chosen agent reacts to an iteration boundary."""
+        voice = self._random_voice()
+        context = (
             f"Iteration {iteration} just finished. "
-            f"{len(workspace.completed_agents)} agents complete. "
-            "Write one short comment in character."
+            f"{len(workspace.completed_agents)} agents complete so far."
         )
-        quip = await self._generate(prompt, event="iteration_complete")
-        self._append(quip)
-        self._persist()
-        self._notify(quip)
+        quip = await self._generate(voice, context, event="iteration_complete")
+        self._save(quip)
 
     async def on_event(self, summary: str, event: str = "system") -> None:
-        prompt = f"{summary}\n\nWrite one short, in-character comment."
-        quip = await self._generate(prompt, event=event)
-        self._append(quip)
-        self._persist()
-        self._notify(quip)
+        """Generic hook — picks a random voice."""
+        voice = self._random_voice()
+        quip = await self._generate(voice, summary, event=event)
+        self._save(quip)
 
     # ── Internals ───────────────────────────────────────────────────────────
 
-    def _summarise_for_quip(self, workspace: Workspace, result: SchedulerResult) -> str:
-        return (
-            f"Run finished with status: {result.status.value}. "
-            f"Completed: {', '.join(result.completed) or '(none)'}. "
-            f"Failed: {', '.join(result.failed) or '(none)'}. "
-            "Write one short in-character comment about how it went."
+    def _voice_for(self, role: str) -> AgentVoice:
+        for v in self._voices:
+            if v.role == role:
+                return v
+        return self._fallback_voice(role)
+
+    def _random_voice(self) -> AgentVoice:
+        if self._voices:
+            return random.choice(self._voices)
+        return self._fallback_voice("system")
+
+    def _fallback_voice(self, role: str) -> AgentVoice:
+        return AgentVoice(
+            role=role,
+            name=role.capitalize(),
+            character="You are a focused engineer on a software team.",
         )
 
-    async def _generate(self, prompt: str, event: str) -> Quip:
+    async def _generate(self, voice: AgentVoice, context: str, event: str) -> Quip:
+        system = (
+            f"{voice.character}\n\n"
+            "React to what just happened in ONE punchy sentence — in character, "
+            "no quotation marks, no preamble. Speak as yourself."
+        )
         try:
             response = await self.llm.complete(
-                system="You are a member of an engineering team. Drop a short, "
-                       "punchy comment about what just happened — one sentence, "
-                       "no quotation marks, no preamble. Stay in character.",
-                messages=[LLMMessage(role="user", content=prompt)],
+                system=system,
+                messages=[LLMMessage(role="user", content=context)],
                 tools=None,
                 max_tokens=self.MAX_TOKENS,
                 model=self.FAST_TIER_MODEL,
@@ -115,13 +172,16 @@ class QuipEngine:
             text = f"(quip failed: {e})"
         return Quip(
             ts=datetime.now(timezone.utc).isoformat(),
-            persona=self.persona_name,
+            persona=voice.name,
+            role=voice.role,
             text=text,
             event=event,
         )
 
-    def _append(self, quip: Quip) -> None:
+    def _save(self, quip: Quip) -> None:
         self._quips.append(quip)
+        self._persist()
+        self._notify(quip)
 
     def _persist(self) -> None:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)

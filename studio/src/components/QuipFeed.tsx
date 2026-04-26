@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { connectQuipStream, type QuipWire } from "../api";
 
+const EVENT_LABEL: Record<string, string> = {
+  agent_complete: "·",
+  approved: "✓",
+  rejected: "✗",
+  run_complete: "·",
+  iteration_complete: "·",
+};
+
 interface Props {
   runId: string;
 }
@@ -47,11 +55,11 @@ export function QuipFeed({ runId }: Props) {
         {visible.length === 0 && <p className="muted small">No quips yet.</p>}
         {visible.map((q, i) => (
           <div className="quip" key={`${q.ts}-${i}`}>
-            <span className="who">{q.persona}:</span>
-            <em>{q.text}</em>
-            <span className="muted small" style={{ marginLeft: 8 }}>
-              ({q.event})
+            <span className="who">{q.persona}</span>
+            <span className="muted small" style={{ margin: "0 4px" }}>
+              {EVENT_LABEL[q.event] ?? q.event}
             </span>
+            <em>{q.text}</em>
           </div>
         ))}
       </div>

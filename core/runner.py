@@ -563,6 +563,23 @@ class AgentRunner:
     async def run(self) -> SchedulerResult:
         self._build_agents()
 
+        # Populate quip voices from the now-built agents so each quip
+        # is spoken in the right persona's voice.
+        if self.quip_engine is not None:
+            from core.quip_engine import AgentVoice
+            voices = []
+            for role, agent in self.agents.items():
+                if agent.persona is not None:
+                    name = agent.persona.profile.name or role
+                    char = agent.persona.character_layer() or (
+                        f"You are {name}, a specialist on a software team."
+                    )
+                else:
+                    name = role.capitalize()
+                    char = f"You are the {role} on a software team. {agent.description}".strip()
+                voices.append(AgentVoice(role=role, name=name, character=char))
+            self.quip_engine.set_voices(voices)
+
         # Build AgentSpecs for the scheduler. Each spec's runner wraps
         # the agent's run() and handles iteration tracking + commit
         # finalisation.
@@ -715,6 +732,23 @@ class AgentRunner:
                 summary=f"{cfg.role} complete",
                 detail=commit_hash,
             )
+
+            # Quip: agent reacts to completing their own work.
+            if self.quip_engine is not None:
+                try:
+                    if cfg.is_reviewer:
+                        verdict = (
+                            "APPROVED" if final_signal is SignalType.APPROVED
+                            else "REJECTED"
+                        )
+                        await self.quip_engine.on_review_verdict(
+                            cfg.role, verdict, workspace
+                        )
+                    else:
+                        await self.quip_engine.on_agent_complete(cfg.role, workspace)
+                except Exception:
+                    pass
+
             # On APPROVED only: merge upstream agent branches into main.
             # REJECTED leaves the branches alone for the next iteration.
             if cfg.is_reviewer and final_signal is SignalType.APPROVED:
@@ -1136,5 +1170,7 @@ def default_agent_factory(cfg: AgentConfig) -> BaseAgent:
 
 # Forward-declared for the import order.
 class QuipEngine:  # noqa: F811 — real class lives in core/quip_engine.py
-    async def on_run_complete(self, workspace: Workspace, result: SchedulerResult) -> None:
-        ...
+    def set_voices(self, voices: list) -> None: ...
+    async def on_run_complete(self, workspace: Workspace, result: SchedulerResult) -> None: ...
+    async def on_agent_complete(self, role: str, workspace: Workspace) -> None: ...
+    async def on_review_verdict(self, role: str, verdict: str, workspace: Workspace) -> None: ...

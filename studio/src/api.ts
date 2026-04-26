@@ -490,7 +490,8 @@ export function connectRunStream(
 
 export interface QuipWire {
   ts: string;
-  persona: string;
+  persona: string;   // display name
+  role?: string;     // agent role (absent in old quip logs)
   text: string;
   event: string;
 }
