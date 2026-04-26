@@ -219,6 +219,13 @@ class AgentRunner:
         # board.jsonl co-exists with the end-of-run consolidated
         # board.json; both readers and writers tolerate either source.
         self.workspace.set_board_persister(self._build_board_persister())
+        # Phase G-prime.1 — artifact persistence. When a completed
+        # agent's artifact is set via workspace.set_artifact, persist
+        # the full dict so a resumed run can read the agent's output
+        # without re-running it.
+        self.workspace.set_artifact_persister(
+            self._build_artifact_persister()
+        )
         # Run-level deadline — checked by the scheduler.
         if max_wall_seconds is not None:
             import time as _time
@@ -400,6 +407,39 @@ class AgentRunner:
                 # Disk write failures shouldn't break the run. The
                 # consolidated board.json at end-of-run is the
                 # safety net.
+                pass
+
+        return _persist
+
+    def _build_artifact_persister(self):
+        """Returns a callable that writes the full artifacts dict to
+        `{run_root}/artifacts.json`. Whole-dict rewrite is fine because
+        artifact-write events are rare (one per completed agent) and
+        the dict is small. Used by the resume loader (G-prime.1) so a
+        resumed run reads completed agents' outputs from disk."""
+        try:
+            self.run_root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None
+        artifacts_path = self.run_root / "artifacts.json"
+
+        def _persist(artifacts: dict[str, Artifact]) -> None:
+            try:
+                payload = {
+                    role: {
+                        "agent_role": a.agent_role,
+                        "type": a.type,
+                        "content": a.content,
+                        "iteration": a.iteration,
+                        "timestamp": a.timestamp.isoformat(),
+                    }
+                    for role, a in artifacts.items()
+                }
+                artifacts_path.write_text(
+                    json.dumps(payload, indent=2, default=str),
+                    encoding="utf-8",
+                )
+            except OSError:
                 pass
 
         return _persist
@@ -598,13 +638,14 @@ class AgentRunner:
             # Auto-commit any uncommitted changes on the agent's branch.
             commit_hash = await self._auto_commit(cfg.role, workspace)
 
-            # Record the artifact.
-            workspace.artifacts[cfg.role] = Artifact(
+            # Record the artifact (Phase G-prime.1: routes through
+            # set_artifact so the persister fires).
+            workspace.set_artifact(cfg.role, Artifact(
                 agent_role=cfg.role,
                 type="text",
                 content=artifact_text or "",
                 iteration=workspace.iteration,
-            )
+            ))
             workspace.completed_agents.append(cfg.role)
             workspace.agent_states[cfg.role] = AgentState.COMPLETE
 

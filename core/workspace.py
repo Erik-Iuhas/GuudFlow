@@ -206,6 +206,12 @@ class Workspace:
     # are swallowed for the same reason subscriber exceptions are: a
     # broken persister can't be allowed to break the workspace.
     _board_persister: Callable[[Signal], None] | None = field(default=None, repr=False)
+    # Artifact persister (Phase G-prime.1) — fires whenever set_artifact
+    # mutates the artifacts dict so restored workspaces have agent
+    # outputs available without re-running completed agents.
+    _artifact_persister: Callable[[dict[str, "Artifact"]], None] | None = field(
+        default=None, repr=False,
+    )
 
     # ── Board management ────────────────────────────────────────────────────
 
@@ -243,6 +249,26 @@ class Workspace:
         Distinct from `subscribe()` — only one persister at a time, and
         it has a single durable purpose (write to disk for resume)."""
         self._board_persister = callback
+
+    def set_artifact_persister(
+        self, callback: Callable[[dict[str, Artifact]], None] | None,
+    ) -> None:
+        """Install (or clear) the artifact persister. Fires after each
+        `set_artifact()` call with the full current artifacts dict."""
+        self._artifact_persister = callback
+
+    def set_artifact(self, role: str, artifact: Artifact) -> None:
+        """Record an agent's final output artifact. Call this instead of
+        mutating `self.artifacts` directly so the artifact persister
+        (Phase G-prime.1) sees every change and resumed runs can read
+        the artifacts of completed agents without re-running them."""
+        self.artifacts[role] = artifact
+        if self._artifact_persister is not None:
+            try:
+                self._artifact_persister(self.artifacts)
+            except Exception:
+                # Same swallow contract as the board persister.
+                pass
 
     def subscribe(self, callback: Callable[[Signal], None]) -> Callable[[], None]:
         """Register a callback for new signals. Returns an unsubscribe
