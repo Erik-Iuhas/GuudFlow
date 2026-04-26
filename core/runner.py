@@ -128,6 +128,7 @@ class AgentRunner:
         quip_engine: "QuipEngine | None" = None,
         agent_factory: "AgentFactory | None" = None,
         max_wall_seconds: float | None = 1800.0,  # 30 min run-level budget
+        docker_manager: "DockerManager | None" = None,
     ):
         self.project = project
         self.run_id = run_id
@@ -140,6 +141,7 @@ class AgentRunner:
         self.quip_engine = quip_engine
         self.agent_factory = agent_factory or default_agent_factory
         self.max_wall_seconds = max_wall_seconds
+        self.docker_manager = docker_manager
 
         # Set up workspace state.
         self.workspace = Workspace(
@@ -222,7 +224,13 @@ class AgentRunner:
 
     def _instantiate_local_tools(self, role: str) -> dict[str, BaseTool]:
         """Create the BaseTool instances for the tools available to this role."""
-        from agents.tools.code import CodeExec, CodeOutline, make_dev_host_runner
+        import os
+        from agents.tools.code import (
+            CodeExec,
+            CodeOutline,
+            make_container_runner,
+            make_dev_host_runner,
+        )
         from agents.tools.data import DataCsv, DataJson, DataXml, DataYaml
         from agents.tools.doc import DocHtml, DocMarkdown
         from agents.tools.math_tool import MathEval
@@ -245,12 +253,22 @@ class AgentRunner:
                 return
             await agent.release_files(self.workspace, [path], outcome=outcome, commit_hash=commit_hash)
 
-        # Per-run code:exec audit log.
-        code_exec_audit = self.run_root / "code_exec_audit.jsonl"
-        host_runner = make_dev_host_runner(
-            cwd=self.files.working,
-            audit_path=code_exec_audit,
-        )
+        # code:exec runner — production mode + a docker_manager routes
+        # through the sandbox container; dev mode (or production without
+        # a docker_manager) uses the hardened host runner. The host
+        # runner refuses production+host_runner combos via its own mode
+        # check, so a misconfigured production deploy fails loudly.
+        in_production = os.environ.get("AGENTFLOW_MODE") == "production"
+        if in_production and self.docker_manager is not None:
+            code_runner = make_container_runner(self.docker_manager, self.run_id)
+            code_exec_tool = CodeExec(runner=code_runner, is_dev_host_runner=False)
+        else:
+            code_exec_audit = self.run_root / "code_exec_audit.jsonl"
+            host_runner = make_dev_host_runner(
+                cwd=self.files.working,
+                audit_path=code_exec_audit,
+            )
+            code_exec_tool = CodeExec(runner=host_runner, is_dev_host_runner=True)
 
         return {
             FsRead.name: FsRead(self.files),
@@ -267,7 +285,7 @@ class AgentRunner:
             GitLog.name: GitLog(self.git),
             GitRead.name: GitRead(self.git),
             GitStatus.name: GitStatus(self.git),
-            CodeExec.name: CodeExec(runner=host_runner, is_dev_host_runner=True),
+            CodeExec.name: code_exec_tool,
             CodeOutline.name: CodeOutline(self.files),
             DataCsv.name: DataCsv(self.files),
             DataJson.name: DataJson(self.files),

@@ -1,8 +1,8 @@
 # AgentFlow Build Board
 
-**Current stage:** ✅ Initial build complete + Phase D-prime shipped.
+**Current stage:** ✅ Initial build + Phase A + D-prime + B shipped.
 **Last updated:** 2026-04-26
-**Tests:** 624 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
+**Tests:** 638 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
 
 ## Stage status
 - [x] Stage 1 — Foundation primitives  (29/29 tests)

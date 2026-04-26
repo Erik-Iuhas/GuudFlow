@@ -23,8 +23,10 @@ from agents.tools.code import (
     DEFAULT_QUOTA,
     _DEFAULT_ENV_ALLOW,
     _scrub_env,
+    make_container_runner,
     make_dev_host_runner,
 )
+from worker.docker_manager import ExecResult
 
 
 # ── Mode enforcement ───────────────────────────────────────────────────────
@@ -194,3 +196,92 @@ async def test_rlimit_caps_address_space():
     res = await runner("python", [], {"code": "print('rlimit ok')"})
     assert res.get("ok") is True
     assert "rlimit ok" in res["stdout"]
+
+
+# ── make_container_runner (Phase B) ────────────────────────────────────────
+
+
+class _FakeDockerManager:
+    """Minimal stand-in for DockerManager in container-runner tests."""
+
+    def __init__(self, result: ExecResult | None = None, raise_exc: Exception | None = None):
+        self._result = result or ExecResult(exit_code=0, stdout="hi from container", stderr="")
+        self._raise = raise_exc
+        self.calls: list[dict] = []
+
+    async def exec_in(self, run_id, language, code, timeout_s=30.0):
+        self.calls.append({
+            "run_id": run_id,
+            "language": language,
+            "code": code,
+            "timeout_s": timeout_s,
+        })
+        if self._raise is not None:
+            raise self._raise
+        return self._result
+
+
+async def test_container_runner_routes_through_docker_manager():
+    fake = _FakeDockerManager(result=ExecResult(exit_code=0, stdout="hi", stderr=""))
+    runner = make_container_runner(fake, run_id="run_42")
+
+    res = await runner("python", [], {"code": "print('hi')", "timeout_s": 10})
+
+    assert res["ok"] is True
+    assert res["exit_code"] == 0
+    assert res["stdout"] == "hi"
+    assert res["container_mode"] is True
+    assert res["language"] == "python"
+    assert "duration_s" in res
+
+    assert fake.calls == [{
+        "run_id": "run_42",
+        "language": "python",
+        "code": "print('hi')",
+        "timeout_s": 10,
+    }]
+
+
+async def test_container_runner_rejects_unsupported_language():
+    fake = _FakeDockerManager()
+    runner = make_container_runner(fake, run_id="r")
+    res = await runner("rust", [], {"code": "fn main(){}"})
+    assert "error" in res
+    assert "not supported" in res["error"].lower()
+    # Did not call docker.
+    assert fake.calls == []
+
+
+async def test_container_runner_handles_docker_exception():
+    fake = _FakeDockerManager(raise_exc=RuntimeError("daemon unreachable"))
+    runner = make_container_runner(fake, run_id="r")
+    res = await runner("python", [], {"code": "x", "timeout_s": 5})
+    assert "error" in res
+    assert "daemon unreachable" in res["error"]
+    assert "duration_s" in res
+
+
+async def test_container_runner_propagates_stub_flag():
+    """Dev-mode DockerManager returns is_stub=True; the runner output
+    should reflect that so callers can tell it wasn't a real container."""
+    fake = _FakeDockerManager(
+        result=ExecResult(exit_code=0, stdout="[stub]", stderr="", is_stub=True),
+    )
+    runner = make_container_runner(fake, run_id="r")
+    res = await runner("python", [], {"code": "x"})
+    assert res["ok"] is True
+    assert res["is_stub"] is True
+
+
+async def test_container_runner_forwards_nonzero_exit():
+    fake = _FakeDockerManager(
+        result=ExecResult(exit_code=1, stdout="", stderr="boom"),
+    )
+    runner = make_container_runner(fake, run_id="r")
+    res = await runner("python", [], {"code": "raise Exception('boom')"})
+    # Note: container failures aren't errors at the runner layer — they're
+    # legitimate code:exec results with a non-zero exit. The agent reads
+    # the exit_code/stderr and decides what to do.
+    assert res["ok"] is True
+    assert res["exit_code"] == 1
+    assert res["stderr"] == "boom"

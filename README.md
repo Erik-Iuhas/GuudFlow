@@ -89,10 +89,17 @@ For production-style runs, build the per-run sandbox image:
 ./scripts/build_sandbox.sh
 ```
 
-Then set `AGENTFLOW_MODE=production` and the worker will route
-`code:exec` invocations through ephemeral containers with
-`network_mode: none`, read-only root, resource caps, etc. (See
-[DESIGN.md §29](DESIGN.md) for the full security model.)
+Then set `AGENTFLOW_MODE=production`. The worker now routes every
+`code:exec` invocation through `DockerManager.exec_in()` against the
+run's ephemeral container — `network_mode: none`, read-only root,
+512 MiB memory cap, 1 CPU, 50 PID cap, no-new-privileges, tmpfs `/tmp`
+(64 MiB). See [DESIGN.md §29](DESIGN.md) for the full security model.
+
+Misconfigured production deploys fail closed: if the worker reaches
+production mode without a Docker daemon (or without the sandbox image),
+it refuses to start. If somehow `AGENTFLOW_MODE=production` is set
+without a `DockerManager`, `code:exec` itself refuses to run on the
+host.
 
 ## Run it with Docker
 
@@ -170,8 +177,8 @@ mocked). No Docker required (DockerManager dev-mode is a stub).
 
 **[ROADMAP.md](ROADMAP.md)** has the prioritized list. Short version:
 
-- Phase B — close the dev→prod gap (`code:exec` container routing, ~30 lines)
-- Phase C — make a live run feel live (USER_COMMENT POST endpoint, real quip stream, tech-lead escalation auto-detection)
+- ✅ Phase B — `code:exec` routes through the sandbox container in production
+- Phase C — make a live run feel live (USER_COMMENT POST endpoint, real quip stream, tech-lead escalation, final-stage architect review)
 - Phase D — make the meta-agent actually propose (currently returns a deterministic skeleton)
 - Phase E — production deploy story (Redis queue, KubeJobManager for k8s)
 - Phase F — long-term moat features (Training Camp, real LLM-driven memory synthesis, persona chat)

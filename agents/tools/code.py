@@ -202,6 +202,59 @@ def make_dev_host_runner(
     return _runner
 
 
+def make_container_runner(
+    docker_manager: Any,
+    run_id: str,
+) -> CodeRunner:
+    """Build a production-mode runner that routes `code:exec` through the
+    run's sandbox container.
+
+    The runner shape matches `make_dev_host_runner` so the `CodeExec` tool
+    is mode-agnostic at the call site. `docker_manager.exec_in()`
+    enforces the §29 resource limits + network_mode=none container that
+    the agent-generated code actually executes inside.
+
+    The `language` field is forwarded to `DockerManager.exec_in` which
+    knows how to wrap python/shell. Anything else returns an error.
+    """
+
+    async def _runner(
+        language: str,
+        args: list[str],
+        options: dict[str, Any],
+    ) -> dict[str, Any]:
+        code = options.get("code", "")
+        timeout = float(options.get("timeout_s", 30.0))
+
+        if language not in ("python", "shell"):
+            return {"error": f"language not supported in container runner: {language}"}
+
+        started = _time_mod.monotonic()
+        try:
+            result = await docker_manager.exec_in(
+                run_id, language, code, timeout_s=timeout,
+            )
+        except Exception as e:
+            return {
+                "error": f"container exec failed: {e}",
+                "duration_s": _time_mod.monotonic() - started,
+            }
+
+        duration = _time_mod.monotonic() - started
+        return {
+            "ok": True,
+            "language": language,
+            "exit_code": result.exit_code,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "container_mode": True,
+            "is_stub": result.is_stub,
+            "duration_s": duration,
+        }
+
+    return _runner
+
+
 def _audit(
     audit_path: Path | None,
     language: str,

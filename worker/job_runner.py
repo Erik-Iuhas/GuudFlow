@@ -129,7 +129,11 @@ def _persist_run(run_root: Path, runner: AgentRunner, run_id: str,
 # ── JobRunner ──────────────────────────────────────────────────────────────
 
 
-RunnerFactory = Callable[[ProjectConfig, str, Path, LLMClient], AgentRunner]
+RunnerFactory = Callable[..., AgentRunner]
+"""Factory signature: (project, run_id, run_root, llm, *, docker_manager=None) -> AgentRunner.
+
+The trailing keyword arg is positional-via-kwarg so existing factories
+that ignore it still work — JobRunner always passes it as a keyword."""
 
 
 def default_runner_factory(
@@ -137,6 +141,8 @@ def default_runner_factory(
     run_id: str,
     run_root: Path,
     llm: LLMClient,
+    *,
+    docker_manager: DockerManager | None = None,
 ) -> AgentRunner:
     return AgentRunner(
         project=project,
@@ -144,6 +150,7 @@ def default_runner_factory(
         run_root=run_root,
         llm=llm,
         memory_writer=MemoryWriter(),
+        docker_manager=docker_manager,
     )
 
 
@@ -266,8 +273,12 @@ class JobRunner:
         # 3. Verify LLM client is configured.
         llm = self.llm or _build_default_llm()
 
-        # 4. Construct runner.
-        runner = self.runner_factory(project, job.run_id, run_root, llm)
+        # 4. Construct runner. Thread docker_manager through so the
+        # production code:exec routing in core/runner.py can reach it.
+        runner = self.runner_factory(
+            project, job.run_id, run_root, llm,
+            docker_manager=self.docker,
+        )
 
         # 5. Register live workspace for the WebSocket bridge.
         if self.run_registry is not None:

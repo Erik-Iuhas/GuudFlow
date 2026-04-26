@@ -75,13 +75,14 @@ def _persona_attaching_runner_factory(personas_dir: Path):
     waiting on that change.
     """
 
-    def factory(project: ProjectConfig, run_id: str, run_root: Path, llm):
+    def factory(project: ProjectConfig, run_id: str, run_root: Path, llm, **kwargs):
         runner = AgentRunner(
             project=project,
             run_id=run_id,
             run_root=run_root,
             llm=llm,
             memory_writer=MemoryWriter(),
+            docker_manager=kwargs.get("docker_manager"),
         )
         original_build = runner._build_agents
 

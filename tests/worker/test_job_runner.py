@@ -421,6 +421,173 @@ def test_initialize_run_greenfield_project(tmp_path: Path):
     assert not (run_root / "workspace" / "working").exists()
 
 
+async def test_default_runner_factory_threads_docker_manager(tmp_path: Path):
+    """Phase B wiring: default_runner_factory propagates the
+    docker_manager kwarg into AgentRunner.docker_manager so the runner's
+    tool instantiation can reach it."""
+    project = serialise_project({"project_id": "p", "goal": "x"})
+    docker_mgr = DockerManager(mode="dev")
+    runner = default_runner_factory(
+        project, "run_x", tmp_path / "runs" / "run_x",
+        MockLLMClient([]),
+        docker_manager=docker_mgr,
+    )
+    assert runner.docker_manager is docker_mgr
+
+
+async def test_production_mode_wires_container_runner_for_code_exec(
+    tmp_path: Path, monkeypatch
+):
+    """Phase B integration: with AGENTFLOW_MODE=production and a
+    docker_manager threaded into AgentRunner, the runner's instantiated
+    code:exec tool routes through DockerManager.exec_in. Tests the seam
+    that connects JobRunner → AgentRunner._instantiate_local_tools →
+    make_container_runner → DockerManager.
+
+    Goes via the runner's tool-instantiation path directly rather than
+    the full agent-loop e2e, to keep the assertion focused on the
+    routing seam itself."""
+    monkeypatch.setenv("AGENTFLOW_MODE", "production")
+
+    project = serialise_project({
+        "project_id": "p_prod",
+        "goal": "exec something",
+        "agents": [{
+            "role": "developer",
+            "description": "runs code",
+            "declared_local_tools": ["code:exec"],
+            "model_tier": "solid",
+        }],
+        "rbac": {"developer": {"allowed_scopes": ["code:exec"]}},
+    })
+
+    class _FakeClient:
+        def ping(self): return True
+
+    docker_mgr = DockerManager(mode="production", client=_FakeClient())
+    captured: list[dict] = []
+
+    async def spy_exec_in(run_id, language, code, timeout_s=30.0):
+        captured.append({
+            "run_id": run_id, "language": language,
+            "code": code, "timeout_s": timeout_s,
+        })
+        from worker.docker_manager import ExecResult
+        return ExecResult(exit_code=0, stdout="ok\n", stderr="")
+    docker_mgr.exec_in = spy_exec_in  # type: ignore[method-assign]
+
+    runner = AgentRunner(
+        project=project,
+        run_id="run_prod",
+        run_root=tmp_path / "runs" / "run_prod",
+        llm=MockLLMClient([]),
+        docker_manager=docker_mgr,
+    )
+
+    tools = runner._instantiate_local_tools("developer")
+    code_exec = tools["code:exec"]
+
+    result = await code_exec.run({
+        "language": "python",
+        "code": "print('hello container')",
+    })
+
+    assert result["ok"] is True
+    assert result["container_mode"] is True
+    assert captured == [{
+        "run_id": "run_prod",
+        "language": "python",
+        "code": "print('hello container')",
+        "timeout_s": 30.0,
+    }]
+
+
+async def test_dev_mode_keeps_host_runner_even_with_docker_manager(
+    tmp_path: Path, monkeypatch
+):
+    """Inverse seam: AGENTFLOW_MODE=dev keeps the hardened host runner
+    even when a docker_manager is available. exec_in is never reached."""
+    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+
+    project = serialise_project({
+        "project_id": "p_dev",
+        "goal": "x",
+        "agents": [{
+            "role": "developer",
+            "description": "runs code",
+            "declared_local_tools": ["code:exec"],
+            "model_tier": "solid",
+        }],
+        "rbac": {"developer": {"allowed_scopes": ["code:exec"]}},
+    })
+    docker_mgr = DockerManager(mode="dev")
+    captured: list = []
+
+    async def spy(*a, **kw):
+        captured.append((a, kw))
+        from worker.docker_manager import ExecResult
+        return ExecResult(exit_code=0, stdout="", stderr="", is_stub=True)
+    docker_mgr.exec_in = spy  # type: ignore[method-assign]
+
+    runner = AgentRunner(
+        project=project,
+        run_id="run_dev",
+        run_root=tmp_path / "runs" / "run_dev",
+        llm=MockLLMClient([]),
+        docker_manager=docker_mgr,
+    )
+
+    tools = runner._instantiate_local_tools("developer")
+    result = await tools["code:exec"].run({
+        "language": "python",
+        "code": "print('hi')",
+    })
+
+    assert result["ok"] is True
+    assert result.get("dev_mode") is True
+    assert captured == []
+
+
+async def test_production_without_docker_manager_falls_back_to_host(
+    tmp_path: Path, monkeypatch
+):
+    """If somehow a runner ends up in production mode without a
+    docker_manager (misconfiguration), it falls back to the host runner —
+    which itself refuses to run via CodeExec.run()'s mode check
+    (DESIGN §29 rule 61). Defence in depth: wrong wiring fails closed."""
+    monkeypatch.setenv("AGENTFLOW_MODE", "production")
+
+    project = serialise_project({
+        "project_id": "p_misconfig",
+        "goal": "x",
+        "agents": [{
+            "role": "developer",
+            "description": "runs code",
+            "declared_local_tools": ["code:exec"],
+            "model_tier": "solid",
+        }],
+        "rbac": {"developer": {"allowed_scopes": ["code:exec"]}},
+    })
+
+    runner = AgentRunner(
+        project=project,
+        run_id="run_misconfig",
+        run_root=tmp_path / "runs" / "run_misconfig",
+        llm=MockLLMClient([]),
+        docker_manager=None,  # the misconfiguration
+    )
+
+    tools = runner._instantiate_local_tools("developer")
+    result = await tools["code:exec"].run({
+        "language": "python",
+        "code": "print('this should be refused')",
+    })
+
+    # Host runner refuses production-mode execution.
+    assert "error" in result
+    assert "production" in result["error"].lower()
+
+
 async def test_run_one_initializes_inputs_for_real_run(tmp_path: Path, monkeypatch):
     """End-to-end: a project with uploads + source_repo runs through the
     worker; the run's workspace shows the seeded inputs and a working/

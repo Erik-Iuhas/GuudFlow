@@ -21,26 +21,23 @@ file groups them into shippable phases.
 
 ---
 
-## Phase B — Close the dev→prod gap (~1 hour)
+## Phase B — Close the dev→prod gap ✅ DONE (2026-04-26)
 
-> See "How to pick what's next" at the bottom — for **demo-to-real-users**
-> goals, do D-prime + D before B.
+`core/runner.py:_instantiate_local_tools` now branches on
+`AGENTFLOW_MODE` + a threaded `DockerManager`: production mode wires
+`make_container_runner()` (new in `agents/tools/code.py`) which routes
+every `code:exec` call through `DockerManager.exec_in()`. Defence in
+depth: misconfigured production (no DockerManager) falls back to the
+host runner, which itself refuses to run in production via its
+existing mode check.
 
-Today the sandbox image is built and verified, but the runner doesn't
-yet route `code:exec` through it in production mode. This is a small
-wire-up and the highest-value next step for anyone deploying.
+Tests in `tests/agents/test_code_exec_hardening.py` (5 new cases for
+`make_container_runner`) and `tests/worker/test_job_runner.py` (4 new
+cases for the AgentRunner-side wiring + factory threading).
 
-- [ ] Detect `AGENTFLOW_MODE=production` in `core/runner.py`
-- [ ] Replace the dev host `code:exec` runner with a container-routed
-      runner that calls `DockerManager.exec_in(run_id, lang, code)`
-- [ ] Add a test (mocked DockerManager) verifying the routing happens
-- [ ] Document the switch in `README.md`
-
-**Unblocks:** real production-grade `code:exec` execution. Until this
-lands, "production mode" still runs LLM-generated code on the host.
-
-**Files:** `agents/tools/code.py`, `core/runner.py`,
-`tests/agents/test_code_exec_hardening.py`
+**Unblocks:** real production-grade `code:exec` execution. The
+runtime-isolation half of the production story is done; deployment
+packaging is Phase E.
 
 ---
 
