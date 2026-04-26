@@ -287,6 +287,15 @@ them up when real users tell you which one matters.
 - [ ] **Persona chat endpoint** (DESIGN §37) — `POST /api/personas/{id}/chat`
       for one-off conversations with a persona outside any run. Marked
       future/optional in the design.
+
+---
+
+## Phase H — Speculative / not on the priority track
+
+Things that are technically interesting and designed in DESIGN.md but
+don't have a real use case driving them yet. Pick them up only when a
+specific user request lands or when an adjacent phase makes them cheap.
+
 - [ ] **Real Playwright wiring for `visual_checker`** (DESIGN §5) —
       Stage 5 has the agent shell. Production rendering wire-up
       (host-side Playwright, screenshot delivery to the user, spatial
