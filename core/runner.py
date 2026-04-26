@@ -523,7 +523,8 @@ class AgentRunner:
             agent.role = cfg.role
             agent.description = cfg.description
             agent.depends_on = list(cfg.depends_on)
-            agent.system_prompt = cfg.system_prompt
+            if cfg.system_prompt:
+                agent.system_prompt = cfg.system_prompt
             agent.declared_local_tools = list(cfg.declared_local_tools)
             agent.declared_mcp_servers = list(cfg.declared_mcp_servers)
             # Inject runtime handles.
@@ -1060,7 +1061,8 @@ class AgentRunner:
         agent.role = cfg.role
         agent.description = cfg.description
         agent.depends_on = list(cfg.depends_on)
-        agent.system_prompt = cfg.system_prompt
+        if cfg.system_prompt:
+            agent.system_prompt = cfg.system_prompt
         agent.declared_local_tools = list(cfg.declared_local_tools)
         agent.declared_mcp_servers = list(cfg.declared_mcp_servers)
         agent._llm = self.llm

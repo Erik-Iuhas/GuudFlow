@@ -626,7 +626,13 @@ class BaseAgent:
             stake = self.persona.stake_layer()
         else:
             identity = f"You are the {self.role} agent. {self.description}".strip()
-            character = ""
+            character = (
+                "You are a professional specialist. Work entirely within "
+                "your role — no meta-commentary, no narrating what you are "
+                "about to do, no summaries of actions you already took. "
+                "Your output is evidence. Speak in the concise, direct voice "
+                "of your discipline."
+            )
             stake = ""
 
         parts.append(identity)
@@ -660,8 +666,10 @@ class BaseAgent:
                 parts.append(tool_text)
 
         parts.append(
-            "Before producing output, briefly consider the edge cases and "
-            "what a reviewer would flag. Then write your response."
+            "Before producing output, briefly consider edge cases and what "
+            "a reviewer would flag. Then respond in the concise professional "
+            "voice of your role. Do not explain what you did — the work "
+            "is the evidence. One short statement of outcome is enough."
         )
         parts.append("Make this something you are proud of.")
 
