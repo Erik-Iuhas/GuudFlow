@@ -1,7 +1,13 @@
-# Active plan — Phase D — Real meta-agent proposal
+# Active plan — Phase D — Real meta-agent proposal ✅ SHIPPED 2026-04-26
 
-Status: planned. ~9 hrs estimated across 6 chunks (D.0 added per
-Erik's feedback). Builds on the foundation just shipped:
+Status: ✅ done. All 6 chunks landed (D.0 → D.5). Final state:
+- 41 new tests passing (test_meta + test_archetype_doc + integration)
+- Studio typecheck + prod build clean
+- `/api/meta/propose` reads inputs + roster + 16-archetype catalog and
+  returns LLM-driven proposals; deterministic skeleton fallback on any
+  failure mode
+
+Builds on the foundation already shipped:
 
 - **D-prime** — `inputs/README.md` is auto-generated, uploads/source_repo
   /from_run_* are seeded into the run's workspace at start
@@ -35,7 +41,7 @@ Two flavours per DESIGN §7 + §33:
 
 ---
 
-## Chunk 0 — Worker archetype reference + naming rules (~2 hrs)
+## Chunk 0 — Worker archetype reference + naming rules ✅ SHIPPED [b3fee5a]
 
 Erik's feedback: the meta-agent picking from C.0's 4 shipped archetypes
 (code_reviewer, tech_lead, requirements_writer, architect) is too thin.
@@ -130,7 +136,7 @@ Commit: `docs+feat: worker archetype reference + naming rules (Phase D.0)`
 
 ---
 
-## Chunk 1 — MetaAgent.run() core (~2-3 hrs)
+## Chunk 1 — MetaAgent.run() core ✅ SHIPPED [cbbfe68]
 
 ### What lands
 
@@ -180,7 +186,7 @@ Commit: `feat(agents): real meta-agent proposal (Phase D.1)`
 
 ---
 
-## Chunk 2 — API wire-up (~1 hr)
+## Chunk 2 — API wire-up ✅ SHIPPED [9c92388]
 
 ### What lands
 
@@ -208,7 +214,7 @@ Commit: `feat(api): /api/meta/propose uses MetaAgent when project_id given (Phas
 
 ---
 
-## Chunk 3 — Continuation-aware delta proposals (~2 hrs)
+## Chunk 3 — Continuation-aware delta proposals ✅ SHIPPED [f33e713]
 
 DESIGN §33's "Meta-agent re-evaluation on continuation". When a
 project has either `pending_continuation` on its config (set by
@@ -258,7 +264,7 @@ Commit: `feat(agents): continuation-aware delta proposals (Phase D.3)`
 
 ---
 
-## Chunk 4 — Studio rationale rendering + delta UI (~1 hr)
+## Chunk 4 — Studio rationale rendering + delta UI ✅ SHIPPED [171dbe6]
 
 ### What lands
 
@@ -283,28 +289,32 @@ Commit: `feat(studio): meta-agent rationale + delta rendering (Phase D.4)`
 
 ---
 
-## Chunk 5 — Runner / continuation integration (~30 min)
+## Chunk 5 — Runner / continuation integration ✅ SHIPPED 2026-04-26
 
-### What lands
+### What landed
 
-When the user approves a delta proposal, the studio PUTs the updated
-project config (with the new effective team). The runner just uses
-the updated config — no special handling needed.
+`decisions.md` records the option-B choice: when the user approves a
+delta proposal, `Propose.tsx` PUTs the entire updated team config to
+`/api/projects/{id}` (overwriting `agents`). The runner just uses the
+updated config — no continuation-aware path needed beyond what
+D-prime already shipped (inputs seeding from `from_run_*/`).
 
-The simpler "Option B" from the original plan — delta history is lost
-once the user confirms, but the run starts from the updated config.
-Future iterations could persist deltas separately for audit.
+The continuation flow is already covered by:
+- `test_meta.py::test_propose_continuation_*` — unit tests for delta
+  computation across keep/drop/add/swap_tier/replace_persona
+- `test_meta.py::test_compute_deltas_*` — `compute_deltas()` as a pure
+  function, edge cases
+- `test_api/test_meta.py` — `/api/meta/propose` with `prior_run_id`
+  routes the continuation context through end-to-end
 
-### Files
-
-- Documentation only — verify the existing flow handles continuation
-  correctly. Add a note in `decisions.md` about the option-B choice.
-- One e2e test in `tests/api/test_full_journey.py` that covers
-  continuation start (extends the existing journey).
-
-### Tests
-
-- Existing journey test extended with a continuation leg
+The journey test (`tests/api/test_full_journey.py`) is intentionally
+NOT extended with a continuation leg this phase: it would require
+running two full LLM-mocked journeys back-to-back and revisiting the
+runner_factory wrapper that closes the persona auto-load gap. That
+gap has its own scheduled remote agent in 14 days — once it lands,
+extending the journey test with a continuation leg becomes a clean
+follow-up rather than two layered workarounds. Captured in
+`BOARD.md` "Pending follow-ups".
 
 Commit: `docs(meta): record option-B decision for continuation deltas (Phase D.5)`
 

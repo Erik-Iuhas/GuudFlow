@@ -1,8 +1,8 @@
 # AgentFlow Build Board
 
-**Current stage:** ✅ Initial build + Phase A + D-prime + B + C shipped.
+**Current stage:** ✅ Initial build + Phase A + D-prime + B + C + D shipped.
 **Last updated:** 2026-04-26
-**Tests:** 726 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
+**Tests:** 774 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
 
 ## Stage status
 - [x] Stage 1 — Foundation primitives  (29/29 tests)
@@ -35,20 +35,27 @@ gates (C: abstract bases, approval gates, USER_COMMENT, quip stream,
 tech_lead escalation, architect final-review). 726 backend tests
 passing, studio typecheck + prod build clean.
 
-**Recommended next:** **Phase D** (real meta-agent proposal that
-reads `inputs/` + the agent catalog shipped in C.0). Phase G (studio
-polish for workflow review) is independent and the headline UX
-upgrade. Phase E (production deploy) is paused until there's a real
-target.
+**Recommended next:** **Phase G** (studio polish for workflow review)
+is the headline UX upgrade. **Phase F** (Training Camp, persona chat,
+graduating archetypes from YAML to shipped classes) is the next big
+content phase. Phase E (production deploy) is paused until there's a
+real target.
 
 - ✅ **D-prime** — shipped 2026-04-26
 - ✅ **B** — shipped 2026-04-26 ([`56f3523`](https://github.com/Erik-Iuhas/AgentFlow/commit/56f3523))
 - ✅ **C** — shipped 2026-04-26 (C.0 → C.0.5 → C.1 → C.2 → C.3 → C.4)
-- **D** (real meta-agent proposal that reads `inputs/` + catalog) — next recommended
+- ✅ **D** — shipped 2026-04-26 (D.0 → D.1 → D.2 → D.3 → D.4 → D.5)
 - **G** (studio polish for workflow review — independent, can run in parallel)
+- **F** (Training Camp, real LLM-driven memory synthesis, persona chat, etc.)
 - **E** (Redis queue + KubeJobManager + Helm — when there's a deploy target)
-- **F** (Training Camp, real LLM-driven memory synthesis, worker-archetype markdown, persona chat, etc.)
 - **H** (speculative — visual_checker Playwright + UICanvas)
+
+### Pending follow-ups
+- Persona auto-load gap in `AgentRunner._build_agents` — scheduled
+  remote agent in 14 days will open a PR. Until then, runs invoked via
+  the worker leave `agent.persona = None` even when project config
+  sets `persona_id`, so `memory_writer` is a no-op for those runs.
+  Tests work around this with a custom runner_factory wrapper.
 
 ## Deferred follow-ons
 [followups.md](followups.md) is the running inventory of punted items. ROADMAP.md groups them into shippable phases.

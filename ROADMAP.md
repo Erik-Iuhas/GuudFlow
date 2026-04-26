@@ -136,32 +136,44 @@ inside `Studio.tsx`).
 
 ---
 
-## Phase D — Make the meta-agent actually propose (~half day, depends on D-prime)
+## Phase D — Make the meta-agent actually propose ✅ DONE (2026-04-26)
 
-`POST /api/meta/propose` currently returns a deterministic
-developer+reviewer skeleton. With D-prime done, the meta-agent has
-real material to read.
+`POST /api/meta/propose` now drives a real `MetaAgent.propose()` when
+`project_id` is provided: reads inputs (README + uploads excerpts +
+source_repo metadata + prior_run feedback), the union of the runtime
+catalog and YAML archetype catalog, and the persona roster; then calls
+the LLM with a structured `propose_team` tool. Defensive fallback to
+the deterministic skeleton on any LLM failure so the route never 500s.
 
-- [ ] Implement `MetaAgent.run()` properly:
-  - Read `inputs/README.md` and the highest-priority artifacts within
-    token budget (DESIGN §33 rule 84)
-  - Drive an LLM call with the META_SYSTEM_PROMPT + goal + input excerpts
-  - Parse the LLM's structured output into a `TeamProposal`
-  - Return rationale + agents + RBAC, with the rationale specifically
-    referencing the inputs ("I see you've provided an OpenAPI spec at
-    `inputs/uploads/api.yaml` — proposing a developer who reads it as
-    a contract...")
-- [ ] Wire `/api/meta/propose` to actually invoke `MetaAgent.run()`
-      and pass the project's accumulated inputs through
-- [ ] Update the proposal UI to render rationale that references
-      specific input files
+- [x] **D.0** ([`b3fee5a`](https://github.com/Erik-Iuhas/AgentFlow/commit/b3fee5a))
+      Worker archetype YAML (`docs/worker-archetypes.yaml`, canonical) +
+      markdown derivative + `core/archetype_doc.py` parser.
+      `agents/catalog.list_all_archetypes()` unions runtime ∪ YAML.
+      `dedupe_role_names` + `suggest_persona_id` (curated human first
+      names, dedup across team).
+- [x] **D.1** ([`cbbfe68`](https://github.com/Erik-Iuhas/AgentFlow/commit/cbbfe68))
+      `core/meta_proposal.py` (input reading + prompt rendering +
+      tool-use schema + parser); `agents/builtin/meta.MetaAgent.propose`
+      with greenfield + continuation paths and skeleton fallback.
+- [x] **D.2** ([`9c92388`](https://github.com/Erik-Iuhas/AgentFlow/commit/9c92388))
+      `/api/meta/propose` instantiates MetaAgent when `project_id`
+      given (404 unknown project), back-compat skeleton otherwise.
+- [x] **D.3** ([`f33e713`](https://github.com/Erik-Iuhas/AgentFlow/commit/f33e713))
+      Continuation deltas (`compute_deltas`): keep / drop / add /
+      swap_tier / replace_persona, per-role rationale.
+- [x] **D.4** ([`171dbe6`](https://github.com/Erik-Iuhas/AgentFlow/commit/171dbe6))
+      Studio rationale rendering with file-path highlighting + delta
+      table + per-role persona-hire badges; continuation entry via
+      `?project_id=&prior_run_id=` query string.
+- [x] **D.5** decisions.md note for option-B continuation flow (studio
+      PUTs the updated team config; runner stays simple).
 
 **Unblocks:** "describe a goal + show me your inputs, get a smart
-team." This is the moment the platform feels intelligent rather than
-form-driven.
+team." Continuation runs propose deltas rather than greenfield teams.
 
-**Files:** `agents/builtin/meta.py`, `api/routes/meta.py`,
-`studio/src/views/Propose.tsx`.
+**Files:** `docs/worker-archetypes.{yaml,md}`,
+`core/{archetype_doc,meta_proposal}.py`, `agents/{catalog,builtin/meta}.py`,
+`api/routes/meta.py`, `studio/src/{api,types,views/Propose}.tsx`.
 
 ---
 
