@@ -534,6 +534,105 @@ def parse_proposal_args(
     )
 
 
+# ── Delta computation (Phase D.3 — continuation runs) ─────────────────────
+
+
+def _agent_to_dict(agent: Any) -> dict[str, Any]:
+    """Coerce an AgentConfig (or dict from a stored project) into a
+    common dict shape so delta computation can compare both sides."""
+    if isinstance(agent, dict):
+        return agent
+    return {
+        "role": agent.role,
+        "model_tier": agent.model_tier,
+        "persona_id": agent.persona_id,
+        "agent_class_role_type": agent.agent_class_role_type,
+        "is_reviewer": agent.is_reviewer,
+        "is_final_reviewer": agent.is_final_reviewer,
+    }
+
+
+def compute_deltas(
+    prior_agents: list[Any],
+    new_agents: list[Any],
+) -> list[dict[str, Any]]:
+    """Compute role-level deltas between the prior team and the
+    proposed team for a continuation run.
+
+    Returns a list of dicts, one per role. Action values:
+      - `keep` — role exists in both, no meaningful change
+      - `drop` — role in prior but not proposed
+      - `add` — role in proposed but not prior
+      - `swap_tier` — role in both, `model_tier` changed
+      - `replace_persona` — role in both, `persona_id` changed
+        (and at least one side had a persona)
+
+    Both inputs accept dicts (the project's stored config shape) OR
+    `AgentConfig` instances (the parsed-proposal shape) interchangeably.
+    """
+    prior_by_role: dict[str, dict[str, Any]] = {}
+    for a in prior_agents:
+        d = _agent_to_dict(a)
+        if d.get("role"):
+            prior_by_role[str(d["role"])] = d
+
+    new_by_role: dict[str, dict[str, Any]] = {}
+    for a in new_agents:
+        d = _agent_to_dict(a)
+        if d.get("role"):
+            new_by_role[str(d["role"])] = d
+
+    deltas: list[dict[str, Any]] = []
+
+    # Roles in prior — keep / drop / swap_tier / replace_persona.
+    # Stable ordering: walk prior roles in their original order, then
+    # add new-only roles after.
+    for role, prior in prior_by_role.items():
+        if role not in new_by_role:
+            deltas.append({
+                "role": role,
+                "action": "drop",
+                "from_state": {"model_tier": prior.get("model_tier")},
+            })
+            continue
+        new = new_by_role[role]
+        prior_tier = prior.get("model_tier")
+        new_tier = new.get("model_tier")
+        prior_pid = prior.get("persona_id")
+        new_pid = new.get("persona_id")
+
+        if prior_tier and new_tier and prior_tier != new_tier:
+            deltas.append({
+                "role": role,
+                "action": "swap_tier",
+                "from_state": {"model_tier": prior_tier},
+                "to_state": {"model_tier": new_tier},
+            })
+        elif (prior_pid or new_pid) and prior_pid != new_pid:
+            deltas.append({
+                "role": role,
+                "action": "replace_persona",
+                "from_state": {"persona_id": prior_pid},
+                "to_state": {"persona_id": new_pid},
+            })
+        else:
+            deltas.append({"role": role, "action": "keep"})
+
+    for role, new in new_by_role.items():
+        if role in prior_by_role:
+            continue
+        deltas.append({
+            "role": role,
+            "action": "add",
+            "to_state": {
+                "model_tier": new.get("model_tier"),
+                "persona_id": new.get("persona_id"),
+            },
+        })
+
+    return deltas
+
+
 # ── Fallback ───────────────────────────────────────────────────────────────
 
 

@@ -365,6 +365,169 @@ async def test_proposal_includes_roster_when_personas_exist(tmp_path: Path):
 # ── Serialisation ────────────────────────────────────────────────────────
 
 
+# ── Continuation deltas (Phase D.3) ──────────────────────────────────────
+
+
+async def test_continuation_proposal_computes_deltas_keep_add_drop(tmp_path: Path):
+    """Prior team had old_dev + old_reviewer; new proposal keeps
+    old_dev, drops old_reviewer, adds frontend_dev. Expect three
+    deltas: keep / drop / add."""
+    project_dir = _project_with_inputs(tmp_path, "p_cont")
+    # Stage a from_run_*.meta.json so the meta-agent treats this as
+    # a continuation context.
+    inputs = project_dir / "inputs"
+    (inputs / "from_run_prev.meta.json").write_text(json.dumps({
+        "kind": "prior_run", "run_id": "prev",
+        "status": "complete", "completed_agents": ["old_dev", "old_reviewer"],
+        "has_feedback": False,
+    }), encoding="utf-8")
+
+    prior_team = [
+        {"role": "old_dev", "model_tier": "solid"},
+        {"role": "old_reviewer", "model_tier": "solid", "is_reviewer": True},
+    ]
+
+    llm = MockLLMClient([_propose_call({
+        "rationale": "Keep old_dev, swap reviewer for ui work.",
+        "agents": [
+            {"role": "old_dev", "archetype": "backend_dev",
+             "depends_on": [], "model_tier": "solid"},
+            {"role": "frontend_ui", "archetype": "frontend_dev",
+             "depends_on": ["old_dev"], "model_tier": "solid"},
+        ],
+    })])
+    meta = MetaAgent()
+    meta._llm = llm
+
+    proposal = await meta.propose(
+        project_dir=project_dir, project_id="p_cont",
+        goal="Add UI", roster=[],
+        prior_run_id="prev",
+        prior_team_roles=["old_dev", "old_reviewer"],
+        prior_team=prior_team,
+    )
+
+    actions = {(d["role"], d["action"]) for d in proposal.deltas}
+    assert ("old_dev", "keep") in actions
+    assert ("old_reviewer", "drop") in actions
+    assert ("frontend_ui", "add") in actions
+
+
+async def test_continuation_swap_tier_delta(tmp_path: Path):
+    """Same role + same persona, different model_tier → swap_tier."""
+    project_dir = _project_with_inputs(tmp_path, "p_swap")
+    inputs = project_dir / "inputs"
+    (inputs / "from_run_prev.meta.json").write_text(json.dumps({
+        "kind": "prior_run", "run_id": "prev",
+        "status": "complete", "completed_agents": ["dev"],
+    }), encoding="utf-8")
+
+    prior_team = [{"role": "dev", "model_tier": "fast"}]
+    llm = MockLLMClient([_propose_call({
+        "rationale": "Bumping dev to solid for the new harder ask.",
+        "agents": [
+            {"role": "dev", "archetype": "backend_dev",
+             "depends_on": [], "model_tier": "solid"},
+        ],
+    })])
+    meta = MetaAgent()
+    meta._llm = llm
+
+    proposal = await meta.propose(
+        project_dir=project_dir, project_id="p_swap",
+        goal="harder ask", roster=[],
+        prior_run_id="prev",
+        prior_team_roles=["dev"],
+        prior_team=prior_team,
+    )
+    swap = next(d for d in proposal.deltas if d["role"] == "dev")
+    assert swap["action"] == "swap_tier"
+    assert swap["from_state"]["model_tier"] == "fast"
+    assert swap["to_state"]["model_tier"] == "solid"
+
+
+async def test_continuation_replace_persona_delta(tmp_path: Path):
+    """Same role + same tier, different persona_id → replace_persona."""
+    project_dir = _project_with_inputs(tmp_path, "p_rep")
+    inputs = project_dir / "inputs"
+    (inputs / "from_run_prev.meta.json").write_text(json.dumps({
+        "kind": "prior_run", "run_id": "prev",
+        "status": "complete", "completed_agents": ["dev"],
+    }), encoding="utf-8")
+
+    prior_team = [{"role": "dev", "model_tier": "solid",
+                   "persona_id": "old-dev-v1"}]
+    roster = [
+        {"persona_id": "old-dev-v1", "name": "OldDev",
+         "specialty": "y", "reputation": {}},
+        {"persona_id": "new-dev-v1", "name": "NewDev",
+         "specialty": "z", "reputation": {}},
+    ]
+    llm = MockLLMClient([_propose_call({
+        "rationale": "Old dev not a fit; bringing in NewDev.",
+        "agents": [
+            {"role": "dev", "archetype": "backend_dev",
+             "depends_on": [], "model_tier": "solid",
+             "persona": {"action": "hire_existing",
+                         "persona_id": "new-dev-v1"}},
+        ],
+    })])
+    meta = MetaAgent()
+    meta._llm = llm
+
+    proposal = await meta.propose(
+        project_dir=project_dir, project_id="p_rep",
+        goal="extend", roster=roster,
+        prior_run_id="prev",
+        prior_team_roles=["dev"],
+        prior_team=prior_team,
+    )
+    rep = next(d for d in proposal.deltas if d["role"] == "dev")
+    assert rep["action"] == "replace_persona"
+    assert rep["from_state"]["persona_id"] == "old-dev-v1"
+    assert rep["to_state"]["persona_id"] == "new-dev-v1"
+
+
+async def test_greenfield_proposal_has_no_deltas(tmp_path: Path):
+    """Without continuation context, deltas stay empty (just a fresh
+    team proposal, nothing to diff against)."""
+    project_dir = _project_with_inputs(tmp_path)
+    llm = MockLLMClient([_propose_call({
+        "rationale": "fresh team",
+        "agents": [{"role": "dev", "archetype": "backend_dev", "depends_on": []}],
+    })])
+    meta = MetaAgent()
+    meta._llm = llm
+    proposal = await meta.propose(
+        project_dir=project_dir, project_id="p1", goal="x", roster=[],
+    )
+    assert proposal.deltas == []
+
+
+# ── compute_deltas as a pure function ────────────────────────────────────
+
+
+def test_compute_deltas_pure_keep():
+    from core.meta_proposal import compute_deltas
+    deltas = compute_deltas(
+        [{"role": "a", "model_tier": "solid"}],
+        [{"role": "a", "model_tier": "solid"}],
+    )
+    assert deltas == [{"role": "a", "action": "keep"}]
+
+
+def test_compute_deltas_handles_mixed_inputs():
+    """Accepts dicts on the prior side AND AgentConfig instances on
+    the new side — same shape regardless."""
+    from core.runner import AgentConfig
+    from core.meta_proposal import compute_deltas
+    deltas = compute_deltas(
+        [{"role": "a", "model_tier": "solid"}],
+        [AgentConfig(role="a", model_tier="solid")],
+    )
+    assert deltas == [{"role": "a", "action": "keep"}]
+
+
 async def test_team_proposal_to_dict_round_trip(tmp_path: Path):
     """to_dict() output matches the API response shape (stable for
     the studio's Propose.tsx)."""

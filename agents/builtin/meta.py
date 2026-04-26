@@ -27,6 +27,7 @@ from core.llm import LLMClient, LLMMessage
 from core.meta_proposal import (
     PROPOSE_TEAM_TOOL,
     PersonaHire,
+    compute_deltas,
     fallback_skeleton,
     parse_proposal_args,
     read_meta_inputs,
@@ -168,6 +169,7 @@ class MetaAgent(BaseAgent):
         roster: list[dict[str, Any]] | None = None,
         prior_run_id: str | None = None,
         prior_team_roles: list[str] | None = None,
+        prior_team: list[dict[str, Any]] | None = None,
     ) -> TeamProposal:
         """Generate a team proposal for `goal` using inputs in
         `project_dir/inputs/`.
@@ -239,12 +241,20 @@ class MetaAgent(BaseAgent):
                 goal, "parsed proposal had no agents",
             )
 
+        # Phase D.3: compute deltas vs the prior team for continuation
+        # runs. The studio renders these as a side-by-side diff so the
+        # user approves *what's changing* rather than the whole team.
+        deltas: list[dict[str, Any]] = []
+        if inputs.continuation is not None and prior_team:
+            deltas = compute_deltas(prior_team, result.agents)
+
         return TeamProposal(
             rationale=result.rationale,
             roles=result.agents,
             rbac=result.rbac,
             persona_hires=result.persona_hires,
             warnings=result.warnings,
+            deltas=deltas,
         )
 
     @staticmethod

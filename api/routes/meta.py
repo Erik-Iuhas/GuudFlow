@@ -148,19 +148,22 @@ async def propose(
             status_code=400, detail="prior_run_id must be a string",
         )
 
-    # When prior_run_id is given, also extract the prior team's roles
-    # from the stored project config so the meta-agent's continuation
-    # prompt has them. The simpler flow: the project's CURRENT stored
-    # `agents` is the prior team (D-prime's "Continue from this run"
-    # button stamps `pending_continuation` without overwriting agents
-    # until the user approves the new proposal).
+    # When prior_run_id is given, the project's CURRENT stored agents
+    # config IS the prior team (D-prime's "Continue from this run"
+    # button stamps pending_continuation without overwriting agents
+    # until the user approves the new proposal). We pass both:
+    #   - prior_team_roles: just the role names, fed into the
+    #     continuation prompt so the LLM knows what existed
+    #   - prior_team: the full agent dicts, fed to compute_deltas
+    #     so the studio can show keep/drop/add/swap_tier/replace_persona
     prior_team_roles: list[str] | None = None
+    prior_team: list[dict[str, Any]] | None = None
     if prior_run_id is not None:
+        stored_agents = list(project.get("agents") or [])
         prior_team_roles = [
-            str(a.get("role"))
-            for a in (project.get("agents") or [])
-            if a.get("role")
+            str(a.get("role")) for a in stored_agents if a.get("role")
         ]
+        prior_team = stored_agents
 
     project_dir = request.app.state.data_root / "projects" / str(project_id)
 
@@ -174,6 +177,7 @@ async def propose(
             roster=roster,
             prior_run_id=prior_run_id,
             prior_team_roles=prior_team_roles,
+            prior_team=prior_team,
         )
     except Exception as e:
         _logger.exception("meta.propose crashed")
