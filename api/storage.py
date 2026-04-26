@@ -42,6 +42,12 @@ class ProjectStore:
     def uploads_dir(self, project_id: str) -> Path:
         return self.inputs_dir(project_id) / "uploads"
 
+    def source_repo_dir(self, project_id: str) -> Path:
+        return self.inputs_dir(project_id) / "source_repo"
+
+    def source_repo_meta_path(self, project_id: str) -> Path:
+        return self.inputs_dir(project_id) / "source_repo.meta.json"
+
     async def list(self) -> list[dict[str, Any]]:
         async with self._lock:
             data = await self._read_locked()

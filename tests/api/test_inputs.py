@@ -1,6 +1,7 @@
 """Tests for /api/projects/{id}/inputs and the per-project inputs storage layer.
 
-DESIGN §33 Chunk 1 — uploads + list + delete + project-dir lifecycle.
+DESIGN §33 Chunks 1 & 2 — uploads + git/local-path source repo + secret
+scan + list + delete + project-dir lifecycle.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from api.storage import ProjectStore
+from core import source_repo as source_repo_lib
 
 
 # ── HTTP fixtures ──────────────────────────────────────────────────────────
@@ -224,3 +226,297 @@ async def test_delete_project_removes_inputs_dir(data_root: Path):
     ok = await store.delete("px")
     assert ok is True
     assert not project_dir.exists()
+
+
+# ── Source repo: git URL ───────────────────────────────────────────────────
+
+
+def _fake_clone_factory(payload: dict[str, str] | None = None):
+    """Returns an async stand-in for clone_git_repo that creates `payload`
+    files under the dest. Defaults to a single README."""
+    files = payload if payload is not None else {"README.md": "# upstream\n"}
+
+    async def _fake(url, branch, shallow, dest):
+        if dest.exists():
+            import shutil
+            shutil.rmtree(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        for rel, content in files.items():
+            target = dest / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+    return _fake
+
+
+async def test_git_import_happy_path(client, auth_header, data_root, project, monkeypatch):
+    monkeypatch.setattr(source_repo_lib, "clone_git_repo", _fake_clone_factory())
+    r = await client.post(
+        f"/api/projects/{project}/inputs/git",
+        json={"git_url": "https://example.com/repo.git", "branch": "main"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source_repo"]["kind"] == "git_url"
+    assert body["source_repo"]["git_url"] == "https://example.com/repo.git"
+    assert body["source_repo"]["branch"] == "main"
+    assert body["warnings"] == []
+
+    landed = data_root / "projects" / project / "inputs" / "source_repo" / "README.md"
+    assert landed.read_text(encoding="utf-8") == "# upstream\n"
+    meta = data_root / "projects" / project / "inputs" / "source_repo.meta.json"
+    assert meta.exists()
+
+
+async def test_git_import_requires_url(client, auth_header, project):
+    r = await client.post(
+        f"/api/projects/{project}/inputs/git",
+        json={},
+        headers=auth_header,
+    )
+    assert r.status_code == 400
+
+
+async def test_git_import_requires_auth(client, project):
+    r = await client.post(
+        f"/api/projects/{project}/inputs/git",
+        json={"git_url": "https://example.com/repo.git"},
+    )
+    assert r.status_code == 401
+
+
+async def test_git_import_unknown_project(client, auth_header):
+    r = await client.post(
+        "/api/projects/ghost/inputs/git",
+        json={"git_url": "https://example.com/repo.git"},
+        headers=auth_header,
+    )
+    assert r.status_code == 404
+
+
+async def test_git_import_clone_failure(client, auth_header, project, monkeypatch):
+    async def boom(*a, **kw):
+        raise source_repo_lib.SourceCloneError("repository not found")
+    monkeypatch.setattr(source_repo_lib, "clone_git_repo", boom)
+    r = await client.post(
+        f"/api/projects/{project}/inputs/git",
+        json={"git_url": "https://example.com/missing.git"},
+        headers=auth_header,
+    )
+    assert r.status_code == 400
+    assert "repository not found" in r.json()["detail"]
+
+
+async def test_git_import_replaces_existing(client, auth_header, data_root, project, monkeypatch):
+    monkeypatch.setattr(
+        source_repo_lib, "clone_git_repo", _fake_clone_factory({"a.txt": "first"})
+    )
+    await client.post(
+        f"/api/projects/{project}/inputs/git",
+        json={"git_url": "https://example.com/r.git"},
+        headers=auth_header,
+    )
+
+    monkeypatch.setattr(
+        source_repo_lib, "clone_git_repo", _fake_clone_factory({"b.txt": "second"})
+    )
+    r = await client.post(
+        f"/api/projects/{project}/inputs/git",
+        json={"git_url": "https://example.com/r.git"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    src = data_root / "projects" / project / "inputs" / "source_repo"
+    assert (src / "b.txt").read_text(encoding="utf-8") == "second"
+    assert not (src / "a.txt").exists()
+
+
+async def test_git_import_secrets_refused(client, auth_header, data_root, project, monkeypatch):
+    monkeypatch.setattr(
+        source_repo_lib,
+        "clone_git_repo",
+        _fake_clone_factory({"README.md": "ok\n", ".env": "DB_PASS=hunter2\n"}),
+    )
+    r = await client.post(
+        f"/api/projects/{project}/inputs/git",
+        json={"git_url": "https://example.com/r.git"},
+        headers=auth_header,
+    )
+    assert r.status_code == 409
+    body = r.json()
+    assert any(f["path"] == ".env" for f in body["findings"])
+    src = data_root / "projects" / project / "inputs" / "source_repo"
+    assert not src.exists()
+    meta = data_root / "projects" / project / "inputs" / "source_repo.meta.json"
+    assert not meta.exists()
+
+
+async def test_git_import_secrets_force_strips(client, auth_header, data_root, project, monkeypatch):
+    monkeypatch.setattr(
+        source_repo_lib,
+        "clone_git_repo",
+        _fake_clone_factory({"README.md": "ok\n", ".env": "DB_PASS=hunter2\n"}),
+    )
+    r = await client.post(
+        f"/api/projects/{project}/inputs/git",
+        json={"git_url": "https://example.com/r.git", "force": True},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert any(w["path"] == ".env" for w in body["warnings"])
+    src = data_root / "projects" / project / "inputs" / "source_repo"
+    assert (src / "README.md").exists()
+    assert not (src / ".env").exists()
+
+
+# ── Source repo: local path ───────────────────────────────────────────────
+
+
+@pytest.fixture
+def local_src(tmp_path: Path) -> Path:
+    src = tmp_path / "external_src"
+    (src / "src").mkdir(parents=True)
+    (src / "README.md").write_text("# from disk\n", encoding="utf-8")
+    (src / "src" / "main.py").write_text("print('hi')\n", encoding="utf-8")
+    return src
+
+
+async def test_local_path_happy_path(client, auth_header, data_root, project, local_src):
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={"path": str(local_src)},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source_repo"]["kind"] == "local_path"
+    assert body["source_repo"]["path"] == str(local_src)
+    assert body["warnings"] == []
+
+    dest = data_root / "projects" / project / "inputs" / "source_repo"
+    assert (dest / "README.md").read_text(encoding="utf-8") == "# from disk\n"
+    assert (dest / "src" / "main.py").exists()
+
+
+async def test_local_path_requires_path(client, auth_header, project):
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={},
+        headers=auth_header,
+    )
+    assert r.status_code == 400
+
+
+async def test_local_path_rejects_relative(client, auth_header, project):
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={"path": "./relative/dir"},
+        headers=auth_header,
+    )
+    assert r.status_code == 400
+
+
+async def test_local_path_missing_dir(client, auth_header, project, tmp_path):
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={"path": str(tmp_path / "does_not_exist")},
+        headers=auth_header,
+    )
+    assert r.status_code == 400
+
+
+async def test_local_path_requires_auth(client, project, local_src):
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={"path": str(local_src)},
+    )
+    assert r.status_code == 401
+
+
+async def test_local_path_unknown_project(client, auth_header, local_src):
+    r = await client.post(
+        "/api/projects/ghost/inputs/local_path",
+        json={"path": str(local_src)},
+        headers=auth_header,
+    )
+    assert r.status_code == 404
+
+
+async def test_local_path_secrets_refused(client, auth_header, data_root, project, local_src):
+    (local_src / ".env").write_text("DB=hunter2", encoding="utf-8")
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={"path": str(local_src)},
+        headers=auth_header,
+    )
+    assert r.status_code == 409
+    dest = data_root / "projects" / project / "inputs" / "source_repo"
+    assert not dest.exists()
+
+
+async def test_local_path_secrets_force_strips(client, auth_header, data_root, project, local_src):
+    (local_src / ".env").write_text("DB=hunter2", encoding="utf-8")
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={"path": str(local_src), "force": True},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    dest = data_root / "projects" / project / "inputs" / "source_repo"
+    assert (dest / "README.md").exists()
+    assert not (dest / ".env").exists()
+
+
+async def test_local_path_allowlist_blocks_outside(client, auth_header, project, local_src, monkeypatch):
+    # Allowlist points elsewhere — local_src is not under it.
+    monkeypatch.setenv("AGENTFLOW_LOCAL_PATH_ALLOWLIST", str(local_src.parent.parent / "other"))
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={"path": str(local_src)},
+        headers=auth_header,
+    )
+    assert r.status_code == 403
+
+
+async def test_local_path_allowlist_permits_inside(client, auth_header, project, local_src, monkeypatch):
+    monkeypatch.setenv("AGENTFLOW_LOCAL_PATH_ALLOWLIST", str(local_src.parent))
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={"path": str(local_src)},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+
+
+async def test_local_path_allowlist_unset_permits(client, auth_header, project, local_src, monkeypatch):
+    monkeypatch.delenv("AGENTFLOW_LOCAL_PATH_ALLOWLIST", raising=False)
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={"path": str(local_src)},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+
+
+# ── List surfaces source_repo metadata ─────────────────────────────────────
+
+
+async def test_list_includes_source_repo_after_local_import(
+    client, auth_header, project, local_src
+):
+    await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={"path": str(local_src)},
+        headers=auth_header,
+    )
+    r = await client.get(f"/api/projects/{project}/inputs")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["source_repo"]["kind"] == "local_path"
+    assert body["source_repo"]["path"] == str(local_src)
+
+
+async def test_list_source_repo_null_when_absent(client, project):
+    r = await client.get(f"/api/projects/{project}/inputs")
+    assert r.json()["source_repo"] is None

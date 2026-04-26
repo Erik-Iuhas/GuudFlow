@@ -1,26 +1,66 @@
 """/api/projects/{project_id}/inputs — project-scoped input ingestion.
 
-DESIGN §33. Uploads land in `data/projects/{id}/inputs/uploads/` and stay
-attached to the project across runs. The runner copies them into a run's
-`workspace/inputs/uploads/` at run start (Chunks 4-5).
-
-This module ships uploads + a list view that returns stable placeholders for
-`source_repo` (Chunk 2) and `prior_runs` (Chunk 3) so the response shape is
-forward-compatible.
+DESIGN §33. Uploads land in `data/projects/{id}/inputs/uploads/`,
+git/local-path source repos land in `inputs/source_repo/` (with a
+`source_repo.meta.json` sidecar describing origin), and continuation
+copies (Chunk 3) land in `inputs/from_run_{run_id}/`. Everything stays
+attached to the project across runs; the runner seeds a run's
+`workspace/inputs/` from this storage at run start (Chunks 4-5).
 """
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
+from fastapi.responses import JSONResponse
 
 from api.auth import require_bearer
+from core import source_repo as source_repo_lib
+from core.secret_scan import scan_directory, strip_secrets
 
 
 router = APIRouter(prefix="/api/projects/{project_id}/inputs", tags=["inputs"])
 
 _CHUNK_SIZE = 1024 * 1024  # 1 MiB
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _allowlist_permits(path: Path) -> bool:
+    """If AGENTFLOW_LOCAL_PATH_ALLOWLIST is set (comma-separated path
+    prefixes), `path` must resolve under one of them. Unset = single-user
+    dev posture, no restriction."""
+    raw = os.environ.get("AGENTFLOW_LOCAL_PATH_ALLOWLIST", "").strip()
+    if not raw:
+        return True
+    resolved = path.resolve()
+    for raw_prefix in raw.split(","):
+        prefix = raw_prefix.strip()
+        if not prefix:
+            continue
+        try:
+            resolved.relative_to(Path(prefix).resolve())
+            return True
+        except ValueError:
+            continue
+    return False
 
 
 def _store(request: Request):
@@ -74,7 +114,8 @@ async def upload_inputs(
 @router.get("")
 async def list_inputs(request: Request, project_id: str) -> dict:
     await _require_project(request, project_id)
-    uploads_dir = _store(request).uploads_dir(project_id)
+    store = _store(request)
+    uploads_dir = store.uploads_dir(project_id)
 
     uploads: list[dict] = []
     if uploads_dir.exists():
@@ -82,9 +123,17 @@ async def list_inputs(request: Request, project_id: str) -> dict:
             if entry.is_file():
                 uploads.append({"filename": entry.name, "size": entry.stat().st_size})
 
+    source_repo: dict | None = None
+    meta_path = store.source_repo_meta_path(project_id)
+    if meta_path.exists() and store.source_repo_dir(project_id).exists():
+        try:
+            source_repo = json.loads(meta_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            source_repo = None
+
     return {
         "uploads": uploads,
-        "source_repo": None,
+        "source_repo": source_repo,
         "prior_runs": [],
     }
 
@@ -103,3 +152,101 @@ async def delete_upload(request: Request, project_id: str, filename: str):
         raise HTTPException(status_code=404, detail=f"upload {filename!r} not found")
     target.unlink()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _finalize_source_repo(
+    target: Path,
+    meta_path: Path,
+    meta: dict,
+    force: bool,
+) -> JSONResponse | dict:
+    """Run secret scan; refuse if findings + not force, otherwise strip + write
+    metadata. Returns the success body or a 409 JSONResponse on refusal."""
+    findings = scan_directory(target)
+    if findings and not force:
+        shutil.rmtree(target, ignore_errors=True)
+        if meta_path.exists():
+            meta_path.unlink()
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "secrets detected in source — pass force=true to import with stripping",
+                "findings": [f.to_dict() for f in findings],
+            },
+        )
+    if findings:
+        strip_secrets(target, findings)
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return {
+        "source_repo": meta,
+        "warnings": [f.to_dict() for f in findings],
+    }
+
+
+@router.post("/git", dependencies=[Depends(require_bearer)])
+async def import_git(
+    request: Request,
+    project_id: str,
+    body: dict = Body(...),
+):
+    await _require_project(request, project_id)
+    git_url = (body.get("git_url") or "").strip()
+    if not git_url:
+        raise HTTPException(status_code=400, detail="git_url is required")
+    branch = (body.get("branch") or "main").strip() or "main"
+    shallow = bool(body.get("shallow", True))
+    force = bool(body.get("force", False))
+
+    store = _store(request)
+    target = store.source_repo_dir(project_id)
+    meta_path = store.source_repo_meta_path(project_id)
+
+    try:
+        await source_repo_lib.clone_git_repo(git_url, branch, shallow, target)
+    except source_repo_lib.SourceCloneError as e:
+        raise HTTPException(status_code=400, detail=f"git clone failed: {e}")
+
+    meta = {
+        "kind": "git_url",
+        "git_url": git_url,
+        "branch": branch,
+        "shallow": shallow,
+        "imported_at": _now_iso(),
+    }
+    return _finalize_source_repo(target, meta_path, meta, force)
+
+
+@router.post("/local_path", dependencies=[Depends(require_bearer)])
+async def import_local_path(
+    request: Request,
+    project_id: str,
+    body: dict = Body(...),
+):
+    await _require_project(request, project_id)
+    raw_path = (body.get("path") or "").strip()
+    if not raw_path:
+        raise HTTPException(status_code=400, detail="path is required")
+    src = Path(raw_path)
+    if not src.is_absolute():
+        raise HTTPException(status_code=400, detail="path must be absolute")
+    if not _allowlist_permits(src):
+        raise HTTPException(
+            status_code=403,
+            detail="path is not under AGENTFLOW_LOCAL_PATH_ALLOWLIST",
+        )
+    if not src.is_dir():
+        raise HTTPException(status_code=400, detail=f"path is not a directory: {src}")
+    force = bool(body.get("force", False))
+
+    store = _store(request)
+    target = store.source_repo_dir(project_id)
+    meta_path = store.source_repo_meta_path(project_id)
+
+    source_repo_lib.copy_local_dir(src, target)
+
+    meta = {
+        "kind": "local_path",
+        "path": str(src),
+        "imported_at": _now_iso(),
+    }
+    return _finalize_source_repo(target, meta_path, meta, force)
