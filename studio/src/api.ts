@@ -124,6 +124,63 @@ export interface PersonaChatResponse {
   };
 }
 
+// ── Training Camp (Phase F.1.2) ────────────────────────────────────────────
+
+export interface TrainingScenario {
+  scenario_id: string;
+  goal: string;
+  project_type: string;
+  expected_role_types: string[];
+  n_auto_checks: number;
+  total_auto_weight: number;
+  description: string;
+}
+
+export interface TrainingRunResponse {
+  project_id: string;
+  run_id: string;
+  job_id: string;
+}
+
+export interface TournamentParticipant {
+  persona_id: string;
+  project_id: string;
+  run_id: string;
+  job_id: string;
+}
+
+export interface TournamentResponse {
+  tournament_id: string;
+  scenario_id: string;
+  participants: TournamentParticipant[];
+}
+
+export interface TournamentResult {
+  tournament_id: string;
+  scenario_id: string;
+  complete: boolean;
+  leaderboard: Array<{
+    persona_id: string;
+    project_id: string;
+    run_id: string;
+    score: number | null;
+  }>;
+}
+
+export const trainingApi = {
+  listScenarios: () =>
+    request<TrainingScenario[]>("GET", "/api/training/scenarios"),
+  run: (body: { persona_id: string; scenario_id: string }) =>
+    request<TrainingRunResponse>("POST", "/api/training/run", body, true),
+  tournament: (body: { scenario_id: string; persona_ids: string[] }) =>
+    request<TournamentResponse>("POST", "/api/training/tournament", body, true),
+  tournamentResult: (tournamentId: string) =>
+    request<TournamentResult>(
+      "GET",
+      `/api/training/tournaments/${encodeURIComponent(tournamentId)}`,
+    ),
+};
+
 export const personasApi = {
   list: () => request<PersonaSummary[]>("GET", "/api/personas"),
   get: (id: string) =>

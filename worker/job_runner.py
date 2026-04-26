@@ -115,6 +115,8 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         max_iterations=int(data.get("max_iterations", 5)),
         escalation_thresholds=escalation_thresholds,
         approval_gates=approval_gates,
+        mode=str(data.get("mode") or "production"),
+        training_scenario_id=data.get("training_scenario_id"),
     )
 
 
