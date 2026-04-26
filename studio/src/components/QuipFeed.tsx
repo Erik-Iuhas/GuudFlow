@@ -1,42 +1,60 @@
-import type { Signal } from "../types";
+import { useEffect, useRef, useState } from "react";
+import { connectQuipStream, type QuipWire } from "../api";
 
-export function QuipFeed({ signals }: { signals: Signal[] }) {
-  // Quips currently land in a separate file (data/runs/{id}/quip_log.json)
-  // not the board. For Stage 8 MVP we synthesise pseudo-quips from board
-  // events so the pane is never empty in dev. Real quip stream wires
-  // into a parallel WebSocket later.
-  const synthQuips = signals
-    .filter((s) => s.type === "APPROVED" || s.type === "REJECTED" || s.type === "COMPLETE" || s.type === "FAILED")
-    .slice(-5);
+interface Props {
+  runId: string;
+}
+
+export function QuipFeed({ runId }: Props) {
+  const [quips, setQuips] = useState<QuipWire[]>([]);
+  const [connected, setConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    const ws = connectQuipStream(
+      runId,
+      (msg) => {
+        if (msg.type === "snapshot" && msg.quips) {
+          setQuips(msg.quips);
+          setConnected(msg.live ?? false);
+        } else if (msg.type === "quip" && msg.quip) {
+          setQuips((prev) => [...prev, msg.quip as QuipWire]);
+        }
+        // type === "error" is silently absorbed — the pane just stays empty.
+      },
+      () => setConnected(false),
+    );
+    wsRef.current = ws;
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+  }, [runId]);
+
+  // Show the most recent N so the pane stays compact.
+  const visible = quips.slice(-8);
 
   return (
     <div className="card">
-      <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Quips</h2>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Quips</h2>
+        <span className="muted small">
+          {connected ? "● live" : "○ disk"}
+        </span>
+      </div>
       <div className="muted small">In-character commentary on key events.</div>
       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-        {synthQuips.length === 0 && <p className="muted small">No quips yet.</p>}
-        {synthQuips.map((s) => (
-          <div className="quip" key={s.id}>
-            <span className="who">{s.from_agent ?? "system"}:</span>
-            <em>{quipFor(s)}</em>
+        {visible.length === 0 && <p className="muted small">No quips yet.</p>}
+        {visible.map((q, i) => (
+          <div className="quip" key={`${q.ts}-${i}`}>
+            <span className="who">{q.persona}:</span>
+            <em>{q.text}</em>
+            <span className="muted small" style={{ marginLeft: 8 }}>
+              ({q.event})
+            </span>
           </div>
         ))}
       </div>
     </div>
   );
-}
-
-function quipFor(s: { type: string; summary: string; from_agent?: string | null }): string {
-  switch (s.type) {
-    case "APPROVED":
-      return "ship it.";
-    case "REJECTED":
-      return "needs another pass — see notes on the board.";
-    case "COMPLETE":
-      return "done with this step.";
-    case "FAILED":
-      return "ran into a wall here.";
-    default:
-      return s.summary;
-  }
 }

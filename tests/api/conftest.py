@@ -11,7 +11,7 @@ import pytest
 
 from api.main import create_app
 from api.storage import PersonaStore, ProjectStore, RunStore
-from api.websocket import RunRegistry
+from api.websocket import QuipRegistry, RunRegistry
 from worker.queue import InMemoryJobQueue
 
 
@@ -38,6 +38,7 @@ def app(data_root: Path, monkeypatch):
     a.state.persona_store = PersonaStore(data_root / "personas")
     a.state.queue = InMemoryJobQueue()
     a.state.run_registry = RunRegistry()
+    a.state.quip_registry = QuipRegistry()
     return a
 
 

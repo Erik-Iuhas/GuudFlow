@@ -19,6 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from core.quip_engine import Quip, QuipEngine
 from core.signals import Signal
 from core.workspace import Workspace
 
@@ -44,6 +45,28 @@ class RunRegistry:
             return self.runs.get(run_id)
 
 
+@dataclass
+class QuipRegistry:
+    """Maps active run_id → QuipEngine. Parallel to RunRegistry; the
+    runner registers its quip engine alongside the workspace so the
+    quip WebSocket can subscribe."""
+
+    engines: dict[str, QuipEngine] = field(default_factory=dict)
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    async def register(self, run_id: str, engine: QuipEngine) -> None:
+        async with self._lock:
+            self.engines[run_id] = engine
+
+    async def unregister(self, run_id: str) -> None:
+        async with self._lock:
+            self.engines.pop(run_id, None)
+
+    async def get(self, run_id: str) -> QuipEngine | None:
+        async with self._lock:
+            return self.engines.get(run_id)
+
+
 router = APIRouter()
 
 
@@ -60,6 +83,10 @@ def _signal_to_json(sig: Signal) -> dict[str, Any]:
         "seen_by": list(sig.seen_by),
         "timestamp": sig.timestamp.isoformat(),
     }
+
+
+def _quip_to_json(q: Quip) -> dict[str, Any]:
+    return {"ts": q.ts, "persona": q.persona, "text": q.text, "event": q.event}
 
 
 @router.websocket("/ws/runs/{run_id}")
@@ -125,6 +152,106 @@ async def run_board_ws(websocket: WebSocket, run_id: str) -> None:
                     break
                 sig = queue_task.result()
                 await websocket.send_json({"type": "signal", "signal": _signal_to_json(sig)})
+        finally:
+            if not recv_task.done():
+                recv_task.cancel()
+                try:
+                    await recv_task
+                except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                    pass
+    except WebSocketDisconnect:
+        pass
+    finally:
+        unsubscribe()
+
+
+@router.websocket("/ws/runs/{run_id}/quips")
+async def run_quips_ws(websocket: WebSocket, run_id: str) -> None:
+    """Stream the run's quip log live (Phase C.2).
+
+    Parallel channel to /ws/runs/{run_id} — quips and signals have
+    different cadences and schemas, so they each get their own stream
+    rather than mixing message types on one connection.
+
+    Protocol:
+      1. On connect: server sends `{"type": "snapshot", "quips": [...]}`
+         with the engine's current quips (or the on-disk log if no
+         engine is registered for this run — finished run case).
+      2. Then: per new quip, server sends `{"type": "quip", "quip": {...}}`.
+      3. Disconnect closes the subscription.
+    """
+    quip_registry: QuipRegistry | None = getattr(
+        websocket.app.state, "quip_registry", None,
+    )
+    engine = await quip_registry.get(run_id) if quip_registry is not None else None
+
+    if engine is None:
+        # No live engine for this run — try to serve the on-disk log if
+        # available, then close cleanly.
+        await websocket.accept()
+        from pathlib import Path
+        data_root = getattr(websocket.app.state, "data_root", None)
+        if data_root is not None:
+            log_path = Path(data_root) / "runs" / run_id / "quip_log.json"
+            if log_path.exists():
+                try:
+                    import json as _json
+                    quips = _json.loads(log_path.read_text(encoding="utf-8"))
+                except Exception:
+                    quips = []
+                await websocket.send_json({
+                    "type": "snapshot",
+                    "quips": quips,
+                    "live": False,
+                })
+                await websocket.close(code=1000)
+                return
+        await websocket.send_json({
+            "type": "error",
+            "message": f"no quips for run {run_id!r}",
+        })
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+    queue: asyncio.Queue[Quip] = asyncio.Queue()
+
+    def on_quip(q: Quip) -> None:
+        try:
+            queue.put_nowait(q)
+        except asyncio.QueueFull:
+            pass
+
+    unsubscribe = engine.subscribe(on_quip)
+
+    try:
+        snapshot = [_quip_to_json(q) for q in engine.quips()]
+        await websocket.send_json({
+            "type": "snapshot",
+            "quips": snapshot,
+            "live": True,
+        })
+
+        recv_task = asyncio.create_task(websocket.receive())
+        try:
+            while True:
+                queue_task = asyncio.create_task(queue.get())
+                done, _ = await asyncio.wait(
+                    {queue_task, recv_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if recv_task in done:
+                    queue_task.cancel()
+                    try:
+                        recv_task.result()
+                    except WebSocketDisconnect:
+                        pass
+                    break
+                q = queue_task.result()
+                await websocket.send_json({
+                    "type": "quip",
+                    "quip": _quip_to_json(q),
+                })
         finally:
             if not recv_task.done():
                 recv_task.cancel()

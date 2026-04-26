@@ -25,7 +25,7 @@ from api.routes import personas as personas_router
 from api.routes import projects as projects_router
 from api.routes import runs as runs_router
 from api.storage import PersonaStore, ProjectStore, RunStore
-from api.websocket import RunRegistry, router as ws_router
+from api.websocket import QuipRegistry, RunRegistry, router as ws_router
 from worker.docker_manager import DockerManager
 from worker.job_runner import JobRunner
 from worker.queue import InMemoryJobQueue
@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI):
     app.state.persona_store = PersonaStore(data_root / "personas")
     app.state.queue = InMemoryJobQueue()
     app.state.run_registry = RunRegistry()
+    app.state.quip_registry = QuipRegistry()
 
     worker_task = None
     if os.environ.get("AGENTFLOW_DISABLE_INPROC_WORKER") != "1":
@@ -67,6 +68,7 @@ async def lifespan(app: FastAPI):
             data_root=data_root,
             docker_manager=DockerManager(),
             run_registry=app.state.run_registry,
+            quip_registry=app.state.quip_registry,
         )
         worker_task = asyncio.create_task(app.state.job_runner.run_forever())
         app.state.worker_task = worker_task

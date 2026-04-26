@@ -16,7 +16,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from core.llm import LLMClient, LLMMessage
 from core.scheduler import SchedulerResult
@@ -46,6 +46,22 @@ class QuipEngine:
         self.log_path = Path(log_path)
         self.persona_name = persona_name
         self._quips: list[Quip] = []
+        self._subscribers: list[Callable[[Quip], None]] = []
+
+    def subscribe(self, callback: Callable[[Quip], None]) -> Callable[[], None]:
+        """Register a callback for new quips. Returns an unsubscribe
+        function. Used by the API's WebSocket bridge to stream quips
+        live alongside the board feed. Subscribers are notified after the
+        quip is persisted to disk; subscriber exceptions are swallowed."""
+        self._subscribers.append(callback)
+
+        def _unsubscribe() -> None:
+            try:
+                self._subscribers.remove(callback)
+            except ValueError:
+                pass
+
+        return _unsubscribe
 
     async def on_run_complete(self, workspace: Workspace, result: SchedulerResult) -> None:
         """Generate a final quip summarising how the run went."""
@@ -53,6 +69,7 @@ class QuipEngine:
         quip = await self._generate(prompt, event="run_complete")
         self._append(quip)
         self._persist()
+        self._notify(quip)
 
     async def on_iteration_complete(self, workspace: Workspace, iteration: int) -> None:
         prompt = (
@@ -63,12 +80,14 @@ class QuipEngine:
         quip = await self._generate(prompt, event="iteration_complete")
         self._append(quip)
         self._persist()
+        self._notify(quip)
 
     async def on_event(self, summary: str, event: str = "system") -> None:
         prompt = f"{summary}\n\nWrite one short, in-character comment."
         quip = await self._generate(prompt, event=event)
         self._append(quip)
         self._persist()
+        self._notify(quip)
 
     # ── Internals ───────────────────────────────────────────────────────────
 
@@ -110,6 +129,13 @@ class QuipEngine:
             json.dumps([q.__dict__ for q in self._quips], indent=2),
             encoding="utf-8",
         )
+
+    def _notify(self, quip: Quip) -> None:
+        for sub in list(self._subscribers):
+            try:
+                sub(quip)
+            except Exception:
+                continue
 
     def quips(self) -> list[Quip]:
         return list(self._quips)

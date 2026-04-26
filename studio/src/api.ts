@@ -261,4 +261,38 @@ export function connectRunStream(
   return ws;
 }
 
+export interface QuipWire {
+  ts: string;
+  persona: string;
+  text: string;
+  event: string;
+}
+
+export function connectQuipStream(
+  runId: string,
+  onMessage: (msg: {
+    type: string;
+    quips?: QuipWire[];
+    quip?: QuipWire;
+    live?: boolean;
+  }) => void,
+  onClose?: () => void,
+): WebSocket {
+  const proto = window.location.protocol === "https:" ? "wss" : "ws";
+  const url = `${proto}://${window.location.host}/ws/runs/${encodeURIComponent(runId)}/quips`;
+  const ws = new WebSocket(url);
+  ws.addEventListener("message", (ev) => {
+    try {
+      onMessage(JSON.parse(ev.data));
+    } catch {
+      /* ignore malformed */
+    }
+  });
+  if (onClose) {
+    ws.addEventListener("close", onClose);
+    ws.addEventListener("error", onClose);
+  }
+  return ws;
+}
+
 export { ApiError };

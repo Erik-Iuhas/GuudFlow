@@ -85,3 +85,97 @@ async def test_quips_accumulate(tmp_path: Path, workspace: Workspace):
     await engine.on_run_complete(workspace, result)
     data = json.loads((tmp_path / "q.json").read_text(encoding="utf-8"))
     assert [q["text"] for q in data] == ["a", "b", "c"]
+
+
+# ── subscribe / unsubscribe (Phase C.2) ────────────────────────────────────
+
+
+async def test_subscribe_receives_quip_after_persist(tmp_path: Path, workspace: Workspace):
+    """Subscribers fire after the quip is appended + persisted to disk —
+    so the WebSocket bridge sees a consistent state by the time it
+    forwards the event."""
+    llm = MockLLMClient([MockTurn(text="great work")])
+    engine = QuipEngine(llm=llm, log_path=tmp_path / "q.json")
+
+    received: list[Quip] = []
+    state_at_callback: list[bool] = []
+
+    def on_quip(q: Quip) -> None:
+        received.append(q)
+        # Verify the on-disk log already includes this quip when the
+        # callback fires.
+        state_at_callback.append((tmp_path / "q.json").exists())
+
+    engine.subscribe(on_quip)
+
+    result = SchedulerResult(SchedulerStatus.COMPLETE, [], [], {})
+    await engine.on_run_complete(workspace, result)
+
+    assert len(received) == 1
+    assert received[0].text == "great work"
+    assert received[0].event == "run_complete"
+    assert state_at_callback == [True]
+
+
+async def test_subscribe_fires_on_every_event_type(tmp_path: Path, workspace: Workspace):
+    llm = MockLLMClient([
+        MockTurn(text="iter1"), MockTurn(text="event"), MockTurn(text="end"),
+    ])
+    engine = QuipEngine(llm=llm, log_path=tmp_path / "q.json")
+    received: list[Quip] = []
+    engine.subscribe(received.append)
+
+    await engine.on_iteration_complete(workspace, iteration=1)
+    await engine.on_event("merge conflict", event="conflict")
+    await engine.on_run_complete(
+        workspace, SchedulerResult(SchedulerStatus.COMPLETE, [], [], {}),
+    )
+
+    events = [q.event for q in received]
+    assert events == ["iteration_complete", "conflict", "run_complete"]
+
+
+async def test_unsubscribe_stops_callbacks(tmp_path: Path, workspace: Workspace):
+    llm = MockLLMClient([MockTurn(text="a"), MockTurn(text="b")])
+    engine = QuipEngine(llm=llm, log_path=tmp_path / "q.json")
+    received: list[Quip] = []
+    unsubscribe = engine.subscribe(received.append)
+
+    await engine.on_iteration_complete(workspace, iteration=1)
+    unsubscribe()
+    await engine.on_iteration_complete(workspace, iteration=2)
+
+    assert len(received) == 1
+    # But both quips still landed on disk.
+    data = json.loads((tmp_path / "q.json").read_text(encoding="utf-8"))
+    assert len(data) == 2
+
+
+async def test_subscriber_exception_does_not_break_engine(
+    tmp_path: Path, workspace: Workspace,
+):
+    """A buggy subscriber must not prevent other subscribers (or the
+    persist path) from working. Same defensive posture as Workspace."""
+    llm = MockLLMClient([MockTurn(text="a")])
+    engine = QuipEngine(llm=llm, log_path=tmp_path / "q.json")
+
+    def bad(_q: Quip) -> None:
+        raise RuntimeError("boom")
+
+    received: list[Quip] = []
+    engine.subscribe(bad)
+    engine.subscribe(received.append)
+
+    await engine.on_iteration_complete(workspace, iteration=1)
+
+    # The good subscriber still fired, the persist still happened.
+    assert len(received) == 1
+    assert (tmp_path / "q.json").exists()
+
+
+def test_quips_returns_a_copy(tmp_path: Path):
+    """Mutating the returned list must not affect engine state."""
+    engine = QuipEngine(llm=MockLLMClient([]), log_path=tmp_path / "q.json")
+    snapshot = engine.quips()
+    snapshot.append(Quip(ts="x", persona="x", text="x", event="x"))
+    assert engine.quips() == []

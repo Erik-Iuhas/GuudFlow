@@ -77,3 +77,90 @@ def test_websocket_initial_snapshot_includes_existing_board(sync_client, app):
         snapshot = ws.receive_json()
         assert snapshot["type"] == "snapshot"
         assert len(snapshot["signals"]) == 2
+
+
+# ── /ws/runs/{id}/quips (Phase C.2) ────────────────────────────────────────
+
+
+def _register_quip_engine(app, run_id: str, log_path):
+    """Sync registration of a QuipEngine for testing — bypasses the
+    async lock, same pattern as _register for Workspaces."""
+    from core.llm import MockLLMClient
+    from core.quip_engine import QuipEngine
+    engine = QuipEngine(llm=MockLLMClient([]), log_path=log_path)
+    app.state.quip_registry.engines[run_id] = engine
+    return engine
+
+
+def test_quip_websocket_unknown_run_returns_error(sync_client):
+    with sync_client.websocket_connect("/ws/runs/ghost/quips") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+
+
+def test_quip_websocket_serves_disk_log_when_engine_unregistered(
+    sync_client, data_root, write_run,
+):
+    """Finished run case: no live engine, but quip_log.json on disk —
+    serve as snapshot then close."""
+    run_dir = write_run("run_done")
+    import json as _json
+    quip_data = [
+        {"ts": "2026-04-26T10:00:00Z", "persona": "Aria",
+         "text": "all done", "event": "run_complete"},
+    ]
+    (run_dir / "quip_log.json").write_text(
+        _json.dumps(quip_data), encoding="utf-8",
+    )
+
+    with sync_client.websocket_connect("/ws/runs/run_done/quips") as ws:
+        msg = ws.receive_json()
+        assert msg["type"] == "snapshot"
+        assert msg["live"] is False
+        assert msg["quips"] == quip_data
+
+
+def test_quip_websocket_streams_live_quips(sync_client, app, tmp_path):
+    """Engine registered, subscriber fires on new quips → WS forwards
+    them with the {"type": "quip", "quip": {...}} envelope."""
+    import asyncio as _asyncio
+    from core.quip_engine import Quip
+
+    engine = _register_quip_engine(app, "run_live_q", tmp_path / "q.json")
+
+    with sync_client.websocket_connect("/ws/runs/run_live_q/quips") as ws:
+        snapshot = ws.receive_json()
+        assert snapshot["type"] == "snapshot"
+        assert snapshot["live"] is True
+        assert snapshot["quips"] == []
+
+        # Manually push a quip through the engine (skip the LLM call).
+        q = Quip(
+            ts="2026-04-26T10:01:00Z", persona="system",
+            text="live one", event="iteration_complete",
+        )
+        engine._append(q)
+        engine._notify(q)
+
+        live = ws.receive_json()
+        assert live["type"] == "quip"
+        assert live["quip"]["text"] == "live one"
+        assert live["quip"]["event"] == "iteration_complete"
+
+
+def test_quip_websocket_initial_snapshot_includes_existing_quips(
+    sync_client, app, tmp_path,
+):
+    """If quips have already accumulated when the client connects, the
+    initial snapshot includes them."""
+    from core.quip_engine import Quip
+
+    engine = _register_quip_engine(app, "run_with_history", tmp_path / "q.json")
+    engine._append(Quip(ts="t1", persona="p", text="early", event="iteration_complete"))
+    engine._append(Quip(ts="t2", persona="p", text="middle", event="iteration_complete"))
+
+    with sync_client.websocket_connect("/ws/runs/run_with_history/quips") as ws:
+        snapshot = ws.receive_json()
+        assert snapshot["type"] == "snapshot"
+        assert snapshot["live"] is True
+        assert [q["text"] for q in snapshot["quips"]] == ["early", "middle"]

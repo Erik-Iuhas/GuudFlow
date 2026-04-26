@@ -31,6 +31,7 @@ from typing import Any, Callable
 from agents.builtin.memory_writer import MemoryWriter
 from core import run_initializer
 from core.llm import AnthropicClient, LLMClient
+from core.quip_engine import QuipEngine
 from core.runner import AgentConfig, AgentRunner, ProjectConfig
 from core.tool_manifest import RoleRBAC
 from worker.docker_manager import DockerManager, DockerManagerError
@@ -165,6 +166,7 @@ class JobRunner:
         llm: LLMClient | None = None,
         docker_manager: DockerManager | None = None,
         run_registry: Any = None,  # optional RunRegistry from api/websocket
+        quip_registry: Any = None,  # optional QuipRegistry from api/websocket
         runner_factory: RunnerFactory | None = None,
         poll_timeout_s: float = 1.0,
     ):
@@ -174,6 +176,7 @@ class JobRunner:
         self.llm = llm
         self.docker = docker_manager or DockerManager()
         self.run_registry = run_registry
+        self.quip_registry = quip_registry
         self.runner_factory = runner_factory or default_runner_factory
         self.poll_timeout_s = poll_timeout_s
         self._stop = asyncio.Event()
@@ -287,6 +290,21 @@ class JobRunner:
             except Exception:
                 pass
 
+        # 5.5. Build a QuipEngine + register for the quip WebSocket. The
+        # engine subscribes to the runner so quips emitted by
+        # on_run_complete / on_iteration_complete fan out to live clients.
+        # Only enabled when a quip_registry is provided so existing tests
+        # that don't construct one don't accidentally consume MockLLM
+        # turns on quip generation.
+        if self.quip_registry is not None:
+            quip_log_path = run_root / "quip_log.json"
+            quip_engine = QuipEngine(llm=llm, log_path=quip_log_path)
+            runner.quip_engine = quip_engine
+            try:
+                await self.quip_registry.register(job.run_id, quip_engine)
+            except Exception:
+                pass
+
         # 6. Container lifecycle (stub in dev, real in production).
         try:
             await self.docker.start(
@@ -324,6 +342,11 @@ class JobRunner:
             if self.run_registry is not None:
                 try:
                     await self.run_registry.unregister(job.run_id)
+                except Exception:
+                    pass
+            if self.quip_registry is not None:
+                try:
+                    await self.quip_registry.unregister(job.run_id)
                 except Exception:
                     pass
 

@@ -154,7 +154,7 @@ export function Run() {
         </div>
 
         <div className="run-side">
-          <QuipFeed signals={signals} />
+          <QuipFeed runId={runId} />
           <ScreenshotPane signals={signals} />
           <GitLogTab signals={signals} />
         </div>
