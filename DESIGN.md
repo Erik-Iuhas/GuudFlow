@@ -4542,6 +4542,18 @@ The only difference is `main` already has substantive content.
 
 ### Continuation runs
 
+> **Continuation is between runs, not within one.** Mid-run
+> reject → fix → reapprove cycles are handled by the scheduler's
+> iteration loop (§19): the reviewer rejects, the developer commits a
+> fix on the same branch, the reviewer reviews the diff, all bounded
+> by `max_iterations`. That is fast feedback inside an active run.
+>
+> Continuation is the **between-run** case: a prior run *completed* (or
+> hit max_iterations), the user reviewed the deliverables, time
+> passed, and they want a *new* run that builds on the prior output.
+> Different timeline, fresh git history, possibly different agents,
+> explicit user intent.
+
 Continuation is a special pattern where the user explicitly says
 "continue from run X." The runner:
 

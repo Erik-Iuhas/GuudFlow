@@ -91,9 +91,16 @@ read inputs that aren't there.
 - [ ] **Git URL ingestion** — `POST /api/projects/{id}/inputs/git`
       that clones a public repo (or auth'd via the broker) into
       `data/projects/{id}/inputs/source_repo/`.
-- [ ] **Continuation pattern** — `POST /api/projects/{id}/inputs/from_run/{run_id}`
-      that copies a prior run's `deliverables/` into the new run's
-      inputs (DESIGN §33 "Continuation runs").
+- [ ] **Between-run continuation** — `POST /api/projects/{id}/inputs/from_run/{run_id}`
+      that copies a prior run's `deliverables/` into the next run's
+      inputs along with a `feedback.md` (DESIGN §33 "Continuation runs").
+      This is **not** the in-run review loop — that's already handled
+      by the scheduler's iteration cycle (DESIGN §19): when a reviewer
+      rejects mid-run, the developer fixes on the same branch and the
+      reviewer reapproves, all bounded by `max_iterations`.
+      Continuation here is the **between-run** case: a run *completed*
+      yesterday, you reviewed the deliverables today, and you want a
+      fresh run that builds on them.
 - [ ] **Runner initialization step** — at run start, copy
       project-level inputs into the run's workspace inputs, generate
       `inputs/README.md` index (DESIGN §33), optionally seed

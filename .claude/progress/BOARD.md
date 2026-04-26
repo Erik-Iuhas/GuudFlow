@@ -29,26 +29,19 @@
 | 9     | 50-100k   | ~30k   | within budget; image-only, build deferred    |
 
 ## Next action
-**Initial build complete.** All 9 stages shipped, 530 backend tests passing, frontend typecheck + production build clean.
+**Initial build complete + Phase A shipped.** All 9 stages green, 530 backend tests passing, studio typecheck + prod build clean. Repo pushed to `Erik-Iuhas/AgentFlow` (private). `setup.sh` / `setup.ps1` / `Dockerfile` / `docker-compose.yml` written. Embeddings deps split into `requirements-optional.txt` (default install is now ~60s).
 
-**To run the platform locally:**
-1. `cp .env.example .env` and add `ANTHROPIC_API_KEY`
-2. `pip install -r requirements.txt`
-3. `uvicorn api.main:app --reload --port 8000` (API + in-process worker)
-4. `cd studio && npm install && npm run dev` (frontend on :3000)
+**Pick up from [ROADMAP.md](../../ROADMAP.md).** Three goal-driven sequences are documented; recommended default is **D-prime → D → B → C → E → F**.
 
-**Outstanding work** lives in [followups.md](followups.md):
-- Tier 1 + 2 onboarding (README, host Dockerfile, docker-compose)
-- Production `code:exec` container routing wire-up (~30 lines; image is ready)
-- Live USER_COMMENT POST endpoint
-- Real quip stream WebSocket
-- Tech-lead escalation auto-detection in the runner
-- Real LLM-driven meta-agent proposal
-- Real Playwright wiring for visual_checker
-- Tier 3 Redis queue + k8s manifests (when there's a deploy target)
+- **D-prime** (rich input ingestion: upload API, git URL clone, between-run continuation, runner init step, Studio Inputs tab) is the prerequisite for anything user-facing
+- **D** (real meta-agent proposal that reads `inputs/`)
+- **B** (`code:exec` → DockerManager.exec_in() routing in production)
+- **C** (live USER_COMMENT POST + real quip stream + tech-lead escalation auto-detection)
+- **E** (Redis queue + KubeJobManager + Helm — when there's a deploy target)
+- **F** (Training Camp, real LLM-driven memory synthesis, persona chat, etc.)
 
 ## Deferred follow-ons
-See [followups.md](followups.md) for items explicitly punted from earlier stages — onboarding docs, host Dockerfile, k8s manifests, Stage 5/7 wiring follow-ons, sandbox Dockerfile (Stage 9).
+[followups.md](followups.md) is the running inventory of punted items. ROADMAP.md groups them into shippable phases.
 
 ## Workflow reminder
 1. Read this BOARD.
