@@ -57,13 +57,13 @@ class RequirementsWriter(Specialist):
     # knows what to set on AgentConfig when proposing a team.
     default_model_tier: ClassVar[str] = "solid"
     default_tools: ClassVar[tuple[str, ...]] = (
-        "fs:read", "fs:list", "fs:read_range", "fs:grep",
-        "fs:write",
-        "doc:pdf", "doc:docx", "doc:markdown",
+        "fs-read", "fs-list", "fs-read_range", "fs-grep",
+        "fs-write",
+        "doc-pdf", "doc-docx", "doc-markdown",
     )
     default_rbac_scopes: ClassVar[tuple[str, ...]] = (
-        "fs:write",
-        "doc:pdf", "doc:docx", "doc:markdown",
+        "fs-write",
+        "doc-pdf", "doc-docx", "doc-markdown",
     )
 
     archetype_description: ClassVar[str] = (

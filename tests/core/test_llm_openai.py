@@ -43,7 +43,7 @@ def test_to_openai_messages_assistant_text_only():
 def test_to_openai_messages_assistant_tool_use():
     msg = LLMMessage(role="assistant", content=[
         {"type": "text", "text": "calling fs:read"},
-        {"type": "tool_use", "id": "tu_1", "name": "fs:read", "input": {"path": "x.py"}},
+        {"type": "tool_use", "id": "tu_1", "name": "fs-read", "input": {"path": "x.py"}},
     ])
     out = _to_openai_messages(msg)
     assert len(out) == 1
@@ -51,7 +51,7 @@ def test_to_openai_messages_assistant_tool_use():
     assert asst["role"] == "assistant"
     assert asst["content"] == "calling fs:read"
     assert asst["tool_calls"][0]["id"] == "tu_1"
-    assert asst["tool_calls"][0]["function"]["name"] == "fs:read"
+    assert asst["tool_calls"][0]["function"]["name"] == "fs-read"
     # arguments is a JSON STRING per OpenAI spec
     args = json.loads(asst["tool_calls"][0]["function"]["arguments"])
     assert args == {"path": "x.py"}
@@ -61,7 +61,7 @@ def test_to_openai_messages_assistant_no_text_with_tools():
     """When the LLM only emitted tool_use blocks, content must be null
     (OpenAI spec) and tool_calls must be present."""
     msg = LLMMessage(role="assistant", content=[
-        {"type": "tool_use", "id": "tu_1", "name": "fs:read", "input": {}},
+        {"type": "tool_use", "id": "tu_1", "name": "fs-read", "input": {}},
     ])
     out = _to_openai_messages(msg)
     assert out[0]["content"] is None
@@ -98,7 +98,7 @@ def test_to_openai_messages_user_text_with_tool_results():
 
 def test_to_openai_tool_schema():
     anthropic_tool = {
-        "name": "fs:read",
+        "name": "fs-read",
         "description": "Read a file",
         "input_schema": {
             "type": "object",
@@ -108,7 +108,7 @@ def test_to_openai_tool_schema():
     }
     out = _to_openai_tool(anthropic_tool)
     assert out["type"] == "function"
-    assert out["function"]["name"] == "fs:read"
+    assert out["function"]["name"] == "fs-read"
     assert out["function"]["parameters"]["properties"]["path"]["type"] == "string"
 
 
@@ -146,7 +146,7 @@ def test_from_openai_response_tool_calls():
                     "id": "call_1",
                     "type": "function",
                     "function": {
-                        "name": "fs:read",
+                        "name": "fs-read",
                         "arguments": json.dumps({"path": "auth.py"}),
                     },
                 }],
@@ -157,7 +157,7 @@ def test_from_openai_response_tool_calls():
     out = _from_openai_response(resp)
     assert out.stop_reason == "tool_use"
     assert len(out.tool_calls) == 1
-    assert out.tool_calls[0].name == "fs:read"
+    assert out.tool_calls[0].name == "fs-read"
     assert out.tool_calls[0].arguments == {"path": "auth.py"}
 
 
@@ -252,10 +252,10 @@ async def test_complete_includes_tools_when_provided():
     await client.complete(
         system="s",
         messages=[LLMMessage(role="user", content="x")],
-        tools=[{"name": "fs:read", "description": "Read", "input_schema": {"type": "object"}}],
+        tools=[{"name": "fs-read", "description": "Read", "input_schema": {"type": "object"}}],
     )
     assert "tools" in captured["body"]
-    assert captured["body"]["tools"][0]["function"]["name"] == "fs:read"
+    assert captured["body"]["tools"][0]["function"]["name"] == "fs-read"
 
 
 async def test_complete_no_api_key_omits_authorization():
@@ -308,7 +308,7 @@ async def test_complete_round_trips_tool_use():
                         "id": "tu_1",
                         "type": "function",
                         "function": {
-                            "name": "fs:read",
+                            "name": "fs-read",
                             "arguments": json.dumps({"path": "x.py"}),
                         },
                     }],
@@ -322,11 +322,11 @@ async def test_complete_round_trips_tool_use():
     res = await client.complete(
         system="be helpful",
         messages=[LLMMessage(role="user", content="read x.py")],
-        tools=[{"name": "fs:read", "description": "Read a file",
+        tools=[{"name": "fs-read", "description": "Read a file",
                 "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}}}],
     )
     assert res.stop_reason == "tool_use"
-    assert res.tool_calls[0].name == "fs:read"
+    assert res.tool_calls[0].name == "fs-read"
     assert res.tool_calls[0].arguments == {"path": "x.py"}
     assert res.model == "qwen2.5:7b"
 

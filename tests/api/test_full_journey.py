@@ -150,13 +150,13 @@ async def test_full_user_journey(
     llm = MockLLMClient([
         MockTurn(tool_calls=[ToolCall(
             id="dev_t1",
-            name="fs:write",
+            name="fs-write",
             arguments={"path": "hello.py", "content": "def greet():\n    return 'hi'\n"},
         )]),
         MockTurn(text="Wrote hello.py with greet()"),
         MockTurn(tool_calls=[ToolCall(
             id="rev_t1",
-            name="git:diff",
+            name="git-diff",
             arguments={"branch_a": "agent/developer", "branch_b": "main"},
         )]),
         MockTurn(text="APPROVED"),

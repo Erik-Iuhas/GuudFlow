@@ -31,10 +31,10 @@ def fw(tmp_path: Path) -> FileWorkspace:
 
 def test_general_tools_are_baseline():
     for scope in (
-        "text:diff", "text:estimate_tokens",
-        "data:json", "data:csv", "data:yaml", "data:xml",
-        "time:now", "time:diff",
-        "math:eval",
+        "text-diff", "text-estimate_tokens",
+        "data-json", "data-csv", "data-yaml", "data-xml",
+        "time-now", "time-diff",
+        "math-eval",
     ):
         assert scope in BASELINE_LOCAL_SCOPES, f"{scope} should be baseline"
 

@@ -84,7 +84,7 @@ class CredentialsBroker:
     def register_handler(self, scope: str, handler: CredentialHandler) -> None:
         """Register a callable that performs the credentialed call for a scope.
 
-        For prefix scopes (e.g. "mcp:github"), the handler is invoked for any
+        For prefix scopes (e.g. "mcp-github"), the handler is invoked for any
         sub-scope match unless a more specific handler is registered.
         """
         self._handlers[scope] = handler
@@ -94,7 +94,7 @@ class CredentialsBroker:
         if scope in self._handlers:
             return self._handlers[scope]
         # Fall back to prefix matches, longest-first.
-        candidates = [s for s in self._handlers if scope.startswith(s + ":")]
+        candidates = [s for s in self._handlers if scope.startswith(s + "-")]
         if not candidates:
             return None
         candidates.sort(key=len, reverse=True)

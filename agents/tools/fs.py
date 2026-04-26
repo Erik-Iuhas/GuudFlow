@@ -47,7 +47,7 @@ def _ok(**kwargs: Any) -> dict[str, Any]:
 
 
 class FsRead(BaseTool):
-    name = "fs:read"
+    name = "fs-read"
     description = "Read the full contents of a file under working/ as text (UTF-8)."
     input_schema = {
         "type": "object",
@@ -74,7 +74,7 @@ class FsRead(BaseTool):
 
 
 class FsList(BaseTool):
-    name = "fs:list"
+    name = "fs-list"
     description = "List files under a working/ subpath. Optional recursive flag."
     input_schema = {
         "type": "object",
@@ -100,7 +100,7 @@ class FsList(BaseTool):
 
 
 class FsExists(BaseTool):
-    name = "fs:exists"
+    name = "fs-exists"
     description = "Check whether a working/ path exists."
     input_schema = {
         "type": "object",
@@ -126,8 +126,8 @@ class FsReadRange(BaseTool):
     clamped to the file's actual line count if it overshoots.
     """
 
-    name = "fs:read_range"
-    description = "Read a specific line range from a file (1-indexed, inclusive). Use after fs:exists or code:outline to read just the section you need."
+    name = "fs-read_range"
+    description = "Read a specific line range from a file (1-indexed, inclusive). Use after fs-exists or code-outline to read just the section you need."
     input_schema = {
         "type": "object",
         "properties": {
@@ -189,7 +189,7 @@ class FsGrep(BaseTool):
     regex semantics.
     """
 
-    name = "fs:grep"
+    name = "fs-grep"
     description = "Search file contents under working/ for a query. Returns matches with line numbers and surrounding context."
     input_schema = {
         "type": "object",
@@ -318,7 +318,7 @@ class _ClaimingTool(BaseTool):
 
 
 class FsWrite(_ClaimingTool):
-    name = "fs:write"
+    name = "fs-write"
     description = "Write/overwrite a file under working/. Creates parent dirs as needed."
     input_schema = {
         "type": "object",
@@ -351,7 +351,7 @@ class FsWrite(_ClaimingTool):
 
 
 class FsCreate(_ClaimingTool):
-    name = "fs:create"
+    name = "fs-create"
     description = "Create a NEW file under working/. Errors if it already exists."
     input_schema = {
         "type": "object",
@@ -395,7 +395,7 @@ class FsEdit(_ClaimingTool):
       - replace_all=True: replaces every occurrence; returns count.
     """
 
-    name = "fs:edit"
+    name = "fs-edit"
     description = "Surgical edit on an existing file: find/replace exact strings."
     input_schema = {
         "type": "object",
@@ -457,7 +457,7 @@ class FsEdit(_ClaimingTool):
 
 
 class FsDelete(_ClaimingTool):
-    name = "fs:delete"
+    name = "fs-delete"
     description = "Delete a file or directory under working/."
     input_schema = {
         "type": "object",
@@ -489,7 +489,7 @@ class FsDelete(_ClaimingTool):
 
 
 class FsRename(_ClaimingTool):
-    name = "fs:rename"
+    name = "fs-rename"
     description = "Rename or move a file under working/."
     input_schema = {
         "type": "object",

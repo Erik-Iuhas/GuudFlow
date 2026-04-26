@@ -27,7 +27,7 @@ def fw(tmp_path: Path) -> FileWorkspace:
 def test_new_tools_are_baseline_scopes():
     """Read-side additions must be baseline so every agent gets them
     without explicit RBAC grant."""
-    for scope in ("fs:read_range", "fs:grep", "code:outline", "git:status"):
+    for scope in ("fs-read_range", "fs-grep", "code-outline", "git-status"):
         assert scope in BASELINE_LOCAL_SCOPES, f"{scope} should be baseline"
 
 

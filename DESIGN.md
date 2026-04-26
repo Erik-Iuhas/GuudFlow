@@ -3396,12 +3396,12 @@ agent A wants to post to Slack
         │
         ▼
 emits CREDENTIAL_REQUEST signal:
-  scope = "mcp:slack:post"
+  scope = "mcp-slack-post"
   payload = {channel: "#eng", text: "build green"}
         │
         ▼
 Credentials Broker (event-driven agent, like IT agent)
-  ├─ checks RBAC matrix: is "developer" allowed "mcp:slack:post"?
+  ├─ checks RBAC matrix: is "developer" allowed "mcp-slack-post"?
   ├─ if yes: invokes the MCP server on the host with the project's stored token,
   │   posts CREDENTIAL_GRANTED signal containing the call result
   └─ if no:  posts CREDENTIAL_DENIED with reason
@@ -3437,13 +3437,13 @@ The agent never saw the token.
       "allowed_scopes": []
     },
     "developer": {
-      "allowed_scopes": ["mcp:github:read", "api:web_search"]
+      "allowed_scopes": ["mcp-github-read", "api-web_search"]
     },
     "tech_lead": {
-      "allowed_scopes": ["mcp:github", "mcp:linear", "api:web_search"]
+      "allowed_scopes": ["mcp-github", "mcp-linear", "api-web_search"]
     },
     "deploy_agent": {
-      "allowed_scopes": ["mcp:github", "ci:trigger_pipeline"]
+      "allowed_scopes": ["mcp-github", "ci-trigger_pipeline"]
     },
     "memory_writer": {
       "allowed_scopes": []
@@ -3454,7 +3454,7 @@ The agent never saw the token.
 
 Scope grammar:
 - `mcp:{server}` — full access to one MCP server
-- `mcp:{server}:{verb}` — restricted (e.g. `mcp:github:read` permits read
+- `mcp:{server}:{verb}` — restricted (e.g. `mcp-github-read` permits read
   ops only — the broker enforces verb-level filtering for MCPs that expose it)
 - `api:{name}` — a named external API the runner has configured
 - `ci:{action}` — pipeline-level actions
@@ -3531,7 +3531,7 @@ a separate channel from the board, parallel to `quip_log.json`:
   {
     "ts": "2026-04-25T18:14:02Z",
     "from_agent": "developer",
-    "scope": "mcp:slack:post",
+    "scope": "mcp-slack-post",
     "decision": "granted",
     "operation": "post_message",
     "redacted_payload_preview": "channel=#eng, text=<...>"
@@ -3539,9 +3539,9 @@ a separate channel from the board, parallel to `quip_log.json`:
   {
     "ts": "2026-04-25T18:14:09Z",
     "from_agent": "developer",
-    "scope": "mcp:github:write",
+    "scope": "mcp-github-write",
     "decision": "denied",
-    "reason": "developer role not granted mcp:github:write"
+    "reason": "developer role not granted mcp-github-write"
   }
 ]
 ```
@@ -3559,20 +3559,20 @@ by `request_id` — covers all of them. No new transport.
 **Flow A — agent has the scope, calls the service via the broker.**
 
 A developer agent fetches comments from a GitHub PR. Developer holds
-`mcp:github:read` in the project's RBAC matrix.
+`mcp-github-read` in the project's RBAC matrix.
 
 ```
 [iter 2] STARTED              developer
 [iter 2] CREDENTIAL_REQUEST   developer
            request_id: req-7f3a
-           scope:      mcp:github:read
+           scope:      mcp-github-read
            operation:  get_pr_comments
            payload:    { repo: "acme/web", pr: 42 }
 
 [iter 2] STARTED              credentials_broker     (wakes on CREDENTIAL_REQUEST)
-         ├─ RBAC lookup: developer ⊇ mcp:github:read   → grant
+         ├─ RBAC lookup: developer ⊇ mcp-github-read   → grant
          ├─ broker process invokes GitHub MCP on host with project's stored token
-         └─ access_log.json: { from: developer, scope: mcp:github:read,
+         └─ access_log.json: { from: developer, scope: mcp-github-read,
                                decision: granted, operation: get_pr_comments }
 
 [iter 2] CREDENTIAL_GRANTED   credentials_broker
@@ -3600,18 +3600,18 @@ The same developer wants to update a Confluence page but has no write scope.
 
 ```
 [iter 3] CREDENTIAL_REQUEST   developer
-           scope:      mcp:confluence:write
+           scope:      mcp-confluence-write
            request_id: req-9b1c
 
 [iter 3] STARTED              credentials_broker
-         ├─ RBAC lookup: developer ⊉ mcp:confluence:write   → deny
-         └─ access_log.json: { from: developer, scope: mcp:confluence:write,
+         ├─ RBAC lookup: developer ⊉ mcp-confluence-write   → deny
+         └─ access_log.json: { from: developer, scope: mcp-confluence-write,
                                decision: denied,
-                               reason: "developer role not granted mcp:confluence:write" }
+                               reason: "developer role not granted mcp-confluence-write" }
 
 [iter 3] CREDENTIAL_DENIED    credentials_broker
            request_id: req-9b1c
-           reason:          "developer role not granted mcp:confluence:write"
+           reason:          "developer role not granted mcp-confluence-write"
            suggested_roles: [ "tech_writer" ]
 ```
 
@@ -3641,12 +3641,12 @@ protocol. Tech_writer makes the broker call under *its own* scope grant.
 [iter 3] (tech_writer reads developer's branch via git_read, drafts the update)
 
 [iter 3] CREDENTIAL_REQUEST   tech_writer            ← tech_writer's scope, not developer's
-           scope:      mcp:confluence:write
+           scope:      mcp-confluence-write
            request_id: req-c4f2
 
 [iter 3] CREDENTIAL_GRANTED   credentials_broker → tech_writer
            result:     { version: 5 }
-         └─ access_log.json: { from: tech_writer, scope: mcp:confluence:write,
+         └─ access_log.json: { from: tech_writer, scope: mcp-confluence-write,
                                decision: granted, ... }
 
 [iter 3] PROTOCOL   tech_writer  ANSWER q-1 tech_writer → developer
@@ -3699,7 +3699,7 @@ own design pass.
   read them by filtering board signals on type + request_id, not via
   `read_protocol()`.
 
-### Dev-mode `code:exec` hardening (active before Stage 7's container)
+### Dev-mode `code-exec` hardening (active before Stage 7's container)
 
 §29 specifies what production looks like (Docker container, network_mode
 none, resource caps). Until Stage 7 wires the container, dev mode runs
@@ -3758,8 +3758,8 @@ audit trail. The agent abstraction gives that for free: separate process
 boundary inside the runner, separate prompt context, separate logging.
 
 This also means the broker can be a *prompt-defined* agent for users who
-want richer policy than a static RBAC matrix — e.g. "deny `mcp:github:write`
-during a freeze window" or "require human approval for any `ci:trigger_*`
+want richer policy than a static RBAC matrix — e.g. "deny `mcp-github-write`
+during a freeze window" or "require human approval for any `ci-trigger_*`
 scope". The same way the IT agent can be replaced with a custom one.
 
 ### Design Rules for the Credentials Broker
@@ -3788,7 +3788,7 @@ scope". The same way the IT agent can be replaced with a custom one.
     lives outside the container.
 
 71. **Scope strings are stable contracts.** Once a scope name is in use
-    (`mcp:slack:post`), renaming it is a breaking change for every project's
+    (`mcp-slack-post`), renaming it is a breaking change for every project's
     RBAC config. Add new scopes; do not rename existing ones.
 
 ### Where this slots into the build
@@ -3844,19 +3844,19 @@ Categories:
 
 | Prefix    | Category                       | Examples                                             |
 |-----------|--------------------------------|------------------------------------------------------|
-| `fs:`     | Filesystem (working/ scope)    | `fs:read`, `fs:write`, `fs:edit`, `fs:list`, `fs:delete`, `fs:create`, `fs:rename` |
-| `doc:`    | Document parsing (read-only)   | `doc:pdf`, `doc:docx`, `doc:xlsx`, `doc:html`, `doc:image`, `doc:markdown` |
-| `code:`   | Code execution & analysis      | `code:exec`, `code:test`, `code:lint`               |
-| `web:`    | Uncredentialed web access      | `web:search`, `web:fetch`                            |
-| `git:`    | Git ops on workspace repo      | `git:commit`, `git:diff`, `git:log`, `git:read`     |
-| `vis:`    | Visual / screenshot            | `vis:screenshot`                                     |
-| `mcp:`    | MCP-mediated remote tools      | `mcp:github:get_pr_comments`, `mcp:slack:post`      |
+| `fs:`     | Filesystem (working/ scope)    | `fs-read`, `fs-write`, `fs-edit`, `fs-list`, `fs-delete`, `fs-create`, `fs-rename` |
+| `doc:`    | Document parsing (read-only)   | `doc-pdf`, `doc-docx`, `doc-xlsx`, `doc-html`, `doc-image`, `doc-markdown` |
+| `code:`   | Code execution & analysis      | `code-exec`, `code-test`, `code-lint`               |
+| `web:`    | Uncredentialed web access      | `web-search`, `web-fetch`                            |
+| `git:`    | Git ops on workspace repo      | `git-commit`, `git-diff`, `git-log`, `git-read`     |
+| `vis:`    | Visual / screenshot            | `vis-screenshot`                                     |
+| `mcp:`    | MCP-mediated remote tools      | `mcp-github-get_pr_comments`, `mcp-slack-post`      |
 
-A scope grant of `mcp:github` grants every `mcp:github:*` tool. A grant of
-`mcp:github:read` grants only the read-tagged tools. Verb-level scopes work
-the same way for built-ins where it makes sense — e.g. `fs:read` is
-implicitly granted to every agent (read is non-destructive); `fs:write`,
-`fs:edit`, `fs:delete` require explicit scope grants.
+A scope grant of `mcp-github` grants every `mcp-github-*` tool. A grant of
+`mcp-github-read` grants only the read-tagged tools. Verb-level scopes work
+the same way for built-ins where it makes sense — e.g. `fs-read` is
+implicitly granted to every agent (read is non-destructive); `fs-write`,
+`fs-edit`, `fs-delete` require explicit scope grants.
 
 ### The Built-in Tool Catalog (MVP)
 
@@ -3868,25 +3868,25 @@ declaration in agent config and matching RBAC scope.
 
 | Tool             | Purpose                                                                   | Default access |
 |------------------|---------------------------------------------------------------------------|----------------|
-| `fs:read`        | Read full contents of one file                                            | always         |
-| `fs:read_range`  | Read a specific line range from a file (1-indexed, inclusive)             | always         |
-| `fs:list`        | List files at a path (recursive optional)                                 | always         |
-| `fs:exists`      | Check if a path exists                                                    | always         |
-| `fs:grep`        | Search file contents under working/ — line matches with surrounding context, optional path glob and regex | always |
-| `fs:create`      | Create a new file (errors if it exists)                                   | by declaration |
-| `fs:write`       | Write/overwrite a file                                                    | by declaration |
-| `fs:edit`        | Surgical edit: find/replace, line-anchored ops                            | by declaration |
-| `fs:delete`      | Delete a file or directory                                                | by declaration |
-| `fs:rename`      | Rename or move a file                                                     | by declaration |
+| `fs-read`        | Read full contents of one file                                            | always         |
+| `fs-read_range`  | Read a specific line range from a file (1-indexed, inclusive)             | always         |
+| `fs-list`        | List files at a path (recursive optional)                                 | always         |
+| `fs-exists`      | Check if a path exists                                                    | always         |
+| `fs-grep`        | Search file contents under working/ — line matches with surrounding context, optional path glob and regex | always |
+| `fs-create`      | Create a new file (errors if it exists)                                   | by declaration |
+| `fs-write`       | Write/overwrite a file                                                    | by declaration |
+| `fs-edit`        | Surgical edit: find/replace, line-anchored ops                            | by declaration |
+| `fs-delete`      | Delete a file or directory                                                | by declaration |
+| `fs-rename`      | Rename or move a file                                                     | by declaration |
 
-`fs:read_range` and `fs:grep` are the workhorses for token efficiency on
-large files. The pattern is: `fs:list` (or repo_map) → `code:outline` →
-`fs:read_range`. Reading the whole file is reserved for short files or
+`fs-read_range` and `fs-grep` are the workhorses for token efficiency on
+large files. The pattern is: `fs-list` (or repo_map) → `code-outline` →
+`fs-read_range`. Reading the whole file is reserved for short files or
 when full context is genuinely needed.
 
-`fs:edit` is the workhorse. Most file changes are edits, not full rewrites,
+`fs-edit` is the workhorse. Most file changes are edits, not full rewrites,
 and a dedicated edit tool dramatically reduces token cost and conflict surface
-versus `fs:write`.
+versus `fs-write`.
 
 **Document parsing (`doc:*`)** — read-only ingestion of human-authored
 formats. Used heavily when `inputs/` (§33) contains spec documents,
@@ -3895,14 +3895,14 @@ all calls scoped through `FileWorkspace` paths or `inputs/` paths.
 
 | Tool         | Purpose                                                |
 |--------------|--------------------------------------------------------|
-| `doc:pdf`    | Extract text (and optionally tables) from a PDF        |
-| `doc:docx`   | Extract text and structure from a Word document        |
-| `doc:xlsx`   | Read a spreadsheet — sheets, rows, columns, headers    |
-| `doc:html`   | Parse HTML to text or DOM-like structure               |
-| `doc:image`  | Vision-model description of an image (broker-routed if vision API is credentialed) |
-| `doc:markdown`| Parse markdown → AST or rendered text                  |
+| `doc-pdf`    | Extract text (and optionally tables) from a PDF        |
+| `doc-docx`   | Extract text and structure from a Word document        |
+| `doc-xlsx`   | Read a spreadsheet — sheets, rows, columns, headers    |
+| `doc-html`   | Parse HTML to text or DOM-like structure               |
+| `doc-image`  | Vision-model description of an image (broker-routed if vision API is credentialed) |
+| `doc-markdown`| Parse markdown → AST or rendered text                  |
 
-A common pattern: a requirements agent calls `doc:pdf` on a spec uploaded
+A common pattern: a requirements agent calls `doc-pdf` on a spec uploaded
 to `inputs/`, gets back text, posts a structured artifact to the workspace,
 and downstream agents work from the artifact rather than re-parsing.
 
@@ -3910,48 +3910,48 @@ and downstream agents work from the artifact rather than re-parsing.
 
 | Tool           | Purpose                                                              | Default access |
 |----------------|----------------------------------------------------------------------|----------------|
-| `code:outline` | Tree-sitter outline of one source file: imports / classes (with methods) / functions / constants. Cheap reconnaissance before `fs:read_range`. | always |
-| `code:exec`    | Execute Python or shell. In production runs inside sandbox container; in dev runs on host with explicit warning. | by declaration |
-| `code:test`    | Convenience wrapper over `code:exec` that knows how to parse pytest/jest result formats.                          | by declaration |
-| `code:lint`    | Convenience wrapper over `code:exec` for common linters.                                                          | by declaration |
+| `code-outline` | Tree-sitter outline of one source file: imports / classes (with methods) / functions / constants. Cheap reconnaissance before `fs-read_range`. | always |
+| `code-exec`    | Execute Python or shell. In production runs inside sandbox container; in dev runs on host with explicit warning. | by declaration |
+| `code-test`    | Convenience wrapper over `code-exec` that knows how to parse pytest/jest result formats.                          | by declaration |
+| `code-lint`    | Convenience wrapper over `code-exec` for common linters.                                                          | by declaration |
 
 **Data (`data:*`)** — common structured-data formats. All read-only and
-path-safe via `FileWorkspace`. `data:xml` uses `defusedxml` to block
+path-safe via `FileWorkspace`. `data-xml` uses `defusedxml` to block
 XXE / billion-laughs / external DTDs.
 
 | Tool        | Purpose                                                                   |
 |-------------|---------------------------------------------------------------------------|
-| `data:json` | Parse a JSON file. Optional `json_path` (array of keys/indices, or dot-string) extracts a subtree. |
-| `data:csv`  | Parse a CSV file. Returns columns + rows-as-dicts. `max_rows` caps output; total row count reported. |
-| `data:yaml` | Parse a YAML file via `yaml.safe_load` (rejects arbitrary object construction). |
-| `data:xml`  | Parse an XML file (safe via defusedxml). Returns dict tree. `max_depth` caps nesting. |
+| `data-json` | Parse a JSON file. Optional `json_path` (array of keys/indices, or dot-string) extracts a subtree. |
+| `data-csv`  | Parse a CSV file. Returns columns + rows-as-dicts. `max_rows` caps output; total row count reported. |
+| `data-yaml` | Parse a YAML file via `yaml.safe_load` (rejects arbitrary object construction). |
+| `data-xml`  | Parse an XML file (safe via defusedxml). Returns dict tree. `max_depth` caps nesting. |
 
 **Text (`text:*`)** — text comparisons and cost estimates.
 
 | Tool                   | Purpose                                                              |
 |------------------------|----------------------------------------------------------------------|
-| `text:diff`            | Unified diff between two strings or files (`a`/`b` or `a_path`/`b_path`). |
-| `text:estimate_tokens` | Approximate token count for a string or file (chars/4, matches context_manager). |
+| `text-diff`            | Unified diff between two strings or files (`a`/`b` or `a_path`/`b_path`). |
+| `text-estimate_tokens` | Approximate token count for a string or file (chars/4, matches context_manager). |
 
 **Time (`time:*`)** — UTC-only timestamps and durations. Anything
-fancier (natural language, named timezones) goes through `code:exec`
+fancier (natural language, named timezones) goes through `code-exec`
 or a future MCP.
 
 | Tool        | Purpose                                                       |
 |-------------|---------------------------------------------------------------|
-| `time:now`  | Current UTC timestamp. Returns ISO + epoch seconds + epoch ms. |
-| `time:diff` | Duration between two ISO timestamps (b - a). Total seconds + days/hours/minutes/seconds breakdown. |
+| `time-now`  | Current UTC timestamp. Returns ISO + epoch seconds + epoch ms. |
+| `time-diff` | Duration between two ISO timestamps (b - a). Total seconds + days/hours/minutes/seconds breakdown. |
 
 **Math (`math:*`)** — safe arithmetic.
 
 | Tool        | Purpose                                                       |
 |-------------|---------------------------------------------------------------|
-| `math:eval` | Evaluate a numeric expression. AST-allowlisted: `+ - * / // % **` and parentheses only. NO names, function calls, or attribute access. |
+| `math-eval` | Evaluate a numeric expression. AST-allowlisted: `+ - * / // % **` and parentheses only. NO names, function calls, or attribute access. |
 
-**Web (`web:*`)** — uncredentialed fetches only. `web:search` may call a
+**Web (`web:*`)** — uncredentialed fetches only. `web-search` may call a
 search API; that API key is held by the broker (the runner, on the host).
 The agent never sees it, but the call itself is treated as
-broker-routed — the result is what the agent sees. `web:fetch` retrieves
+broker-routed — the result is what the agent sees. `web-fetch` retrieves
 a public URL with no auth.
 
 Anything credentialed routes through the broker, even if it would
@@ -3959,16 +3959,16 @@ otherwise look "local". The broker pattern is about credential
 containment, not network distance.
 
 **Git (`git:*`)** — wraps `core/git_workspace.py`. Read tools
-(`git:diff`, `git:log`, `git:read`, `git:status`) are always available.
+(`git-diff`, `git-log`, `git-read`, `git-status`) are always available.
 
 | Tool         | Purpose                                                                |
 |--------------|------------------------------------------------------------------------|
-| `git:diff`   | Diff between two branches.                                             |
-| `git:log`    | Recent commits on a branch.                                            |
-| `git:read`   | Read a file at the tip of a branch without checkout.                   |
-| `git:status` | Uncommitted changes on the current branch (staged / unstaged / untracked). |
+| `git-diff`   | Diff between two branches.                                             |
+| `git-log`    | Recent commits on a branch.                                            |
+| `git-read`   | Read a file at the tip of a branch without checkout.                   |
+| `git-status` | Uncommitted changes on the current branch (staged / unstaged / untracked). |
 
-`git:commit` is implicit in the BaseAgent's commit lifecycle and is not
+`git-commit` is implicit in the BaseAgent's commit lifecycle and is not
 exposed as a freestanding tool — agents commit by completing a step,
 not by tool call.
 
@@ -3997,27 +3997,27 @@ not by tool call.
   "rbac": {
     "developer": {
       "allowed_scopes": [
-        "fs:read", "fs:list", "fs:create", "fs:write", "fs:edit",
-        "code:exec", "code:test",
-        "git:diff", "git:log", "git:read",
-        "doc:markdown",
-        "mcp:github:read",
-        "web:search", "web:fetch"
+        "fs-read", "fs-list", "fs-create", "fs-write", "fs-edit",
+        "code-exec", "code-test",
+        "git-diff", "git-log", "git-read",
+        "doc-markdown",
+        "mcp-github-read",
+        "web-search", "web-fetch"
       ]
     },
     "tech_writer": {
       "allowed_scopes": [
-        "fs:read", "fs:list",
-        "doc:pdf", "doc:docx", "doc:markdown",
-        "mcp:confluence",
-        "web:search"
+        "fs-read", "fs-list",
+        "doc-pdf", "doc-docx", "doc-markdown",
+        "mcp-confluence",
+        "web-search"
       ]
     }
   },
   "agents": [
     {
       "role": "developer",
-      "declared_local_tools": ["fs:read", "fs:write", "fs:edit", "code:exec", "code:test"],
+      "declared_local_tools": ["fs-read", "fs-write", "fs-edit", "code-exec", "code-test"],
       "declared_mcp_servers": ["github"]
     }
   ]
@@ -4026,7 +4026,7 @@ not by tool call.
 
 `credential_ref` resolves to an entry in the broker-only credentials store
 (§30). `verb_scopes` lets one MCP server expose verb-level RBAC — the broker
-maps `mcp:github:read` to "any of these named tools" at filter time.
+maps `mcp-github-read` to "any of these named tools" at filter time.
 
 ### The agent's `declared_*` lists are intent, not capability
 
@@ -4038,7 +4038,7 @@ Two layers of declaration are intentional:
 - The RBAC matrix declares what the role is *trusted with*.
 - The runtime surface is the **intersection** of the two.
 
-If the agent declares `mcp:linear` but RBAC has no Linear scope, the agent
+If the agent declares `mcp-linear` but RBAC has no Linear scope, the agent
 gets no Linear tools and the runner surfaces a config warning during
 proposal review. The reverse is also fine — RBAC may grant scopes the
 agent didn't declare; those scopes just don't surface as tools (an agent
@@ -4049,7 +4049,7 @@ isn't going to call a tool it didn't declare even if technically permitted).
 ```python
 @dataclass
 class ToolDescriptor:
-    name: str                    # "fs:edit" | "mcp:github:get_pr_comments"
+    name: str                    # "fs-edit" | "mcp-github-get_pr_comments"
     description: str             # what the LLM reads when deciding
     input_schema: dict           # JSONSchema for the call's arguments
     invocation: Literal["local", "broker"]
@@ -4157,7 +4157,7 @@ two levels). Manifest is for clarity and cost; broker is for security.
 - **Large tool results.** Broker writes oversized results
   (heuristic: > ~16 KB) into `inputs/mcp_cache/{hash}.json` and returns
   `{file: path, size, summary}` to the agent. Agents read the file via
-  `fs:read` if they need the full content. Same "signals reference files,
+  `fs-read` if they need the full content. Same "signals reference files,
   don't contain them" rule as §17.
 - **Tool whose schema needs runtime parameters.** MCP tools sometimes
   expose schemas that depend on connected state (e.g. "this Slack
@@ -4189,8 +4189,8 @@ two levels). Manifest is for clarity and cost; broker is for security.
     even for builtins.
 
 74. **All write-side built-ins require explicit RBAC scope.** Read tools
-    (`fs:read`, `fs:list`, `git:diff`, `doc:*`, `web:fetch`,
-    `web:search`) are baseline. Anything that mutates (file writes,
+    (`fs-read`, `fs-list`, `git-diff`, `doc:*`, `web-fetch`,
+    `web-search`) are baseline. Anything that mutates (file writes,
     deletes, code execution, MCP write tools) must be granted.
 
 75. **Built-in tools are namespaced `{category}:{name}`.** No legacy
@@ -4268,7 +4268,7 @@ intent; agents decide what to do with it.
 Agents do not have to remember to claim. The write-side filesystem tools
 do it on their behalf:
 
-- `fs:write` and `fs:edit` and `fs:create` and `fs:delete` post a
+- `fs-write` and `fs-edit` and `fs-create` and `fs-delete` post a
   `FILE_CLAIM` before the operation, and a `FILE_RELEASE` (outcome:
   `committed`) immediately after the agent's next git commit covering
   that path.
@@ -4292,7 +4292,7 @@ await self.release_files(["src/auth.py", "src/auth_utils.py", "tests/test_auth.p
                          outcome="committed")
 ```
 
-Manual claims override the auto-claim from `fs:write` (it sees an active
+Manual claims override the auto-claim from `fs-write` (it sees an active
 claim by the same agent and skips the redundant one).
 
 ### What agents do with claims they observe
@@ -4350,13 +4350,13 @@ periodically.
 ### Read side: no claims needed
 
 Reads are unrestricted. Git branches give immutable snapshots of any
-branch's state at a commit; agents calling `fs:read` against the working
+branch's state at a commit; agents calling `fs-read` against the working
 directory always see their own branch's state, not other agents'
 in-flight work. There is no race on reads.
 
 The exception: if an agent wants to read **another agent's** in-flight
 work (rare but legitimate during coordination), it uses
-`git:read("agent/B", path)` — which gives the snapshot at the tip of B's
+`git-read("agent/B", path)` — which gives the snapshot at the tip of B's
 branch, not a torn view.
 
 ### Reviewer / runner override
@@ -4502,7 +4502,7 @@ under `source_repo/`. Read the spec at `uploads/auth-spec.pdf` first.
 Treat `from_run_xyz/feedback.md` as the primary directive for changes.
 ```
 
-This is what agents `fs:read` first when they start. It is the deliberate
+This is what agents `fs-read` first when they start. It is the deliberate
 "open the inputs folder and look around" entry point.
 
 ### The meta-agent reads `inputs/` first
@@ -4688,9 +4688,9 @@ isolation contains it.
 - Stage 5 — runner's initialization step: clone, copy, seed, secret-scan,
   generate `inputs/README.md`. Meta-agent reads `inputs/` first. Continuation
   pattern (`from_run_{id}` seeding, prior persona reuse).
-- Stage 4 — the expanded built-in tool catalog (`fs:write`, `fs:edit`,
-  `fs:create`, `fs:delete`, `doc:pdf`, `doc:docx`, `doc:xlsx`, `doc:html`,
-  `doc:markdown`, `code:test`, `code:lint`, `web:fetch`). Read tools land
+- Stage 4 — the expanded built-in tool catalog (`fs-write`, `fs-edit`,
+  `fs-create`, `fs-delete`, `doc-pdf`, `doc-docx`, `doc-xlsx`, `doc-html`,
+  `doc-markdown`, `code-test`, `code-lint`, `web-fetch`). Read tools land
   first; write tools land after the broker is at least stub-implemented
   so RBAC enforcement is in the path.
 

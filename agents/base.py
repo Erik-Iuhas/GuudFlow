@@ -524,7 +524,7 @@ class BaseAgent:
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
         """Sugar over `call_tool` for MCP tools."""
-        return await self.call_tool(workspace, f"mcp:{server}:{tool}", arguments)
+        return await self.call_tool(workspace, f"mcp-{server}-{tool}", arguments)
 
     # ── Context (§28) ──────────────────────────────────────────────────────
 

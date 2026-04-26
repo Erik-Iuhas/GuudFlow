@@ -84,14 +84,14 @@ class ToolManifest:
         if not self.descriptors:
             return ""
 
-        # Group by category prefix ("fs:", "doc:", "mcp:github:" → "mcp:github").
+        # Group by category prefix ("fs-", "doc-", "mcp-github-" → "mcp-github").
         groups: dict[str, list[ToolDescriptor]] = {}
         for d in self.descriptors:
-            head, _, _ = d.name.partition(":")
-            if head == "mcp" and ":" in d.name[4:]:
-                # mcp:server:tool → group by "mcp:server"
-                _, server, _ = d.name.split(":", 2)
-                key = f"mcp:{server}"
+            head, _, _ = d.name.partition("-")
+            if head == "mcp" and "-" in d.name[4:]:
+                # mcp-server-tool → group by "mcp-server"
+                _, server, _ = d.name.split("-", 2)
+                key = f"mcp-{server}"
             else:
                 key = head or "tools"
             groups.setdefault(key, []).append(d)
@@ -140,14 +140,14 @@ class RoleRBAC:
         """True if this role's allowed_scopes covers `scope`.
 
         A scope grant covers itself and all sub-scopes:
-          - "mcp:github" grants "mcp:github" and "mcp:github:read" and
-            "mcp:github:get_pr".
-          - "mcp:github:read" grants only "mcp:github:read".
+          - "mcp-github" grants "mcp-github" and "mcp-github-read" and
+            "mcp-github-get_pr".
+          - "mcp-github-read" grants only "mcp-github-read".
         """
         for granted in self.allowed_scopes:
             if scope == granted:
                 return True
-            if scope.startswith(granted + ":"):
+            if scope.startswith(granted + "-"):
                 return True
         return False
 
@@ -155,7 +155,7 @@ class RoleRBAC:
         """True if this role has ANY scope under `prefix` — used to skip
         whole MCP servers the role can't touch at all."""
         for granted in self.allowed_scopes:
-            if granted == prefix or granted.startswith(prefix + ":") or prefix.startswith(granted + ":") or prefix.startswith(granted):
+            if granted == prefix or granted.startswith(prefix + "-") or prefix.startswith(granted + "-") or prefix.startswith(granted):
                 return True
         return False
 
@@ -235,19 +235,19 @@ class ToolManifestBuilder:
 
         # 2. MCP tools
         for server in declared_mcp_servers:
-            server_prefix = f"mcp:{server}"
+            server_prefix = f"mcp-{server}"
             if not role_rbac.has_any_in(server_prefix):
                 continue
             catalog = self.mcp_catalogs.get(server) or []
             for tool in catalog:
                 if tool.verb_scope:
-                    required = f"{server_prefix}:{tool.verb_scope}"
+                    required = f"{server_prefix}-{tool.verb_scope}"
                 else:
-                    required = f"{server_prefix}:{tool.name}"
+                    required = f"{server_prefix}-{tool.name}"
                 if not role_rbac.grants(required):
                     continue
                 descriptors.append(ToolDescriptor(
-                    name=f"{server_prefix}:{tool.name}",
+                    name=f"{server_prefix}-{tool.name}",
                     description=tool.description,
                     input_schema=tool.input_schema,
                     invocation="broker",
@@ -261,15 +261,15 @@ class ToolManifestBuilder:
 # Read tools that every agent gets without explicit RBAC grant.
 # DESIGN §31 rule 74 — read tools are baseline; write tools require scope.
 BASELINE_LOCAL_SCOPES: frozenset[str] = frozenset({
-    "fs:read", "fs:list", "fs:exists", "fs:read_range", "fs:grep",
-    "git:diff", "git:log", "git:read", "git:status",
-    "code:outline",
-    "doc:markdown", "doc:html",
-    "web:fetch", "web:search",
-    "text:diff", "text:estimate_tokens",
-    "data:json", "data:csv", "data:yaml", "data:xml",
-    "time:now", "time:diff",
-    "math:eval",
+    "fs-read", "fs-list", "fs-exists", "fs-read_range", "fs-grep",
+    "git-diff", "git-log", "git-read", "git-status",
+    "code-outline",
+    "doc-markdown", "doc-html",
+    "web-fetch", "web-search",
+    "text-diff", "text-estimate_tokens",
+    "data-json", "data-csv", "data-yaml", "data-xml",
+    "time-now", "time-diff",
+    "math-eval",
 })
 
 

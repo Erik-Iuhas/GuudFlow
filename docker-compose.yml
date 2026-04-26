@@ -24,8 +24,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Optional bearer token. Required in production mode.
       AGENTFLOW_API_TOKEN: ${AGENTFLOW_API_TOKEN:-}
-      # dev (default) keeps code:exec on the host with §29 hardening.
-      # production refuses to start without Docker; routes code:exec to
+      # dev (default) keeps code-exec on the host with §29 hardening.
+      # production refuses to start without Docker; routes code-exec to
       # the sandbox container.
       AGENTFLOW_MODE: ${AGENTFLOW_MODE:-dev}
       # Persistent data lives in a volume.

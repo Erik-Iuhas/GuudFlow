@@ -31,7 +31,7 @@ def _project() -> ProjectConfig:
                 role="developer",
                 description="dev",
                 system_prompt="x",
-                declared_local_tools=["fs:read"],
+                declared_local_tools=["fs-read"],
                 model_tier="solid",
             ),
         ],

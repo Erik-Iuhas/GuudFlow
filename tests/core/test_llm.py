@@ -22,11 +22,11 @@ async def test_mock_returns_text_turn():
 
 async def test_mock_returns_tool_call():
     client = MockLLMClient([MockTurn(tool_calls=[
-        ToolCall(id="t1", name="fs:read", arguments={"path": "x"}),
+        ToolCall(id="t1", name="fs-read", arguments={"path": "x"}),
     ])])
     res = await client.complete(system="s", messages=[LLMMessage("user", "do thing")])
     assert res.stop_reason == "tool_use"
-    assert res.tool_calls[0].name == "fs:read"
+    assert res.tool_calls[0].name == "fs-read"
 
 
 async def test_mock_records_calls():

@@ -5,7 +5,7 @@ state between calls. Concurrency is owned by the scheduler; tools don't
 manage tasks.
 
 A tool exposes:
-  - `name`            — namespaced like "fs:read", "doc:pdf", "code:exec"
+  - `name`            — namespaced like "fs-read", "doc-pdf", "code-exec"
   - `description`     — what the LLM sees when deciding to use it
   - `input_schema`    — JSONSchema-shaped dict for the call's arguments
   - `run(arguments)`  — async; returns a dict result

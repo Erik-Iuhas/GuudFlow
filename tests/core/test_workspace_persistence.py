@@ -30,7 +30,7 @@ def _project() -> ProjectConfig:
         goal="x",
         agents=[
             AgentConfig(role="developer", system_prompt="x",
-                         declared_local_tools=["fs:read"], model_tier="solid"),
+                         declared_local_tools=["fs-read"], model_tier="solid"),
         ],
         rbac={"developer": RoleRBAC(role="developer", allowed_scopes=[])},
         max_iterations=1,

@@ -21,7 +21,7 @@ async def test_runner_nudges_on_repeated_identical_failure(tmp_path: Path):
         agents=[AgentConfig(
             role="developer",
             description="reads files",
-            declared_local_tools=["fs:read"],
+            declared_local_tools=["fs-read"],
             model_tier="solid",
             max_tool_iterations=10,
             loop_guard=LoopGuardConfig(max_repeat_identical=3, max_repeat_error_class=20),
@@ -33,9 +33,9 @@ async def test_runner_nudges_on_repeated_identical_failure(tmp_path: Path):
     # Script: the LLM keeps trying fs:read on ghost.py. After the 3rd
     # consecutive identical failure, the runner appends a nudge; we then
     # script the LLM to give up cleanly.
-    bad_call = ToolCall(id="t1", name="fs:read", arguments={"path": "ghost.py"})
-    bad_call_2 = ToolCall(id="t2", name="fs:read", arguments={"path": "ghost.py"})
-    bad_call_3 = ToolCall(id="t3", name="fs:read", arguments={"path": "ghost.py"})
+    bad_call = ToolCall(id="t1", name="fs-read", arguments={"path": "ghost.py"})
+    bad_call_2 = ToolCall(id="t2", name="fs-read", arguments={"path": "ghost.py"})
+    bad_call_3 = ToolCall(id="t3", name="fs-read", arguments={"path": "ghost.py"})
     llm = MockLLMClient([
         MockTurn(tool_calls=[bad_call]),
         MockTurn(tool_calls=[bad_call_2]),
@@ -75,7 +75,7 @@ async def test_runner_aborts_on_wall_clock_deadline(tmp_path: Path):
         agents=[AgentConfig(
             role="developer",
             description="dev",
-            declared_local_tools=["fs:read"],
+            declared_local_tools=["fs-read"],
             max_tool_iterations=10,
             loop_guard=LoopGuardConfig(max_wall_seconds=-1.0),
         )],
@@ -83,7 +83,7 @@ async def test_runner_aborts_on_wall_clock_deadline(tmp_path: Path):
         max_iterations=2,
     )
 
-    bad_call = ToolCall(id="t1", name="fs:read", arguments={"path": "x.py"})
+    bad_call = ToolCall(id="t1", name="fs-read", arguments={"path": "x.py"})
     llm = MockLLMClient([
         MockTurn(tool_calls=[bad_call]),
         MockTurn(text="should not get here"),

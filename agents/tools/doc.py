@@ -38,7 +38,7 @@ class DocMarkdown(BaseTool):
     `inputs/`.
     """
 
-    name = "doc:markdown"
+    name = "doc-markdown"
     description = "Read a markdown file and return raw text + extracted heading outline."
     input_schema = {
         "type": "object",
@@ -117,7 +117,7 @@ class _TextExtractor(HTMLParser):
 class DocHtml(BaseTool):
     """Strip tags from an HTML file and return the visible text."""
 
-    name = "doc:html"
+    name = "doc-html"
     description = "Read an HTML file and return its visible text (no scripts/styles)."
     input_schema = {
         "type": "object",

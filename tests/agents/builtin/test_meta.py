@@ -114,8 +114,8 @@ async def test_greenfield_proposal_with_two_agents(tmp_path: Path):
     # default from the catalog entry.
     auth_dev = proposal.roles[0]
     assert auth_dev.agent_class_role_type is None
-    assert "fs:write" in auth_dev.declared_local_tools
-    assert "code:exec" in auth_dev.declared_local_tools
+    assert "fs-write" in auth_dev.declared_local_tools
+    assert "code-exec" in auth_dev.declared_local_tools
     assert auth_dev.system_prompt  # populated from YAML
     assert "backend developer" in auth_dev.system_prompt.lower()
 
@@ -126,7 +126,7 @@ async def test_greenfield_proposal_with_two_agents(tmp_path: Path):
     assert reviewer.is_reviewer is True
 
     # RBAC scopes propagate from the archetype defaults.
-    assert "fs:write" in proposal.rbac["auth_dev"].allowed_scopes
+    assert "fs-write" in proposal.rbac["auth_dev"].allowed_scopes
     assert proposal.rbac["auth_reviewer"].allowed_scopes == []  # reviewers don't write
 
     # Persona hires: both create_new with curated names.

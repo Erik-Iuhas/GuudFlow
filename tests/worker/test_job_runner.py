@@ -51,7 +51,7 @@ def test_serialise_project_full():
                 "description": "writes code",
                 "depends_on": [],
                 "system_prompt": "be precise",
-                "declared_local_tools": ["fs:read", "fs:write"],
+                "declared_local_tools": ["fs-read", "fs-write"],
                 "model_tier": "solid",
                 "max_tool_iterations": 6,
             },
@@ -63,17 +63,17 @@ def test_serialise_project_full():
             },
         ],
         "rbac": {
-            "developer": {"allowed_scopes": ["fs:write"]},
+            "developer": {"allowed_scopes": ["fs-write"]},
             "reviewer": {"allowed_scopes": []},
         },
     }
     p = serialise_project(data)
     assert len(p.agents) == 2
     assert p.agents[0].role == "developer"
-    assert p.agents[0].declared_local_tools == ["fs:read", "fs:write"]
+    assert p.agents[0].declared_local_tools == ["fs-read", "fs-write"]
     assert p.agents[0].max_tool_iterations == 6
     assert p.agents[1].is_reviewer is True
-    assert p.rbac["developer"].allowed_scopes == ["fs:write"]
+    assert p.rbac["developer"].allowed_scopes == ["fs-write"]
 
 
 def test_serialise_project_handles_missing_keys():
@@ -166,20 +166,20 @@ async def test_job_runner_runs_one_job_to_completion(tmp_path: Path, monkeypatch
             {
                 "role": "developer",
                 "description": "write a file",
-                "declared_local_tools": ["fs:read", "fs:write"],
+                "declared_local_tools": ["fs-read", "fs-write"],
                 "model_tier": "solid",
             },
             {
                 "role": "reviewer",
                 "depends_on": ["developer"],
-                "declared_local_tools": ["fs:read", "git:diff"],
+                "declared_local_tools": ["fs-read", "git-diff"],
                 "agent_class_role_type": "code_reviewer",
                 "is_reviewer": True,
                 "max_tool_iterations": 4,
             },
         ],
         "rbac": {
-            "developer": {"allowed_scopes": ["fs:write"]},
+            "developer": {"allowed_scopes": ["fs-write"]},
             "reviewer": {"allowed_scopes": []},
         },
         "max_iterations": 2,
@@ -196,12 +196,12 @@ async def test_job_runner_runs_one_job_to_completion(tmp_path: Path, monkeypatch
     # then approves.
     llm = MockLLMClient([
         MockTurn(tool_calls=[ToolCall(
-            id="dev_t1", name="fs:write",
+            id="dev_t1", name="fs-write",
             arguments={"path": "hello.py", "content": "print('hi')"},
         )]),
         MockTurn(text="Wrote hello.py"),
         MockTurn(tool_calls=[ToolCall(
-            id="rev_t1", name="git:diff",
+            id="rev_t1", name="git-diff",
             arguments={"branch_a": "agent/developer", "branch_b": "main"},
         )]),
         MockTurn(text="APPROVED"),
@@ -289,7 +289,7 @@ async def test_job_runner_registers_with_run_registry(tmp_path: Path, monkeypatc
         "project_id": "p1", "goal": "x",
         "agents": [{
             "role": "developer", "description": "no-op",
-            "declared_local_tools": ["fs:read"],
+            "declared_local_tools": ["fs-read"],
         }],
         "rbac": {},
         "max_iterations": 1,
@@ -325,7 +325,7 @@ async def test_run_forever_drains_then_stops(tmp_path: Path, monkeypatch):
         "project_id": "p1", "goal": "x",
         "agents": [{
             "role": "developer", "description": "dev",
-            "declared_local_tools": ["fs:read"],
+            "declared_local_tools": ["fs-read"],
         }],
         "rbac": {},
         "max_iterations": 1,
@@ -514,10 +514,10 @@ async def test_production_mode_wires_container_runner_for_code_exec(
         "agents": [{
             "role": "developer",
             "description": "runs code",
-            "declared_local_tools": ["code:exec"],
+            "declared_local_tools": ["code-exec"],
             "model_tier": "solid",
         }],
-        "rbac": {"developer": {"allowed_scopes": ["code:exec"]}},
+        "rbac": {"developer": {"allowed_scopes": ["code-exec"]}},
     })
 
     class _FakeClient:
@@ -544,7 +544,7 @@ async def test_production_mode_wires_container_runner_for_code_exec(
     )
 
     tools = runner._instantiate_local_tools("developer")
-    code_exec = tools["code:exec"]
+    code_exec = tools["code-exec"]
 
     result = await code_exec.run({
         "language": "python",
@@ -574,10 +574,10 @@ async def test_dev_mode_keeps_host_runner_even_with_docker_manager(
         "agents": [{
             "role": "developer",
             "description": "runs code",
-            "declared_local_tools": ["code:exec"],
+            "declared_local_tools": ["code-exec"],
             "model_tier": "solid",
         }],
-        "rbac": {"developer": {"allowed_scopes": ["code:exec"]}},
+        "rbac": {"developer": {"allowed_scopes": ["code-exec"]}},
     })
     docker_mgr = DockerManager(mode="dev")
     captured: list = []
@@ -597,7 +597,7 @@ async def test_dev_mode_keeps_host_runner_even_with_docker_manager(
     )
 
     tools = runner._instantiate_local_tools("developer")
-    result = await tools["code:exec"].run({
+    result = await tools["code-exec"].run({
         "language": "python",
         "code": "print('hi')",
     })
@@ -622,10 +622,10 @@ async def test_production_without_docker_manager_falls_back_to_host(
         "agents": [{
             "role": "developer",
             "description": "runs code",
-            "declared_local_tools": ["code:exec"],
+            "declared_local_tools": ["code-exec"],
             "model_tier": "solid",
         }],
-        "rbac": {"developer": {"allowed_scopes": ["code:exec"]}},
+        "rbac": {"developer": {"allowed_scopes": ["code-exec"]}},
     })
 
     runner = AgentRunner(
@@ -637,7 +637,7 @@ async def test_production_without_docker_manager_falls_back_to_host(
     )
 
     tools = runner._instantiate_local_tools("developer")
-    result = await tools["code:exec"].run({
+    result = await tools["code-exec"].run({
         "language": "python",
         "code": "print('this should be refused')",
     })
@@ -659,7 +659,7 @@ async def test_run_one_initializes_inputs_for_real_run(tmp_path: Path, monkeypat
         "goal": "extend the existing app",
         "agents": [{
             "role": "developer", "description": "no-op",
-            "declared_local_tools": ["fs:read"],
+            "declared_local_tools": ["fs-read"],
         }],
         "rbac": {},
         "max_iterations": 1,

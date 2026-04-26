@@ -30,7 +30,7 @@ class WebSearch(BaseTool):
     """Search the web. The actual call is performed by an injected handler;
     in dev mode without a handler, returns a clear `no_handler` result."""
 
-    name = "web:search"
+    name = "web-search"
     description = "Search the public web for the given query. Returns ranked results."
     input_schema = {
         "type": "object",
@@ -68,7 +68,7 @@ class WebFetch(BaseTool):
     """Fetch a public URL. No credentials. Anything credentialed must go
     through the broker as `mcp:*` or a similar scoped tool."""
 
-    name = "web:fetch"
+    name = "web-fetch"
     description = "Fetch a public URL (uncredentialed). Returns text body."
     input_schema = {
         "type": "object",

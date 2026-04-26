@@ -205,10 +205,10 @@ async def test_call_tool_local(workspace: Workspace, fs_workspace: FileWorkspace
     await fs_workspace.write("a.py", "x = 1")
     a = _agent_with_manifest(
         role="developer",
-        descriptors=[ToolDescriptor("fs:read", "read", {}, "local")],
-        tools={"fs:read": FsRead(fs_workspace)},
+        descriptors=[ToolDescriptor("fs-read", "read", {}, "local")],
+        tools={"fs-read": FsRead(fs_workspace)},
     )
-    res = await a.call_tool(workspace, "fs:read", {"path": "a.py"})
+    res = await a.call_tool(workspace, "fs-read", {"path": "a.py"})
     assert res["ok"] is True
     assert res["content"] == "x = 1"
 
@@ -216,36 +216,36 @@ async def test_call_tool_local(workspace: Workspace, fs_workspace: FileWorkspace
 async def test_call_tool_not_in_manifest_raises(workspace: Workspace):
     a = _agent_with_manifest("developer", descriptors=[])
     with pytest.raises(ToolNotAvailable):
-        await a.call_tool(workspace, "fs:read", {})
+        await a.call_tool(workspace, "fs-read", {})
 
 
 async def test_call_tool_local_not_instantiated_raises(workspace: Workspace):
     a = _agent_with_manifest(
         "developer",
-        descriptors=[ToolDescriptor("fs:read", "x", {}, "local")],
+        descriptors=[ToolDescriptor("fs-read", "x", {}, "local")],
         tools={},  # missing
     )
     with pytest.raises(Exception):
-        await a.call_tool(workspace, "fs:read", {})
+        await a.call_tool(workspace, "fs-read", {})
 
 
 async def test_call_tool_broker_routed(workspace: Workspace):
-    rbac = {"developer": RoleRBAC(role="developer", allowed_scopes=["mcp:github:read"])}
+    rbac = {"developer": RoleRBAC(role="developer", allowed_scopes=["mcp-github-read"])}
     broker = CredentialsBroker(rbac=rbac)
     async def handler(op: str, payload: dict) -> dict:
         return {"pr": payload.get("id"), "title": "Fix auth"}
-    broker.register_handler("mcp:github:read", handler)
+    broker.register_handler("mcp-github-read", handler)
 
     a = _agent_with_manifest(
         "developer",
         descriptors=[ToolDescriptor(
-            "mcp:github:get_pr", "Get a PR", {}, "broker",
-            scope="mcp:github:read", server="github",
+            "mcp-github-get_pr", "Get a PR", {}, "broker",
+            scope="mcp-github-read", server="github",
         )],
     )
     a._broker = broker
 
-    res = await a.call_tool(workspace, "mcp:github:get_pr", {"id": 42})
+    res = await a.call_tool(workspace, "mcp-github-get_pr", {"id": 42})
     assert res == {"pr": 42, "title": "Fix auth"}
 
 
@@ -255,32 +255,32 @@ async def test_call_tool_broker_denied_raises(workspace: Workspace):
     a = _agent_with_manifest(
         "developer",
         descriptors=[ToolDescriptor(
-            "mcp:github:get_pr", "Get a PR", {}, "broker",
-            scope="mcp:github:read", server="github",
+            "mcp-github-get_pr", "Get a PR", {}, "broker",
+            scope="mcp-github-read", server="github",
         )],
     )
     a._broker = broker
     with pytest.raises(ToolDenied):
-        await a.call_tool(workspace, "mcp:github:get_pr", {"id": 1})
+        await a.call_tool(workspace, "mcp-github-get_pr", {"id": 1})
 
 
 async def test_invoke_mcp_sugar(workspace: Workspace):
-    rbac = {"dev": RoleRBAC(role="dev", allowed_scopes=["mcp:github"])}
+    rbac = {"dev": RoleRBAC(role="dev", allowed_scopes=["mcp-github"])}
     broker = CredentialsBroker(rbac=rbac)
     async def handler(op: str, p: dict) -> dict:
         return {"op": op}
-    broker.register_handler("mcp:github", handler)
+    broker.register_handler("mcp-github", handler)
 
     a = _agent_with_manifest(
         "dev",
         descriptors=[ToolDescriptor(
-            "mcp:github:list_issues", "list", {}, "broker",
-            scope="mcp:github:list_issues", server="github",
+            "mcp-github-list_issues", "list", {}, "broker",
+            scope="mcp-github-list_issues", server="github",
         )],
     )
     a._broker = broker
     res = await a.invoke_mcp(workspace, "github", "list_issues", {})
-    assert res == {"op": "mcp:github:list_issues"}
+    assert res == {"op": "mcp-github-list_issues"}
 
 
 # ── Effective system prompt — layer order ─────────────────────────────────
@@ -299,7 +299,7 @@ async def test_effective_system_prompt_layer_order():
     )
     a._project_rules = "TypeScript only. No raw CSS."
     a._manifest = ToolManifest([
-        ToolDescriptor("fs:read", "Read file", {}, "local"),
+        ToolDescriptor("fs-read", "Read file", {}, "local"),
     ])
     a._current_task = "Implement login screen"
 

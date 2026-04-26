@@ -449,7 +449,7 @@ def parse_proposal_args(
             )
 
         # Pull defaults from the archetype if found, else conservative.
-        default_tools = list(archetype.default_tools) if archetype else ["fs:read"]
+        default_tools = list(archetype.default_tools) if archetype else ["fs-read"]
         default_rbac = list(archetype.default_rbac_scopes) if archetype else []
         default_tier = archetype.default_model_tier if archetype else "solid"
 
@@ -655,8 +655,8 @@ def fallback_skeleton(goal: str, reason: str = "") -> ParseResult:
                 description="Writes the code.",
                 depends_on=[],
                 declared_local_tools=[
-                    "fs:read", "fs:list", "fs:write", "fs:edit",
-                    "code:exec", "git:diff", "git:log", "git:read",
+                    "fs-read", "fs-list", "fs-write", "fs-edit",
+                    "code-exec", "git-diff", "git-log", "git-read",
                 ],
                 declared_mcp_servers=[],
                 model_tier="solid",
@@ -666,8 +666,8 @@ def fallback_skeleton(goal: str, reason: str = "") -> ParseResult:
                 description="Reviews the developer's work.",
                 depends_on=["developer"],
                 declared_local_tools=[
-                    "fs:read", "fs:list", "git:diff", "git:log",
-                    "git:read", "git:status",
+                    "fs-read", "fs-list", "git-diff", "git-log",
+                    "git-read", "git-status",
                 ],
                 declared_mcp_servers=[],
                 model_tier="solid",
@@ -678,7 +678,7 @@ def fallback_skeleton(goal: str, reason: str = "") -> ParseResult:
         rbac={
             "developer": RoleRBAC(
                 role="developer",
-                allowed_scopes=["fs:write", "fs:edit", "code:exec"],
+                allowed_scopes=["fs-write", "fs-edit", "code-exec"],
             ),
             "reviewer": RoleRBAC(role="reviewer", allowed_scopes=[]),
         },

@@ -64,10 +64,10 @@ async def test_runner_builds_per_agent_manifest(tmp_path: Path):
     proj = _project(
         agents=[AgentConfig(
             role="dev",
-            declared_local_tools=["fs:read", "fs:write"],
+            declared_local_tools=["fs-read", "fs-write"],
             model_tier="solid",
         )],
-        rbac={"dev": RoleRBAC(role="dev", allowed_scopes=["fs:write"])},
+        rbac={"dev": RoleRBAC(role="dev", allowed_scopes=["fs-write"])},
     )
     llm = MockLLMClient([])
     runner = AgentRunner(
@@ -77,17 +77,17 @@ async def test_runner_builds_per_agent_manifest(tmp_path: Path):
     runner._build_agents()
     agent = runner.agents["dev"]
     names = agent._manifest.names()
-    assert "fs:read" in names      # baseline
-    assert "fs:write" in names     # explicitly declared + RBAC granted
+    assert "fs-read" in names      # baseline
+    assert "fs-write" in names     # explicitly declared + RBAC granted
 
 
 async def test_runner_excludes_undeclared_tools(tmp_path: Path):
     proj = _project(
         agents=[AgentConfig(
             role="dev",
-            declared_local_tools=["fs:read"],  # NOT fs:write
+            declared_local_tools=["fs-read"],  # NOT fs:write
         )],
-        rbac={"dev": RoleRBAC(role="dev", allowed_scopes=["fs:write"])},
+        rbac={"dev": RoleRBAC(role="dev", allowed_scopes=["fs-write"])},
     )
     runner = AgentRunner(
         project=proj, run_id="r1",
@@ -95,8 +95,8 @@ async def test_runner_excludes_undeclared_tools(tmp_path: Path):
     )
     runner._build_agents()
     names = runner.agents["dev"]._manifest.names()
-    assert "fs:read" in names
-    assert "fs:write" not in names  # not declared → not in manifest
+    assert "fs-read" in names
+    assert "fs-write" not in names  # not declared → not in manifest
 
 
 async def test_runner_assigns_model_from_tier(tmp_path: Path):
@@ -117,7 +117,7 @@ async def test_runner_assigns_model_from_tier(tmp_path: Path):
 
 async def test_runner_local_tools_instantiated_per_role(tmp_path: Path):
     proj = _project(
-        agents=[AgentConfig(role="dev", declared_local_tools=["fs:read"])],
+        agents=[AgentConfig(role="dev", declared_local_tools=["fs-read"])],
     )
     runner = AgentRunner(
         project=proj, run_id="r1",
@@ -127,8 +127,8 @@ async def test_runner_local_tools_instantiated_per_role(tmp_path: Path):
     tools = runner.agents["dev"]._local_tools
     # Every registered tool is instantiated; manifest dictates which the
     # agent can call.
-    assert "fs:read" in tools
-    assert "fs:write" in tools  # instantiated, but not in manifest
+    assert "fs-read" in tools
+    assert "fs-write" in tools  # instantiated, but not in manifest
 
 
 async def test_runner_no_agents_returns_complete(tmp_path: Path):
@@ -295,14 +295,14 @@ async def test_reviewer_rejected_text_posts_rejected_signal(tmp_path: Path):
             AgentConfig(
                 role="dev",
                 description="writes code",
-                declared_local_tools=["fs:read"],
+                declared_local_tools=["fs-read"],
             ),
             AgentConfig(
                 role="reviewer",
                 description="reviews",
                 depends_on=["dev"],
                 is_reviewer=True,
-                declared_local_tools=["fs:read"],
+                declared_local_tools=["fs-read"],
             ),
         ],
         rbac={
@@ -333,10 +333,10 @@ async def test_reviewer_approved_text_still_emits_approved(tmp_path: Path):
     working unchanged. Just the REJECTED branch is new."""
     proj = _project(
         agents=[
-            AgentConfig(role="dev", declared_local_tools=["fs:read"]),
+            AgentConfig(role="dev", declared_local_tools=["fs-read"]),
             AgentConfig(
                 role="reviewer", depends_on=["dev"], is_reviewer=True,
-                declared_local_tools=["fs:read"],
+                declared_local_tools=["fs-read"],
             ),
         ],
         max_iterations=2,
@@ -429,16 +429,16 @@ async def test_three_agent_run_with_architect_happy_path(tmp_path: Path):
     when is_final_reviewer is set."""
     proj = _project(
         agents=[
-            AgentConfig(role="dev", declared_local_tools=["fs:read"]),
+            AgentConfig(role="dev", declared_local_tools=["fs-read"]),
             AgentConfig(
                 role="reviewer", depends_on=["dev"], is_reviewer=True,
-                declared_local_tools=["fs:read"],
+                declared_local_tools=["fs-read"],
             ),
             AgentConfig(
                 role="architect",
                 is_final_reviewer=True,
                 is_reviewer=True,  # also a reviewer for APPROVED→merge logic
-                declared_local_tools=["fs:read"],
+                declared_local_tools=["fs-read"],
             ),
         ],
         # Disable the gate for this test to keep the LLM script simple

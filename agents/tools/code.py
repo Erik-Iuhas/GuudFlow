@@ -1,8 +1,8 @@
-"""Code tools — `code:exec`, `code:outline`.
+"""Code tools — `code-exec`, `code:outline`.
 
-DESIGN §29 / §31. In production, `code:exec` MUST run inside the sandbox
+DESIGN §29 / §31. In production, `code-exec` MUST run inside the sandbox
 container — the worker refuses to start in production mode without
-Docker available. In dev mode, `code:exec` may run on the host with an
+Docker available. In dev mode, `code-exec` may run on the host with an
 explicit `⚠ DEV MODE` warning logged on every call AND the dev-mode
 hardening described below.
 
@@ -11,9 +11,9 @@ a source file returning imports / classes (with their methods) / top-level
 functions. It is the cheap intermediate between repo_map (whole codebase,
 top-level only) and `fs:read` (full content).
 
-## Dev-mode `code:exec` hardening (active before Stage 7's container)
+## Dev-mode `code-exec` hardening (active before Stage 7's container)
 
-These guards apply when `code:exec` runs on the host:
+These guards apply when `code-exec` runs on the host:
 
   1. **Mode enforcement.** If `AGENTFLOW_MODE=production`, the host
      runner refuses to run and returns an error directing the runner to
@@ -138,7 +138,7 @@ def make_dev_host_runner(
         options: dict[str, Any],
     ) -> dict[str, Any]:
         _logger.warning(
-            "⚠ DEV MODE: code:exec running on host. Do not use with untrusted input."
+            "⚠ DEV MODE: code-exec running on host. Do not use with untrusted input."
         )
 
         code = options.get("code", "")
@@ -206,7 +206,7 @@ def make_container_runner(
     docker_manager: Any,
     run_id: str,
 ) -> CodeRunner:
-    """Build a production-mode runner that routes `code:exec` through the
+    """Build a production-mode runner that routes `code-exec` through the
     run's sandbox container.
 
     The runner shape matches `make_dev_host_runner` so the `CodeExec` tool
@@ -282,7 +282,7 @@ def _audit(
             f.write(json.dumps(entry) + "\n")
     except OSError:
         # Audit write failure must not break execution; log and continue.
-        _logger.warning("code:exec audit log write failed", exc_info=True)
+        _logger.warning("code-exec audit log write failed", exc_info=True)
 
 
 # Backward-compatible default runner — used by tests that don't care
@@ -317,7 +317,7 @@ class CodeExec(BaseTool):
     so the runner identity is the signal.
     """
 
-    name = "code:exec"
+    name = "code-exec"
     description = "Execute code (Python or shell). In dev mode runs on host with hardening (env scrub, cwd pin, rlimits, audit); in production routes to sandbox container."
     input_schema = {
         "type": "object",
@@ -360,7 +360,7 @@ class CodeExec(BaseTool):
         if self._is_dev_host_runner and os.environ.get("AGENTFLOW_MODE") == "production":
             return {
                 "error": (
-                    "code:exec refuses to run on the host in production mode. "
+                    "code-exec refuses to run on the host in production mode. "
                     "The runner must be the container-routed runner. "
                     "(Stage 7 worker/docker_manager wires this up.)"
                 ),
@@ -369,7 +369,7 @@ class CodeExec(BaseTool):
         # Per-run quota.
         if self._calls >= self.quota:
             return {
-                "error": f"code:exec quota exhausted ({self.quota} calls); refusing further executions",
+                "error": f"code-exec quota exhausted ({self.quota} calls); refusing further executions",
                 "quota": self.quota,
             }
         self._calls += 1
@@ -392,8 +392,8 @@ class CodeOutline(BaseTool):
     Reuses the tree-sitter grammars already loaded by `core/repo_map.py`.
     """
 
-    name = "code:outline"
-    description = "Extract structure of a source file: imports, classes (with methods), functions. Cheap reconnaissance before fs:read_range."
+    name = "code-outline"
+    description = "Extract structure of a source file: imports, classes (with methods), functions. Cheap reconnaissance before fs-read_range."
     input_schema = {
         "type": "object",
         "properties": {"path": {"type": "string"}},

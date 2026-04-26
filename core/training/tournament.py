@@ -29,16 +29,16 @@ from core.training.scenario import Scenario
 # Default tool grants per role-type. Keep lean — training scenarios are
 # meant to be cheap and self-contained, not full-stack debugging.
 _DEFAULT_TOOLS_BY_ROLE: dict[str, list[str]] = {
-    "developer": ["fs:read", "fs:list", "fs:write", "git:diff", "git:log"],
-    "reviewer": ["fs:read", "fs:list", "git:diff", "git:log"],
-    "tester": ["fs:read", "fs:list", "fs:write"],
-    "doc_writer": ["fs:read", "fs:list", "fs:write", "doc:read"],
+    "developer": ["fs-read", "fs-list", "fs-write", "git-diff", "git-log"],
+    "reviewer": ["fs-read", "fs-list", "git-diff", "git-log"],
+    "tester": ["fs-read", "fs-list", "fs-write"],
+    "doc_writer": ["fs-read", "fs-list", "fs-write", "doc-read"],
 }
 _DEFAULT_SCOPES_BY_ROLE: dict[str, list[str]] = {
-    "developer": ["fs:write"],
+    "developer": ["fs-write"],
     "reviewer": [],
-    "tester": ["fs:write"],
-    "doc_writer": ["fs:write"],
+    "tester": ["fs-write"],
+    "doc_writer": ["fs-write"],
 }
 _REVIEWER_ROLE_TYPES = frozenset({"reviewer", "code_reviewer"})
 
@@ -78,7 +78,7 @@ def build_training_project(
             "system_prompt": _DEFAULT_SYSTEM_PROMPT.format(role=role_type),
             "depends_on": list(scenario.expected_role_types[:i]) if i > 0 else [],
             "declared_local_tools": list(_DEFAULT_TOOLS_BY_ROLE.get(
-                role_type, ["fs:read", "fs:list"],
+                role_type, ["fs-read", "fs-list"],
             )),
             "model_tier": "fast",  # training runs default to FAST tier for cost
             "is_reviewer": is_reviewer,

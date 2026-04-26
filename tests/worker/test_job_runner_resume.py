@@ -64,14 +64,14 @@ async def test_resume_does_not_rerun_completed_agents(tmp_path: Path):
             {
                 "role": "developer",
                 "system_prompt": "Write hello.py via fs:write.",
-                "declared_local_tools": ["fs:read", "fs:list", "fs:write"],
+                "declared_local_tools": ["fs-read", "fs-list", "fs-write"],
                 "model_tier": "solid",
             },
             {
                 "role": "reviewer",
                 "depends_on": ["developer"],
-                "declared_local_tools": ["fs:read", "fs:list",
-                                          "git:diff", "git:log"],
+                "declared_local_tools": ["fs-read", "fs-list",
+                                          "git-diff", "git-log"],
                 "model_tier": "solid",
                 "agent_class_role_type": "code_reviewer",
                 "is_reviewer": True,
@@ -79,7 +79,7 @@ async def test_resume_does_not_rerun_completed_agents(tmp_path: Path):
             },
         ],
         "rbac": {
-            "developer": {"allowed_scopes": ["fs:write"]},
+            "developer": {"allowed_scopes": ["fs-write"]},
             "reviewer": {"allowed_scopes": []},
         },
         "max_iterations": 3,
@@ -100,7 +100,7 @@ async def test_resume_does_not_rerun_completed_agents(tmp_path: Path):
         run_root=run_root,
         llm=MockLLMClient([
             MockTurn(tool_calls=[ToolCall(
-                id="t1", name="fs:write",
+                id="t1", name="fs-write",
                 arguments={"path": "hello.py",
                            "content": "def greet():\n    return 'hi'\n"},
             )]),
@@ -161,7 +161,7 @@ async def test_resume_does_not_rerun_completed_agents(tmp_path: Path):
     # error if the developer were retried.
     phase2_llm = MockLLMClient([
         MockTurn(tool_calls=[ToolCall(
-            id="t1", name="git:diff",
+            id="t1", name="git-diff",
             arguments={"branch_a": "agent/developer", "branch_b": "main"},
         )]),
         MockTurn(text="APPROVED"),

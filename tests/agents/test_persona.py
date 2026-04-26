@@ -46,7 +46,7 @@ def _profile_dict(persona_id: str = "p1") -> dict:
         "character": "Methodical and quietly proud of her work.",
         "stake_framing": "Real users will see this. Make it count.",
         "preferred_model": {"provider": "anthropic", "model": "claude-sonnet-4-6"},
-        "tools_required": ["fs:read", "fs:write"],
+        "tools_required": ["fs-read", "fs-write"],
         "created_at": "2026-04-25T00:00:00Z",
     }
 

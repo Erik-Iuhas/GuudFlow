@@ -32,7 +32,7 @@ class TextDiff(BaseTool):
     `has_changes` flag.
     """
 
-    name = "text:diff"
+    name = "text-diff"
     description = "Unified diff between two strings or two files. Pass `a`/`b` for raw text or `a_path`/`b_path` for files."
     input_schema = {
         "type": "object",
@@ -127,7 +127,7 @@ class TextEstimateTokens(BaseTool):
     its budget tracking, so estimates here line up with the budget.
     """
 
-    name = "text:estimate_tokens"
+    name = "text-estimate_tokens"
     description = "Estimate token count for a string or a file path. Approximation: chars/4 (same heuristic as context_manager)."
     input_schema = {
         "type": "object",

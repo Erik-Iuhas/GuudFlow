@@ -92,7 +92,7 @@ the backend on `:8000`. Paste your API token (whatever you set in
 
 ### 3. (Optional) Sandbox image
 
-In dev mode this is optional — `code:exec` runs on the host with §29
+In dev mode this is optional — `code-exec` runs on the host with §29
 hardening (env scrub, cwd pin, audit log, POSIX rlimits, mode
 enforcement).
 
@@ -103,7 +103,7 @@ For production-style runs, build the per-run sandbox image:
 ```
 
 Then set `AGENTFLOW_MODE=production`. The worker now routes every
-`code:exec` invocation through `DockerManager.exec_in()` against the
+`code-exec` invocation through `DockerManager.exec_in()` against the
 run's ephemeral container — `network_mode: none`, read-only root,
 512 MiB memory cap, 1 CPU, 50 PID cap, no-new-privileges, tmpfs `/tmp`
 (64 MiB). See [DESIGN.md §29](DESIGN.md) for the full security model.
@@ -111,7 +111,7 @@ run's ephemeral container — `network_mode: none`, read-only root,
 Misconfigured production deploys fail closed: if the worker reaches
 production mode without a Docker daemon (or without the sandbox image),
 it refuses to start. If somehow `AGENTFLOW_MODE=production` is set
-without a `DockerManager`, `code:exec` itself refuses to run on the
+without a `DockerManager`, `code-exec` itself refuses to run on the
 host.
 
 ## Run it with Docker
@@ -167,7 +167,7 @@ you need.
 |---|---|---|
 | `ANTHROPIC_API_KEY` | (unset) | Required for real LLM calls |
 | `AGENTFLOW_API_TOKEN` | (unset) | Bearer token for credentialed routes. Unset = dev-permissive; required in production |
-| `AGENTFLOW_MODE` | `dev` | `dev` or `production`. Production refuses to start without Docker; gates `code:exec` to container path |
+| `AGENTFLOW_MODE` | `dev` | `dev` or `production`. Production refuses to start without Docker; gates `code-exec` to container path |
 | `AGENTFLOW_DATA_DIR` | `./data` | Where runs, personas, and projects are stored |
 | `AGENTFLOW_DISABLE_INPROC_WORKER` | unset | Set to `1` to disable the in-process worker (use a separate worker process instead) |
 | `AGENTFLOW_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
@@ -194,7 +194,7 @@ Mode B (headless service) is a future tack-on per
 [docs/USER_STORIES.md](docs/USER_STORIES.md).
 
 Shipped:
-- ✅ Phase B — production `code:exec` through the sandbox container
+- ✅ Phase B — production `code-exec` through the sandbox container
 - ✅ Phase C — live runs (comments, quip stream, escalation, architect review, approval gates)
 - ✅ Phase D — real meta-agent proposal (reads inputs + roster + 16-archetype catalog)
 - ✅ Phase F — Training Camp + persona chat + memory-writer LLM synthesis

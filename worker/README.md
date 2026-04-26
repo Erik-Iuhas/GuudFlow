@@ -18,7 +18,7 @@ or a no-op stub (dev).
 `AGENTFLOW_MODE=dev` (default):
 
 - DockerManager is a stub. `start()` / `stop()` are no-ops.
-- `code:exec` runs on the host with §29 dev-mode hardening (env scrub,
+- `code-exec` runs on the host with §29 dev-mode hardening (env scrub,
   cwd pin, audit log, POSIX rlimits).
 
 `AGENTFLOW_MODE=production`:
@@ -28,7 +28,7 @@ or a no-op stub (dev).
 - Each run gets an ephemeral container with `network_mode: none`,
   resource caps from `docker_manager.CONTAINER_LIMITS`, and a sized
   tmpfs at `/tmp`.
-- `code:exec` routes inside the container via `docker exec`.
+- `code-exec` routes inside the container via `docker exec`.
 
 ## Running the worker
 

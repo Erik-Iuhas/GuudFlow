@@ -18,7 +18,7 @@ def _err(msg: str) -> dict[str, Any]:
 
 
 class GitDiff(BaseTool):
-    name = "git:diff"
+    name = "git-diff"
     description = "Show the diff between two branches in the working/ git repo."
     input_schema = {
         "type": "object",
@@ -47,7 +47,7 @@ class GitDiff(BaseTool):
 
 
 class GitLog(BaseTool):
-    name = "git:log"
+    name = "git-log"
     description = "List recent commits on a branch (default current HEAD)."
     input_schema = {
         "type": "object",
@@ -86,7 +86,7 @@ class GitLog(BaseTool):
 
 
 class GitStatus(BaseTool):
-    name = "git:status"
+    name = "git-status"
     description = "Show uncommitted changes on the current branch (staged, unstaged, untracked)."
     input_schema = {"type": "object", "properties": {}}
 
@@ -112,7 +112,7 @@ class GitStatus(BaseTool):
 
 
 class GitRead(BaseTool):
-    name = "git:read"
+    name = "git-read"
     description = "Read a file's contents at the tip of a specific branch (no checkout)."
     input_schema = {
         "type": "object",

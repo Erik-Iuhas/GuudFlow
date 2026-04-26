@@ -70,7 +70,7 @@ def _walk(node: ast.AST) -> float | int:
 
 
 class MathEval(BaseTool):
-    name = "math:eval"
+    name = "math-eval"
     description = "Safely evaluate a numeric expression: + - * / // % ** and parentheses. No names, no calls, no attributes."
     input_schema = {
         "type": "object",

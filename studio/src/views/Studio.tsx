@@ -71,7 +71,7 @@ export function Studio() {
           role,
           description: "",
           depends_on: [],
-          declared_local_tools: ["fs:read"],
+          declared_local_tools: ["fs-read"],
           model_tier: "solid",
           max_tool_iterations: 6,
         },

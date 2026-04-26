@@ -65,9 +65,9 @@ def test_meta_carries_class_level_defaults():
     a particular instance was constructed with."""
     meta = get_archetype("requirements_writer")
     assert meta is not None
-    assert "doc:pdf" in meta.default_tools
-    assert "fs:write" in meta.default_tools
-    assert "fs:write" in meta.default_rbac_scopes
+    assert "doc-pdf" in meta.default_tools
+    assert "fs-write" in meta.default_tools
+    assert "fs-write" in meta.default_rbac_scopes
     # RequirementsWriter is a Specialist, so the meta's abstract_base
     # is the specialist discriminator — what the meta-agent reasons over.
     assert meta.abstract_base == "specialist"

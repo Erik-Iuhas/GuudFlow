@@ -69,7 +69,7 @@ class TestRunner(BaseAgent):
         self.command = command
 
     async def run(self, workspace) -> str:
-        result = await self.call_tool(workspace, "code:exec", {
+        result = await self.call_tool(workspace, "code-exec", {
             "language": "shell",
             "code": self.command,
             "timeout_s": 120,

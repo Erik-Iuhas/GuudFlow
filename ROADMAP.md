@@ -26,7 +26,7 @@ file groups them into shippable phases.
 `core/runner.py:_instantiate_local_tools` now branches on
 `AGENTFLOW_MODE` + a threaded `DockerManager`: production mode wires
 `make_container_runner()` (new in `agents/tools/code.py`) which routes
-every `code:exec` call through `DockerManager.exec_in()`. Defence in
+every `code-exec` call through `DockerManager.exec_in()`. Defence in
 depth: misconfigured production (no DockerManager) falls back to the
 host runner, which itself refuses to run in production via its
 existing mode check.
@@ -35,7 +35,7 @@ Tests in `tests/agents/test_code_exec_hardening.py` (5 new cases for
 `make_container_runner`) and `tests/worker/test_job_runner.py` (4 new
 cases for the AgentRunner-side wiring + factory threading).
 
-**Unblocks:** real production-grade `code:exec` execution. The
+**Unblocks:** real production-grade `code-exec` execution. The
 runtime-isolation half of the production story is done; deployment
 packaging is Phase E.
 
@@ -419,8 +419,8 @@ them up when real users tell you which one matters.
       - **F.5.1 Curated reference-URL training** — extend scenarios
         to carry `reference_urls`; persona memory gets a fourth
         layer for curated references; new tool
-        `web:lookup_reference(topic)` checks curated URLs before
-        falling back to `web:search`. Cuts down on blind doc
+        `web-lookup_reference(topic)` checks curated URLs before
+        falling back to `web-search`. Cuts down on blind doc
         searches at runtime.
       - **F.5.2 Persona publishing** — local roster → org or public
         registry. Versioned manifest, signature, reputation export.
@@ -489,7 +489,7 @@ output format.
 
 Scope:
 
-- [ ] **`code:summarize`** — tool that walks a directory and
+- [ ] **`code-summarize`** — tool that walks a directory and
       produces a structured summary (purpose, public API,
       dependencies). Tree-sitter-backed; uses repo_map under
       the hood.

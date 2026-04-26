@@ -50,8 +50,8 @@ def _skeleton_response(goal: str) -> dict[str, Any]:
                 "description": "Writes the code.",
                 "depends_on": [],
                 "declared_local_tools": [
-                    "fs:read", "fs:list", "fs:write", "fs:edit",
-                    "code:exec", "git:diff", "git:log", "git:read",
+                    "fs-read", "fs-list", "fs-write", "fs-edit",
+                    "code-exec", "git-diff", "git-log", "git-read",
                 ],
                 "declared_mcp_servers": [],
                 "model_tier": "solid",
@@ -61,8 +61,8 @@ def _skeleton_response(goal: str) -> dict[str, Any]:
                 "description": "Reviews the developer's work.",
                 "depends_on": ["developer"],
                 "declared_local_tools": [
-                    "fs:read", "fs:list", "git:diff", "git:log",
-                    "git:read", "git:status",
+                    "fs-read", "fs-list", "git-diff", "git-log",
+                    "git-read", "git-status",
                 ],
                 "declared_mcp_servers": [],
                 "model_tier": "solid",
@@ -72,7 +72,7 @@ def _skeleton_response(goal: str) -> dict[str, Any]:
         ],
         "rbac": {
             "developer": {
-                "allowed_scopes": ["fs:write", "fs:edit", "code:exec"],
+                "allowed_scopes": ["fs-write", "fs-edit", "code-exec"],
             },
             "reviewer": {
                 "allowed_scopes": [],

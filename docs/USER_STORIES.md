@@ -208,7 +208,7 @@ mode and current support level (`✓` shipped, `~` partial, `✗` missing).
 - ✗ As a writer, I want a **deep-wiki-style codebase
   documentation toolkit** — agents that crawl a repo, produce
   cross-linked wiki output, and update incrementally as the code
-  changes. New tools (`code:summarize`, `wiki:link`,
+  changes. New tools (`code-summarize`, `wiki:link`,
   `wiki:update`) and a doc-writer specialist tuned for it.
   Phase J — Knowledge Surface (future).
 - ✗ As a writer, I want a **"document this codebase" headless
@@ -237,10 +237,10 @@ mode and current support level (`✓` shipped, `~` partial, `✗` missing).
   empty. Phase F.5.
 - ✗ As a persona author, I want **training to include
   reference-URL curation**, not just scenarios. Today agents do
-  blind `web:fetch` at runtime and re-discover the same docs over
+  blind `web-fetch` at runtime and re-discover the same docs over
   and over. A persona trained with curated references for its
   domain would have those URLs in memory, callable via
-  `web:lookup_reference(topic)` before falling back to search.
+  `web-lookup_reference(topic)` before falling back to search.
   Phase F.5.
 - ✗ As a persona author, I want **scenario authoring tooling** —
   scaffold a new scenario from a template, validate the rubric,

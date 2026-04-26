@@ -30,8 +30,8 @@ async def test_catalog_entries_have_metadata(client):
     rw = by_name["requirements_writer"]
     assert rw["abstract_base"] == "specialist"
     assert rw["default_model_tier"] in ("heavy", "solid", "fast")
-    assert "doc:pdf" in rw["default_tools"]
-    assert "fs:write" in rw["default_rbac_scopes"]
+    assert "doc-pdf" in rw["default_tools"]
+    assert "fs-write" in rw["default_rbac_scopes"]
     assert rw["description"]
     assert rw["when_to_use"]
 

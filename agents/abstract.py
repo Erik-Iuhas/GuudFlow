@@ -78,8 +78,8 @@ class Reviewer(AgentArchetype):
     archetype_kind: ClassVar[str] = "reviewer"
     default_model_tier: ClassVar[str] = "solid"
     default_tools: ClassVar[tuple[str, ...]] = (
-        "fs:read", "fs:list", "fs:read_range", "fs:grep",
-        "git:diff", "git:log", "git:read", "git:status",
+        "fs-read", "fs-list", "fs-read_range", "fs-grep",
+        "git-diff", "git-log", "git-read", "git-status",
     )
     # Reviewers don't write — they decide. Concrete subclasses can
     # widen this if they need to (e.g. a reviewer that auto-files
@@ -109,12 +109,12 @@ class EscalationHandler(AgentArchetype):
 
     default_model_tier: ClassVar[str] = "heavy"
     default_tools: ClassVar[tuple[str, ...]] = (
-        "fs:read", "fs:list", "fs:read_range", "fs:grep",
-        "git:diff", "git:log", "git:read",
-        "web:search", "web:fetch",
+        "fs-read", "fs-list", "fs-read_range", "fs-grep",
+        "git-diff", "git-log", "git-read",
+        "web-search", "web-fetch",
     )
     default_rbac_scopes: ClassVar[tuple[str, ...]] = (
-        "web:search", "web:fetch",
+        "web-search", "web-fetch",
     )
 
 
@@ -133,6 +133,6 @@ class Specialist(AgentArchetype):
     archetype_kind: ClassVar[str] = "specialist"
     default_model_tier: ClassVar[str] = "solid"
     default_tools: ClassVar[tuple[str, ...]] = (
-        "fs:read", "fs:list", "fs:read_range", "fs:grep",
+        "fs-read", "fs-list", "fs-read_range", "fs-grep",
     )
     default_rbac_scopes: ClassVar[tuple[str, ...]] = ()

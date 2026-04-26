@@ -68,14 +68,14 @@ async def test_two_agent_run_e2e(tmp_path: Path):
                 role="developer",
                 description="Writes the code",
                 system_prompt="Write code with fs:write.",
-                declared_local_tools=["fs:read", "fs:list", "fs:write"],
+                declared_local_tools=["fs-read", "fs-list", "fs-write"],
                 model_tier="solid",
             ),
             AgentConfig(
                 role="reviewer",
                 description="Reviews the developer's work",
                 depends_on=["developer"],
-                declared_local_tools=["fs:read", "fs:list", "git:diff", "git:log"],
+                declared_local_tools=["fs-read", "fs-list", "git-diff", "git-log"],
                 model_tier="solid",
                 agent_class_role_type="code_reviewer",
                 is_reviewer=True,
@@ -83,7 +83,7 @@ async def test_two_agent_run_e2e(tmp_path: Path):
             ),
         ],
         rbac={
-            "developer": RoleRBAC(role="developer", allowed_scopes=["fs:write"]),
+            "developer": RoleRBAC(role="developer", allowed_scopes=["fs-write"]),
             "reviewer": RoleRBAC(role="reviewer", allowed_scopes=[]),
         },
         max_iterations=3,
@@ -102,13 +102,13 @@ async def test_two_agent_run_e2e(tmp_path: Path):
     llm = MockLLMClient([
         MockTurn(tool_calls=[ToolCall(
             id="dev_t1",
-            name="fs:write",
+            name="fs-write",
             arguments={"path": "hello.py", "content": "def greet():\n    return 'hi'\n"},
         )]),
         MockTurn(text="Wrote hello.py with greet()"),
         MockTurn(tool_calls=[ToolCall(
             id="rev_t1",
-            name="git:diff",
+            name="git-diff",
             arguments={"branch_a": "agent/developer", "branch_b": "main"},
         )]),
         MockTurn(text="APPROVED"),

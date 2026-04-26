@@ -9,7 +9,7 @@ mounted, the persona roster read-only, and §29's resource caps applied.
 ## What's in the image
 
 - `python:3.11-slim` base
-- `bash` (for shell-mode `code:exec`)
+- `bash` (for shell-mode `code-exec`)
 - `coreutils` (cat / ls / head / tail / etc.)
 - `git` (so agents can inspect the repo mounted at `/workspace`)
 - A non-root `runner` user

@@ -42,8 +42,8 @@ def test_specialist_base_has_correct_kind():
 def test_intermediate_base_provides_default_tools():
     """Reviewer's class-level default_tools includes the read tools every
     reviewer needs."""
-    assert "git:diff" in Reviewer.default_tools
-    assert "fs:read" in Reviewer.default_tools
+    assert "git-diff" in Reviewer.default_tools
+    assert "fs-read" in Reviewer.default_tools
 
 
 def test_escalation_handler_defaults_to_heavy_tier():
@@ -59,7 +59,7 @@ def test_code_reviewer_extends_reviewer():
     assert CodeReviewer.archetype_kind == "reviewer"
     # Inherits the parent's tool list verbatim — CodeReviewer doesn't
     # override (yet).
-    assert "git:diff" in CodeReviewer.default_tools
+    assert "git-diff" in CodeReviewer.default_tools
 
 
 def test_tech_lead_extends_escalation_handler():
@@ -74,17 +74,17 @@ def test_requirements_writer_extends_specialist():
     assert RequirementsWriter.archetype_kind == "specialist"
     # RequirementsWriter overrides default_tools to include doc + write
     # — proves class-level overrides flow through.
-    assert "fs:write" in RequirementsWriter.default_tools
-    assert "doc:pdf" in RequirementsWriter.default_tools
-    assert "doc:markdown" in RequirementsWriter.default_tools
-    assert "fs:write" in RequirementsWriter.default_rbac_scopes
+    assert "fs-write" in RequirementsWriter.default_tools
+    assert "doc-pdf" in RequirementsWriter.default_tools
+    assert "doc-markdown" in RequirementsWriter.default_tools
+    assert "fs-write" in RequirementsWriter.default_rbac_scopes
 
 
 def test_requirements_writer_does_not_grant_code_exec():
     """Spot-check the opinionated permission posture: RequirementsWriter
     reads + writes docs, doesn't run code."""
-    assert "code:exec" not in RequirementsWriter.default_tools
-    assert "code:exec" not in RequirementsWriter.default_rbac_scopes
+    assert "code-exec" not in RequirementsWriter.default_tools
+    assert "code-exec" not in RequirementsWriter.default_rbac_scopes
 
 
 # ── All concrete subclasses are still BaseAgent ───────────────────────────
@@ -122,6 +122,6 @@ def test_architect_defaults_to_heavy_tier():
 def test_architect_inherits_reviewer_tools():
     """Architect doesn't override default_tools — it gets the standard
     diff-aware reviewer toolkit from Reviewer."""
-    assert "git:diff" in Architect.default_tools
-    assert "git:log" in Architect.default_tools
-    assert "fs:read" in Architect.default_tools
+    assert "git-diff" in Architect.default_tools
+    assert "git-log" in Architect.default_tools
+    assert "fs-read" in Architect.default_tools

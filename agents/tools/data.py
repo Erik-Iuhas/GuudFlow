@@ -77,7 +77,7 @@ class DataJson(BaseTool):
       json_path: "data.results"
     """
 
-    name = "data:json"
+    name = "data-json"
     description = "Parse a JSON file. Optional `json_path` (array of keys/indices, or dot-string) extracts a subtree."
     input_schema = {
         "type": "object",
@@ -145,7 +145,7 @@ class DataCsv(BaseTool):
     row count is reported separately so the agent can detect truncation.
     """
 
-    name = "data:csv"
+    name = "data-csv"
     description = "Parse a CSV file. Returns columns + rows-as-dicts (or list-of-lists if has_header=false)."
     input_schema = {
         "type": "object",
@@ -218,7 +218,7 @@ class DataYaml(BaseTool):
     """Parse a YAML file using `yaml.safe_load` (rejects arbitrary Python
     object construction)."""
 
-    name = "data:yaml"
+    name = "data-yaml"
     description = "Parse a YAML file. Uses safe_load — rejects arbitrary object construction."
     input_schema = {
         "type": "object",
@@ -285,7 +285,7 @@ class DataXml(BaseTool):
     `children_truncated: true` is returned for the node.
     """
 
-    name = "data:xml"
+    name = "data-xml"
     description = "Parse an XML file (safe via defusedxml). Returns a dict tree of {tag, attrib, text, children}."
     input_schema = {
         "type": "object",
