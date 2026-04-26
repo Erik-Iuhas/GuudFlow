@@ -20,12 +20,27 @@ from typing import Any
 
 
 class ProjectStore:
-    """File-backed project config storage."""
+    """File-backed project config storage.
+
+    `data/projects.json` holds project configs (dict keyed by project_id).
+    Per-project directories live alongside at `data/projects/{id}/` and hold
+    inputs (uploads, source repo, prior-run continuations) — see DESIGN §33.
+    """
 
     def __init__(self, root: Path | str):
         self.root = Path(root)
         self.path = self.root / "projects.json"
+        self.projects_dir = self.root / "projects"
         self._lock = asyncio.Lock()
+
+    def project_dir(self, project_id: str) -> Path:
+        return self.projects_dir / project_id
+
+    def inputs_dir(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "inputs"
+
+    def uploads_dir(self, project_id: str) -> Path:
+        return self.inputs_dir(project_id) / "uploads"
 
     async def list(self) -> list[dict[str, Any]]:
         async with self._lock:
@@ -46,6 +61,7 @@ class ProjectStore:
                 raise ValueError(f"project {project['project_id']!r} already exists")
             data[project["project_id"]] = project
             await self._write_locked(data)
+            self.uploads_dir(project["project_id"]).mkdir(parents=True, exist_ok=True)
             return project
 
     async def update(self, project_id: str, project: dict[str, Any]) -> dict[str, Any] | None:
@@ -65,6 +81,9 @@ class ProjectStore:
                 return False
             del data[project_id]
             await self._write_locked(data)
+            project_dir = self.project_dir(project_id)
+            if project_dir.exists():
+                shutil.rmtree(project_dir)
             return True
 
     async def _read_locked(self) -> dict[str, dict[str, Any]]:

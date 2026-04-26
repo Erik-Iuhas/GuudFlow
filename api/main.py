@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from api.routes import inputs as inputs_router
 from api.routes import invoke as invoke_router
 from api.routes import meta as meta_router
 from api.routes import personas as personas_router
@@ -98,6 +99,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(projects_router.router)
+    app.include_router(inputs_router.router)
     app.include_router(runs_router.router)
     app.include_router(personas_router.router)
     app.include_router(meta_router.router)
