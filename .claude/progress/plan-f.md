@@ -1,10 +1,9 @@
 # Active plan — Phase F — Long-term moat features
 
-Status: planned. F.3 (real memory_writer LLM synthesis) leads, then
-F.1/F.2 (Training Camp + archetype graduation), F.4 (persona chat) as
-side quest. Order chosen by Erik 2026-04-26: "F.3 first because it
-sits inside infrastructure that already works and pays off
-immediately — every completed run starts producing real patterns."
+Status: F.3 ✅ shipped 2026-04-26. F.1/F.2/F.4 still planned.
+Order chosen by Erik 2026-04-26: "F.3 first because it sits inside
+infrastructure that already works and pays off immediately — every
+completed run starts producing real patterns."
 
 The persona auto-load gap (`AgentRunner._build_agents` doesn't
 auto-attach personas from `cfg.persona_id`) is closed by a scheduled
@@ -15,7 +14,7 @@ working unchanged.
 
 ---
 
-## F.3 — Real memory_writer LLM synthesis (~half day)
+## F.3 — Real memory_writer LLM synthesis ✅ SHIPPED 2026-04-26
 
 Today's `MemoryWriter` (`agents/builtin/memory_writer.py`) ships
 deterministic Steps 1, 2, 5, 6 (record episode, recompute confidence,
@@ -24,7 +23,7 @@ detection from episode clusters) and 4 (style tendency updates from
 evidence) are scaffolded as no-op placeholders. F.3 implements both
 with LLM-driven synthesis, plus tightens Step 6 flip-detection.
 
-### F.3.0 — Wire LLM into MemoryWriter (~30 min)
+### F.3.0 — Wire LLM into MemoryWriter ✅ SHIPPED [b0bfd23]
 
 **Goal:** `MemoryWriter.__init__(llm=None)` + runner threads its LLM
 client through. `llm=None` retains today's deterministic behaviour
@@ -46,7 +45,7 @@ path.
 
 Commit: `feat(memory): thread LLM into MemoryWriter (Phase F.3.0)`
 
-### F.3.1 — LLM-driven pattern distillation from episode clusters (~2 hrs)
+### F.3.1 — LLM-driven pattern distillation from episode clusters ✅ SHIPPED [b0bfd23]
 
 **Goal:** Step 3 emits new emerging patterns. The LLM is asked
 ONLY when there are ≥3 episodes sharing tags (otherwise no synthesis
@@ -84,7 +83,7 @@ needed; saves tokens).
 
 Commit: `feat(memory): LLM-driven pattern distillation (Phase F.3.1)`
 
-### F.3.2 — Pattern→anti-pattern flip detection (~1 hr)
+### F.3.2 — Pattern→anti-pattern flip detection ✅ SHIPPED [761de9c]
 
 **Goal:** Step 6d wires the §34 flip mechanic. Today the comment in
 the code says "(Detection requires 'what worked' alternatives in
@@ -114,7 +113,7 @@ F.3.2 lands the LLM-driven version.
 
 Commit: `feat(memory): LLM-driven pattern flip detection (Phase F.3.2)`
 
-### F.3.3 — Style tendency updates from episode evidence (~1 hr)
+### F.3.3 — Deterministic style drift from run evidence ✅ SHIPPED [dc5709a]
 
 **Goal:** Step 4 is scaffolded. Today's persona has `style.json` with
 working-style tendency scores (e.g. "incremental_commits": 0.7,
@@ -144,7 +143,7 @@ style drift," not LLM. Rename internally for clarity.
 
 Commit: `feat(memory): deterministic style drift from run evidence (Phase F.3.3)`
 
-### F.3.4 — Integration smoke test (~30 min)
+### F.3.4 — Integration smoke test ✅ SHIPPED 2026-04-26
 
 **Goal:** One end-to-end test that proves the synthesis loop works:
 two runs of the same persona, run 1 produces episodes, run 2's

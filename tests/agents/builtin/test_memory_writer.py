@@ -660,6 +660,82 @@ async def test_flip_llm_failure_does_not_break_run(tmp_path: Path):
     assert len(eps) >= 1
 
 
+# ── Phase F.3.4 — synthesis integration over three runs ──────────────────
+
+
+async def test_three_run_synthesis_loop(tmp_path: Path):
+    """Three consecutive runs of the same persona on JWT-flavoured tasks.
+
+    Runs 1 and 2 each record an episode; the LLM is not called because
+    the cluster threshold (3 episodes) hasn't been reached. Run 3 hits
+    the threshold and the LLM emits a pattern. After run 3 the
+    persona's patterns.json should contain a new emerging pattern that
+    cites all three episodes.
+
+    This proves the moving parts work together: episode capture →
+    cluster detection → LLM call → pattern persistence → reload.
+    """
+    p, d = _persona(tmp_path)
+    persona_id = p.profile.persona_id
+
+    # The LLM is queued with one tool call — only run 3 should reach it.
+    llm = MockLLMClient([MockTurn(tool_calls=[ToolCall(
+        id="t_run3",
+        name="emit_pattern",
+        arguments={
+            "title": "Validate JWT issuer claim",
+            "lesson": "Always check the iss claim against the configured issuer.",
+            "applies_when": ["jwt", "auth"],
+        },
+    )])])
+
+    mw = MemoryWriter(llm=llm)
+
+    async def _run_once(run_id: str, goal: str) -> None:
+        # Reload from disk each run so the test exercises the
+        # serialised state, not in-memory mutation.
+        persona = Persona.load(persona_id, tmp_path / "personas")
+        persona._dir = d
+        ws = Workspace(run_id=run_id, goal=goal)
+        ws.iteration = 1
+        await mw.on_run_complete(
+            workspace=ws, project=None, run_id=run_id,
+            run_root=tmp_path, personas={"developer": persona},
+        )
+
+    await _run_once("r1", "Add JWT auth middleware")
+    after_run1 = json.loads((d / "patterns.json").read_text(encoding="utf-8"))
+    assert after_run1["patterns"] == []  # only 1 episode
+    assert llm.calls == []
+
+    await _run_once("r2", "Refresh JWT token endpoint")
+    after_run2 = json.loads((d / "patterns.json").read_text(encoding="utf-8"))
+    assert after_run2["patterns"] == []  # only 2 episodes
+    assert llm.calls == []
+
+    await _run_once("r3", "JWT auth header parsing")
+    after_run3 = json.loads((d / "patterns.json").read_text(encoding="utf-8"))
+    assert len(after_run3["patterns"]) == 1
+    assert len(llm.calls) == 1
+
+    pat = after_run3["patterns"][0]
+    assert pat["status"] == STATUS_EMERGING
+    assert pat["confidence"] == 0.6
+    assert "iss claim" in pat["lesson"]
+    # source_episodes covers all three runs' episodes (the cluster
+    # they all shared).
+    assert len(pat["source_episodes"]) == 3
+
+    # Episodes file has all three lines.
+    episodes = (d / "episodes.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(episodes) == 3
+
+    # Style drifted across three runs (incremental_commits = false on
+    # all three since no commits posted, so trends down from 0.5).
+    style = json.loads((d / "style.json").read_text(encoding="utf-8"))
+    assert style["tendencies"]["incremental_commits"] < 0.5
+
+
 async def test_distillation_caps_at_three_clusters(tmp_path: Path):
     """Many candidate clusters → at most MAX_DISTILL_CALLS_PER_RUN LLM
     calls. Caps token spend on chatty personas."""

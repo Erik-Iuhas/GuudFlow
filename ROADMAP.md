@@ -275,26 +275,34 @@ small grouping helper in `studio/src/lib/`.
 These are designed in DESIGN.md but aren't on the critical path. Pick
 them up when real users tell you which one matters.
 
-- [ ] **Training Camp** (DESIGN §35) — toy scenario library,
+- [ ] **F.1 Training Camp** (DESIGN §35) — toy scenario library,
       tournament mode, ranking board for hiring decisions. Critical
       for smaller-model users who need to bootstrap persona quality
       without paying for production runs.
-- [ ] **Persona variations + training-camp readiness for each
-      archetype** — extending `docs/worker-archetypes.md` (initial
-      version lands in Phase D.0) with persona variations within each
-      archetype (e.g. "minimalist frontend_dev" vs "framework-heavy
-      frontend_dev") and training-camp scenarios that exercise each.
-      The Phase F training-camp work is what produces these
-      variations through tournament-mode runs — they get added to the
-      doc as they're validated. A small generator that emits a
-      "shipped vs described" status table from `agents/catalog.py` is
-      part of this.
-- [ ] **Real `memory_writer` LLM synthesis** (DESIGN §34) — the
-      data-layer reconciliation works (lifecycle transitions,
-      contradiction reconciliation, episode staleness). The LLM-driven
-      *distillation* — turning clusters of episodes into new patterns —
-      is scaffolded but not implemented.
-- [ ] **Persona chat endpoint** (DESIGN §37) — `POST /api/personas/{id}/chat`
+- [ ] **F.2 Persona variations + training-camp readiness for each
+      archetype** — extending `docs/worker-archetypes.yaml` with
+      persona variations within each archetype (e.g. "minimalist
+      frontend_dev" vs "framework-heavy frontend_dev") and
+      training-camp scenarios that exercise each. F.1 produces these
+      variations through tournament runs — they get added to the YAML
+      as they're validated. A small generator that emits a "shipped
+      vs described" status table from `agents/catalog.py` is part of
+      this.
+- [x] **F.3 Real `memory_writer` LLM synthesis** ✅ SHIPPED 2026-04-26
+      (DESIGN §34) — three sub-chunks landed:
+      - F.3.1 ([`b0bfd23`](https://github.com/Erik-Iuhas/AgentFlow/commit/b0bfd23))
+        LLM-driven pattern distillation from episode clusters; bounded
+        per-run, defensive fallbacks, two structured tools.
+      - F.3.2 ([`761de9c`](https://github.com/Erik-Iuhas/AgentFlow/commit/761de9c))
+        pattern→anti-pattern flip detection. Reordered reconciliation
+        so flip wins over archive when LLM names an alternative.
+      - F.3.3 ([`dc5709a`](https://github.com/Erik-Iuhas/AgentFlow/commit/dc5709a))
+        deterministic style drift on three observations
+        (incremental_commits, iterates_on_feedback, tests_referenced).
+        style.json now persists alongside patterns.json.
+      Without an LLM the writer collapses to its deterministic Stage-5
+      contract — no regression for callers that don't inject one.
+- [ ] **F.4 Persona chat endpoint** (DESIGN §37) — `POST /api/personas/{id}/chat`
       for one-off conversations with a persona outside any run. Marked
       future/optional in the design.
 
