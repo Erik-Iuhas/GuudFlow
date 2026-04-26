@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from agents.builtin.memory_writer import MemoryWriter
+from core import run_initializer
 from core.llm import AnthropicClient, LLMClient
 from core.runner import AgentConfig, AgentRunner, ProjectConfig
 from core.tool_manifest import RoleRBAC
@@ -186,6 +187,44 @@ class JobRunner:
                 _logger.exception("job %s crashed", job.job_id)
                 await self.queue.update_status(job.job_id, JOB_FAILED, error=str(e))
 
+    def _initialize_run(self, job: Job, run_root: Path) -> None:
+        """Seed the run's workspace from the project's persistent inputs.
+
+        Order matters:
+          1. seed_run: copies project_dir/inputs/* → run/workspace/inputs/
+          2. seed_working_from_source: if source_repo present, populate
+             working/ + fresh git init + seed commit
+          3. bundle_prior_history: per attached prior run with a working/ on
+             disk, bundle its history under inputs/from_run_{id}/.history.bundle
+          4. generate_inputs_readme: last so it sees the bundles too
+        """
+        project_dir = self.data_root / "projects" / job.project_id
+        run_initializer.seed_run(project_dir, run_root)
+
+        run_inputs = run_root / "workspace" / "inputs"
+        working_dir = run_root / "workspace" / "working"
+
+        run_initializer.seed_working_from_source(
+            working_dir, run_inputs / "source_repo"
+        )
+
+        for meta_entry in run_inputs.glob("from_run_*.meta.json"):
+            try:
+                meta = json.loads(meta_entry.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+            prior_run_id = meta.get("run_id")
+            if not prior_run_id:
+                continue
+            prior_working = (
+                self.data_root / "runs" / prior_run_id / "workspace" / "working"
+            )
+            if prior_working.is_dir():
+                bundle_path = run_inputs / f"from_run_{prior_run_id}" / ".history.bundle"
+                run_initializer.bundle_prior_history(prior_working, bundle_path)
+
+        run_initializer.generate_inputs_readme(run_inputs)
+
     async def run_one(self, job: Job) -> None:
         """Execute a single job end-to-end. Idempotent on status updates."""
         await self.queue.update_status(job.job_id, JOB_RUNNING)
@@ -210,6 +249,19 @@ class JobRunner:
         # 2. Set up paths.
         run_root = self.data_root / "runs" / job.run_id
         run_root.mkdir(parents=True, exist_ok=True)
+
+        # 2.5. Pre-flight initialisation (DESIGN §33). Copy project inputs
+        # into the run's workspace/inputs/, seed working/ from any
+        # source_repo, bundle attached prior runs' git history, and write
+        # the inputs/README.md index.
+        try:
+            self._initialize_run(job, run_root)
+        except Exception as e:
+            await self.queue.update_status(
+                job.job_id, JOB_FAILED,
+                error=f"run initialization failed: {e}",
+            )
+            return
 
         # 3. Verify LLM client is configured.
         llm = self.llm or _build_default_llm()

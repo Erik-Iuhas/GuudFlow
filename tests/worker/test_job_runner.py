@@ -294,3 +294,172 @@ async def test_run_forever_drains_then_stops(tmp_path: Path, monkeypatch):
     assert out.status == JOB_COMPLETE
     worker.stop()
     await asyncio.wait_for(task, timeout=2.0)
+
+
+# ── Run initialisation (DESIGN §33, D-prime Chunk 5) ───────────────────────
+
+
+def _stage_project_inputs(data_root: Path, project_id: str) -> Path:
+    """Materialise data/projects/{id}/inputs/ with uploads + source_repo
+    + a from_run sidecar so the initializer has work to do."""
+    project_dir = data_root / "projects" / project_id
+    inputs = project_dir / "inputs"
+    (inputs / "uploads").mkdir(parents=True)
+    (inputs / "uploads" / "spec.txt").write_text("the spec\n", encoding="utf-8")
+
+    (inputs / "source_repo").mkdir()
+    (inputs / "source_repo" / "main.py").write_text("print('seed')\n", encoding="utf-8")
+    (inputs / "source_repo.meta.json").write_text(
+        json.dumps({"kind": "git_url", "git_url": "https://example.com/r.git", "branch": "main"}),
+        encoding="utf-8",
+    )
+
+    (inputs / "from_run_prior").mkdir()
+    (inputs / "from_run_prior" / "deliverables").mkdir()
+    (inputs / "from_run_prior" / "deliverables" / "out.txt").write_text("done\n", encoding="utf-8")
+    (inputs / "from_run_prior.meta.json").write_text(
+        json.dumps({"kind": "prior_run", "run_id": "prior", "has_feedback": False}),
+        encoding="utf-8",
+    )
+    return project_dir
+
+
+def _build_initializer_worker(tmp_path: Path) -> JobRunner:
+    """A JobRunner just well-enough constructed to call _initialize_run."""
+    return JobRunner(
+        queue=InMemoryJobQueue(),
+        project_loader=lambda _: None,
+        data_root=tmp_path,
+    )
+
+
+def test_initialize_run_seeds_uploads(tmp_path: Path):
+    _stage_project_inputs(tmp_path, "p1")
+    worker = _build_initializer_worker(tmp_path)
+    run_root = tmp_path / "runs" / "run_init"
+    run_root.mkdir(parents=True)
+    job = Job(job_id="j", project_id="p1", run_id="run_init")
+
+    worker._initialize_run(job, run_root)
+
+    assert (run_root / "workspace" / "inputs" / "uploads" / "spec.txt").read_text(
+        encoding="utf-8"
+    ) == "the spec\n"
+
+
+def test_initialize_run_seeds_working_with_git(tmp_path: Path):
+    _stage_project_inputs(tmp_path, "p1")
+    worker = _build_initializer_worker(tmp_path)
+    run_root = tmp_path / "runs" / "run_init"
+    run_root.mkdir(parents=True)
+    job = Job(job_id="j", project_id="p1", run_id="run_init")
+
+    worker._initialize_run(job, run_root)
+
+    working = run_root / "workspace" / "working"
+    assert (working / "main.py").read_text(encoding="utf-8") == "print('seed')\n"
+    assert (working / ".git").is_dir()
+
+
+def test_initialize_run_writes_readme(tmp_path: Path):
+    _stage_project_inputs(tmp_path, "p1")
+    worker = _build_initializer_worker(tmp_path)
+    run_root = tmp_path / "runs" / "run_init"
+    run_root.mkdir(parents=True)
+    job = Job(job_id="j", project_id="p1", run_id="run_init")
+
+    worker._initialize_run(job, run_root)
+
+    readme = (run_root / "workspace" / "inputs" / "README.md").read_text(encoding="utf-8")
+    assert "uploads/spec.txt" in readme
+    assert "source_repo/" in readme
+    assert "from_run_prior/deliverables/" in readme
+
+
+def test_initialize_run_bundles_prior_history(tmp_path: Path):
+    _stage_project_inputs(tmp_path, "p1")
+    # Stage a prior run with its own working/ git history on disk.
+    prior_working = tmp_path / "runs" / "prior" / "workspace" / "working"
+    prior_working.mkdir(parents=True)
+    from git import Repo as _Repo
+    repo = _Repo.init(prior_working, initial_branch="main")
+    with repo.config_writer() as cfg:
+        cfg.set_value("user", "name", "test")
+        cfg.set_value("user", "email", "test@example.com")
+        cfg.set_value("commit", "gpgsign", "false")
+    (prior_working / "x.txt").write_text("x", encoding="utf-8")
+    repo.index.add(["x.txt"])
+    repo.index.commit("init")
+
+    worker = _build_initializer_worker(tmp_path)
+    run_root = tmp_path / "runs" / "run_init"
+    run_root.mkdir(parents=True)
+    job = Job(job_id="j", project_id="p1", run_id="run_init")
+
+    worker._initialize_run(job, run_root)
+
+    bundle = run_root / "workspace" / "inputs" / "from_run_prior" / ".history.bundle"
+    assert bundle.is_file()
+    assert bundle.stat().st_size > 0
+
+
+def test_initialize_run_greenfield_project(tmp_path: Path):
+    """Project with no inputs dir at all — initialisation succeeds and
+    creates an empty inputs/ + greenfield README."""
+    worker = _build_initializer_worker(tmp_path)
+    run_root = tmp_path / "runs" / "run_blank"
+    run_root.mkdir(parents=True)
+    job = Job(job_id="j", project_id="p_blank", run_id="run_blank")
+
+    worker._initialize_run(job, run_root)
+
+    inputs = run_root / "workspace" / "inputs"
+    assert inputs.is_dir()
+    readme = (inputs / "README.md").read_text(encoding="utf-8")
+    assert "greenfield" in readme.lower()
+    # No source_repo → no working/ either.
+    assert not (run_root / "workspace" / "working").exists()
+
+
+async def test_run_one_initializes_inputs_for_real_run(tmp_path: Path, monkeypatch):
+    """End-to-end: a project with uploads + source_repo runs through the
+    worker; the run's workspace shows the seeded inputs and a working/
+    with the source_repo content + a fresh git history."""
+    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    _stage_project_inputs(tmp_path, "p_seeded")
+
+    project = {
+        "project_id": "p_seeded",
+        "goal": "extend the existing app",
+        "agents": [{
+            "role": "developer", "description": "no-op",
+            "declared_local_tools": ["fs:read"],
+        }],
+        "rbac": {},
+        "max_iterations": 1,
+    }
+    queue = InMemoryJobQueue()
+    job = Job(job_id="j_init", project_id="p_seeded", run_id="run_init_e2e")
+    await queue.enqueue(job)
+
+    async def loader(_: str):
+        return project
+    llm = MockLLMClient([MockTurn(text="ok done")])
+
+    worker = JobRunner(
+        queue=queue, project_loader=loader,
+        data_root=tmp_path, llm=llm,
+        docker_manager=DockerManager(mode="dev"),
+    )
+    await worker.run_one(job)
+
+    out = await queue.get("j_init")
+    assert out.status == JOB_COMPLETE
+
+    run_root = tmp_path / "runs" / "run_init_e2e"
+    inputs = run_root / "workspace" / "inputs"
+    assert (inputs / "uploads" / "spec.txt").exists()
+    assert (inputs / "source_repo" / "main.py").exists()
+    assert (inputs / "README.md").exists()
+    # working/ was seeded from source_repo
+    assert (run_root / "workspace" / "working" / "main.py").exists()
