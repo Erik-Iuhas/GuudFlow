@@ -1,0 +1,11 @@
+# Optional dependencies — install only if you need the feature.
+#
+#   pip install -r requirements-optional.txt
+#
+# These are heavy and lazy-loaded, so we keep them out of the default
+# install path (DESIGN §28 — embeddings are off by default).
+
+# Local embedding model — used only when a project's
+# `embeddings_enabled: true`. Pulls PyTorch (~500MB).
+sentence-transformers==2.7.0
+numpy==1.26.4

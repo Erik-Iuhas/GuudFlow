@@ -1,0 +1,181 @@
+# AgentFlow
+
+A managed multi-agent orchestration platform. Describe a goal, a meta-agent
+proposes a team, you approve it, and the team runs — with a shared
+workspace, a shared git repo, structured inter-agent communication, and a
+sandboxed code-execution surface.
+
+**Status: initial build complete (all 9 stages shipped, ~530 backend
+tests passing, frontend builds clean).** Production deploy story is
+designed but not fully wired — see [ROADMAP.md](ROADMAP.md) for what's next.
+
+## What it actually is
+
+```
+You              "Add JWT auth to my web app, with refresh tokens"
+   ↓
+Meta-agent       proposes a team: developer + reviewer + tech_lead-on-escalation
+                 with model tiers, tools, RBAC scopes
+   ↓
+You approve      tweak agents, model tiers, see live cost estimate
+   ↓
+Run starts       agents work in parallel where deps allow, share a board,
+                 commit to per-agent git branches, escalate on conflicts,
+                 ask you for input when genuinely blocked
+   ↓
+Reviewer         approves → branches merge → memory_writer records what
+                 worked into the personas' files for next time
+```
+
+The full architecture is in [DESIGN.md](DESIGN.md) (37 sections). The
+build plan and stage-by-stage progress is in
+[`.claude/progress/`](.claude/progress/).
+
+## Run it locally
+
+You need Python 3.11+, Node 18+, and (for production sandbox)
+Docker. Three commands:
+
+### 1. Backend
+
+```bash
+# Linux / macOS / WSL
+./scripts/setup.sh
+
+# Windows PowerShell
+./scripts/setup.ps1
+```
+
+This creates a venv, installs Python deps, runs `playwright install
+chromium`, and copies `.env.example` → `.env` if it doesn't already
+exist. Open `.env` and add your `ANTHROPIC_API_KEY`.
+
+> **Optional:** semantic embeddings (PyTorch + sentence-transformers,
+> ~600 MB) are off by default per DESIGN §28. To enable, set
+> `AGENTFLOW_WITH_EMBEDDINGS=1` before running setup, or
+> `pip install -r requirements-optional.txt` separately later.
+
+Then start the API + in-process worker:
+
+```bash
+source venv/bin/activate     # or: venv\Scripts\Activate.ps1 on Windows
+uvicorn api.main:app --reload --port 8000
+```
+
+The API serves at `http://localhost:8000`. Health check:
+`http://localhost:8000/health`.
+
+### 2. Frontend
+
+```bash
+cd studio
+npm install
+npm run dev
+```
+
+Studio runs at `http://localhost:3000` and proxies `/api` and `/ws` to
+the backend on `:8000`. Paste your API token (whatever you set in
+`AGENTFLOW_API_TOKEN`) in the top-right field.
+
+### 3. (Optional) Sandbox image
+
+In dev mode this is optional — `code:exec` runs on the host with §29
+hardening (env scrub, cwd pin, audit log, POSIX rlimits, mode
+enforcement).
+
+For production-style runs, build the per-run sandbox image:
+
+```bash
+./scripts/build_sandbox.sh
+```
+
+Then set `AGENTFLOW_MODE=production` and the worker will route
+`code:exec` invocations through ephemeral containers with
+`network_mode: none`, read-only root, resource caps, etc. (See
+[DESIGN.md §29](DESIGN.md) for the full security model.)
+
+## Run it with Docker
+
+If you'd rather not install Python/Node directly:
+
+```bash
+# 1. Build the per-run sandbox image (one-time)
+./scripts/build_sandbox.sh
+
+# 2. Start the host stack
+docker compose up --build
+```
+
+The compose stack:
+- Builds the host image (multi-stage: builds studio, then runs the API
+  with the bundle at `/`)
+- Mounts `./data` as the persistent run/persona directory
+- Mounts `/var/run/docker.sock` so the host container can spawn sandbox
+  containers as siblings (NOT nested — see DESIGN §29 / k8s notes in
+  [ROADMAP.md](ROADMAP.md))
+- Exposes the studio + API at `http://localhost:8000`
+
+Set environment variables in `.env` (the compose file reads it):
+- `ANTHROPIC_API_KEY` (required for real LLM calls)
+- `AGENTFLOW_API_TOKEN` (optional — required for production)
+
+## Project layout
+
+```
+agentflow/
+├── core/              ← signals, protocol, workspace, scheduler,
+│                        runner, llm, loop_guard, ...
+├── agents/            ← BaseAgent, persona, registry, tools/, builtin/
+├── api/               ← FastAPI app + routes + WebSocket
+├── worker/            ← JobRunner, queue, DockerManager
+├── studio/            ← Vite + React + TS frontend
+├── sandbox/           ← per-run sandbox Dockerfile (§29)
+├── data/              ← runs, personas, projects (created on first run)
+├── tests/             ← pytest suite (~530 tests)
+├── scripts/           ← setup + sandbox build helpers
+├── DESIGN.md          ← full architecture (37 sections)
+├── CLAUDE.md          ← operating instructions for AI assistants
+└── ROADMAP.md         ← what's next
+```
+
+## Configuration
+
+Most behaviour is environment-driven. Reasonable defaults; override what
+you need.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | (unset) | Required for real LLM calls |
+| `AGENTFLOW_API_TOKEN` | (unset) | Bearer token for credentialed routes. Unset = dev-permissive; required in production |
+| `AGENTFLOW_MODE` | `dev` | `dev` or `production`. Production refuses to start without Docker; gates `code:exec` to container path |
+| `AGENTFLOW_DATA_DIR` | `./data` | Where runs, personas, and projects are stored |
+| `AGENTFLOW_DISABLE_INPROC_WORKER` | unset | Set to `1` to disable the in-process worker (use a separate worker process instead) |
+| `AGENTFLOW_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
+| `AGENTFLOW_STUDIO_DIST` | unset | If set to a directory of static files, the API serves them at `/` |
+
+## Testing
+
+```bash
+# Backend
+pytest
+
+# Frontend typecheck
+cd studio && npm run typecheck
+```
+
+Backend suite is ~530 tests, runs in ~17 seconds. No real LLM calls (all
+mocked). No Docker required (DockerManager dev-mode is a stub).
+
+## What's missing / what's next
+
+**[ROADMAP.md](ROADMAP.md)** has the prioritized list. Short version:
+
+- Phase B — close the dev→prod gap (`code:exec` container routing, ~30 lines)
+- Phase C — make a live run feel live (USER_COMMENT POST endpoint, real quip stream, tech-lead escalation auto-detection)
+- Phase D — make the meta-agent actually propose (currently returns a deterministic skeleton)
+- Phase E — production deploy story (Redis queue, KubeJobManager for k8s)
+- Phase F — long-term moat features (Training Camp, real LLM-driven memory synthesis, persona chat)
+
+## License
+
+TBD — pick before sharing.

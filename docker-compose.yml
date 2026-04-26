@@ -1,0 +1,65 @@
+# docker-compose for the host stack.
+#
+# Usage:
+#   1. ./scripts/build_sandbox.sh          # build the per-run sandbox image first
+#   2. cp .env.example .env && edit it     # add ANTHROPIC_API_KEY
+#   3. docker compose up --build           # build + start the host stack
+#
+# The host container mounts /var/run/docker.sock so it can ask the machine's
+# Docker daemon to spawn sandbox containers as siblings (NOT nested) per
+# DESIGN §29. This is the standard "Docker-out-of-Docker" pattern.
+#
+# For Kubernetes / multi-node deploys, this approach doesn't translate
+# cleanly — see ROADMAP.md Phase E (KubeJobManager + Helm chart).
+
+services:
+  agentflow:
+    build: .
+    image: agentflow:latest
+    container_name: agentflow
+    ports:
+      - "8000:8000"
+    environment:
+      # Required for real LLM calls. Read from .env.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Optional bearer token. Required in production mode.
+      AGENTFLOW_API_TOKEN: ${AGENTFLOW_API_TOKEN:-}
+      # dev (default) keeps code:exec on the host with §29 hardening.
+      # production refuses to start without Docker; routes code:exec to
+      # the sandbox container.
+      AGENTFLOW_MODE: ${AGENTFLOW_MODE:-dev}
+      # Persistent data lives in a volume.
+      AGENTFLOW_DATA_DIR: /app/data
+      AGENTFLOW_STUDIO_DIST: /app/studio/dist
+      AGENTFLOW_CORS_ORIGINS: ${AGENTFLOW_CORS_ORIGINS:-*}
+    volumes:
+      # Persist runs, personas, projects across container restarts.
+      - ./data:/app/data
+      # Sibling-container pattern: the host container talks to the
+      # machine's Docker daemon to spawn sandbox containers next to it.
+      # Sandbox containers will inherit the limits in
+      # worker/docker_manager.CONTAINER_LIMITS — they are NOT nested.
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# To split the worker into a separate process (production pattern):
+#
+#   worker:
+#     build: .
+#     image: agentflow:latest
+#     command: ["python", "-m", "worker.job_runner"]
+#     environment:
+#       ...same env as agentflow service...
+#       AGENTFLOW_DISABLE_INPROC_WORKER: "1"   # also set this on agentflow
+#     volumes:
+#       - ./data:/app/data
+#       - /var/run/docker.sock:/var/run/docker.sock
+#
+# (The standalone worker today has its own InMemoryJobQueue and won't share
+# with the API — Redis-backed queue lands in Phase E.)

@@ -1,0 +1,4 @@
+# Build context is just this directory. Nothing else is copied in —
+# the workspace is mounted at runtime, not baked into the image.
+*
+!Dockerfile
