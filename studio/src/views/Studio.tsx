@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, invokeApi, projectsApi, runsApi } from "../api";
 import { AgentCard } from "../components/AgentCard";
 import { CostStrip } from "../components/CostStrip";
+import { PipelineGraph } from "../components/PipelineGraph";
 import type { AgentConfig, ProjectConfig, RunMeta } from "../types";
 import { Inputs } from "./Inputs";
 
@@ -201,6 +202,11 @@ export function Studio() {
           <CostStrip project={project} />
 
           <h2>Agents</h2>
+          {/* Phase G.1 — DAG preview so the user can spot disconnected
+              agents or weird dependencies before launching a run. */}
+          {(project.agents ?? []).length > 0 && (
+            <PipelineGraph agents={project.agents ?? []} />
+          )}
           <div className="grid-2">
             {(project.agents ?? []).map((a) => (
               <AgentCard

@@ -357,3 +357,44 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .chat-turn-loading { font-style: italic; }
 .chat-input-row { display: flex; gap: 8px; }
 .chat-input-row input { flex: 1; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; }
+
+/* ─── Phase G.1 — pipeline graph + agent state cards ─────────────────── */
+
+.pipeline-graph {
+  border: 1px solid #e2e8f0; border-radius: 6px;
+  background: #fafafa; padding: 8px;
+  overflow-x: auto; margin: 8px 0 16px 0;
+}
+.pipeline-graph svg { display: block; min-width: max-content; }
+
+.run-pipeline {
+  grid-column: 1 / -1;
+  padding: 12px 16px; border-bottom: 1px solid #e2e8f0;
+  background: #fafafa;
+}
+
+.agent-state-cards {
+  display: flex; flex-direction: column; gap: 4px; margin-top: 8px;
+}
+.agent-state-card {
+  border: 1px solid #e2e8f0; border-left-width: 3px;
+  border-radius: 6px; padding: 8px 12px; background: white;
+}
+.agent-state-pending { border-left-color: #cbd5e1; }
+.agent-state-running { border-left-color: #f59e0b; }
+.agent-state-complete { border-left-color: #10b981; }
+.agent-state-failed { border-left-color: #ef4444; }
+.agent-state-waiting_for_human { border-left-color: #3b82f6; }
+
+.agent-state-detail {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid #f1f5f9;
+}
+.agent-iteration-list {
+  list-style: none; padding: 0; margin: 0;
+  font-size: 12px; color: #475569;
+}
+.agent-iteration-list li { padding: 3px 0; }
+
+.tag-comments { background: #fef3c7; color: #92400e; }
+.tag-status-pending { background: #f1f5f9; color: #475569; }
+.tag-status-waiting_for_human { background: #dbeafe; color: #1e3a8a; }

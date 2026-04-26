@@ -7,13 +7,16 @@ import {
   projectsApi,
   runsApi,
 } from "../api";
+import { AgentStateCard } from "../components/AgentStateCard";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { BoardFeed } from "../components/BoardFeed";
 import { CommentBox } from "../components/CommentBox";
 import { GitLogTab } from "../components/GitLogTab";
+import { PipelineGraph } from "../components/PipelineGraph";
 import { QuipFeed } from "../components/QuipFeed";
 import { ScreenshotPane } from "../components/ScreenshotPane";
-import type { RunMeta, Signal } from "../types";
+import { summariseAgents } from "../lib/iterations";
+import type { ProjectConfig, RunMeta, Signal } from "../types";
 
 /** Unresolved approval gates: APPROVAL_NEEDED signals whose matching
  *  GRANTED / DENIED hasn't landed on the board yet. */
@@ -49,6 +52,7 @@ export function Run() {
   const { runId } = useParams<{ runId: string }>();
   const [meta, setMeta] = useState<RunMeta | null>(null);
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [project, setProject] = useState<ProjectConfig | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [continueOpen, setContinueOpen] = useState(false);
@@ -88,6 +92,16 @@ export function Run() {
     try {
       const m = await runsApi.get(runId);
       setMeta(m);
+      // Phase G.1 — fetch the project so the pipeline graph can
+      // render the agent DAG. Failures here are non-fatal; the
+      // graph just won't show.
+      if (m.project_id) {
+        try {
+          setProject(await projectsApi.get(m.project_id));
+        } catch {
+          /* ignore — graph is optional */
+        }
+      }
     } catch (e) {
       // Run might still be active and not yet flushed to disk; that's fine.
       if (e instanceof ApiError && e.status !== 404) {
@@ -173,6 +187,35 @@ export function Run() {
             <ApprovalCard key={sig.id} runId={runId} signal={sig} />
           ))}
         </div>
+
+        {/* Phase G.1 — pipeline graph + per-agent state cards above
+            the BoardFeed so the user can answer "what's the team
+            doing right now?" without reading the board linearly. */}
+        {project && (project.agents ?? []).length > 0 && (
+          <div className="run-pipeline">
+            <PipelineGraph
+              agents={project.agents ?? []}
+              liveStates={summariseAgents(
+                (project.agents ?? []).map((a) => a.role),
+                signals,
+              )}
+            />
+            <div className="agent-state-cards">
+              {Array.from(
+                summariseAgents(
+                  (project.agents ?? []).map((a) => a.role),
+                  signals,
+                ).values(),
+              ).map((s) => (
+                <AgentStateCard
+                  key={s.role}
+                  summary={s}
+                  allSignals={signals}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="run-board">
           <BoardFeed signals={signals} />
