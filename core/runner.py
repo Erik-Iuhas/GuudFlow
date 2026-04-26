@@ -684,6 +684,15 @@ class AgentRunner:
                         ok = self.git.merge(branch, into="main")
                         if ok:
                             workspace.git.merged.append(branch)
+                # Phase G.5 — auto-tag the review point. The tag lives
+                # on whatever commit `main` points at after the merge,
+                # so users can list review points and (in a follow-up
+                # phase) rewind to a known-good tree state.
+                tag_name = f"review/{workspace.iteration}/{cfg.role}"
+                self.git.tag(
+                    tag_name,
+                    message=f"{cfg.role} approved at iteration {workspace.iteration}",
+                )
 
         return runner
 

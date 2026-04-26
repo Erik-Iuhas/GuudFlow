@@ -15,6 +15,7 @@ import { GitLogTab } from "../components/GitLogTab";
 import { PipelineGraph } from "../components/PipelineGraph";
 import { QuipFeed } from "../components/QuipFeed";
 import { ScreenshotPane } from "../components/ScreenshotPane";
+import { TagsPanel } from "../components/TagsPanel";
 import { summariseAgents } from "../lib/iterations";
 import type { ProjectConfig, RunMeta, Signal } from "../types";
 
@@ -275,6 +276,7 @@ export function Run() {
           <QuipFeed runId={runId} />
           <ScreenshotPane signals={signals} />
           <GitLogTab signals={signals} />
+          <TagsPanel runId={runId} />
         </div>
 
         <div className="run-comments">

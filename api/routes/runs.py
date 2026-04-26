@@ -156,6 +156,48 @@ async def post_user_comment(
     }
 
 
+@router.get("/{run_id}/tags")
+async def list_run_tags(request: Request, run_id: str) -> list[dict]:
+    """List git review-point tags for a run (Phase G.5).
+
+    The runner auto-tags every APPROVED merge as
+    `review/<iteration>/<reviewer-role>`. This endpoint reads them
+    off the run's working/ git repo so the studio can show them in
+    a "review points" panel.
+
+    Returns 404 if the run has no working/ git repo (run never
+    started, or never persisted).
+    """
+    from git import InvalidGitRepositoryError, NoSuchPathError, Repo
+
+    data_root = Path(request.app.state.data_root)
+    working_dir = data_root / "runs" / run_id / "workspace" / "working"
+    try:
+        repo = Repo(working_dir)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        raise HTTPException(
+            status_code=404,
+            detail=f"run {run_id!r} has no git workspace",
+        )
+
+    out: list[dict] = []
+    for tag in repo.tags:
+        commit = tag.commit
+        tag_obj = getattr(tag, "tag", None)
+        out.append({
+            "name": tag.name,
+            "sha": commit.hexsha,
+            "short_sha": commit.hexsha[:7],
+            "message": tag_obj.message if tag_obj is not None else "",
+            "commit_message": commit.message.strip(),
+            "tagged_at": (
+                tag_obj.tagged_date if tag_obj is not None else commit.committed_date
+            ),
+        })
+    out.sort(key=lambda t: t["tagged_at"])
+    return out
+
+
 @router.get("/{run_id}/deliverables/{path:path}")
 async def download_deliverable(request: Request, run_id: str, path: str):
     deliverables = _store(request).deliverables_dir(run_id)

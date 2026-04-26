@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import git
 from git import GitCommandError, Repo
@@ -314,3 +314,43 @@ class GitWorkspace:
                 None,
             )
         return True
+
+    # ── Phase G.5 — review-point tagging ──────────────────────────────────
+
+    def tag(self, name: str, message: str, ref: str = "HEAD") -> bool:
+        """Create an annotated git tag at `ref`. Returns False if the
+        tag already exists or a git error fires; True on success.
+
+        Used by the runner to mark APPROVED merges so users can rewind
+        to a known-good review point. Tag names are
+        `review/<iteration>/<reviewer-role>` so they're unique per run
+        and self-describing.
+        """
+        try:
+            self.repo.create_tag(name, ref=ref, message=message)
+            return True
+        except GitCommandError:
+            return False
+        except Exception:
+            return False
+
+    def list_tags(self) -> list[dict[str, Any]]:
+        """List every tag with its commit SHA + message + tagged date.
+        Used by `GET /api/runs/{id}/tags` to surface review points
+        for the studio's tag panel."""
+        out: list[dict[str, Any]] = []
+        for tag in self.repo.tags:
+            commit = tag.commit
+            tag_obj = tag.tag  # None for lightweight tags; populated for annotated
+            out.append({
+                "name": tag.name,
+                "sha": commit.hexsha,
+                "short_sha": commit.hexsha[:7],
+                "message": (tag_obj.message if tag_obj is not None else ""),
+                "commit_message": commit.message.strip(),
+                "tagged_at": (
+                    tag_obj.tagged_date if tag_obj is not None else commit.committed_date
+                ),
+            })
+        out.sort(key=lambda t: t["tagged_at"])
+        return out

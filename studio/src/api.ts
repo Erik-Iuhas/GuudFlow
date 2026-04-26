@@ -116,7 +116,20 @@ export const runsApi = {
       job_id: string;
       project_id: string;
     }>("POST", `/api/runs/${encodeURIComponent(id)}/resume`, undefined, true),
+  /** Phase G.5 — list review-point tags created by the runner at
+   *  every APPROVED merge. Used by the Run view's tag panel. */
+  tags: (id: string) =>
+    request<RunTag[]>("GET", `/api/runs/${encodeURIComponent(id)}/tags`),
 };
+
+export interface RunTag {
+  name: string;
+  sha: string;
+  short_sha: string;
+  message: string;
+  commit_message: string;
+  tagged_at: number;
+}
 
 // ── Personas ───────────────────────────────────────────────────────────────
 

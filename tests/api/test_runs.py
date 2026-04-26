@@ -277,6 +277,44 @@ async def test_post_approval_requires_auth(client, app):
     assert r.status_code == 401
 
 
+# ── Phase G.5 — review-point tags ──────────────────────────────────────────
+
+
+async def test_list_tags_404_when_no_git_workspace(client, write_run):
+    """A run with no working/.git directory returns 404 — not all
+    runs reach the point of having a workspace."""
+    write_run("run_no_git", project_id="p1")
+    r = await client.get("/api/runs/run_no_git/tags")
+    assert r.status_code == 404
+
+
+async def test_list_tags_returns_review_points(client, write_run, data_root):
+    """Create a real git repo with a tag, verify the endpoint
+    surfaces it with sha + message + timestamp."""
+    from git import Repo
+
+    write_run("run_with_tags", project_id="p1")
+    working = data_root / "runs" / "run_with_tags" / "workspace" / "working"
+    working.mkdir(parents=True, exist_ok=True)
+    repo = Repo.init(working)
+    # Initial commit (git needs a commit before tags can attach).
+    (working / "a.py").write_text("a")
+    repo.index.add(["a.py"])
+    repo.index.commit("initial")
+    repo.create_tag(
+        "review/1/reviewer", ref="HEAD", message="approved at iter 1"
+    )
+
+    r = await client.get("/api/runs/run_with_tags/tags")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["name"] == "review/1/reviewer"
+    assert body[0]["message"].startswith("approved at iter 1")
+    assert len(body[0]["sha"]) == 40
+    assert body[0]["short_sha"] == body[0]["sha"][:7]
+
+
 async def test_resume_unknown_run_404(client, auth_header):
     r = await client.post(
         "/api/runs/run_ghost/resume", headers=auth_header,

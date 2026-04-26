@@ -439,3 +439,15 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .persona-pick:hover { background: #f1f5f9; }
 .persona-pick.selected { background: #eff6ff; }
 .persona-pick input { margin: 0; }
+
+/* ─── Phase G.5 — review-point tags ──────────────────────────────────── */
+
+.tags-panel { background: #fefce8; border-color: #fde68a; }
+.tags-list {
+  list-style: none; padding: 0; margin: 8px 0 0 0;
+}
+.tags-list li {
+  padding: 6px 8px; border-bottom: 1px solid #fef3c7;
+  font-size: 13px;
+}
+.tags-list li:last-child { border-bottom: none; }

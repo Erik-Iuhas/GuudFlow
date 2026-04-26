@@ -227,3 +227,52 @@ def test_no_emit_when_emitter_is_none(tmp_path: Path):
     info = g.commit("developer", "feat: x")
     # Should not raise; commit succeeds without emitter.
     assert info.branch == "agent/developer"
+
+
+# ── Phase G.5 — review-point tagging ───────────────────────────────────────
+
+
+def test_tag_creates_annotated_tag(gw: GitWorkspace):
+    """Tag at the current main HEAD; list_tags reflects it."""
+    (gw.working_dir / "a.py").write_text("a")
+    gw.commit("developer", "feat: a")
+    gw.merge("agent/developer", into="main")
+
+    assert gw.tag("review/1/reviewer", message="approved at iter 1") is True
+
+    tags = gw.list_tags()
+    assert len(tags) == 1
+    assert tags[0]["name"] == "review/1/reviewer"
+    assert tags[0]["message"].startswith("approved at iter 1")
+    main_sha = gw.repo.heads.main.commit.hexsha
+    assert tags[0]["sha"] == main_sha
+    assert tags[0]["short_sha"] == main_sha[:7]
+
+
+def test_tag_duplicate_returns_false(gw: GitWorkspace):
+    (gw.working_dir / "a.py").write_text("a")
+    gw.commit("developer", "feat: a")
+    gw.merge("agent/developer", into="main")
+
+    assert gw.tag("review/1/reviewer", message="x") is True
+    assert gw.tag("review/1/reviewer", message="y") is False
+
+
+def test_list_tags_returns_in_chronological_order(gw: GitWorkspace):
+    import time
+    (gw.working_dir / "a.py").write_text("a")
+    gw.commit("developer", "feat: a")
+    gw.merge("agent/developer", into="main")
+    gw.tag("review/1/reviewer", message="first")
+
+    # Sleep so the tag timestamps differ — git's tagged_date has
+    # second resolution.
+    time.sleep(1.1)
+
+    (gw.working_dir / "b.py").write_text("b")
+    gw.commit("developer", "feat: b")
+    gw.merge("agent/developer", into="main")
+    gw.tag("review/2/reviewer", message="second")
+
+    tags = gw.list_tags()
+    assert [t["name"] for t in tags] == ["review/1/reviewer", "review/2/reviewer"]
