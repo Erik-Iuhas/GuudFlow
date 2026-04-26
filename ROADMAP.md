@@ -223,33 +223,39 @@ backends.
 
 ---
 
-## Phase G-prime — Run resume backend (~1.5 days, ships before G)
+## Phase G-prime — Run resume backend ✅ SHIPPED 2026-04-26
 
 Foundational gap surfaced by the user-stories doc: the architecture
-supports mid-run resume conceptually (git workspace + episodes +
-reputation persist) but `board.json` is only written at end-of-run,
-so a crashed run loses its signal trail. G-prime fixes that gap and
-ships the resume API surface so G's resume UI is pure frontend work.
+supported mid-run resume conceptually (git workspace + episodes +
+reputation persist) but `board.json` was only written at end-of-run,
+so a crashed run lost its signal trail. G-prime closed that gap and
+shipped the resume API surface so G's resume UI is pure frontend.
 
-Plan: [.claude/progress/plan-g-prime.md](.claude/progress/plan-g-prime.md).
-
-- [ ] **G-prime.0** — Incremental board persistence. Debounced
-      flush of board.json after every signal post (or on a 1s
-      timer, whichever fires first). Crash-safe within seconds.
-- [ ] **G-prime.1** — State restoration loader.
-      `core/run_loader.py:restore_workspace(run_root, project)`
-      reads board.json + git refs and reconstructs a Workspace
-      with the right `agent_states` and `iteration` to pick up.
-- [ ] **G-prime.2** — `POST /api/runs/{id}/resume` endpoint.
-      Re-enqueues a Job with `resume: true`. 404 unknown run, 409
-      if a job for this run is already active.
-- [ ] **G-prime.3** — Worker resume branch. When dequeued job has
-      `resume: true`, call `run_loader.restore_workspace` instead
-      of seeding fresh, then drive the scheduler from the
-      restored state.
-
-**Unblocks:** the "Solo dev wants to resume" story, all resume UI
-in G, and (forward) auto-tag rewinds in G.5.
+- [x] **G-prime.0** ([`44c40b6`](https://github.com/Erik-Iuhas/AgentFlow/commit/44c40b6))
+      Incremental board persistence — workspace persister hook +
+      `board.jsonl` JSONL trail (atomic per-line append, O(1) per
+      signal). End-of-run consolidated `board.json` unchanged for
+      backward compat.
+- [x] **G-prime.1** ([`fef6f1a`](https://github.com/Erik-Iuhas/AgentFlow/commit/fef6f1a))
+      State restoration loader — `core/run_loader.py:restore_workspace`
+      reads `board.jsonl` (or `board.json` fallback) +
+      `artifacts.json` + `meta.json` and reconstructs ws.board,
+      ws.user_board, ws.completed_agents, ws.agent_states,
+      ws.iteration, ws.artifacts. `Workspace.set_artifact` routes
+      through a persister so completed agents' outputs survive
+      a crash.
+- [x] **G-prime.2** ([`4818135`](https://github.com/Erik-Iuhas/AgentFlow/commit/4818135))
+      `POST /api/runs/{id}/resume` — re-enqueues a Job with
+      `payload.resume = True`. 404 unknown run, 400 already
+      complete, 409 if a job for this run is queued/running.
+- [x] **G-prime.3** Worker resume branch — `run_one` skips
+      `_initialize_run` and calls `restore_workspace` when the
+      payload carries `resume: true`. AgentRunner accepts
+      `restored_workspace=` and re-attaches subscriber +
+      persisters to the restored state. E2E test in
+      `tests/worker/test_job_runner_resume.py`: a crashed run
+      resumes and the second pass completes without re-running
+      the agent that succeeded the first time.
 
 ---
 

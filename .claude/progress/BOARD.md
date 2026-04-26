@@ -1,8 +1,8 @@
 # AgentFlow Build Board
 
-**Current stage:** ✅ Initial build + Phase A + D-prime + B + C + D + F shipped.
+**Current stage:** ✅ Initial build + Phase A + D-prime + B + C + D + F + G-prime shipped.
 **Last updated:** 2026-04-26
-**Tests:** 852 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
+**Tests:** 880 passed, 2 skipped (POSIX-only); studio typecheck + prod build green
 
 ## Stage status
 - [x] Stage 1 — Foundation primitives  (29/29 tests)
@@ -49,10 +49,15 @@ real target.
   F.4 (persona chat), F.1 (Training Camp: scenarios + rubric +
   tournaments + graduation + rankings), F.2 (catalog status:
   shipped vs described view)
+- ✅ **G-prime** — shipped 2026-04-26. Run resume backend:
+  incremental board.jsonl + artifact persistence, run_loader,
+  `POST /api/runs/{id}/resume`, worker resume branch. E2E:
+  failed run resumes without re-running completed agents.
 - **G** — studio polish, story-backed (re-scoped against
   [docs/USER_STORIES.md](../../docs/USER_STORIES.md) 2026-04-26).
-  First chunks: roster review UI, pipeline graph, onboarding,
-  run resume.
+  Seven chunks: G.0 roster review, G.1 pipeline graph, G.2
+  onboarding, G.3 resume UI (consumes G-prime), G.4 training
+  tab, G.5 auto-tag review points, G.6 polish.
 - **F.5** (future) — persona author depth: publish, scenario
   authoring, richer scenario kinds
 - **I** (future, Mode B tack-on) — headless service: webhook

@@ -189,6 +189,7 @@ def default_runner_factory(
     *,
     docker_manager: DockerManager | None = None,
     data_root: Path | None = None,
+    restored_workspace=None,
 ) -> AgentRunner:
     # Phase F.1.1 — wire the rubric_scorer + scenarios root so training
     # mode produces a RUBRIC_SCORE signal automatically. Production
@@ -207,6 +208,7 @@ def default_runner_factory(
         docker_manager=docker_manager,
         rubric_scorer=RubricScorer(),
         training_scenarios_root=scenarios_root,
+        restored_workspace=restored_workspace,
     )
 
 
@@ -315,28 +317,55 @@ class JobRunner:
         run_root = self.data_root / "runs" / job.run_id
         run_root.mkdir(parents=True, exist_ok=True)
 
-        # 2.5. Pre-flight initialisation (DESIGN §33). Copy project inputs
-        # into the run's workspace/inputs/, seed working/ from any
-        # source_repo, bundle attached prior runs' git history, and write
-        # the inputs/README.md index.
-        try:
-            self._initialize_run(job, run_root)
-        except Exception as e:
-            await self.queue.update_status(
-                job.job_id, JOB_FAILED,
-                error=f"run initialization failed: {e}",
-            )
-            return
+        # Phase G-prime.3 — resume branch. When the API enqueues a
+        # job with payload.resume = True, skip fresh initialisation
+        # (the workspace dir already exists with inputs + working/)
+        # and load the prior board + artifacts from disk so the
+        # scheduler can pick up where it left off.
+        is_resume = bool(job.payload.get("resume"))
+
+        if not is_resume:
+            # 2.5. Pre-flight initialisation (DESIGN §33). Copy project inputs
+            # into the run's workspace/inputs/, seed working/ from any
+            # source_repo, bundle attached prior runs' git history, and write
+            # the inputs/README.md index.
+            try:
+                self._initialize_run(job, run_root)
+            except Exception as e:
+                await self.queue.update_status(
+                    job.job_id, JOB_FAILED,
+                    error=f"run initialization failed: {e}",
+                )
+                return
+
+        restored_workspace = None
+        if is_resume:
+            from core.run_loader import restore_workspace as _restore
+            try:
+                restored_workspace = _restore(run_root, project)
+            except Exception as e:
+                await self.queue.update_status(
+                    job.job_id, JOB_FAILED,
+                    error=f"resume state restoration failed: {e}",
+                )
+                return
 
         # 3. Verify LLM client is configured.
         llm = self.llm or _build_default_llm()
 
         # 4. Construct runner. Thread docker_manager through so the
         # production code:exec routing in core/runner.py can reach it.
+        # On resume, also thread the restored workspace so the runner
+        # uses it instead of constructing a fresh one.
+        factory_kwargs: dict[str, Any] = {
+            "docker_manager": self.docker,
+            "data_root": self.data_root,
+        }
+        if restored_workspace is not None:
+            factory_kwargs["restored_workspace"] = restored_workspace
         runner = self.runner_factory(
             project, job.run_id, run_root, llm,
-            docker_manager=self.docker,
-            data_root=self.data_root,
+            **factory_kwargs,
         )
 
         # 5. Register live workspace for the WebSocket bridge.

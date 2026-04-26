@@ -174,6 +174,7 @@ class AgentRunner:
         docker_manager: "DockerManager | None" = None,
         rubric_scorer: BaseAgent | None = None,
         training_scenarios_root: Path | None = None,
+        restored_workspace: "Workspace | None" = None,
     ):
         self.project = project
         self.run_id = run_id
@@ -205,12 +206,20 @@ class AgentRunner:
         self._escalations_fired: dict[str, set[str]] = {}
         self._escalation_tasks: list[asyncio.Task] = []
 
-        # Set up workspace state.
-        self.workspace = Workspace(
-            run_id=run_id,
-            goal=project.goal,
-            max_iterations=project.max_iterations,
-        )
+        # Set up workspace state. Phase G-prime.3 — when restoring from
+        # a prior run, use the restored workspace and skip fresh
+        # construction. The restored workspace already has board +
+        # completed_agents + agent_states + artifacts; we just need
+        # to re-attach the live hooks (subscriber + persisters) since
+        # those are runner-bound, not persisted.
+        if restored_workspace is not None:
+            self.workspace = restored_workspace
+        else:
+            self.workspace = Workspace(
+                run_id=run_id,
+                goal=project.goal,
+                max_iterations=project.max_iterations,
+            )
         # Subscribe to the board so we can count REJECTED signals and
         # fire escalations when thresholds are crossed.
         self.workspace.subscribe(self._on_signal_for_escalation)

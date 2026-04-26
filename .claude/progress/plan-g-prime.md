@@ -1,4 +1,4 @@
-# Active plan — Phase G-prime — Run resume backend
+# Active plan — Phase G-prime — Run resume backend ✅ SHIPPED 2026-04-26
 
 Status: planned. Pre-Phase-G chunk. Estimated ~1.5 days across 4
 sub-chunks. Ships the backend so G's resume UI (G.3) is pure
@@ -31,7 +31,7 @@ button (G.3) calls this; CLI / API consumers can call it directly.
 
 ---
 
-## Chunk 0 — Incremental board persistence (~30 min)
+## Chunk 0 — Incremental board persistence ✅ SHIPPED [44c40b6]
 
 ### What lands
 
@@ -76,7 +76,7 @@ Commit: `feat(workspace): incremental board persistence (Phase G-prime.0)`
 
 ---
 
-## Chunk 1 — State restoration loader (~3-4 hrs)
+## Chunk 1 — State restoration loader ✅ SHIPPED [fef6f1a]
 
 ### What lands
 
@@ -128,7 +128,7 @@ Commit: `feat(core): run state restoration loader (Phase G-prime.1)`
 
 ---
 
-## Chunk 2 — Resume endpoint (~2 hrs)
+## Chunk 2 — Resume endpoint ✅ SHIPPED [4818135]
 
 ### What lands
 
@@ -162,7 +162,7 @@ Commit: `feat(api): POST /runs/{id}/resume (Phase G-prime.2)`
 
 ---
 
-## Chunk 3 — Worker resume branch (~3-4 hrs)
+## Chunk 3 — Worker resume branch ✅ SHIPPED 2026-04-26
 
 ### What lands
 
