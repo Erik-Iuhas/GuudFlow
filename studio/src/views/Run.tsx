@@ -11,6 +11,7 @@ import { AgentStateCard } from "../components/AgentStateCard";
 import { ApprovalCard } from "../components/ApprovalCard";
 import { BoardFeed } from "../components/BoardFeed";
 import { CommentBox } from "../components/CommentBox";
+import { FileTreeTab } from "../components/FileTreeTab";
 import { GitLogTab } from "../components/GitLogTab";
 import { PipelineGraph } from "../components/PipelineGraph";
 import { QuipFeed } from "../components/QuipFeed";
@@ -61,6 +62,7 @@ export function Run() {
   const [continueBusy, setContinueBusy] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const [resuming, setResuming] = useState(false);
+  const [boardTab, setBoardTab] = useState<"signals" | "files">("signals");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -276,7 +278,25 @@ export function Run() {
         )}
 
         <div className="run-board">
-          <BoardFeed signals={signals} />
+          <div className="tabs" style={{ marginBottom: 0, borderBottom: "1px solid #e2e8f0" }}>
+            <button
+              className={`tab ${boardTab === "signals" ? "tab-active" : ""}`}
+              onClick={() => setBoardTab("signals")}
+            >
+              Signals
+            </button>
+            <button
+              className={`tab ${boardTab === "files" ? "tab-active" : ""}`}
+              onClick={() => setBoardTab("files")}
+            >
+              Files
+            </button>
+          </div>
+          {boardTab === "signals" ? (
+            <BoardFeed signals={signals} />
+          ) : (
+            <FileTreeTab signals={signals} />
+          )}
         </div>
 
         <div className="run-side">
