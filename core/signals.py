@@ -88,6 +88,11 @@ class SignalType(str, Enum):
 
     PROTOCOL = "PROTOCOL"
 
+    # Agent-to-agent messaging (non-blocking). An agent posts AGENT_MESSAGE
+    # directed at another role; the recipient reads it at the start of their
+    # next turn. Replies are also AGENT_MESSAGE signals.
+    AGENT_MESSAGE = "AGENT_MESSAGE"
+
 
 Priority = Literal["normal", "high"]
 

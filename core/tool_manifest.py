@@ -262,6 +262,7 @@ class ToolManifestBuilder:
 # DESIGN §31 rule 74 — read tools are baseline; write tools require scope.
 BASELINE_LOCAL_SCOPES: frozenset[str] = frozenset({
     "fs-read", "fs-list", "fs-exists", "fs-read_range", "fs-grep",
+    "board-message",
     "git-diff", "git-changed-files", "git-log", "git-read", "git-status",
     "code-outline",
     "doc-markdown", "doc-html",

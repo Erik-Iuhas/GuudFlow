@@ -33,6 +33,7 @@ from typing import Any, Awaitable, Callable
 
 from agents.base import BaseAgent, ToolNotAvailable
 from agents.tools.base import BaseTool
+from agents.tools.board import BoardMessage
 from agents.tools.fs import (
     FsCreate,
     FsDelete,
@@ -394,6 +395,7 @@ class AgentRunner:
             FsEdit.name: FsEdit(self.files, claim_emitter, release_emitter),
             FsDelete.name: FsDelete(self.files, claim_emitter, release_emitter),
             FsRename.name: FsRename(self.files, claim_emitter, release_emitter),
+            BoardMessage.name: BoardMessage(role, self.workspace),
             GitDiff.name: GitDiff(self.git),
             GitChangedFiles.name: GitChangedFiles(self.git),
             GitLog.name: GitLog(self.git),
@@ -909,11 +911,35 @@ class AgentRunner:
             "\n\nUpstream dependencies summary:\n" + "\n".join(upstream_notes)
             if upstream_notes else ""
         )
+
+        # Inject any AGENT_MESSAGE signals directed at this role so the agent
+        # sees peer questions/notes without reading the raw board themselves.
+        import json as _json
+        pending_messages: list[str] = []
+        for sig in self.workspace.board:
+            if sig.type != SignalType.AGENT_MESSAGE or not sig.detail:
+                continue
+            try:
+                d = _json.loads(sig.detail)
+            except Exception:
+                continue
+            if d.get("to") == cfg.role:
+                pending_messages.append(
+                    f"  • From {d.get('from', '?')}: {d.get('message', '')}"
+                )
+        messages_ctx = (
+            "\n\nMessages from other agents waiting for your response:\n"
+            + "\n".join(pending_messages)
+            if pending_messages else ""
+        )
+
         task_prompt = (
             f"Project goal: {self.project.goal}\n\n"
-            f"Your role: {cfg.role}. {cfg.description}{upstream_ctx}\n\n"
-            f"Use the available tools to complete your work, then return a final "
-            f"response ending with the required protocol block (see system prompt)."
+            f"Your role: {cfg.role}. {cfg.description}{upstream_ctx}{messages_ctx}\n\n"
+            f"START WORKING NOW. Call `fs-list` or `git-changed-files` as your very "
+            f"first tool call to understand what already exists on disk. Then read, "
+            f"build, or review as your role requires. Do not describe what you will do — "
+            f"do it. End with the required protocol block once your work is complete."
         )
         messages: list[LLMMessage] = [LLMMessage(role="user", content=task_prompt)]
         guard = LoopGuard(cfg.loop_guard)
