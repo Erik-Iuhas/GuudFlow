@@ -86,7 +86,7 @@ def _signal_to_json(sig: Signal) -> dict[str, Any]:
 
 
 def _quip_to_json(q: Quip) -> dict[str, Any]:
-    return {"ts": q.ts, "persona": q.persona, "text": q.text, "event": q.event}
+    return {"ts": q.ts, "persona": q.persona, "role": q.role, "text": q.text, "event": q.event}
 
 
 @router.websocket("/ws/runs/{run_id}")

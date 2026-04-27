@@ -9,6 +9,12 @@ interface Props {
 
 const TIERS: ModelTier[] = ["heavy", "solid", "fast"];
 
+const TIER_MODEL: Record<ModelTier, string> = {
+  heavy: "opus-4-7",
+  solid: "sonnet-4-6",
+  fast: "haiku-4-5",
+};
+
 export function AgentCard({ agent, allRoles, onChange, onRemove }: Props) {
   return (
     <div className="card agent-card">
@@ -35,9 +41,10 @@ export function AgentCard({ agent, allRoles, onChange, onRemove }: Props) {
             key={t}
             className={agent.model_tier === t ? "primary" : ""}
             onClick={() => onChange({ model_tier: t })}
-            style={{ padding: "4px 10px" }}
+            style={{ padding: "4px 10px", display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}
           >
-            {t}
+            <span>{t}</span>
+            <span style={{ fontSize: 9, opacity: 0.7, fontFamily: "monospace" }}>{TIER_MODEL[t]}</span>
           </button>
         ))}
       </div>

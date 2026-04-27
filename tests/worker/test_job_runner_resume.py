@@ -104,7 +104,7 @@ async def test_resume_does_not_rerun_completed_agents(tmp_path: Path):
                 arguments={"path": "hello.py",
                            "content": "def greet():\n    return 'hi'\n"},
             )]),
-            MockTurn(text="Wrote hello.py"),
+            MockTurn(text="[COMMIT]\n  summary: wrote hello.py\n  files: hello.py"),
         ]),
         memory_writer=MemoryWriter(),
     )
@@ -164,7 +164,7 @@ async def test_resume_does_not_rerun_completed_agents(tmp_path: Path):
             id="t1", name="git-diff",
             arguments={"branch_a": "agent/developer", "branch_b": "main"},
         )]),
-        MockTurn(text="APPROVED"),
+        MockTurn(text="[VERIFY] PASS"),
     ])
 
     from worker.docker_manager import DockerManager

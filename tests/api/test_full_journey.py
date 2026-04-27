@@ -180,13 +180,13 @@ async def test_full_user_journey(
             name="fs-write",
             arguments={"path": "hello.py", "content": "def greet():\n    return 'hi'\n"},
         )]),
-        MockTurn(text="Wrote hello.py with greet()"),
+        MockTurn(text="[COMMIT]\n  summary: wrote greet()\n  files: hello.py"),
         MockTurn(tool_calls=[ToolCall(
             id="rev_t1",
             name="git-diff",
             arguments={"branch_a": "agent/developer", "branch_b": "main"},
         )]),
-        MockTurn(text="APPROVED"),
+        MockTurn(text="[VERIFY] PASS"),
     ])
 
     async def loader(project_id: str):

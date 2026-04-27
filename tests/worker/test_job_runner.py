@@ -199,12 +199,12 @@ async def test_job_runner_runs_one_job_to_completion(tmp_path: Path, monkeypatch
             id="dev_t1", name="fs-write",
             arguments={"path": "hello.py", "content": "print('hi')"},
         )]),
-        MockTurn(text="Wrote hello.py"),
+        MockTurn(text="[COMMIT]\n  summary: wrote hello.py\n  files: hello.py"),
         MockTurn(tool_calls=[ToolCall(
             id="rev_t1", name="git-diff",
             arguments={"branch_a": "agent/developer", "branch_b": "main"},
         )]),
-        MockTurn(text="APPROVED"),
+        MockTurn(text="[VERIFY] PASS"),
     ])
 
     worker = JobRunner(

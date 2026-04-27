@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from core.llm import MockLLMClient, MockTurn
-from core.quip_engine import Quip, QuipEngine
+from core.quip_engine import AgentVoice, Quip, QuipEngine
 from core.scheduler import SchedulerResult, SchedulerStatus
 from core.workspace import Workspace
 
@@ -20,7 +20,8 @@ def workspace() -> Workspace:
 
 async def test_quip_on_run_complete_persists_to_disk(tmp_path: Path, workspace: Workspace):
     llm = MockLLMClient([MockTurn(text="ship it")])
-    engine = QuipEngine(llm=llm, log_path=tmp_path / "quip.json", persona_name="Aria")
+    engine = QuipEngine(llm=llm, log_path=tmp_path / "quip.json")
+    engine.set_voices([AgentVoice(role="developer", name="Aria", character="Focused engineer.")])
     result = SchedulerResult(
         status=SchedulerStatus.COMPLETE,
         completed=["developer", "reviewer"],
@@ -177,5 +178,5 @@ def test_quips_returns_a_copy(tmp_path: Path):
     """Mutating the returned list must not affect engine state."""
     engine = QuipEngine(llm=MockLLMClient([]), log_path=tmp_path / "q.json")
     snapshot = engine.quips()
-    snapshot.append(Quip(ts="x", persona="x", text="x", event="x"))
+    snapshot.append(Quip(ts="x", persona="x", role="x", text="x", event="x"))
     assert engine.quips() == []

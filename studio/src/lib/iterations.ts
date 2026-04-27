@@ -64,9 +64,9 @@ export function summariseAgents(
 
     if (sig.type === "STARTED") {
       summary.state = "running";
-    } else if (sig.type === "COMPLETE") {
+    } else if (sig.type === "COMPLETE" || sig.type === "APPROVED") {
       summary.state = "complete";
-    } else if (sig.type === "FAILED") {
+    } else if (sig.type === "FAILED" || sig.type === "REJECTED") {
       summary.state = "failed";
     } else if (sig.type === "HUMAN_NEEDED") {
       summary.state = "waiting_for_human";

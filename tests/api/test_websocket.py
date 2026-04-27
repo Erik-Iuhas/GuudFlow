@@ -136,10 +136,10 @@ def test_quip_websocket_streams_live_quips(sync_client, app, tmp_path):
 
         # Manually push a quip through the engine (skip the LLM call).
         q = Quip(
-            ts="2026-04-26T10:01:00Z", persona="system",
+            ts="2026-04-26T10:01:00Z", persona="system", role="system",
             text="live one", event="iteration_complete",
         )
-        engine._append(q)
+        engine._quips.append(q)
         engine._notify(q)
 
         live = ws.receive_json()
@@ -156,8 +156,8 @@ def test_quip_websocket_initial_snapshot_includes_existing_quips(
     from core.quip_engine import Quip
 
     engine = _register_quip_engine(app, "run_with_history", tmp_path / "q.json")
-    engine._append(Quip(ts="t1", persona="p", text="early", event="iteration_complete"))
-    engine._append(Quip(ts="t2", persona="p", text="middle", event="iteration_complete"))
+    engine._quips.append(Quip(ts="t1", persona="p", role="r", text="early", event="iteration_complete"))
+    engine._quips.append(Quip(ts="t2", persona="p", role="r", text="middle", event="iteration_complete"))
 
     with sync_client.websocket_connect("/ws/runs/run_with_history/quips") as ws:
         snapshot = ws.receive_json()

@@ -417,6 +417,12 @@ class JobRunner:
             except Exception:
                 pass
 
+        # 5.9. Write an initial meta.json so GET /runs/{run_id} works
+        # immediately while the run is live. The frontend uses this to
+        # load project config and render the pipeline graph before the
+        # run finishes. Overwritten at the end by _persist_run.
+        _persist_run(run_root, runner, job.run_id, job.project_id, "running")
+
         # 6. Container lifecycle (stub in dev, real in production).
         try:
             await self.docker.start(
