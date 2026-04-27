@@ -106,14 +106,43 @@ class QuipEngine:
 
     async def on_run_complete(self, workspace: Workspace, result: SchedulerResult) -> None:
         """A randomly chosen team member reacts to the overall run outcome."""
+        from core.signals import SignalType
         voice = self._random_voice()
         status = result.status.value
         done = ", ".join(result.completed) or "(none)"
         failed = ", ".join(result.failed) or "none"
-        context = (
-            f"The run just finished with status: {status}. "
-            f"Completed agents: {done}. Failed: {failed}."
-        )
+
+        # Check the board for reviewer verdicts — the scheduler reports
+        # COMPLETE when all agents ran, regardless of whether a reviewer
+        # posted REJECTED. The quip must reflect the actual verdict.
+        rejected_signals = [
+            s for s in workspace.board
+            if s.type == SignalType.REJECTED
+        ]
+        approved_signals = [
+            s for s in workspace.board
+            if s.type == SignalType.APPROVED
+        ]
+
+        if rejected_signals:
+            rejecting_agents = ", ".join(
+                s.from_agent for s in rejected_signals if s.from_agent
+            ) or "a reviewer"
+            context = (
+                f"The run just finished with status: {status}, but "
+                f"the work was REJECTED by {rejecting_agents}. "
+                f"The deliverables did NOT pass review — this is a failure, not a success."
+            )
+        elif approved_signals:
+            context = (
+                f"The run just finished with status: {status}. "
+                f"The work was APPROVED. Completed: {done}."
+            )
+        else:
+            context = (
+                f"The run just finished with status: {status}. "
+                f"Completed agents: {done}. Failed: {failed}."
+            )
         quip = await self._generate(voice, context, event="run_complete")
         self._save(quip)
 

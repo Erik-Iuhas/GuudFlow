@@ -66,7 +66,7 @@ _DEFAULT_ENV_ALLOW: frozenset[str] = frozenset({
     "PATH", "HOME", "USERPROFILE", "TEMP", "TMP", "TMPDIR",
     "LANG", "LC_ALL", "LC_CTYPE",
     "PYTHONPATH",  # needed if subprocess runs python that imports project code
-    "SYSTEMROOT", "COMSPEC", "WINDIR",  # required on Windows
+    "SYSTEMROOT", "SYSTEMDRIVE", "COMSPEC", "WINDIR",  # required on Windows
 })
 
 
