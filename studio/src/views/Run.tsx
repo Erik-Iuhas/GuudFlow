@@ -73,6 +73,13 @@ export function Run() {
         if (msg.type === "snapshot" && msg.signals) {
           setSignals(msg.signals);
           setConnected(true);
+          // meta.json may not exist yet when the browser navigates here
+          // immediately after invoke (worker hasn't written it yet).
+          // Re-try once the WS confirms the run is live.
+          setMeta((prev) => {
+            if (!prev) void loadMeta();
+            return prev;
+          });
         } else if (msg.type === "signal" && msg.signal) {
           setSignals((prev) => [...prev, msg.signal as Signal]);
         } else if (msg.type === "error") {
