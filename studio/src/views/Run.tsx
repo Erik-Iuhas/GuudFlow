@@ -69,19 +69,26 @@ export function Run() {
     if (!runId) return;
     void loadMeta();
 
+    // Poll for meta.json until it arrives — the worker may not have written
+    // it yet when the browser navigates here immediately after invoke.
+    let metaPollTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
+      setMeta((prev) => {
+        if (prev) {
+          // Meta arrived — stop polling.
+          if (metaPollTimer) { clearInterval(metaPollTimer); metaPollTimer = null; }
+          return prev;
+        }
+        void loadMeta();
+        return prev;
+      });
+    }, 3000);
+
     const ws = connectRunStream(
       runId,
       (msg) => {
         if (msg.type === "snapshot" && msg.signals) {
           setSignals(msg.signals);
           setConnected(true);
-          // meta.json may not exist yet when the browser navigates here
-          // immediately after invoke (worker hasn't written it yet).
-          // Re-try once the WS confirms the run is live.
-          setMeta((prev) => {
-            if (!prev) void loadMeta();
-            return prev;
-          });
         } else if (msg.type === "signal" && msg.signal) {
           setSignals((prev) => [...prev, msg.signal as Signal]);
         } else if (msg.type === "error") {
@@ -94,6 +101,7 @@ export function Run() {
     return () => {
       ws.close();
       wsRef.current = null;
+      if (metaPollTimer) clearInterval(metaPollTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
@@ -127,8 +135,26 @@ export function Run() {
     setError(null);
     try {
       await runsApi.resume(runId);
-      // Re-load meta + reconnect — the websocket should pick up
-      // the new signals (including the synthetic "resumed" banner).
+      // Close the old WS and open a fresh one — the worker starts a new
+      // stream when it picks up the resumed job.
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      setConnected(false);
+      const ws = connectRunStream(
+        runId,
+        (msg) => {
+          if (msg.type === "snapshot" && msg.signals) {
+            setSignals(msg.signals);
+            setConnected(true);
+          } else if (msg.type === "signal" && msg.signal) {
+            setSignals((prev) => [...prev, msg.signal as Signal]);
+          }
+        },
+        () => setConnected(false),
+      );
+      wsRef.current = ws;
       await loadMeta();
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
