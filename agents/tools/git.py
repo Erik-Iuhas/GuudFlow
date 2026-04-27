@@ -17,9 +17,59 @@ def _err(msg: str) -> dict[str, Any]:
     return {"error": msg}
 
 
+_DIFF_CHAR_LIMIT = 6000  # ~1500 tokens — safe for a single file diff
+
+
 class GitDiff(BaseTool):
     name = "git-diff"
-    description = "Show the diff between two branches in the working/ git repo."
+    description = (
+        "Show the diff between two branches. "
+        "Always pass `path` to diff a single file — never call without `path` "
+        "on a large codebase, or you will exceed token limits. "
+        "Use git-changed-files first to get the list of changed paths."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "branch_a": {"type": "string", "description": "branch with new changes"},
+            "branch_b": {"type": "string", "description": "base branch (default 'main')"},
+            "path": {"type": "string", "description": "restrict diff to this file path"},
+        },
+        "required": ["branch_a"],
+    }
+
+    def __init__(self, git: GitWorkspace):
+        self.git = git
+
+    async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        a = arguments.get("branch_a")
+        b = arguments.get("branch_b", "main")
+        path = arguments.get("path") or None
+        if not a or not isinstance(a, str):
+            return _err("missing required argument: branch_a")
+        try:
+            diff = self.git.diff(a, b, path=path)
+        except GitWorkspaceError as e:
+            return _err(str(e))
+        except Exception as e:
+            return _err(f"git diff failed: {e}")
+        truncated = False
+        if len(diff) > _DIFF_CHAR_LIMIT:
+            diff = diff[:_DIFF_CHAR_LIMIT]
+            truncated = True
+        return {
+            "ok": True,
+            "branch_a": a,
+            "branch_b": b,
+            "path": path,
+            "diff": diff,
+            "truncated": truncated,
+        }
+
+
+class GitChangedFiles(BaseTool):
+    name = "git-changed-files"
+    description = "List file paths changed in branch_a vs branch_b. Use this before git-diff to review files one at a time."
     input_schema = {
         "type": "object",
         "properties": {
@@ -38,12 +88,12 @@ class GitDiff(BaseTool):
         if not a or not isinstance(a, str):
             return _err("missing required argument: branch_a")
         try:
-            diff = self.git.diff(a, b)
+            files = self.git.changed_files(a, b)
         except GitWorkspaceError as e:
             return _err(str(e))
         except Exception as e:
-            return _err(f"git diff failed: {e}")
-        return {"ok": True, "branch_a": a, "branch_b": b, "diff": diff}
+            return _err(f"git changed-files failed: {e}")
+        return {"ok": True, "branch_a": a, "branch_b": b, "files": files, "count": len(files)}
 
 
 class GitLog(BaseTool):

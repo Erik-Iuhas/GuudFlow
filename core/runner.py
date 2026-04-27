@@ -45,7 +45,7 @@ from agents.tools.fs import (
     FsRename,
     FsWrite,
 )
-from agents.tools.git import GitDiff, GitLog, GitRead, GitStatus
+from agents.tools.git import GitChangedFiles, GitDiff, GitLog, GitRead, GitStatus
 from core import protocol
 from core.context_manager import ContextManager
 from core.credentials_broker import CredentialsBroker
@@ -395,6 +395,7 @@ class AgentRunner:
             FsDelete.name: FsDelete(self.files, claim_emitter, release_emitter),
             FsRename.name: FsRename(self.files, claim_emitter, release_emitter),
             GitDiff.name: GitDiff(self.git),
+            GitChangedFiles.name: GitChangedFiles(self.git),
             GitLog.name: GitLog(self.git),
             GitRead.name: GitRead(self.git),
             GitStatus.name: GitStatus(self.git),

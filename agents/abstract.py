@@ -79,7 +79,7 @@ class Reviewer(AgentArchetype):
     default_model_tier: ClassVar[str] = "solid"
     default_tools: ClassVar[tuple[str, ...]] = (
         "fs-read", "fs-list", "fs-read_range", "fs-grep",
-        "git-diff", "git-log", "git-read", "git-status",
+        "git-diff", "git-changed-files", "git-log", "git-read", "git-status",
     )
     # Reviewers don't write — they decide. Concrete subclasses can
     # widen this if they need to (e.g. a reviewer that auto-files

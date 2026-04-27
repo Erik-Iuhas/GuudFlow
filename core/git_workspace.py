@@ -222,9 +222,21 @@ class GitWorkspace:
         except GitCommandError as e:
             raise FileNotFoundError(f"{path!r} not found on branch {branch!r}") from e
 
-    def diff(self, branch_a: str, branch_b: str = "main") -> str:
-        """Return the unified diff of `branch_a` vs `branch_b`."""
-        return self.repo.git.diff(f"{branch_b}...{branch_a}")
+    def diff(self, branch_a: str, branch_b: str = "main", path: str | None = None) -> str:
+        """Return the unified diff of `branch_a` vs `branch_b`.
+
+        If `path` is given, restrict the diff to that single file so
+        reviewers can work file-by-file without blowing the token budget.
+        """
+        range_arg = f"{branch_b}...{branch_a}"
+        if path:
+            return self.repo.git.diff(range_arg, "--", path)
+        return self.repo.git.diff(range_arg)
+
+    def changed_files(self, branch_a: str, branch_b: str = "main") -> list[str]:
+        """Return the list of file paths changed in `branch_a` vs `branch_b`."""
+        output: str = self.repo.git.diff("--name-only", f"{branch_b}...{branch_a}")
+        return [p for p in output.splitlines() if p.strip()]
 
     def status(self) -> GitStatusResult:
         """Return uncommitted state on the current branch.
