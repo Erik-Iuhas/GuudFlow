@@ -248,9 +248,8 @@ export function Run() {
           ))}
         </div>
 
-        {/* Phase G.1 — pipeline graph + per-agent state cards above
-            the BoardFeed so the user can answer "what's the team
-            doing right now?" without reading the board linearly. */}
+        {/* Pipeline graph — compact, graph only. Agent state cards live
+            in the side rail so they don't eat the board's vertical space. */}
         {project && (project.agents ?? []).length > 0 && (
           <div className="run-pipeline">
             <PipelineGraph
@@ -260,20 +259,6 @@ export function Run() {
                 signals,
               )}
             />
-            <div className="agent-state-cards">
-              {Array.from(
-                summariseAgents(
-                  (project.agents ?? []).map((a) => a.role),
-                  signals,
-                ).values(),
-              ).map((s) => (
-                <AgentStateCard
-                  key={s.role}
-                  summary={s}
-                  allSignals={signals}
-                />
-              ))}
-            </div>
           </div>
         )}
 
@@ -300,6 +285,24 @@ export function Run() {
         </div>
 
         <div className="run-side">
+          {/* Agent state cards in the side rail — keeps the pipeline
+              row compact and gives the board full vertical space. */}
+          {project && (project.agents ?? []).length > 0 && (
+            <div className="agent-state-cards">
+              {Array.from(
+                summariseAgents(
+                  (project.agents ?? []).map((a) => a.role),
+                  signals,
+                ).values(),
+              ).map((s) => (
+                <AgentStateCard
+                  key={s.role}
+                  summary={s}
+                  allSignals={signals}
+                />
+              ))}
+            </div>
+          )}
           <QuipFeed runId={runId} />
           <ScreenshotPane signals={signals} />
           <GitLogTab signals={signals} />

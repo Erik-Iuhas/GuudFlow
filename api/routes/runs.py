@@ -26,7 +26,16 @@ async def list_runs(
     project_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
 ) -> list[dict]:
-    return await _store(request).list(project_id=project_id, limit=limit)
+    runs = await _store(request).list(project_id=project_id, limit=limit)
+    # Override status to "running" for any run the registry knows is live.
+    # This handles resumed runs whose meta.json still says "stuck".
+    registry = getattr(request.app.state, "run_registry", None)
+    if registry is not None:
+        active_ids: set[str] = set(registry.runs.keys())
+        for r in runs:
+            if r.get("run_id") in active_ids:
+                r["status"] = "running"
+    return runs
 
 
 @router.get("/{run_id}")

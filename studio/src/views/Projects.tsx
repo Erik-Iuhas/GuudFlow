@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ApiError, projectsApi } from "../api";
-import type { ProjectConfig } from "../types";
+import { ApiError, projectsApi, runsApi } from "../api";
+import type { ProjectConfig, RunMeta } from "../types";
 
 export function Projects() {
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
+  const [activeRuns, setActiveRuns] = useState<RunMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -18,7 +19,19 @@ export function Projects() {
 
   useEffect(() => {
     void load();
+    void loadActiveRuns();
+    const timer = setInterval(() => void loadActiveRuns(), 5000);
+    return () => clearInterval(timer);
   }, []);
+
+  async function loadActiveRuns() {
+    try {
+      const runs = await runsApi.list();
+      setActiveRuns(runs.filter((r) => r.status === "running" || r.status === "queued"));
+    } catch {
+      /* non-fatal */
+    }
+  }
 
   // Close the menu when clicking outside.
   useEffect(() => {
@@ -177,6 +190,54 @@ export function Projects() {
       </div>
 
       {error && <div className="error">{error}</div>}
+
+      {activeRuns.length > 0 && (
+        <div className="card" style={{ marginBottom: 16, padding: "12px 16px" }}>
+          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+            <span
+              style={{
+                display: "inline-block",
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "#16a34a",
+                animation: "pulse 1.5s infinite",
+              }}
+            />
+            <strong className="small">Active runs</strong>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {activeRuns.map((r) => (
+              <Link
+                key={r.run_id}
+                to={`/runs/${r.run_id}`}
+                style={{ textDecoration: "none" }}
+              >
+                <div
+                  className="row"
+                  style={{
+                    padding: "8px 12px",
+                    background: "#f0fdf4",
+                    border: "1px solid #bbf7d0",
+                    borderRadius: 6,
+                    gap: 12,
+                  }}
+                >
+                  <span className={`tag tag-status-${r.status}`}>{r.status}</span>
+                  <span className="mono small" style={{ flex: 1, color: "#1e40af" }}>
+                    {r.run_id}
+                  </span>
+                  <span className="small muted">{r.project_id}</span>
+                  <span className="small muted">
+                    {r.created_at ? new Date(r.created_at).toLocaleTimeString() : ""}
+                  </span>
+                  <span className="small" style={{ color: "#6b7280" }}>Watch →</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className="muted">loading…</p>
