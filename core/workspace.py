@@ -77,6 +77,7 @@ class CommitRecord:
     agent: str
     message: str
     iteration: int
+    files: list[str] = field(default_factory=list)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 

@@ -102,7 +102,7 @@ async def test_fs_write_emits_claim_and_release(fw: FileWorkspace, emitters, cla
     res = await tool.run({"path": "auth.py", "content": "x = 1"})
     assert res["ok"] is True
     assert claim_log["claims"] == [("edit", "auth.py")]
-    assert claim_log["releases"] == [("auth.py", "committed", None)]
+    assert claim_log["releases"] == [("auth.py", "written", None)]
 
 
 async def test_fs_write_aborts_release_on_path_safety(fw: FileWorkspace, emitters, claim_log):

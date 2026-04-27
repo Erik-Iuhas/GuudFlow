@@ -873,23 +873,40 @@ class AgentRunner:
         agent: BaseAgent,
         cfg: AgentConfig,
     ) -> "protocol.CompactBlock | str":
-        # Warn the agent if any upstream dependency produced no file commits
-        # — the design or prior work may be missing and the agent must not
-        # assume it exists on disk.
-        upstream_warnings: list[str] = []
+        # Build a context block about every upstream dependency — listing
+        # which files they committed so the agent knows what artifacts exist.
+        upstream_notes: list[str] = []
         for dep_role in cfg.depends_on:
-            dep_has_commits = any(
-                c.agent == dep_role for c in self.workspace.git.commits
-            )
-            if not dep_has_commits:
-                upstream_warnings.append(
+            dep_commits = [c for c in self.workspace.git.commits if c.agent == dep_role]
+            if not dep_commits:
+                upstream_notes.append(
                     f"⚠ '{dep_role}' completed but produced NO file commits — "
-                    f"do not assume any design artifacts exist on disk. "
-                    f"You must either create them yourself or work from the goal alone."
+                    f"do not assume any artifacts exist on disk. "
+                    f"You must create them yourself or work from the goal alone."
                 )
+            else:
+                # Collect the files committed by this upstream agent
+                dep_files: list[str] = []
+                for commit in dep_commits:
+                    if hasattr(commit, "files") and commit.files:
+                        dep_files.extend(commit.files)
+                if dep_files:
+                    file_list = "\n  ".join(dep_files[:30])
+                    upstream_notes.append(
+                        f"'{dep_role}' committed {len(dep_files)} file(s):\n  {file_list}\n"
+                        f"Read these files to understand what has been produced before starting your own work."
+                    )
+                else:
+                    # commits recorded but no file metadata — list commit messages instead
+                    msgs = "; ".join(c.message for c in dep_commits[:5])
+                    upstream_notes.append(
+                        f"'{dep_role}' made {len(dep_commits)} commit(s): {msgs}. "
+                        f"Read the working directory to see what files were created."
+                    )
 
         upstream_ctx = (
-            "\n\n" + "\n".join(upstream_warnings) if upstream_warnings else ""
+            "\n\nUpstream dependencies summary:\n" + "\n".join(upstream_notes)
+            if upstream_notes else ""
         )
         task_prompt = (
             f"Project goal: {self.project.goal}\n\n"
@@ -1014,6 +1031,8 @@ class AgentRunner:
             if status.clean:
                 return None
 
+            changed_files = [e.path for e in status.entries]
+
             try:
                 info = self.git.commit(role, message=f"feat: {role} iteration {workspace.iteration}")
             except Exception:
@@ -1025,6 +1044,7 @@ class AgentRunner:
                 agent=role,
                 message=info.message,
                 iteration=workspace.iteration,
+                files=changed_files,
             ))
             # Post a GIT_COMMIT signal attributed to the agent role so the
             # board (and the Studio git-activity tab) can surface it.

@@ -29,10 +29,9 @@ The emitter posts a FILE_CLAIM. The release is fired by the tool itself
 on success/failure."""
 
 ReleaseEmitter = Callable[[str, str, str | None], Awaitable[None]]
-"""(path, outcome, commit_hash) → None.  outcome ∈ {"committed", "aborted"}.
-"committed" is fired even before a real git commit — claim release is
-about coordination, not git state. The runner can lift the outcome to
-"committed" on actual commit later."""
+"""(path, outcome, commit_hash) → None.  outcome ∈ {"written", "aborted"}.
+"written" means the file was written to disk; git commit happens later
+in _auto_commit() and is signalled separately via GIT_COMMIT."""
 
 
 def _err(msg: str) -> dict[str, Any]:
@@ -346,7 +345,7 @@ class FsWrite(_ClaimingTool):
         except OSError as e:
             await self._release(path, "aborted")
             return _err(f"write failed: {e}")
-        await self._release(path, "committed")
+        await self._release(path, "written")
         return _ok(path=path, bytes_written=len(content.encode("utf-8")))
 
 
@@ -382,7 +381,7 @@ class FsCreate(_ClaimingTool):
         except OSError as e:
             await self._release(path, "aborted")
             return _err(f"create failed: {e}")
-        await self._release(path, "committed")
+        await self._release(path, "written")
         return _ok(path=path, created=True, bytes_written=len(content.encode("utf-8")))
 
 
@@ -452,7 +451,7 @@ class FsEdit(_ClaimingTool):
         except OSError as e:
             await self._release(path, "aborted")
             return _err(f"write failed: {e}")
-        await self._release(path, "committed")
+        await self._release(path, "written")
         return _ok(path=path, replacements=replacements)
 
 
@@ -484,7 +483,7 @@ class FsDelete(_ClaimingTool):
         except OSError as e:
             await self._release(path, "aborted")
             return _err(f"delete failed: {e}")
-        await self._release(path, "committed")
+        await self._release(path, "written")
         return _ok(path=path, deleted=True)
 
 
@@ -531,6 +530,6 @@ class FsRename(_ClaimingTool):
             await self._release(src, "aborted")
             await self._release(dst, "aborted")
             return _err(f"rename failed: {e}")
-        await self._release(src, "committed")
-        await self._release(dst, "committed")
+        await self._release(src, "written")
+        await self._release(dst, "written")
         return _ok(src=src, dst=dst)
