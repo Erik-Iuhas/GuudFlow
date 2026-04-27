@@ -109,7 +109,12 @@ export function Studio() {
   }>(null);
 
   async function runNow(confirm = false) {
-    if (!id) return;
+    if (!id || !project) return;
+    // Always persist current agent config before invoking so model_tier
+    // changes and other edits made in the UI are actually used by the run.
+    if (!confirm) {
+      await save();
+    }
     try {
       const res = await invokeApi.invoke(id, confirm ? { confirm: true } : {});
       if (res.accepted) {

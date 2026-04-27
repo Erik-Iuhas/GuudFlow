@@ -228,6 +228,10 @@ class AgentRunner:
         self._rejection_counts: dict[str, int] = {}
         self._escalations_fired: dict[str, set[str]] = {}
         self._escalation_tasks: list[asyncio.Task] = []
+        # Serialize git operations across parallel agents — a shared
+        # working directory with concurrent checkouts causes race conditions
+        # where one agent's `git add -A` picks up another agent's file writes.
+        self._git_lock = asyncio.Lock()
 
         # Set up workspace state. Phase G-prime.3 — when restoring from
         # a prior run, use the restored workspace and skip fresh
@@ -691,6 +695,13 @@ class AgentRunner:
 
             await agent.signal(workspace, SignalType.STARTED, summary=f"started ({cfg.role})")
 
+            # Quip: agent reacts to receiving the baton (handoff moment).
+            if self.quip_engine is not None:
+                try:
+                    await self.quip_engine.on_agent_started(cfg.role, workspace)
+                except Exception:
+                    pass
+
             try:
                 drive_result = await self._drive_agent_run(agent, cfg)
             except Exception as e:
@@ -862,9 +873,27 @@ class AgentRunner:
         agent: BaseAgent,
         cfg: AgentConfig,
     ) -> "protocol.CompactBlock | str":
+        # Warn the agent if any upstream dependency produced no file commits
+        # — the design or prior work may be missing and the agent must not
+        # assume it exists on disk.
+        upstream_warnings: list[str] = []
+        for dep_role in cfg.depends_on:
+            dep_has_commits = any(
+                c.agent == dep_role for c in self.workspace.git.commits
+            )
+            if not dep_has_commits:
+                upstream_warnings.append(
+                    f"⚠ '{dep_role}' completed but produced NO file commits — "
+                    f"do not assume any design artifacts exist on disk. "
+                    f"You must either create them yourself or work from the goal alone."
+                )
+
+        upstream_ctx = (
+            "\n\n" + "\n".join(upstream_warnings) if upstream_warnings else ""
+        )
         task_prompt = (
             f"Project goal: {self.project.goal}\n\n"
-            f"Your role: {cfg.role}. {cfg.description}\n\n"
+            f"Your role: {cfg.role}. {cfg.description}{upstream_ctx}\n\n"
             f"Use the available tools to complete your work, then return a final "
             f"response ending with the required protocol block (see system prompt)."
         )
@@ -968,30 +997,44 @@ class AgentRunner:
         return "(max tool iterations reached)"
 
     async def _auto_commit(self, role: str, workspace: Workspace) -> str | None:
-        """Stage and commit any uncommitted changes on the agent's branch."""
-        try:
-            branch = self.git.agent_branch(role)
-            workspace.git.agent_branches[role] = branch
-        except Exception:
-            return None
+        """Stage and commit any uncommitted changes on the agent's branch.
 
-        status = self.git.status()
-        if status.clean:
-            return None
+        Serialized via _git_lock so parallel agents don't race on the
+        shared working directory — concurrent `git add -A` + checkout
+        would mix files from different agents into the wrong branch.
+        """
+        async with self._git_lock:
+            try:
+                branch = self.git.agent_branch(role)
+                workspace.git.agent_branches[role] = branch
+            except Exception:
+                return None
 
-        try:
-            info = self.git.commit(role, message=f"feat: {role} iteration {workspace.iteration}")
-        except Exception:
-            return None
+            status = self.git.status()
+            if status.clean:
+                return None
 
-        workspace.git.commits.append(CommitRecord(
-            hash=info.hash,
-            branch=info.branch,
-            agent=role,
-            message=info.message,
-            iteration=workspace.iteration,
-        ))
-        return info.hash
+            try:
+                info = self.git.commit(role, message=f"feat: {role} iteration {workspace.iteration}")
+            except Exception:
+                return None
+
+            workspace.git.commits.append(CommitRecord(
+                hash=info.hash,
+                branch=info.branch,
+                agent=role,
+                message=info.message,
+                iteration=workspace.iteration,
+            ))
+            # Post a GIT_COMMIT signal attributed to the agent role so the
+            # board (and the Studio git-activity tab) can surface it.
+            workspace.post_signal(Signal(
+                type=SignalType.GIT_COMMIT,
+                summary=f"{role}: committed {info.hash[:7]} — {info.message}",
+                from_agent=role,
+                detail=info.hash,
+            ))
+            return info.hash
 
     # ── Memory writer ───────────────────────────────────────────────────────
 

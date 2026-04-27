@@ -1,4 +1,4 @@
-import type { AgentConfig, ModelTier } from "../types";
+import type { AgentConfig } from "../types";
 
 interface Props {
   agent: AgentConfig;
@@ -7,13 +7,18 @@ interface Props {
   onRemove: () => void;
 }
 
-const TIERS: ModelTier[] = ["heavy", "solid", "fast"];
+interface ModelOption {
+  value: string;       // stored as model_tier (tier name or model ID)
+  label: string;
+  sublabel: string;
+  provider: string;
+}
 
-const TIER_MODEL: Record<ModelTier, string> = {
-  heavy: "opus-4-7",
-  solid: "sonnet-4-6",
-  fast: "haiku-4-5",
-};
+const ANTHROPIC_MODELS: ModelOption[] = [
+  { value: "heavy",   label: "Heavy",  sublabel: "claude-opus-4-7",            provider: "Anthropic" },
+  { value: "solid",   label: "Solid",  sublabel: "claude-sonnet-4-6",          provider: "Anthropic" },
+  { value: "fast",    label: "Fast",   sublabel: "claude-haiku-4-5-20251001",  provider: "Anthropic" },
+];
 
 export function AgentCard({ agent, allRoles, onChange, onRemove }: Props) {
   return (
@@ -34,19 +39,19 @@ export function AgentCard({ agent, allRoles, onChange, onRemove }: Props) {
         onChange={(e) => onChange({ system_prompt: e.target.value })}
       />
 
-      <div className="tier-row">
-        <label className="small" style={{ margin: 0 }}>Model tier:</label>
-        {TIERS.map((t) => (
-          <button
-            key={t}
-            className={agent.model_tier === t ? "primary" : ""}
-            onClick={() => onChange({ model_tier: t })}
-            style={{ padding: "4px 10px", display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}
-          >
-            <span>{t}</span>
-            <span style={{ fontSize: 9, opacity: 0.7, fontFamily: "monospace" }}>{TIER_MODEL[t]}</span>
-          </button>
-        ))}
+      <div style={{ marginTop: 8 }}>
+        <label className="small">Model</label>
+        <select
+          value={agent.model_tier ?? "solid"}
+          onChange={(e) => onChange({ model_tier: e.target.value as AgentConfig["model_tier"] })}
+          style={{ width: "100%" }}
+        >
+          {ANTHROPIC_MODELS.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.provider} — {m.label} ({m.sublabel})
+            </option>
+          ))}
+        </select>
       </div>
 
       <label className="small">Tools (comma-separated)</label>

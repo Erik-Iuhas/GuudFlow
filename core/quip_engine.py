@@ -76,6 +76,19 @@ class QuipEngine:
 
     # ── Public event hooks ──────────────────────────────────────────────────
 
+    async def on_agent_started(self, role: str, workspace: Workspace) -> None:
+        """An agent reacts to another agent starting — handoff moment."""
+        voice = self._voice_for(role)
+        n_done = len(workspace.completed_agents)
+        n_total = len(self._voices) or (n_done + 1)
+        context = (
+            f"You just started your work. "
+            f"{n_done} of ~{n_total} agents have completed so far. "
+            "React briefly to being handed the baton — in character."
+        )
+        quip = await self._generate(voice, context, event="agent_started")
+        self._save(quip)
+
     async def on_agent_complete(self, role: str, workspace: Workspace) -> None:
         """The completing agent reacts to finishing their work."""
         voice = self._voice_for(role)

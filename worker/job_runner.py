@@ -120,6 +120,45 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
     )
 
 
+# ── Persona bootstrapping ──────────────────────────────────────────────────
+
+
+def _bootstrap_personas(project: ProjectConfig, personas_root: Path) -> None:
+    """Create minimal persona directories for any agent persona_ids that
+    don't exist on disk yet.
+
+    When the meta-agent proposes `create_new` hires, suggest_persona_id()
+    generates a persona_id (e.g. "aria-dev-v1") but nothing writes the
+    directory at proposal time. Without this, Persona.load() silently
+    fails, the agent runs without memory, and the persona never appears
+    in the roster after the run.
+    """
+    for cfg in project.agents:
+        if not cfg.persona_id:
+            continue
+        persona_dir = personas_root / cfg.persona_id
+        if persona_dir.is_dir():
+            continue
+        try:
+            persona_dir.mkdir(parents=True, exist_ok=True)
+            # Derive a human-readable name from the persona_id:
+            # "aria-dev-v1" → "Aria", "mike-backend-v2" → "Mike"
+            name_parts = cfg.persona_id.split("-")
+            name = name_parts[0].capitalize() if name_parts else cfg.persona_id
+            profile = {
+                "persona_id": cfg.persona_id,
+                "name": name,
+                "specialty": cfg.role,
+                "character": f"A focused and competent {cfg.role}.",
+                "stake_framing": f"Your work as {cfg.role} shapes the outcome of every run.",
+            }
+            (persona_dir / "profile.json").write_text(
+                json.dumps(profile, indent=2), encoding="utf-8"
+            )
+        except OSError:
+            pass  # non-fatal — agent runs without persona
+
+
 # ── Persistence ────────────────────────────────────────────────────────────
 
 
@@ -325,6 +364,13 @@ class JobRunner:
             )
             return
         project = serialise_project(project_data)
+
+        # 1.5. Bootstrap persona directories for any create_new persona_ids
+        # that have no on-disk directory yet. Without this, Persona.load()
+        # silently fails and the agent runs without memory + reputation —
+        # after the run the persona never appears in the roster.
+        personas_root = self.data_root / "personas"
+        _bootstrap_personas(project, personas_root)
 
         # 2. Set up paths.
         run_root = self.data_root / "runs" / job.run_id
