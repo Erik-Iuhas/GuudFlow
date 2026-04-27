@@ -800,6 +800,49 @@ class AgentRunner:
         # Generic prompt-defined agent: drive a tool-use loop.
         return await self._generic_tool_use_loop(agent, cfg)
 
+    async def _llm_with_backoff(
+        self,
+        agent: BaseAgent,
+        messages: list[LLMMessage],
+    ) -> "LLMResponse":
+        """Call agent.llm(), retrying on rate-limit errors.
+
+        Posts a BLOCKED signal before each wait so the board shows the
+        agent is standing by rather than failed. Respects the Retry-After
+        header when present; falls back to exponential backoff capped at
+        120 s. Gives up after 5 retries and re-raises.
+        """
+        try:
+            from anthropic import RateLimitError as _AnthropicRateLimit
+        except ImportError:
+            # anthropic not installed — no rate-limit errors possible.
+            return await agent.llm(messages)
+
+        for attempt in range(6):
+            try:
+                return await agent.llm(messages)
+            except _AnthropicRateLimit as exc:
+                if attempt >= 5:
+                    raise
+                # Respect Retry-After header; default exponential backoff.
+                retry_after_raw = getattr(
+                    getattr(exc, "response", None), "headers", {}
+                ).get("retry-after")
+                try:
+                    wait_s = float(retry_after_raw)
+                except (TypeError, ValueError):
+                    wait_s = min(10.0 * (2 ** attempt), 120.0)
+
+                await agent.signal(
+                    self.workspace,
+                    SignalType.BLOCKED,
+                    summary=f"rate limited — waiting {wait_s:.0f}s (attempt {attempt + 1}/5)",
+                )
+                await asyncio.sleep(wait_s)
+
+        # Unreachable — the loop above always returns or raises.
+        raise RuntimeError("_llm_with_backoff: loop exhausted without returning")
+
     @staticmethod
     def _artifact_from_drive_result(
         result: "protocol.CompactBlock | str",
@@ -834,7 +877,7 @@ class AgentRunner:
             if guard.deadline_exceeded():
                 return f"(loop guard: wall-clock budget exhausted after {guard.elapsed_seconds:.0f}s)"
 
-            response = await agent.llm(messages)
+            response = await self._llm_with_backoff(agent, messages)
 
             if response.stop_reason == "tool_use" and response.tool_calls:
                 # Echo assistant turn (including tool_use blocks) — keep raw if available.

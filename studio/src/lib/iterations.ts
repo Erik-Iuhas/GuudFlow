@@ -15,7 +15,8 @@ export type AgentLiveState =
   | "running"
   | "complete"
   | "failed"
-  | "waiting_for_human";
+  | "waiting_for_human"
+  | "blocked";
 
 export interface AgentLiveSummary {
   role: string;
@@ -70,6 +71,8 @@ export function summariseAgents(
       summary.state = "failed";
     } else if (sig.type === "HUMAN_NEEDED") {
       summary.state = "waiting_for_human";
+    } else if (sig.type === "BLOCKED") {
+      summary.state = "blocked";
     } else if (sig.type === "GIT_COMMIT") {
       const sha = extractCommitSha(sig.detail || sig.summary);
       if (sha) {

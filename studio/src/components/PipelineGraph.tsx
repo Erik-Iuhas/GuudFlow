@@ -29,6 +29,7 @@ const STATE_COLORS: Record<AgentLiveState, { fill: string; stroke: string; text:
   complete: { fill: "#d1fae5", stroke: "#10b981", text: "#065f46" },
   failed: { fill: "#fee2e2", stroke: "#ef4444", text: "#991b1b" },
   waiting_for_human: { fill: "#dbeafe", stroke: "#3b82f6", text: "#1e3a8a" },
+  blocked: { fill: "#fef9c3", stroke: "#ca8a04", text: "#713f12" },
 };
 
 interface Props {
