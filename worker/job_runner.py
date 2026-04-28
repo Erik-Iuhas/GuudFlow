@@ -31,6 +31,7 @@ from typing import Any, Callable
 from agents.builtin.memory_writer import MemoryWriter
 from core import run_initializer
 from core.llm import AnthropicClient, LLMClient
+from core.llm.registry import ModelRegistry
 from core.quip_engine import QuipEngine
 from core.runner import AgentConfig, AgentRunner, ProjectConfig
 from core.tool_manifest import RoleRBAC
@@ -333,18 +334,50 @@ def default_runner_factory(
         Path(data_root) / "projects" / project.project_id
         if data_root is not None else None
     )
+    # M3: load ModelRegistry when no explicit LLM is injected (production path).
+    # Tests inject llm=MockLLMClient, which takes priority in _resolve_llm_for_tier;
+    # registry is only loaded for production runs where llm=None.
+    model_registry: ModelRegistry | None = None
+    if llm is None:
+        registry_path = (
+            Path(data_root) / "models.json" if data_root is not None
+            else Path("data/models.json")
+        )
+        if not registry_path.exists():
+            registry_path = Path("data/models.json")
+        if registry_path.exists():
+            try:
+                model_registry = ModelRegistry(registry_path)
+            except Exception:
+                pass  # malformed registry — runner raises on first agent spawn
+
+    # MemoryWriter needs a concrete LLM client (it calls complete() directly
+    # for pattern synthesis). Give it the injected client, or resolve a
+    # SOLID-tier client from the registry, or fall back to AnthropicClient.
+    if llm is not None:
+        mw_llm: LLMClient = llm
+    elif model_registry is not None:
+        try:
+            mw_model = model_registry.resolve("solid")
+            mw_llm = model_registry.get_client(mw_model)
+        except Exception:
+            mw_llm = _build_default_llm()
+    else:
+        mw_llm = _build_default_llm()
+
     return AgentRunner(
         project=project,
         run_id=run_id,
         run_root=run_root,
         llm=llm,
-        memory_writer=MemoryWriter(llm=llm),
+        memory_writer=MemoryWriter(llm=mw_llm),
         docker_manager=docker_manager,
         rubric_scorer=RubricScorer(),
         training_scenarios_root=scenarios_root,
         restored_workspace=restored_workspace,
         personas_root=personas_root,
         project_dir=project_dir,
+        model_registry=model_registry,
     )
 
 
@@ -507,8 +540,10 @@ class JobRunner:
                 iteration=restored_workspace.iteration,
             ))
 
-        # 3. Verify LLM client is configured.
-        llm = self.llm or _build_default_llm()
+        # 3. Resolve LLM client. self.llm is set only when explicitly injected
+        # (tests / single-client overrides). None → default_runner_factory
+        # loads ModelRegistry and resolves per-agent clients by tier.
+        llm = self.llm  # may be None; factory handles it
 
         # 4. Construct runner. Thread docker_manager through so the
         # production code:exec routing in core/runner.py can reach it.

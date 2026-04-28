@@ -55,6 +55,7 @@ from core.credentials_broker import CredentialsBroker
 from core.file_workspace import FileWorkspace
 from core.git_workspace import GitWorkspace
 from core.llm import LLMClient, LLMMessage, ToolCall
+from core.llm.registry import ModelRegistry
 from core.loop_guard import LoopGuard, LoopGuardConfig
 from core.repo_map import build as build_repo_map, update_incremental
 from core.scheduler import (
@@ -285,7 +286,7 @@ class AgentRunner:
         project: ProjectConfig,
         run_id: str,
         run_root: Path | str,
-        llm: LLMClient,
+        llm: LLMClient | None = None,
         broker: CredentialsBroker | None = None,
         screenshot_callback: ScreenshotCallback | None = None,
         memory_writer: BaseAgent | None = None,
@@ -298,11 +299,13 @@ class AgentRunner:
         restored_workspace: "Workspace | None" = None,
         personas_root: Path | None = None,
         project_dir: Path | None = None,
+        model_registry: ModelRegistry | None = None,
     ):
         self.project = project
         self.run_id = run_id
         self.run_root = Path(run_root)
         self.llm = llm
+        self._model_registry = model_registry
         self.broker = broker or CredentialsBroker(rbac=project.rbac,
                                                   audit_log_path=self.run_root / "access_log.jsonl")
         self.screenshot_callback = screenshot_callback
@@ -716,8 +719,7 @@ class AgentRunner:
             agent.declared_local_tools = list(cfg.declared_local_tools)
             agent.declared_mcp_servers = list(cfg.declared_mcp_servers)
             # Inject runtime handles.
-            agent._llm = self.llm
-            agent._model = TIER_TO_MODEL.get(cfg.model_tier, TIER_TO_MODEL["solid"])
+            agent._llm, agent._model = self._resolve_llm_for_tier(cfg.model_tier)
             agent._broker = self.broker
             agent._context_manager = self.context_manager
             agent._manifest = self.manifest_builder.build_for_agent(
@@ -1400,6 +1402,29 @@ class AgentRunner:
         except Exception:
             return ""
 
+    def _resolve_llm_for_tier(self, tier: str) -> tuple[LLMClient, str]:
+        """Return (client, model_id) for an agent's tier.
+
+        Priority:
+          1. self.llm — explicitly injected client (tests; single-client production).
+             When set, ALL agents share it; model string still varies by tier.
+          2. self._model_registry — per-agent client from the registry.
+             Production multi-model path: fast-tier agent may get Groq, heavy gets Opus.
+          3. Error — no client configured.
+        """
+        if self.llm is not None:
+            return self.llm, TIER_TO_MODEL.get(tier, TIER_TO_MODEL["solid"])
+        if self._model_registry is not None:
+            try:
+                model_info = self._model_registry.resolve(tier)
+                return self._model_registry.get_client(model_info), model_info.id
+            except Exception:
+                pass
+        raise RuntimeError(
+            f"AgentRunner has no LLM client and no model_registry for tier={tier!r}. "
+            "Inject an llm or provide a model_registry."
+        )
+
     def _persona_name(self, role: str) -> str:
         agent = self.agents.get(role)
         if agent and agent.persona is not None:
@@ -1436,27 +1461,18 @@ class AgentRunner:
         header when present; falls back to exponential backoff capped at
         120 s. Gives up after 5 retries and re-raises.
         """
-        try:
-            from anthropic import RateLimitError as _AnthropicRateLimit
-        except ImportError:
-            # anthropic not installed — no rate-limit errors possible.
-            return await agent.llm(messages)
+        from core.llm.errors import RateLimitError as _RateLimitError
 
         for attempt in range(6):
             try:
                 return await agent.llm(messages)
-            except _AnthropicRateLimit as exc:
+            except _RateLimitError as exc:
                 if attempt >= 5:
                     raise
                 # Respect Retry-After header; default exponential backoff.
-                retry_after_raw = getattr(
-                    getattr(exc, "response", None), "headers", {}
-                ).get("retry-after")
-                try:
-                    wait_s = float(retry_after_raw)
-                except (TypeError, ValueError):
-                    wait_s = min(10.0 * (2 ** attempt), 120.0)
-
+                wait_s: float = exc.retry_after_s if exc.retry_after_s is not None else min(
+                    10.0 * (2 ** attempt), 120.0
+                )
                 await agent.signal(
                     self.workspace,
                     SignalType.BLOCKED,
@@ -2472,8 +2488,7 @@ class AgentRunner:
             agent.system_prompt = cfg.system_prompt
         agent.declared_local_tools = list(cfg.declared_local_tools)
         agent.declared_mcp_servers = list(cfg.declared_mcp_servers)
-        agent._llm = self.llm
-        agent._model = TIER_TO_MODEL.get(cfg.model_tier, TIER_TO_MODEL["solid"])
+        agent._llm, agent._model = self._resolve_llm_for_tier(cfg.model_tier)
         agent._broker = self.broker
         agent._context_manager = self.context_manager
         agent._manifest = self.manifest_builder.build_for_agent(

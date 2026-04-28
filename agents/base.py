@@ -656,6 +656,7 @@ class BaseAgent:
             tools=tools or None,
             max_tokens=max_tokens,
             model=self._model,
+            cache_system=True,
         )
 
     def _tool_schemas_for_llm(self) -> list[dict[str, Any]]:

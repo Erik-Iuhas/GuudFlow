@@ -18,28 +18,22 @@ oracle.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from core.runner import ProjectConfig
 
-
 # Conservative tokens-per-call estimates (input + output combined)
-# per model tier. These get multiplied by the per-agent worst-case
-# call count to produce a $ figure.
+# per model tier for the fallback path when no registry is available.
 _TOKENS_PER_CALL: dict[str, int] = {
     "heavy": 8000,
     "solid": 4000,
     "fast": 1500,
 }
 
+# Assumed output fraction for blended rate (output tokens cost more).
+_OUTPUT_FRACTION = 0.25
 
-# Approximate $/1K-token blended rates per tier (input × output mix
-# weighted toward output). These are deliberately rough — they exist
-# to flag "this run might cost $20" vs "this run might cost $0.10".
-_USD_PER_1K_TOKENS: dict[str, float] = {
-    "heavy": 0.045,   # Opus blend
-    "solid": 0.009,   # Sonnet blend
-    "fast": 0.003,    # Haiku blend
-}
+_REGISTRY_PATH = Path("data/models.json")
 
 
 @dataclass
@@ -56,6 +50,29 @@ class CostEstimate:
         }
 
 
+def _blended_rate_from_registry(tier: str) -> float | None:
+    """Look up blended $/1K-token rate for a tier from models.json.
+
+    Returns None if the registry is unavailable or has no model for the tier.
+    """
+    if not _REGISTRY_PATH.exists():
+        return None
+    try:
+        from core.llm.registry import ModelRegistry, NoModelAvailableError
+        reg = ModelRegistry(_REGISTRY_PATH)
+        # Try to find the first non-deprecated model for this tier.
+        # We don't need an API key for estimation — just the price fields.
+        for m in reg.list_models():
+            if m.tier == tier and not m.deprecated:
+                input_rate = m.cost_per_1k_input
+                output_rate = m.cost_per_1k_output
+                # Blended: 75% input tokens, 25% output tokens (conservative output mix)
+                return input_rate * (1 - _OUTPUT_FRACTION) + output_rate * _OUTPUT_FRACTION
+    except Exception:
+        pass
+    return None
+
+
 def estimate_run_cost(project: ProjectConfig) -> CostEstimate:
     """Return a $ estimate for one full run of `project` at worst-case
     iteration counts. Always returns a non-negative number."""
@@ -67,22 +84,27 @@ def estimate_run_cost(project: ProjectConfig) -> CostEstimate:
         return CostEstimate(total_usd=0.0, by_role=by_role, notes=notes)
 
     max_iter = max(int(project.max_iterations), 1)
+    used_registry = False
     for cfg in project.agents:
         tier = cfg.model_tier or "solid"
         tokens_per_call = _TOKENS_PER_CALL.get(tier, _TOKENS_PER_CALL["solid"])
-        usd_per_1k = _USD_PER_1K_TOKENS.get(tier, _USD_PER_1K_TOKENS["solid"])
         max_tool_iter = max(int(cfg.max_tool_iterations or 10), 1)
-
-        # Worst case: agent respawns max_iter times, each respawn runs
-        # the tool-use loop up to max_tool_iter times.
         worst_case_calls = max_iter * max_tool_iter
         worst_case_tokens = worst_case_calls * tokens_per_call
-        role_cost = (worst_case_tokens / 1000.0) * usd_per_1k
-        by_role[cfg.role] = role_cost
+
+        usd_per_1k = _blended_rate_from_registry(tier)
+        if usd_per_1k is not None:
+            used_registry = True
+        else:
+            # Static fallback rates (conservative Anthropic blends)
+            usd_per_1k = {"heavy": 0.045, "solid": 0.009, "fast": 0.003}.get(tier, 0.009)
+
+        by_role[cfg.role] = (worst_case_tokens / 1000.0) * usd_per_1k
 
     total = sum(by_role.values())
+    source = "registry" if used_registry else "static fallback"
     notes.append(
-        f"Worst-case estimate: {len(project.agents)} agents × "
+        f"Worst-case estimate ({source}): {len(project.agents)} agents × "
         f"max_iterations={max_iter}. Real spend usually lower."
     )
     return CostEstimate(total_usd=total, by_role=by_role, notes=notes)

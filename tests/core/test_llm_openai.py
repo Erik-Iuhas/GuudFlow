@@ -12,8 +12,10 @@ import httpx
 import pytest
 
 from core.llm import (
+    AuthError,
     LLMMessage,
     OpenAIClient,
+    RateLimitError,
     ToolCall,
     _from_openai_response,
     _to_openai_messages,
@@ -331,13 +333,24 @@ async def test_complete_round_trips_tool_use():
     assert res.model == "qwen2.5:7b"
 
 
-async def test_complete_raises_on_http_error():
+async def test_complete_raises_auth_error_on_401():
     def handler(request):
         return httpx.Response(401, json={"error": {"message": "unauthorized"}})
 
     transport = _make_transport(handler)
     client = OpenAIClient(base_url="http://x/v1", api_key="bad", http_client=transport)
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(AuthError):
+        await client.complete(system="s", messages=[LLMMessage(role="user", content="x")])
+
+
+async def test_complete_raises_rate_limit_error_on_429():
+    def handler(request):
+        resp = httpx.Response(429, json={"error": {"message": "rate limited"}})
+        return resp
+
+    transport = _make_transport(handler)
+    client = OpenAIClient(base_url="http://x/v1", api_key="k", http_client=transport)
+    with pytest.raises(RateLimitError):
         await client.complete(system="s", messages=[LLMMessage(role="user", content="x")])
 
 
