@@ -265,6 +265,33 @@ def serialise_signal(sig: Signal) -> dict[str, Any]:
     }
 
 
+def serialise_task(task) -> dict[str, Any]:
+    """Reusable Task-to-dict mapping for the M3.5 task persister.
+    Mirrors `serialise_signal` so the resume loader has a symmetric
+    pair of entrypoints."""
+    return {
+        "task_id": task.task_id,
+        "story_id": task.story_id,
+        "parent_task_id": task.parent_task_id,
+        "assigned_to": task.assigned_to,
+        "created_by": task.created_by,
+        "created_at_iter": task.created_at_iter,
+        "goal": task.goal,
+        "acceptance_criteria": list(task.acceptance_criteria),
+        "out_of_scope": list(task.out_of_scope),
+        "references": [
+            {"kind": r.kind, "value": r.value, "note": r.note}
+            for r in task.references
+        ],
+        "status": task.status,
+        "started_at_iter": task.started_at_iter,
+        "completed_at_iter": task.completed_at_iter,
+        "closed_by_commit": task.closed_by_commit,
+        "blocked_on": list(task.blocked_on),
+        "cancelled_reason": task.cancelled_reason,
+    }
+
+
 def _persist_run(run_root: Path, runner: AgentRunner, run_id: str,
                  project_id: str, status: str) -> None:
     """Write meta.json + board.json so the API can list / read this run.

@@ -80,6 +80,7 @@ from core.workspace import (
     ApprovalRequest,
     Artifact,
     CommitRecord,
+    Task,
     Workspace,
 )
 
@@ -392,6 +393,9 @@ class AgentRunner:
         # board.jsonl co-exists with the end-of-run consolidated
         # board.json; both readers and writers tolerate either source.
         self.workspace.set_board_persister(self._build_board_persister())
+        # M3.5 chunk 7 — task mutation persister so resume can restore
+        # the per-agent desks without replaying every TASK_* signal.
+        self.workspace.set_task_persister(self._build_task_persister())
         # Phase G-prime.1 — artifact persistence. When a completed
         # agent's artifact is set via workspace.set_artifact, persist
         # the full dict so a resumed run can read the agent's output
@@ -634,6 +638,31 @@ class AgentRunner:
                 # Disk write failures shouldn't break the run. The
                 # consolidated board.json at end-of-run is the
                 # safety net.
+                pass
+
+        return _persist
+
+    def _build_task_persister(self):
+        """Return a callable that appends each task mutation to
+        `{run_root}/tasks.jsonl` (M3.5 chunk 7). Mirrors the board
+        persister: JSONL append per call, swallow OSError so a broken
+        disk doesn't take the run down. The signal trail in
+        board.jsonl remains the source of truth — tasks.jsonl is the
+        cached query view that `restore_workspace` replays first.
+        """
+        from worker.job_runner import serialise_task
+        try:
+            self.run_root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None
+        tasks_path = self.run_root / "tasks.jsonl"
+
+        def _persist(task: Task) -> None:
+            try:
+                line = json.dumps(serialise_task(task), default=str)
+                with open(tasks_path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except OSError:
                 pass
 
         return _persist
