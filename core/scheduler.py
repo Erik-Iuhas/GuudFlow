@@ -33,12 +33,47 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable, Literal
 
 from core.workspace import AgentState, Workspace
 
 
 AgentRunner = Callable[[Workspace], Awaitable[None]]
+
+
+# ── Interrupt / resume dataclasses ───────────────────────────────────────────
+
+@dataclass
+class WaitingForHuman:
+    kind: Literal["human", "visual"] = "human"
+    question: str = ""
+
+
+@dataclass
+class WaitingForPeer:
+    target_role: str = ""
+    ask_id: str = ""
+    deadline_ts: float = 0.0
+    reason_if_timeout: str = "PEER_UNRESPONSIVE"
+
+
+@dataclass
+class WaitingForSkipConfirm:
+    confirmer_role: str = ""
+    skip_id: str = ""
+    deadline_ts: float = 0.0
+    reason_if_timeout: str = "SKIP_NEEDS_HUMAN"
+
+
+InterruptPayload = WaitingForHuman | WaitingForPeer | WaitingForSkipConfirm
+InterruptKind = Literal["human", "peer", "skip"]
+
+
+@dataclass
+class InterruptToken:
+    agent_role: str
+    kind: InterruptKind
+    id: str  # ask_id for peer; skip_id for skip; question text for human
 
 
 @dataclass
@@ -68,6 +103,7 @@ class SchedulerResult:
     completed: list[str]
     failed: list[str]
     spawn_counts: dict[str, int]
+    sat_out: list[str] = field(default_factory=list)
 
 
 class Scheduler:
@@ -103,7 +139,18 @@ class Scheduler:
         self._tasks: dict[str, asyncio.Task] = {}
         self._spawn_count: dict[str, int] = defaultdict(int)
         self._failed: set[str] = set()
+        self._sat_out: set[str] = set()   # roles that got SAT_OUT — count as done
         self._wake = asyncio.Event()
+
+        # interrupt/resume state
+        self._interrupt_payloads: dict[str, InterruptPayload] = {}
+        self._interrupt_tokens: dict[str, InterruptToken] = {}
+        # queued values injected by resume() — runner drains at agent re-entry
+        self._pending_input: dict[str, list[Any]] = defaultdict(list)
+
+        # allowed-speaker-transition rules (AutoGen-style, M1 §10)
+        self._transition_rules: dict[tuple[str, str], frozenset[str]] = {}
+        self._build_transition_rules()
 
     # ── Public API ──────────────────────────────────────────────────────────
 
@@ -117,6 +164,81 @@ class Scheduler:
         """
         self._wake.set()
 
+    def interrupt(
+        self,
+        agent_role: str,
+        kind: InterruptKind,
+        payload: InterruptPayload,
+    ) -> InterruptToken:
+        """Park an agent in a waiting state.  Returns a token for resume().
+
+        - kind="human"  → WAITING_FOR_HUMAN; payload is WaitingForHuman
+        - kind="peer"   → WAITING_FOR_PEER;  payload is WaitingForPeer
+        - kind="skip"   → WAITING_FOR_SKIP_CONFIRM; payload is WaitingForSkipConfirm
+        """
+        if kind == "human":
+            self.workspace.agent_states[agent_role] = AgentState.WAITING_FOR_HUMAN
+            token_id = getattr(payload, "question", agent_role)
+        elif kind == "peer":
+            assert isinstance(payload, WaitingForPeer)
+            self.workspace.agent_states[agent_role] = AgentState.WAITING_FOR_PEER
+            token_id = payload.ask_id
+        else:  # skip
+            assert isinstance(payload, WaitingForSkipConfirm)
+            self.workspace.agent_states[agent_role] = AgentState.WAITING_FOR_SKIP_CONFIRM
+            token_id = payload.skip_id
+
+        token = InterruptToken(agent_role=agent_role, kind=kind, id=token_id)
+        self._interrupt_payloads[agent_role] = payload
+        self._interrupt_tokens[agent_role] = token
+        return token
+
+    def resume(self, token: InterruptToken, value: Any = None) -> None:
+        """Unpark an agent; `value` is appended to pending_input for next iteration.
+
+        Sets agent state back to READY and wakes the scheduler loop.
+        """
+        role = token.agent_role
+        self.workspace.agent_states[role] = AgentState.READY
+        self._interrupt_payloads.pop(role, None)
+        self._interrupt_tokens.pop(role, None)
+        if value is not None:
+            self._pending_input[role].append(value)
+        self._wake.set()
+
+    def drain_pending_input(self, role: str) -> list[Any]:
+        """Return and clear any values queued by resume() for this role."""
+        items = list(self._pending_input[role])
+        self._pending_input[role].clear()
+        return items
+
+    def mark_sat_out(self, role: str) -> None:
+        """Record that a role has SAT_OUT (confirmed skip).
+
+        Counts as completion for downstream depends_on checks.
+        """
+        self._sat_out.add(role)
+        self.workspace.agent_states[role] = AgentState.SAT_OUT
+        self._wake.set()
+
+    def _build_transition_rules(self) -> None:
+        """Populate the default allowed-speaker-transition table (M1 §10).
+
+        Rule format: (signal_type, from_role) → frozenset of allowed next roles.
+        The special strings "<author_of_failed_work>" and "<target_role>" are
+        resolved at enforcement time from the signal payload.
+
+        Default = permissive (no rule → any ready role may spawn).
+        """
+        self._transition_rules = {
+            # After a VERIFY_FAIL, only the author of the failed work may resume.
+            ("VERIFY_FAIL", "*"): frozenset({"<author_of_failed_work>"}),
+            # After an ESCALATION, only tech_lead may respond.
+            ("ESCALATION", "*"): frozenset({"tech_lead"}),
+            # After an ASK, only the target may respond.
+            ("ASK", "*"): frozenset({"<target_role>"}),
+        }
+
     async def run(self) -> SchedulerResult:
         """Drive the scheduler loop until everything is COMPLETE,
         MAX_ITERATIONS triggers, or the run is STUCK."""
@@ -126,26 +248,32 @@ class Scheduler:
                 if self._deadline_exceeded():
                     return self._result(SchedulerStatus.DEADLINE_EXCEEDED)
 
-                # 1. Try to spawn anything ready (unless paused for a human).
+                # 0b. M1 deadline watcher — expire WAITING_FOR_PEER /
+                #     WAITING_FOR_SKIP_CONFIRM interrupts past their deadline_ts.
+                self._reap_expired_interrupts()
+
+                # 1. Try to spawn anything ready. The `pending_human` flag is
+                #    the global block for new spawns; per-agent WAITING_FOR_PEER
+                #    and WAITING_FOR_SKIP_CONFIRM are filtered inside _ready_to_spawn.
                 if not self.workspace.pending_human:
                     for spec in self._ready_to_spawn():
                         self._spawn(spec)
 
-                # 2. Successful exit — every non-failed agent is complete.
+                # 2. Successful exit — every non-failed agent is complete or sat-out.
                 if self._all_complete():
                     return self._result(SchedulerStatus.COMPLETE)
 
-                # 3. Iteration cap — any role that has been respawned past
-                #    the limit without completing forces MAX_ITERATIONS.
+                # 3. Iteration cap.
                 if self._iterations_exceeded():
                     return self._result(SchedulerStatus.MAX_ITERATIONS)
 
-                # 4. Nothing in flight: either parked waiting for a human,
-                #    or we have nothing more we could spawn — STUCK.
+                # 4. Nothing in flight.
                 if not self._tasks:
-                    if self.workspace.pending_human:
-                        await self._wake.wait()
-                        self._wake.clear()
+                    if self._any_waiting():
+                        # Agents are parked waiting for external events; sleep.
+                        # Bound the wait by the soonest interrupt deadline so
+                        # we wake in time to expire stale ASKs / SKIPs.
+                        await self._sleep_until_event_or_deadline()
                         continue
                     return self._result(SchedulerStatus.STUCK)
 
@@ -157,23 +285,230 @@ class Scheduler:
         finally:
             await self._cancel_remaining()
 
+    async def _sleep_until_event_or_deadline(self) -> None:
+        """Block on `_wake` but cap the wait at the next interrupt deadline.
+
+        Returns when `_wake.set()` fires OR the next deadline_ts elapses,
+        whichever comes first. Caller re-enters the loop body to act.
+        """
+        next_deadline = self._next_interrupt_deadline()
+        if next_deadline is None:
+            await self._wake.wait()
+            self._wake.clear()
+            return
+        timeout = max(0.0, next_deadline - time.monotonic())
+        try:
+            await asyncio.wait_for(self._wake.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass  # deadline elapsed — top of loop will reap
+        self._wake.clear()
+
+    def _next_interrupt_deadline(self) -> float | None:
+        """Soonest `deadline_ts` across active peer/skip interrupts."""
+        deadlines: list[float] = []
+        for payload in self._interrupt_payloads.values():
+            ts = getattr(payload, "deadline_ts", 0.0)
+            if ts > 0:
+                deadlines.append(ts)
+        return min(deadlines) if deadlines else None
+
+    def _reap_expired_interrupts(self) -> None:
+        """Convert past-deadline peer/skip interrupts into timeout signals.
+
+        - WaitingForPeer past deadline → post PEER_TIMEOUT, mark agent FAILED
+          for this iteration; the runner's escalation subscriber will route
+          it to tech_lead.
+        - WaitingForSkipConfirm past deadline → post SKIP_TIMEOUT and surface
+          a HUMAN_NEEDED — never auto-grant (M1 §7a "default-deny").
+        """
+        from core.signals import Signal, SignalType
+        from core.workspace import HumanRequest
+
+        now = time.monotonic()
+        for role, payload in list(self._interrupt_payloads.items()):
+            deadline = getattr(payload, "deadline_ts", 0.0)
+            if not deadline or now < deadline:
+                continue
+
+            if isinstance(payload, WaitingForPeer):
+                self.workspace.post_signal(Signal(
+                    type=SignalType.PEER_TIMEOUT,
+                    summary=f"PEER_TIMEOUT {role} → {payload.target_role}",
+                    from_agent=role,
+                    detail=(
+                        f"ask_id={payload.ask_id};reason={payload.reason_if_timeout}"
+                    ),
+                ))
+                # Clear the interrupt so the role can be re-spawned. Runner's
+                # escalation handler picks up PEER_TIMEOUT on the board.
+                self._interrupt_payloads.pop(role, None)
+                self._interrupt_tokens.pop(role, None)
+                self.workspace.agent_states[role] = AgentState.READY
+
+            elif isinstance(payload, WaitingForSkipConfirm):
+                self.workspace.post_signal(Signal(
+                    type=SignalType.SKIP_TIMEOUT,
+                    summary=f"SKIP_TIMEOUT {role} (confirmer={payload.confirmer_role})",
+                    from_agent=role,
+                    detail=f"skip_id={payload.skip_id}",
+                ))
+                # Default-deny: do NOT auto-grant. Park as HUMAN_NEEDED so a
+                # human (or external watcher) makes the call.
+                self.workspace.pending_human = HumanRequest(
+                    from_agent=role,
+                    question=(
+                        f"{role} requested to sit out (skip_id={payload.skip_id}); "
+                        f"confirmer {payload.confirmer_role} did not respond in time."
+                    ),
+                    iteration=self.workspace.iteration,
+                )
+                self._interrupt_payloads.pop(role, None)
+                self._interrupt_tokens.pop(role, None)
+                self.workspace.agent_states[role] = AgentState.WAITING_FOR_HUMAN
+
     # ── Spawn / reap ───────────────────────────────────────────────────────
 
+    # States that block re-spawning by `_ready_to_spawn`. WAITING_FOR_HUMAN is
+    # NOT here — the `pending_human` workspace flag handles that globally at
+    # the top of the run loop, and including it here would deadlock legacy
+    # call sites that set the state without going through `interrupt()`.
+    _WAITING_STATES: frozenset[AgentState] = frozenset({
+        AgentState.WAITING_FOR_PEER,
+        AgentState.WAITING_FOR_SKIP_CONFIRM,
+    })
+
+    # States surfaced by `_any_waiting()` to decide sleep-vs-STUCK. Includes
+    # WAITING_FOR_HUMAN because a human pause means "park, don't return STUCK".
+    _PARKED_STATES: frozenset[AgentState] = frozenset({
+        AgentState.WAITING_FOR_HUMAN,
+        AgentState.WAITING_FOR_PEER,
+        AgentState.WAITING_FOR_SKIP_CONFIRM,
+    })
+
+    def _effective_complete(self, role: str) -> bool:
+        """True if role counts as done for downstream depends_on resolution.
+
+        Both COMPLETE (in completed_agents) and SAT_OUT satisfy this.
+        """
+        return role in self.workspace.completed_agents or role in self._sat_out
+
     def _ready_to_spawn(self) -> list[AgentSpec]:
+        allowed_speaker = self._allowed_speaker_for_recent_signal()
         ready: list[AgentSpec] = []
         for role, spec in self.agents.items():
             if role in self._tasks:
                 continue
-            if role in self.workspace.completed_agents:
+            if self._effective_complete(role):
                 continue
             if role in self._failed:
                 continue
-            if not all(dep in self.workspace.completed_agents for dep in spec.depends_on):
+            state = self.workspace.agent_states.get(role)
+            if state in self._WAITING_STATES:
+                continue
+            if not all(self._effective_complete(dep) for dep in spec.depends_on):
                 continue
             if self._spawn_count[role] >= self.max_iterations:
                 continue
+            if allowed_speaker is not None and role not in allowed_speaker:
+                continue
             ready.append(spec)
         return ready
+
+    def _allowed_speaker_for_recent_signal(self) -> frozenset[str] | None:
+        """Resolve the allowed-speaker set from the most recent constraining
+        signal on the board (M1 §10).
+
+        Looks back through the board (newest first) until it finds a signal
+        type with a transition rule. Resolves placeholders
+        `<author_of_failed_work>` / `<target_role>` against the signal payload.
+        Returns None if no rule applies (default-permissive).
+        """
+        if not self._transition_rules:
+            return None
+        # Build (signal_type_str → ruleset) lookup from `(type, "*")` keys.
+        lookup: dict[str, frozenset[str]] = {}
+        for (sig_type, _from), allowed in self._transition_rules.items():
+            lookup[sig_type] = allowed
+
+        # Walk the board newest-first; first matching constraint wins.
+        for sig in reversed(self.workspace.board):
+            rule_key = self._rule_key_for(sig)
+            if rule_key is None or rule_key not in lookup:
+                continue
+            allowed = lookup[rule_key]
+            return self._resolve_placeholders(allowed, sig)
+        return None
+
+    @staticmethod
+    def _rule_key_for(sig: "Any") -> str | None:
+        """Map a signal to a transition-rule key.
+
+        - REJECTED → "VERIFY_FAIL" (same constraint family).
+        - ESCALATION → "ESCALATION".
+        - AGENT_MESSAGE with summary "ASK ..." → "ASK".
+        - Anything else → None (no rule applies).
+        """
+        type_name = sig.type.value if hasattr(sig.type, "value") else str(sig.type)
+        if type_name == "REJECTED":
+            return "VERIFY_FAIL"
+        if type_name == "ESCALATION":
+            return "ESCALATION"
+        if type_name == "AGENT_MESSAGE":
+            summary = (sig.summary or "").strip()
+            if summary.startswith("ASK "):
+                return "ASK"
+        return None
+
+    def _resolve_placeholders(
+        self, allowed: frozenset[str], sig: "Any",
+    ) -> frozenset[str]:
+        """Substitute `<author_of_failed_work>` and `<target_role>` against
+        the signal payload. Concrete role names pass through unchanged."""
+        resolved: set[str] = set()
+        for entry in allowed:
+            if entry == "<author_of_failed_work>":
+                # The author is encoded in the rejected signal's depends_on
+                # — for VERIFY_FAIL/REJECTED the from_agent is the reviewer;
+                # we want the rejected upstream. Detail is "target_role=X"
+                # for the existing escalation pipeline.
+                target = self._extract_signal_field(sig, "target_role")
+                if target:
+                    resolved.add(target)
+                else:
+                    # Fall back to from_agent's depends_on lookup via agents dict.
+                    reviewer_role = sig.from_agent or ""
+                    spec = self.agents.get(reviewer_role)
+                    if spec is not None:
+                        resolved.update(spec.depends_on)
+            elif entry == "<target_role>":
+                target = self._extract_signal_field(sig, "to") or \
+                         self._extract_signal_field(sig, "target_role")
+                if target:
+                    resolved.add(target)
+            else:
+                resolved.add(entry)
+        return frozenset(resolved)
+
+    @staticmethod
+    def _extract_signal_field(sig: "Any", key: str) -> str | None:
+        """Pull `key=value` (or JSON `key`) out of a Signal.detail string."""
+        detail = getattr(sig, "detail", None)
+        if not detail:
+            return None
+        # JSON shape
+        try:
+            import json as _json
+            data = _json.loads(detail)
+            if isinstance(data, dict) and key in data:
+                return str(data[key])
+        except (ValueError, TypeError):
+            pass
+        # `key=value;` shape
+        for chunk in detail.split(";"):
+            chunk = chunk.strip()
+            if chunk.startswith(f"{key}="):
+                return chunk[len(key) + 1 :].strip()
+        return None
 
     def _spawn(self, spec: AgentSpec) -> None:
         self._spawn_count[spec.role] += 1
@@ -240,9 +575,19 @@ class Scheduler:
         for role in self.agents:
             if role in self._failed:
                 continue
-            if role not in self.workspace.completed_agents:
+            if not self._effective_complete(role):
                 return False
         return True
+
+    def _any_waiting(self) -> bool:
+        """True if any agent is parked in a waiting state (human, peer, skip)."""
+        if self.workspace.pending_human:
+            return True
+        for role in self.agents:
+            state = self.workspace.agent_states.get(role)
+            if state in self._PARKED_STATES:
+                return True
+        return False
 
     def _deadline_exceeded(self) -> bool:
         deadline = self.workspace.deadline_at
@@ -271,4 +616,5 @@ class Scheduler:
             completed=list(self.workspace.completed_agents),
             failed=sorted(self._failed),
             spawn_counts=dict(self._spawn_count),
+            sat_out=sorted(self._sat_out),
         )

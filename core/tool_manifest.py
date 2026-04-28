@@ -109,6 +109,43 @@ class ToolManifest:
         return "\n".join(lines).rstrip()
 
 
+    def render_aci(self) -> str:
+        """SWE-agent-style ACI documentation for the tool catalog.
+
+        Tools that implement `aci_doc()` on their BaseTool class get a full
+        manpage-style block.  All others fall back to the compact one-liner.
+        Injected into Layer 5 of effective_system_prompt() (M1 spec §5).
+        """
+        if not self.descriptors:
+            return ""
+
+        sections: list[str] = []
+        for d in self.descriptors:
+            # Try the tool instance's aci_doc() — only available for local tools
+            # where the BaseTool subclass is stored alongside the descriptor.
+            aci = getattr(d, "_aci_doc_cache", None)
+            if aci is not None:
+                sections.append(_render_aci_block(d.name, aci))
+            else:
+                # Compact fallback for broker/MCP tools and local tools without aci_doc().
+                args = _summarise_schema(d.input_schema) if d.input_schema else ""
+                line = f"TOOL: {d.name}\n  PURPOSE: {d.description}"
+                if args:
+                    line += f"\n  ARGS:    {args}"
+                sections.append(line)
+
+        return "AVAILABLE TOOLS (ACI format):\n\n" + "\n\n".join(sections)
+
+
+def _render_aci_block(name: str, doc: dict[str, str]) -> str:
+    lines = [f"TOOL: {name}"]
+    for key in ("PURPOSE", "ARGS", "EMITS", "ERRORS", "EXAMPLE", "NOTES"):
+        val = doc.get(key.lower()) or doc.get(key)
+        if val:
+            lines.append(f"  {key}:   {val}")
+    return "\n".join(lines)
+
+
 def _summarise_schema(schema: dict[str, Any]) -> str:
     """One-line summary of a JSONSchema for prompt rendering. Best-effort —
     handles the common `{"type": "object", "properties": {...}}` case."""

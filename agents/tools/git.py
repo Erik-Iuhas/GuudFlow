@@ -41,6 +41,16 @@ class GitDiff(BaseTool):
     def __init__(self, git: GitWorkspace):
         self.git = git
 
+    def aci_doc(self) -> dict[str, str]:
+        return {
+            "purpose": "Show diff between branch_a and branch_b (default base 'main').",
+            "args": "{branch_a:string, branch_b?:string, path?:string}",
+            "emits": "{ok:true, branch_a, branch_b, path, diff, truncated}",
+            "errors": "missing branch_a | git diff failed",
+            "example": 'git-diff({"branch_a": "agent/developer", "path": "src/auth.py"})',
+            "notes": "On a large change, call git-changed-files first then loop one path at a time.",
+        }
+
     async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
         a = arguments.get("branch_a")
         b = arguments.get("branch_b", "main")

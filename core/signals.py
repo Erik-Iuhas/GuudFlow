@@ -93,6 +93,10 @@ class SignalType(str, Enum):
     # next turn. Replies are also AGENT_MESSAGE signals.
     AGENT_MESSAGE = "AGENT_MESSAGE"
 
+    # M1 — handshake protocol timeouts
+    PEER_TIMEOUT = "PEER_TIMEOUT"       # ASK target didn't answer within deadline
+    SKIP_TIMEOUT = "SKIP_TIMEOUT"       # REQUEST_SKIP confirmer didn't respond in time
+
 
 Priority = Literal["normal", "high"]
 

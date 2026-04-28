@@ -56,11 +56,19 @@ class QuipEngine:
         self._voices: list[AgentVoice] = []
         self._quips: list[Quip] = []
         self._subscribers: list[Callable[[Quip], None]] = []
+        self._workspace: Workspace | None = None
+        self._personas_root: Path | None = None
 
     def set_voices(self, voices: list[AgentVoice]) -> None:
         """Called by the runner after _build_agents() so the engine knows
         each team member's name and character."""
         self._voices = voices
+
+    def set_workspace(self, workspace: Workspace, personas_root: Path | str | None = None) -> None:
+        """Give the engine access to hired_personas for voice fallback."""
+        self._workspace = workspace
+        if personas_root is not None:
+            self._personas_root = Path(personas_root)
 
     def subscribe(self, callback: Callable[[Quip], None]) -> Callable[[], None]:
         """Register a callback for new quips. Returns an unsubscribe fn."""
@@ -73,6 +81,33 @@ class QuipEngine:
                 pass
 
         return _unsubscribe
+
+    async def emit_quip(
+        self,
+        persona: str,
+        text: str,
+        addressed_to: str | None = None,
+        event_type: str = "system",
+    ) -> None:
+        """Emit a pre-formed quip text (no LLM call).
+
+        Used for ASK/ANSWER events where the runner already knows what
+        the quip should say (M1 spec §12).  `persona` is the role string;
+        `addressed_to` renders a "→ <name>" annotation in the feed.
+        """
+        voice = self._voice_for(persona)
+        full_text = text
+        if addressed_to:
+            target_voice = self._voice_for(addressed_to)
+            full_text = f"{text}  → {target_voice.name}"
+        quip = Quip(
+            ts=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            persona=voice.name,
+            role=voice.role,
+            text=full_text,
+            event=event_type,
+        )
+        self._save(quip)
 
     # ── Public event hooks ──────────────────────────────────────────────────
 
@@ -178,10 +213,41 @@ class QuipEngine:
     # ── Internals ───────────────────────────────────────────────────────────
 
     def _voice_for(self, role: str) -> AgentVoice:
+        # 1. Check the pre-built voices list (populated at run start)
         for v in self._voices:
             if v.role == role:
                 return v
+
+        # 2. Try to synthesise from persona profile (M1 fix — DESIGN §23)
+        #    Covers escalation side-tasks, peer-respond tasks, and any role
+        #    added after set_voices() was called.
+        if self._workspace is not None and self._personas_root is not None:
+            persona_id = self._workspace.hired_personas.get(role)
+            if persona_id:
+                voice = self._synthesise_from_persona(role, persona_id)
+                if voice is not None:
+                    self._voices.append(voice)  # cache for run
+                    return voice
+
+        # 3. System fallback — reserved for genuine system events only.
         return self._fallback_voice(role)
+
+    def _synthesise_from_persona(self, role: str, persona_id: str) -> AgentVoice | None:
+        """Load persona profile from disk and build an AgentVoice.
+
+        Returns None on any I/O failure — caller falls back to system voice.
+        """
+        try:
+            import json as _json
+            profile_path = self._personas_root / persona_id / "profile.json"  # type: ignore[operator]
+            if not profile_path.exists():
+                return None
+            data = _json.loads(profile_path.read_text(encoding="utf-8"))
+            name = data.get("name") or role.capitalize()
+            character = data.get("character") or f"You are {name}, a specialist on a software team."
+            return AgentVoice(role=role, name=name, character=character)
+        except Exception:
+            return None
 
     def _random_voice(self) -> AgentVoice:
         if self._voices:
@@ -189,9 +255,10 @@ class QuipEngine:
         return self._fallback_voice("system")
 
     def _fallback_voice(self, role: str) -> AgentVoice:
+        """System voice — only for genuine runner/system events."""
         return AgentVoice(
             role=role,
-            name=role.capitalize(),
+            name="System" if role == "system" else role.capitalize(),
             character="You are a focused engineer on a software team.",
         )
 

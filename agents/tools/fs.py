@@ -57,6 +57,16 @@ class FsRead(BaseTool):
     def __init__(self, files: FileWorkspace):
         self.files = files
 
+    def aci_doc(self) -> dict[str, str]:
+        return {
+            "purpose": "Read a file under working/ as UTF-8 text.",
+            "args": "{path:string}  # e.g. 'src/main.py'",
+            "emits": "{ok:true, path, content, size}",
+            "errors": "not found | path safety | read failed",
+            "example": 'fs-read({"path": "src/auth.py"})',
+            "notes": "Use fs-read-range for partial reads on huge files.",
+        }
+
     async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
         path = arguments.get("path")
         if not path or not isinstance(path, str):
@@ -203,6 +213,16 @@ class FsGrep(BaseTool):
         "required": ["query"],
     }
 
+    def aci_doc(self) -> dict[str, str]:
+        return {
+            "purpose": "Grep file contents under working/ for a literal string or regex.",
+            "args": "{query:string, regex?:bool, path_glob?:string, max_matches?:int, context_lines?:int, case_sensitive?:bool}",
+            "emits": "{ok:true, matches:[{path,line_number,line,before,after}]}",
+            "errors": "(none — empty matches list on no hits)",
+            "example": 'fs-grep({"query": "from_token", "path_glob": "src/**/*.py"})',
+            "notes": "Cheaper than fs-read when looking for one specific string. Use path_glob to scope.",
+        }
+
     # Skip these obviously-binary extensions to keep the tool fast and
     # avoid noise. Anything not matching is best-effort decoded as UTF-8.
     BINARY_EXTS = {
@@ -329,6 +349,16 @@ class FsWrite(_ClaimingTool):
     }
     intent = "edit"
 
+    def aci_doc(self) -> dict[str, str]:
+        return {
+            "purpose": "Overwrite (or create + parents) a file with the given content.",
+            "args": "{path:string, content:string}",
+            "emits": "{ok:true, path, bytes_written}",
+            "errors": "path safety | write failed",
+            "example": 'fs-write({"path": "src/util.py", "content": "def x():\\n    return 1\\n"})',
+            "notes": "For surgical changes prefer fs-edit; fs-write replaces the entire file.",
+        }
+
     async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
         path = arguments.get("path")
         content = arguments.get("content")
@@ -408,6 +438,20 @@ class FsEdit(_ClaimingTool):
     }
     intent = "edit"
 
+    def aci_doc(self) -> dict[str, str]:
+        return {
+            "purpose": "Find/replace an exact string in a file (auto-claims while editing).",
+            "args": "{path:string, find:string, replace:string, replace_all?:bool}",
+            "emits": "{ok:true, path, replacements}",
+            "errors": "SEARCH_NOT_FOUND (with closest matches) | MULTIPLE_MATCHES | path safety | not found",
+            "example": (
+                'fs-edit({"path": "src/auth.py", '
+                '"find": "    return None\\n", '
+                '"replace": "    return User.from_token(token)\\n"})'
+            ),
+            "notes": "Whitespace is exact. On SEARCH_NOT_FOUND the error contains the 3 closest matches — use them to correct on retry.",
+        }
+
     async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
         path = arguments.get("path")
         find = arguments.get("find")
@@ -431,10 +475,15 @@ class FsEdit(_ClaimingTool):
 
         count = content.count(find)
         if count == 0:
-            return _err(f"find string not present in {path}")
+            # M1 §6: surface closest matches so the agent can correct on retry
+            # without re-reading the file in full.
+            from core.edit_blocks import _closest_matches
+            close = _closest_matches(find, content, top_n=3)
+            hint = ("\nClosest matches in file:\n" + "\n".join(close)) if close else ""
+            return _err(f"SEARCH_NOT_FOUND: {path}{hint}")
         if not replace_all and count > 1:
             return _err(
-                f"find string occurs {count} times in {path}; "
+                f"MULTIPLE_MATCHES: find string occurs {count} times in {path}; "
                 "set replace_all=true or pass a more specific find string"
             )
 

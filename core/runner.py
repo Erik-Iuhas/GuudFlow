@@ -26,6 +26,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time as _time
+import uuid as _uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,7 +57,15 @@ from core.git_workspace import GitWorkspace
 from core.llm import LLMClient, LLMMessage, ToolCall
 from core.loop_guard import LoopGuard, LoopGuardConfig
 from core.repo_map import build as build_repo_map, update_incremental
-from core.scheduler import AgentSpec, Scheduler, SchedulerResult, SchedulerStatus
+from core.scheduler import (
+    AgentSpec,
+    InterruptToken,
+    Scheduler,
+    SchedulerResult,
+    SchedulerStatus,
+    WaitingForPeer,
+    WaitingForSkipConfirm,
+)
 from core.signals import Signal, SignalType
 from core.tool_manifest import (
     LocalToolEntry,
@@ -144,6 +154,10 @@ class ProjectConfig:
     # "training" tags episodes as training=True so reputation aggregates
     # split, and triggers the rubric_scorer at end-of-run.
     mode: str = "production"
+    # M1 §7b — story seeds. Each entry becomes a STORY_OPENED at run start.
+    # Shape: {"name": str, "goal": str, "owner_role": str | None,
+    #         "parent_story_id": str | None}.
+    stories: list[dict[str, Any]] = field(default_factory=list)
     # When mode == "training", the rubric_scorer reads this scenario
     # bundle from disk to score the run. Stored on the project at
     # invoke time by the training launcher.
@@ -156,6 +170,60 @@ TIER_TO_MODEL: dict[str, str] = {
     "solid": "claude-sonnet-4-6",
     "fast": "claude-haiku-4-5-20251001",
 }
+
+
+def _split_paths(raw: str) -> list[str]:
+    """Split a comma-separated path list. Trims whitespace and drops empties."""
+    if not raw:
+        return []
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+_STORY_STOPWORDS: frozenset[str] = frozenset({
+    "a", "an", "the", "and", "or", "of", "to", "in", "on", "for", "with",
+    "is", "are", "be", "this", "that", "it", "by", "as", "at", "from",
+    "ship", "add", "implement", "build", "make", "create", "do", "done",
+})
+
+
+def _summary_matches_goal(summary: str, goal: str, threshold: float = 0.5) -> bool:
+    """≥`threshold` keyword overlap between summary and goal (M1 §7b heuristic)."""
+    def _tokens(text: str) -> set[str]:
+        return {
+            tok.strip(".,;:!?'\"()[]")
+            for tok in text.lower().split()
+        } - _STORY_STOPWORDS - {""}
+
+    g = _tokens(goal)
+    s = _tokens(summary)
+    if not g:
+        return False
+    overlap = len(g & s)
+    return (overlap / len(g)) >= threshold
+
+
+def _extract_field(detail: str | None, key: str) -> str | None:
+    """Pull `key=value;` out of a Signal.detail string.
+
+    Used by the resume subscriber where SKIP_GRANTED/DENIED signals encode
+    skip_id (and redirected_task) in the detail text rather than JSON. Returns
+    None if the field isn't present.
+    """
+    if not detail:
+        return None
+    # Try JSON first
+    try:
+        data = json.loads(detail)
+        if isinstance(data, dict) and key in data:
+            return str(data[key])
+    except (ValueError, TypeError):
+        pass
+    # Fall back to "key=value" parse
+    for chunk in detail.split(";"):
+        chunk = chunk.strip()
+        if chunk.startswith(f"{key}="):
+            return chunk[len(key) + 1 :].strip()
+    return None
 
 
 class AgentRunner:
@@ -229,6 +297,10 @@ class AgentRunner:
         self._rejection_counts: dict[str, int] = {}
         self._escalations_fired: dict[str, set[str]] = {}
         self._escalation_tasks: list[asyncio.Task] = []
+        self._scheduler: Scheduler | None = None  # set in run() after creation
+        # M1: track outstanding interrupts so signal subscribers can resume.
+        # Maps role → InterruptToken. Cleared by _resume_token_for_role().
+        self._open_interrupts: dict[str, "InterruptToken"] = {}
         # Serialize git operations across parallel agents — a shared
         # working directory with concurrent checkouts causes race conditions
         # where one agent's `git add -A` picks up another agent's file writes.
@@ -251,6 +323,9 @@ class AgentRunner:
         # Subscribe to the board so we can count REJECTED signals and
         # fire escalations when thresholds are crossed.
         self.workspace.subscribe(self._on_signal_for_escalation)
+        # M1: subscribe so ANSWER / SKIP_GRANTED / SKIP_DENIED / HUMAN_RESPONDED
+        # routes back to scheduler.resume() and unparks the asker.
+        self.workspace.subscribe(self._on_signal_for_resume)
         # Phase G-prime.0 — incremental board persistence so a crashed
         # mid-run leaves a complete trail on disk for the resume loader.
         # board.jsonl co-exists with the end-of-run consolidated
@@ -573,6 +648,12 @@ class AgentRunner:
 
         # Populate quip voices from the now-built agents so each quip
         # is spoken in the right persona's voice.
+        # Populate workspace.hired_personas from agents that have a persona.
+        for cfg in self.project.agents:
+            agent = self.agents[cfg.role]
+            if agent.persona is not None and cfg.persona_id:
+                self.workspace.hired_personas[cfg.role] = cfg.persona_id
+
         if self.quip_engine is not None:
             from core.quip_engine import AgentVoice
             voices = []
@@ -587,6 +668,9 @@ class AgentRunner:
                     char = f"You are the {role} on a software team. {agent.description}".strip()
                 voices.append(AgentVoice(role=role, name=name, character=char))
             self.quip_engine.set_voices(voices)
+            # M1: give the engine workspace access so dynamic voice synthesis
+            # works for escalation side-tasks and peer-respond tasks.
+            self.quip_engine.set_workspace(self.workspace, self.personas_root)
 
         # Build AgentSpecs for the scheduler. Each spec's runner wraps
         # the agent's run() and handles iteration tracking + commit
@@ -601,11 +685,26 @@ class AgentRunner:
             ))
 
         scheduler = Scheduler(specs, self.workspace, scope="pipeline")
+        self._scheduler = scheduler  # M1: stored for ASK/skip interrupt calls
+
+        # M1 §9: inject scheduler reference so ask_human() and
+        # request_visual_feedback() can park via interrupt() instead of
+        # mutating workspace.pending_human directly.
+        for agent in self.agents.values():
+            agent._scheduler = scheduler
+
+        # M1 §7b: open stories from proposal seeds before the scheduler runs
+        # so every protocol message can be auto-tagged with the active story.
+        self._open_seed_stories()
+
         result = await scheduler.run()
 
         # Wait for any in-flight escalation handlers (Phase C.3) so
         # their signals land before memory_writer / quip_engine fire.
         await self._await_escalation_tasks()
+
+        # M1 §7b: close any stories still open at run end as `deferred`.
+        self._close_remaining_stories()
 
         # Post-run: training rubric scoring (Phase F.1.1) runs first so
         # the RUBRIC_SCORE signal is on the board before the
@@ -667,6 +766,13 @@ class AgentRunner:
             # decides what to do with new user_board entries.
             agent.iteration = workspace.iteration
 
+            # M1: build and inject teammate brief before every iteration.
+            # Rebuilding per-spawn ensures it reflects newly completed agents.
+            try:
+                agent._teammate_brief = self._build_teammate_brief(cfg.role)
+            except Exception:
+                agent._teammate_brief = ""
+
             # Phase C.4: final-stage reviewers (architects) trigger the
             # heavy_tier_mid_run_dispatch gate before they actually
             # spend tokens. This is the "office loops back with the
@@ -715,6 +821,116 @@ class AgentRunner:
                     detail=str(e),
                 )
                 raise
+
+            # M1: handle REQUEST_SKIP before treating the block as work output.
+            if (
+                isinstance(drive_result, protocol.CompactBlock)
+                and drive_result.kind == "REQUEST_SKIP"
+                and self._scheduler is not None
+            ):
+                skip_id = _uuid.uuid4().hex
+                reason = drive_result.fields.get("reason", "no reason given")
+                evidence = _split_paths(drive_result.fields.get("evidence_paths", ""))
+                token = self._scheduler.interrupt(
+                    cfg.role, "skip",
+                    WaitingForSkipConfirm(
+                        confirmer_role="tech_lead",
+                        skip_id=skip_id,
+                        deadline_ts=_time.monotonic() + 90,
+                    ),
+                )
+                self._open_interrupts[cfg.role] = token
+                workspace.post_signal(Signal(
+                    type=SignalType.PROTOCOL,
+                    summary=f"REQUEST_SKIP {cfg.role}: {reason}",
+                    from_agent=cfg.role,
+                    detail=f"skip_id={skip_id}; evidence={evidence}",
+                ))
+                if self.quip_engine is not None:
+                    try:
+                        await self.quip_engine.emit_quip(
+                            persona=cfg.role,
+                            text=f"Sitting this one out — {reason}",
+                            event_type="skip_request",
+                        )
+                    except Exception:
+                        pass
+                # M1: spawn the confirmer to grant or deny.
+                self._dispatch_skip_confirmation(
+                    confirmer_role="tech_lead",
+                    requesting_role=cfg.role,
+                    skip_id=skip_id,
+                    reason=reason,
+                    evidence_paths=evidence,
+                )
+                # Don't mark complete — scheduler holds until SKIP_GRANTED/DENIED
+                return
+
+            # M1: handle ASK CompactBlock — park in WAITING_FOR_PEER.
+            if (
+                isinstance(drive_result, protocol.CompactBlock)
+                and drive_result.kind == "ASK"
+                and self._scheduler is not None
+            ):
+                # One-outstanding-ASK rule (M1 §8): if this agent already has
+                # an open interrupt, reject the second ASK with a synthetic
+                # VERIFY_FAIL signal and let the scheduler re-spawn it.
+                if cfg.role in self._open_interrupts:
+                    workspace.post_signal(Signal(
+                        type=SignalType.PROTOCOL,
+                        summary=f"VERIFY_FAIL {cfg.role}: multiple outstanding ASKs",
+                        from_agent=cfg.role,
+                        detail="emit ANSWER receipt before next ASK",
+                    ))
+                    return
+
+                ask_id = drive_result.fields.get("ask_id") or _uuid.uuid4().hex
+                target_role = drive_result.fields.get("to", "tech_lead")
+                question = drive_result.fields.get("question", "")
+                context_paths = _split_paths(drive_result.fields.get("context_paths", ""))
+
+                token = self._scheduler.interrupt(
+                    cfg.role, "peer",
+                    WaitingForPeer(
+                        target_role=target_role,
+                        ask_id=ask_id,
+                        deadline_ts=_time.monotonic() + 120,
+                    ),
+                )
+                self._open_interrupts[cfg.role] = token
+                workspace.post_signal(Signal(
+                    type=SignalType.AGENT_MESSAGE,
+                    summary=f"ASK {cfg.role} → {target_role}: {question}",
+                    from_agent=cfg.role,
+                    detail=json.dumps({
+                        "ask_id": ask_id,
+                        "from": cfg.role,
+                        "to": target_role,
+                        "question": question,
+                        "context_paths": context_paths,
+                    }),
+                ))
+                if self.quip_engine is not None:
+                    try:
+                        target_name = self._persona_name(target_role)
+                        await self.quip_engine.emit_quip(
+                            persona=cfg.role,
+                            text=f"Hey {target_name}, {question}",
+                            addressed_to=target_role,
+                            event_type="peer_question",
+                        )
+                    except Exception:
+                        pass
+                # M1: spawn the target on a respond side-task.
+                self._dispatch_peer_response(
+                    target_role=target_role,
+                    asker_role=cfg.role,
+                    ask_id=ask_id,
+                    question=question,
+                    context_paths=context_paths,
+                )
+                # Don't mark complete — return without completing the agent.
+                return
 
             # Auto-commit any uncommitted changes on the agent's branch.
             commit_hash = await self._auto_commit(cfg.role, workspace)
@@ -784,6 +1000,15 @@ class AgentRunner:
                         ok = self.git.merge(branch, into="main")
                         if ok:
                             workspace.git.merged.append(branch)
+                    # M1 §7b: auto-close the dep's active story if its
+                    # latest commit summary matches the story goal.
+                    latest = next(
+                        (c for c in reversed(workspace.git.commits)
+                         if c.agent == dep_role),
+                        None,
+                    )
+                    if latest is not None:
+                        self._maybe_auto_close_story(dep_role, latest.message)
                 # Phase G.5 — auto-tag the review point. The tag lives
                 # on whatever commit `main` points at after the merge,
                 # so users can list review points and (in a follow-up
@@ -795,6 +1020,176 @@ class AgentRunner:
                 )
 
         return runner
+
+    # ── M1: teammate brief & incoming-work ─────────────────────────────────
+
+    def _build_teammate_brief(self, role: str) -> str:
+        """Build the TEAM block (Layer 3.5) for `role`.
+
+        Hard-capped at 300 tokens worth (~240 words) by truncating commit
+        subjects and descriptors.
+        """
+        from core.protocol import TeammateEntry, render_teammate_brief
+
+        entries: list[TeammateEntry] = []
+        for cfg in self.project.agents:
+            agent = self.agents.get(cfg.role)
+            if agent is None:
+                continue
+
+            # Descriptor: goal field (M2 adds it), fall back to first sentence of character
+            descriptor = ""
+            if agent.persona is not None:
+                goal = getattr(agent.persona.profile, "goal", "") or ""
+                if goal:
+                    descriptor = goal[:80]
+                else:
+                    char = agent.persona.character_layer() or ""
+                    descriptor = (char.split(".")[0])[:80]
+            else:
+                descriptor = (agent.description or "")[:80]
+
+            state = self.workspace.agent_states.get(cfg.role, None)
+            if cfg.role in self.workspace.completed_agents:
+                status = "DONE"
+            elif state and state.value == "sat_out":
+                status = "SAT_OUT"
+            elif state and state.value == "running":
+                status = "RUNNING"
+            else:
+                status = "PENDING"
+
+            last_commit = ""
+            if status == "DONE":
+                for commit in reversed(self.workspace.git.commits):
+                    if commit.agent == cfg.role:
+                        last_commit = commit.message[:60]
+                        break
+
+            # Escalation target (default tech_lead if any role is tech_lead)
+            escalation_target = ""
+            if cfg.role == role:
+                tech_roles = [c.role for c in self.project.agents if c.role == "tech_lead"]
+                if tech_roles:
+                    escalation_target = "tech_lead"
+
+            persona_name = ""
+            if agent.persona is not None:
+                persona_name = agent.persona.profile.name or cfg.role
+            else:
+                persona_name = cfg.role.capitalize()
+
+            entries.append(TeammateEntry(
+                role=cfg.role,
+                persona_name=persona_name,
+                descriptor=descriptor,
+                is_self=(cfg.role == role),
+                status=status,
+                last_commit_subject=last_commit,
+                escalation_target=escalation_target,
+            ))
+
+        return render_teammate_brief(role, entries)
+
+    def _build_incoming_work(self, cfg: AgentConfig) -> tuple[str, bool]:
+        """Build the INCOMING WORK block for cfg.role.
+
+        Returns (block_text, upstream_incomplete) where upstream_incomplete
+        is True when the ASK-enforcement rule should fire.
+        """
+        from core.protocol import UpstreamEntry, render_incoming_work
+
+        if not cfg.depends_on:
+            return "", False
+
+        entries: list[UpstreamEntry] = []
+        any_incomplete = False
+        _stop_words = frozenset({"work", "done", "finished", "complete", "ok", "completed"})
+
+        for dep_role in cfg.depends_on:
+            # Check if sat-out
+            dep_state = self.workspace.agent_states.get(dep_role)
+            if dep_state and dep_state.value == "sat_out":
+                # Find the REQUEST_SKIP info from the board
+                skip_reason = ""
+                skip_granted_by = ""
+                for sig in reversed(self.workspace.board):
+                    if sig.type == SignalType.PROTOCOL and sig.from_agent == dep_role:
+                        if sig.detail and "REQUEST_SKIP" in (sig.detail or ""):
+                            skip_reason = sig.summary
+                            break
+                entries.append(UpstreamEntry(
+                    role=dep_role,
+                    persona_name=self._persona_name(dep_role),
+                    commit_subject="",
+                    commit_hash="",
+                    summary="",
+                    files=[],
+                    sat_out=True,
+                    sat_out_reason=skip_reason or "no work in this scope",
+                    sat_out_granted_by=skip_granted_by or "tech_lead",
+                ))
+                continue
+
+            # Look for latest COMMIT on board
+            latest_commit: CommitRecord | None = None
+            for commit in reversed(self.workspace.git.commits):
+                if commit.agent == dep_role:
+                    latest_commit = commit
+                    break
+
+            if latest_commit is None:
+                any_incomplete = True
+                entries.append(UpstreamEntry(
+                    role=dep_role,
+                    persona_name=self._persona_name(dep_role),
+                    commit_subject="(no commits)",
+                    commit_hash="",
+                    summary="",
+                    files=[],
+                ))
+                continue
+
+            summary = latest_commit.message or ""
+            # Check empty-upstream rule
+            words = [w for w in summary.lower().split() if w not in _stop_words]
+            if len(words) < 3:
+                any_incomplete = True
+
+            entries.append(UpstreamEntry(
+                role=dep_role,
+                persona_name=self._persona_name(dep_role),
+                commit_subject=latest_commit.message,
+                commit_hash=latest_commit.hash,
+                summary=summary,
+                files=latest_commit.files,
+            ))
+
+        block = render_incoming_work(entries)
+        if any_incomplete and entries:
+            # Append the enforcement directive
+            incomplete_roles = [
+                e.role for e in entries
+                if not e.sat_out and (not e.commit_hash or len([
+                    w for w in e.summary.lower().split()
+                    if w not in _stop_words
+                ]) < 3)
+            ]
+            if incomplete_roles:
+                directive = "\n".join(
+                    f"UPSTREAM INCOMPLETE: {r} produced no usable handoff.\n"
+                    f"You MUST emit ASK targeting {r} before any ACTION/DELTA/COMMIT."
+                    for r in incomplete_roles
+                )
+                block = block + "\n\n" + directive if block else directive
+
+        return block, any_incomplete
+
+    def _persona_name(self, role: str) -> str:
+        agent = self.agents.get(role)
+        if agent and agent.persona is not None:
+            return agent.persona.profile.name or role.capitalize()
+        return role.capitalize()
 
     async def _drive_agent_run(
         self,
@@ -933,6 +1328,9 @@ class AgentRunner:
             if pending_messages else ""
         )
 
+        # M1: build the INCOMING WORK block for this agent's upstream deps.
+        incoming_work_block, upstream_incomplete = self._build_incoming_work(cfg)
+
         task_prompt = (
             f"Project goal: {self.project.goal}\n\n"
             f"Your role: {cfg.role}. {cfg.description}{upstream_ctx}{messages_ctx}\n\n"
@@ -941,10 +1339,14 @@ class AgentRunner:
             f"build, or review as your role requires. Do not describe what you will do — "
             f"do it. End with the required protocol block once your work is complete."
         )
+        if incoming_work_block:
+            task_prompt = incoming_work_block + "\n\n" + task_prompt
+
         messages: list[LLMMessage] = [LLMMessage(role="user", content=task_prompt)]
         guard = LoopGuard(cfg.loop_guard)
         nudges: list[str] = []  # accumulated for the next user turn
         protocol_retries_used = 0
+        ask_enforcement_failures = 0  # track how many times we've caught non-ASK on empty upstream
 
         for iteration in range(cfg.max_tool_iterations):
             if guard.deadline_exceeded():
@@ -1015,6 +1417,22 @@ class AgentRunner:
                 parse_error = str(e)
 
             if block is not None:
+                # M1: ASK enforcement — if UPSTREAM INCOMPLETE was declared and
+                # agent's first block is not ASK, inject synthetic VERIFY_FAIL.
+                # Reviewers are exempt: they are expected to emit [VERIFY], not [ASK].
+                if upstream_incomplete and not cfg.is_reviewer and block.kind not in ("ASK",) and ask_enforcement_failures < 3:
+                    ask_enforcement_failures += 1
+                    messages.append(LLMMessage(role="assistant", content=text))
+                    messages.append(LLMMessage(
+                        role="user",
+                        content=(
+                            "[VERIFY] FAIL\n"
+                            "  detail: ignored UPSTREAM INCOMPLETE directive — "
+                            "you emitted ACTION/COMMIT before ASK; re-read the incoming "
+                            "work block and emit [ASK] targeting the incomplete upstream role."
+                        ),
+                    ))
+                    continue
                 return block
 
             if protocol_retries_used >= 1:
@@ -1029,7 +1447,7 @@ class AgentRunner:
             nudge_msg = (
                 "[PROTOCOL] Your last response did not end with a valid "
                 "compact protocol block. Re-emit your final answer ending "
-                "with one of [COMMIT] / [VERIFY] / [ACTION] / [STATUS] as "
+                "with one of [COMMIT] / [VERIFY] / [ACTION] / [ASK] / [STATUS] as "
                 "specified in the system prompt. Block must be the last "
                 "thing in your response, with required fields filled in."
             )
@@ -1183,6 +1601,489 @@ class AgentRunner:
         for target in reviewer_cfg.depends_on:
             self._rejection_counts[target] = self._rejection_counts.get(target, 0) + 1
             self._maybe_escalate(target)
+
+    def _on_signal_for_resume(self, sig: Signal) -> None:
+        """Workspace subscriber. Resolves outstanding interrupts on receipt of
+        ANSWER, SKIP_GRANTED, SKIP_DENIED, or HUMAN_RESPONDED.
+
+        Flow:
+          - ANSWER (AGENT_MESSAGE with "ANSWER " prefix in summary, ask_id in
+            detail JSON) → find role with matching open peer interrupt; resume.
+          - SKIP_GRANTED → mark_sat_out; clear interrupt.
+          - SKIP_DENIED → resume with redirected_task; clear interrupt.
+          - HUMAN_RESPONDED → resume any open human interrupt with the value.
+        """
+        if self._scheduler is None:
+            return
+
+        try:
+            if sig.type is SignalType.AGENT_MESSAGE and sig.summary.startswith("ANSWER "):
+                payload = json.loads(sig.detail or "{}")
+                ask_id = payload.get("ask_id", "")
+                answer_body = payload.get("answer", "") or payload.get("body", "")
+                if not ask_id:
+                    return
+                role = self._role_with_token_id(ask_id, kind="peer")
+                if role is None:
+                    return
+                token = self._open_interrupts.pop(role)
+                self._scheduler.resume(token, value=answer_body)
+                return
+
+            if sig.type is SignalType.PROTOCOL and sig.summary.startswith("SKIP_GRANTED"):
+                skip_id = _extract_field(sig.detail, "skip_id")
+                if not skip_id:
+                    return
+                role = self._role_with_token_id(skip_id, kind="skip")
+                if role is None:
+                    return
+                self._open_interrupts.pop(role, None)
+                self._scheduler.mark_sat_out(role)
+                return
+
+            if sig.type is SignalType.PROTOCOL and sig.summary.startswith("SKIP_DENIED"):
+                skip_id = _extract_field(sig.detail, "skip_id")
+                redirected = _extract_field(sig.detail, "redirected_task") or ""
+                if not skip_id:
+                    return
+                role = self._role_with_token_id(skip_id, kind="skip")
+                if role is None:
+                    return
+                token = self._open_interrupts.pop(role)
+                self._scheduler.resume(token, value=redirected)
+                return
+
+            if sig.type is SignalType.HUMAN_RESPONDED:
+                # Resume any agents currently waiting on a human interrupt.
+                for role, token in list(self._open_interrupts.items()):
+                    if token.kind != "human":
+                        continue
+                    self._open_interrupts.pop(role, None)
+                    self._scheduler.resume(token, value=sig.detail or sig.summary or "")
+                return
+
+            if sig.type is SignalType.PEER_TIMEOUT:
+                # Scheduler reaped a stale peer interrupt. Re-dispatch
+                # tech_lead with the original ASK so the asker can resume.
+                # Spec §8: "tech_lead posts ANSWER for ask_id (escalation
+                # path) → READY".
+                ask_id = _extract_field(sig.detail, "ask_id")
+                asker_role = sig.from_agent or ""
+                if not ask_id or not asker_role:
+                    return
+                # Find the original ASK on the board to recover the question.
+                original = self._find_original_ask(asker_role, ask_id)
+                if original is None:
+                    return
+                self._open_interrupts.pop(asker_role, None)
+                self._dispatch_peer_response(
+                    target_role="tech_lead",
+                    asker_role=asker_role,
+                    ask_id=ask_id,
+                    question=original.get("question", ""),
+                    context_paths=original.get("context_paths", []),
+                )
+                return
+        except Exception:
+            # Subscribers must never break post_signal — swallow and move on.
+            return
+
+    def _find_original_ask(self, asker_role: str, ask_id: str) -> dict | None:
+        """Find the original AGENT_MESSAGE ASK signal payload by ask_id."""
+        for sig in reversed(self.workspace.board):
+            if sig.type is not SignalType.AGENT_MESSAGE:
+                continue
+            if sig.from_agent != asker_role:
+                continue
+            if not sig.summary.startswith("ASK "):
+                continue
+            try:
+                payload = json.loads(sig.detail or "{}")
+            except (ValueError, TypeError):
+                continue
+            if payload.get("ask_id") == ask_id:
+                return payload
+        return None
+
+    def _role_with_token_id(self, token_id: str, kind: str) -> str | None:
+        for role, tok in self._open_interrupts.items():
+            if tok.kind == kind and tok.id == token_id:
+                return role
+        return None
+
+    # ── M1 stories ─────────────────────────────────────────────────────────
+
+    def _open_seed_stories(self) -> None:
+        """Emit STORY_OPENED for each story seed in the project config.
+
+        Each seed: {"name": str, "goal": str, "owner_role": str | None,
+        "parent_story_id": str | None}. Updates `workspace.stories` and
+        `workspace.active_story` so subsequent protocol messages can be
+        auto-tagged.
+        """
+        from core.workspace import StoryState
+
+        for seed in self.project.stories:
+            name = seed.get("name", "").strip()
+            goal = seed.get("goal", "").strip()
+            if not name or not goal:
+                continue
+            story_id = _uuid.uuid4().hex
+            owner = seed.get("owner_role")
+            parent = seed.get("parent_story_id")
+
+            self.workspace.stories[story_id] = StoryState(
+                story_id=story_id,
+                name=name,
+                goal=goal,
+                owner_role=owner,
+                parent_story_id=parent,
+                opened_at_iteration=self.workspace.iteration,
+            )
+            # Per-agent active-story pointer: owner gets it directly; team-wide
+            # stories (owner=None) become the active story for any role with
+            # no more-specific assignment.
+            if owner:
+                self.workspace.active_story[owner] = story_id
+            else:
+                for cfg in self.project.agents:
+                    self.workspace.active_story.setdefault(cfg.role, story_id)
+
+            # Emit the STORY_OPENED message via the protocol render helper so
+            # the board contains the canonical text for downstream tooling.
+            rendered = protocol.render_story_opened(
+                story_id=story_id,
+                name=name,
+                goal=goal,
+                owner_role=owner,
+                parent_story_id=parent,
+            )
+            self.workspace.post_signal(Signal(
+                type=SignalType.PROTOCOL,
+                summary=f"STORY_OPENED {name}",
+                from_agent="runner",
+                detail=rendered,
+            ))
+
+    def _active_story_for(self, role: str) -> str | None:
+        """Return the active (open) story_id for a role, or None."""
+        story_id = self.workspace.active_story.get(role)
+        if story_id is None:
+            return None
+        story = self.workspace.stories.get(story_id)
+        if story is None or story.closed:
+            return None
+        return story_id
+
+    def _close_remaining_stories(self) -> None:
+        """Mark any still-open stories as `deferred` at run end (M1 §7b)."""
+        for story_id, story in list(self.workspace.stories.items()):
+            if story.closed:
+                continue
+            story.closed = True
+            story.closed_outcome = "deferred"
+            story.closed_summary = "still open at run end"
+            rendered = protocol.render_story_closed(
+                story_id=story_id,
+                outcome="deferred",
+                summary=story.closed_summary,
+            )
+            self.workspace.post_signal(Signal(
+                type=SignalType.PROTOCOL,
+                summary=f"STORY_CLOSED {story.name} (deferred)",
+                from_agent="runner",
+                detail=rendered,
+            ))
+
+    def _maybe_auto_close_story(self, role: str, commit_summary: str) -> None:
+        """M1 §7b: auto-close the role's active story if a COMMIT summary
+        semantically matches the story goal AND a reviewer APPROVE follows.
+
+        Heuristic: ≥50% non-stop-word overlap between summary and goal.
+        Called from the runner's APPROVED branch (after the merge).
+        """
+        story_id = self._active_story_for(role)
+        if story_id is None:
+            return
+        story = self.workspace.stories[story_id]
+        if not _summary_matches_goal(commit_summary, story.goal):
+            return
+        story.closed = True
+        story.closed_outcome = "shipped"
+        story.closed_summary = commit_summary[:120]
+        rendered = protocol.render_story_closed(
+            story_id=story_id,
+            outcome="shipped",
+            summary=story.closed_summary,
+        )
+        self.workspace.post_signal(Signal(
+            type=SignalType.PROTOCOL,
+            summary=f"STORY_CLOSED {story.name} (shipped)",
+            from_agent="runner",
+            detail=rendered,
+        ))
+
+    # ── M1 side-task dispatch ──────────────────────────────────────────────
+
+    def _dispatch_peer_response(
+        self,
+        target_role: str,
+        asker_role: str,
+        ask_id: str,
+        question: str,
+        context_paths: list[str],
+    ) -> None:
+        """Spawn `target_role` on a side task to answer `asker_role`'s ASK.
+
+        On completion, posts an AGENT_MESSAGE with summary `ANSWER ...` and
+        a JSON detail payload; the resume subscriber routes it back to the
+        asker via `scheduler.resume()`. Tech_lead has a specialised
+        `run_respond` method; other roles fall through to a generic
+        single-LLM-call answer prompt.
+        """
+        target_cfg = next(
+            (c for c in self.project.agents if c.role == target_role),
+            None,
+        )
+        if target_cfg is None:
+            # Target not in project — fall back to tech_lead if configured.
+            tech_cfg = next(
+                (c for c in self.project.agents if c.role == "tech_lead"),
+                None,
+            )
+            if tech_cfg is None:
+                return
+            target_cfg = tech_cfg
+            target_role = "tech_lead"
+
+        async def _run_target() -> None:
+            try:
+                if target_role not in self.agents:
+                    self._build_handler_agent(target_cfg)
+                target_agent = self.agents[target_role]
+                target_agent.iteration = self.workspace.iteration
+
+                # Tech_lead has a specialised run_respond; everyone else
+                # uses a generic one-shot prompt.
+                if hasattr(target_agent, "run_respond") and callable(
+                    getattr(target_agent, "run_respond")
+                ):
+                    answer_text = await target_agent.run_respond(
+                        workspace=self.workspace,
+                        ask_id=ask_id,
+                        asker_role=asker_role,
+                        question=question,
+                        context_paths=context_paths,
+                    )
+                else:
+                    answer_text = await self._generic_peer_answer(
+                        target_agent, asker_role, ask_id, question, context_paths,
+                    )
+
+                # Parse the ANSWER block and post as AGENT_MESSAGE.
+                try:
+                    block = protocol.extract_trailing(answer_text or "")
+                except ValueError:
+                    block = None
+                answer_body = ""
+                if block is not None and block.kind == "ANSWER":
+                    answer_body = block.fields.get("answer", "") or block.fields.get(
+                        "body", ""
+                    )
+
+                self.workspace.post_signal(Signal(
+                    type=SignalType.AGENT_MESSAGE,
+                    summary=f"ANSWER {target_role} → {asker_role}",
+                    from_agent=target_role,
+                    detail=json.dumps({
+                        "ask_id": ask_id,
+                        "from": target_role,
+                        "to": asker_role,
+                        "answer": answer_body,
+                    }),
+                ))
+                if self.quip_engine is not None:
+                    try:
+                        await self.quip_engine.emit_quip(
+                            persona=target_role,
+                            text=answer_body[:80] or "(no answer)",
+                            addressed_to=asker_role,
+                            event_type="peer_answer",
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "peer-response dispatch for %s crashed", target_role,
+                )
+
+        try:
+            task = asyncio.create_task(
+                _run_target(), name=f"peer-respond:{target_role}",
+            )
+            self._escalation_tasks.append(task)
+        except RuntimeError:
+            pass
+
+    async def _generic_peer_answer(
+        self,
+        agent: BaseAgent,
+        asker_role: str,
+        ask_id: str,
+        question: str,
+        context_paths: list[str],
+    ) -> str:
+        """Single-LLM-call ANSWER for agents without a specialised handler."""
+        from core.llm import LLMMessage
+        ctx_note = (
+            f"\nContext files: {', '.join(context_paths)}" if context_paths else ""
+        )
+        prompt = (
+            f"PEER QUESTION from {asker_role}:\n"
+            f"ask_id: {ask_id}\n"
+            f"question: {question}{ctx_note}\n\n"
+            f"Answer in ≤12 words. End with:\n"
+            f"[ANSWER]\n"
+            f"  ask_id: {ask_id}\n"
+            f"  to: {asker_role}\n"
+            f"  answer: <your answer>"
+        )
+        try:
+            response = await agent.llm([LLMMessage(role="user", content=prompt)])
+            return response.text or ""
+        except Exception:
+            return ""
+
+    def _dispatch_skip_confirmation(
+        self,
+        confirmer_role: str,
+        requesting_role: str,
+        skip_id: str,
+        reason: str,
+        evidence_paths: list[str],
+    ) -> None:
+        """Spawn `confirmer_role` to grant or deny a REQUEST_SKIP.
+
+        Posts SKIP_GRANTED or SKIP_DENIED signal on completion; the resume
+        subscriber routes it back via `scheduler.mark_sat_out()` /
+        `scheduler.resume()`.
+        """
+        confirmer_cfg = next(
+            (c for c in self.project.agents if c.role == confirmer_role),
+            None,
+        )
+        if confirmer_cfg is None:
+            return
+
+        async def _run_confirmer() -> None:
+            try:
+                if confirmer_role not in self.agents:
+                    self._build_handler_agent(confirmer_cfg)
+                confirmer = self.agents[confirmer_role]
+                confirmer.iteration = self.workspace.iteration
+
+                if hasattr(confirmer, "run_confirm_skip") and callable(
+                    getattr(confirmer, "run_confirm_skip")
+                ):
+                    verdict_text = await confirmer.run_confirm_skip(
+                        workspace=self.workspace,
+                        skip_id=skip_id,
+                        requesting_role=requesting_role,
+                        reason=reason,
+                        evidence_paths=evidence_paths,
+                    )
+                else:
+                    verdict_text = await self._generic_skip_decision(
+                        confirmer, requesting_role, skip_id, reason, evidence_paths,
+                    )
+
+                try:
+                    block = protocol.extract_trailing(verdict_text or "")
+                except ValueError:
+                    block = None
+
+                if block is not None and block.kind == "SKIP_GRANTED":
+                    note = block.fields.get("note", "")
+                    self.workspace.post_signal(Signal(
+                        type=SignalType.PROTOCOL,
+                        summary=f"SKIP_GRANTED {requesting_role}",
+                        from_agent=confirmer_role,
+                        detail=f"skip_id={skip_id};note={note}",
+                    ))
+                    if self.quip_engine is not None:
+                        try:
+                            await self.quip_engine.emit_quip(
+                                persona=confirmer_role,
+                                text=f"Granted — {note or 'confirmed'}",
+                                addressed_to=requesting_role,
+                                event_type="skip_granted",
+                            )
+                        except Exception:
+                            pass
+                elif block is not None and block.kind == "SKIP_DENIED":
+                    redirected = block.fields.get("redirected_task", "")
+                    self.workspace.post_signal(Signal(
+                        type=SignalType.PROTOCOL,
+                        summary=f"SKIP_DENIED {requesting_role}",
+                        from_agent=confirmer_role,
+                        detail=f"skip_id={skip_id};redirected_task={redirected}",
+                    ))
+                    if self.quip_engine is not None:
+                        try:
+                            await self.quip_engine.emit_quip(
+                                persona=confirmer_role,
+                                text=f"Denied — {redirected[:50] or 'do the work'}",
+                                addressed_to=requesting_role,
+                                event_type="skip_denied",
+                            )
+                        except Exception:
+                            pass
+                else:
+                    # No valid verdict — default-deny with a generic redirect.
+                    self.workspace.post_signal(Signal(
+                        type=SignalType.PROTOCOL,
+                        summary=f"SKIP_DENIED {requesting_role}",
+                        from_agent=confirmer_role,
+                        detail=f"skip_id={skip_id};redirected_task=no clear verdict; do your work",
+                    ))
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "skip-confirmation dispatch crashed",
+                )
+
+        try:
+            task = asyncio.create_task(
+                _run_confirmer(), name=f"skip-confirm:{confirmer_role}",
+            )
+            self._escalation_tasks.append(task)
+        except RuntimeError:
+            pass
+
+    async def _generic_skip_decision(
+        self,
+        agent: BaseAgent,
+        requesting_role: str,
+        skip_id: str,
+        reason: str,
+        evidence_paths: list[str],
+    ) -> str:
+        """Single-LLM-call skip verdict for confirmers without a specialised handler."""
+        from core.llm import LLMMessage
+        evidence_note = (
+            f"\nEvidence files: {', '.join(evidence_paths)}" if evidence_paths else ""
+        )
+        prompt = (
+            f"REQUEST_SKIP from {requesting_role}:\n"
+            f"skip_id: {skip_id}\n"
+            f"reason: {reason}{evidence_note}\n\n"
+            f"Inspect the evidence. Emit [SKIP_GRANTED] (skip_id, note) "
+            f"if no relevant work, else [SKIP_DENIED] (skip_id, redirected_task)."
+        )
+        try:
+            response = await agent.llm([LLMMessage(role="user", content=prompt)])
+            return response.text or ""
+        except Exception:
+            return ""
 
     def _maybe_escalate(self, target_role: str) -> None:
         """If `target_role` has crossed any threshold in

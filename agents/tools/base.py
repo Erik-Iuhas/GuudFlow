@@ -42,6 +42,39 @@ class BaseTool(ABC):
         reserved for unrecoverable framework bugs.
         """
 
+    def aci_doc(self) -> dict[str, str] | None:
+        """Return ACI (SWE-agent-style) documentation for this tool.
+
+        Keys: purpose, args, emits, errors, example, notes (all optional
+        except purpose). Default is auto-synthesized from `description` +
+        `input_schema`; override on a subclass to add `example`/`errors`/
+        `notes` with hand-crafted content. Return None to skip ACI rendering
+        entirely (fall back to the compact catalog one-liner).
+        """
+        if not self.description:
+            return None
+        doc: dict[str, str] = {"purpose": self.description}
+        args = _summarise_input_schema(self.input_schema)
+        if args:
+            doc["args"] = args
+        return doc
+
+
+def _summarise_input_schema(schema: dict[str, Any]) -> str:
+    """One-line `{name?:type, name:type}` summary of a JSONSchema object."""
+    if not isinstance(schema, dict):
+        return ""
+    props = schema.get("properties")
+    if not isinstance(props, dict) or not props:
+        return ""
+    required = set(schema.get("required") or [])
+    parts: list[str] = []
+    for name, prop in props.items():
+        ptype = prop.get("type", "any") if isinstance(prop, dict) else "any"
+        marker = "" if name in required else "?"
+        parts.append(f"{name}{marker}:{ptype}")
+    return "{" + ", ".join(parts) + "}"
+
 
 class ToolError(Exception):
     """Raised by the framework (not tools themselves) when something

@@ -30,6 +30,10 @@ class AgentState(str, Enum):
     COMPLETE = "complete"
     FAILED = "failed"
     WAITING_FOR_HUMAN = "waiting_for_human"
+    # M1 — handshake protocol
+    WAITING_FOR_PEER = "waiting_for_peer"          # blocked on ASK/ANSWER
+    WAITING_FOR_SKIP_CONFIRM = "waiting_for_skip_confirm"  # REQUEST_SKIP pending
+    SAT_OUT = "sat_out"                            # skip confirmed; counts as complete
 
 
 # ── Typed sub-records ───────────────────────────────────────────────────────
@@ -79,6 +83,26 @@ class CommitRecord:
     iteration: int
     files: list[str] = field(default_factory=list)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class StoryState:
+    """A live story (M1 §7b). Tracks open/closed status + which agents own it.
+
+    `active_for` is the set of roles for which this story is the currently
+    active story (auto-resolved by the runner). `parent` is the parent story_id
+    for sub-stories (one level deep only).
+    """
+
+    story_id: str
+    name: str
+    goal: str
+    owner_role: str | None = None
+    parent_story_id: str | None = None
+    opened_at_iteration: int = 0
+    closed: bool = False
+    closed_outcome: str | None = None  # "shipped" | "abandoned" | "deferred"
+    closed_summary: str = ""
 
 
 @dataclass
@@ -189,6 +213,12 @@ class Workspace:
     iteration: int = 0
     completed_agents: list[str] = field(default_factory=list)
     repo_map: RepoMap = field(default_factory=RepoMap)
+
+    # M1 §7b — stories. `stories` is the index by story_id; `active_story`
+    # maps role → story_id (the per-agent active-story pointer the runner
+    # uses to auto-tag emitted protocol messages).
+    stories: dict[str, "StoryState"] = field(default_factory=dict)
+    active_story: dict[str, str] = field(default_factory=dict)
     embeddings_enabled: bool = False
 
     # Run-level wall-clock deadline (epoch seconds). Set by the runner

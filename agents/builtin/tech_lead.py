@@ -18,7 +18,8 @@ escalation handlers with the same metadata shape.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from dataclasses import dataclass, field
+from typing import Any, ClassVar
 
 from agents.abstract import EscalationHandler
 from core.signals import SignalType
@@ -42,6 +43,44 @@ Process:
 You are the senior here. The team is stuck. Make the call.
 """
 
+TECH_LEAD_RESPOND_PROMPT = """\
+You are a senior tech lead. A teammate has asked you a question and needs
+an answer before they can continue their work. Read the question carefully.
+
+Process:
+  1. Read any context files listed in context_paths if provided.
+  2. Look at the relevant git branches (git-diff, git-log) if the question
+     is about existing code.
+  3. Give a direct, specific answer — one or two sentences max.
+  4. End with [ANSWER] block:
+       ask_id: <the ask_id provided in the question context>
+       to: <the role that asked>
+       answer: <your answer — ≤ 12 words, specific and actionable>
+
+You are the authority here. Give a decision, not a list of options.
+"""
+
+TECH_LEAD_CONFIRM_SKIP_PROMPT = """\
+You are a senior tech lead. A teammate wants to sit out this iteration.
+Your job is to confirm or redirect them.
+
+Context you receive: the agent's role, their reason, and the files they inspected.
+
+Process:
+  1. Read the evidence_paths to verify they actually contain no work for that role.
+  2. If the diff/files confirm the agent has nothing to do: emit [SKIP_GRANTED].
+  3. If there IS work for that agent: emit [SKIP_DENIED] with a specific redirected_task.
+  4. Keep it brief — this is a fast decision.
+
+Block for granting: [SKIP_GRANTED]
+  skip_id: <skip_id>
+  note: confirmed — no relevant files
+
+Block for denying: [SKIP_DENIED]
+  skip_id: <skip_id>
+  redirected_task: <one sentence: what the agent should actually do>
+"""
+
 
 class TechLead(EscalationHandler):
     role: str = "tech_lead"
@@ -55,7 +94,8 @@ class TechLead(EscalationHandler):
     archetype_description: ClassVar[str] = (
         "Investigates stuck cycles (multiple rejections on the same "
         "agent) and posts a specific ACTION recommendation that "
-        "breaks the loop. HEAVY tier by default — activates rarely."
+        "breaks the loop. HEAVY tier by default — activates rarely. "
+        "Also handles peer ASK/ANSWER routing and REQUEST_SKIP confirmation."
     )
     archetype_when_to_use: ClassVar[str] = (
         "Include in any project where the developer/reviewer cycle "
@@ -70,3 +110,84 @@ class TechLead(EscalationHandler):
             system_prompt=TECH_LEAD_SYSTEM_PROMPT,
             **kwargs,
         )
+
+    async def run_respond(
+        self,
+        workspace: Any,
+        ask_id: str,
+        asker_role: str,
+        question: str,
+        context_paths: list[str] | None = None,
+    ) -> str:
+        """Handle a `respond` task — answer a peer's ASK.
+
+        Called by the runner when tech_lead is spawned with task_type="respond".
+        Returns the ANSWER body text.
+        """
+        from core.llm import LLMMessage
+
+        # Temporarily override system prompt for this task.
+        original_prompt = self.system_prompt
+        self.system_prompt = TECH_LEAD_RESPOND_PROMPT
+
+        ctx_note = ""
+        if context_paths:
+            ctx_note = f"\nContext files to check: {', '.join(context_paths)}"
+
+        messages = [
+            LLMMessage(
+                role="user",
+                content=(
+                    f"PEER QUESTION from {asker_role}:\n"
+                    f"ask_id: {ask_id}\n"
+                    f"question: {question}{ctx_note}\n\n"
+                    f"Provide a direct answer. End with the [ANSWER] block."
+                ),
+            )
+        ]
+
+        try:
+            response = await self.llm(messages)
+            return response.text or "(no answer)"
+        finally:
+            self.system_prompt = original_prompt
+
+    async def run_confirm_skip(
+        self,
+        workspace: Any,
+        skip_id: str,
+        requesting_role: str,
+        reason: str,
+        evidence_paths: list[str] | None = None,
+    ) -> str:
+        """Handle a `confirm_skip` task — grant or deny a REQUEST_SKIP.
+
+        Called by the runner when tech_lead is spawned with task_type="confirm_skip".
+        Returns the full compact block text ([SKIP_GRANTED] or [SKIP_DENIED]).
+        """
+        from core.llm import LLMMessage
+
+        original_prompt = self.system_prompt
+        self.system_prompt = TECH_LEAD_CONFIRM_SKIP_PROMPT
+
+        evidence_note = ""
+        if evidence_paths:
+            evidence_note = f"\nEvidence files: {', '.join(evidence_paths)}"
+
+        messages = [
+            LLMMessage(
+                role="user",
+                content=(
+                    f"REQUEST_SKIP from {requesting_role}:\n"
+                    f"skip_id: {skip_id}\n"
+                    f"reason: {reason}{evidence_note}\n\n"
+                    f"Inspect the evidence and emit [SKIP_GRANTED] or [SKIP_DENIED]."
+                ),
+            )
+        ]
+
+        try:
+            response = await self.llm(messages)
+            return response.text or "(no decision)"
+        finally:
+            self.system_prompt = original_prompt

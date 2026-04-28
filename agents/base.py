@@ -114,12 +114,18 @@ class BaseAgent:
     _context_manager: ContextManager | None = None
     _llm: LLMClient | None = None
     _model: str = "claude-sonnet-4-6"
+    # M1 §9 — scheduler handle so ask_human / request_visual_feedback can
+    # park via interrupt() instead of mutating workspace.pending_human.
+    # Injected by the runner immediately after Scheduler construction.
+    _scheduler: Any = None  # core.scheduler.Scheduler
     _project_rules: str = ""
     # Phase K.1 — project's roadmap.md (free-form markdown the user
     # owns). Empty / unset = layer is omitted from the effective
     # prompt; same observable behaviour as today's runs.
     _project_context: str = ""
     _current_task: str = ""
+    # M1 — teammate brief (Layer 3.5). Set by runner before each LLM call.
+    _teammate_brief: str = ""
 
     # Per-instance current iteration (set by runner per attempt).
     iteration: int = 0
@@ -170,17 +176,27 @@ class BaseAgent:
         question: str,
         context: str | None = None,
     ) -> None:
-        """Set pending_human and post HUMAN_NEEDED. Returns immediately —
-        the scheduler will respawn this agent after HUMAN_RESPONDED clears
-        `pending_human`. The runner contract (DESIGN §3.3 / §6) is that the
-        runner re-enters `run()` for the same role after the response."""
+        """Park the agent for a human answer. Returns immediately — the
+        runner re-enters `run()` for this role after HUMAN_RESPONDED.
+
+        M1 §9: when a scheduler is injected, this routes through
+        `scheduler.interrupt(role, "human", ...)` so the resume path is
+        unified with peer/skip waits. Without a scheduler (legacy/test
+        callers), falls back to setting `pending_human` directly.
+        """
         workspace.pending_human = HumanRequest(
             from_agent=self.role,
             question=question,
             context=context,
             iteration=self.iteration,
         )
-        workspace.agent_states[self.role] = AgentState.WAITING_FOR_HUMAN
+        if self._scheduler is not None:
+            from core.scheduler import WaitingForHuman
+            self._scheduler.interrupt(
+                self.role, "human", WaitingForHuman(kind="human", question=question),
+            )
+        else:
+            workspace.agent_states[self.role] = AgentState.WAITING_FOR_HUMAN
         await self.signal(
             workspace,
             SignalType.HUMAN_NEEDED,
@@ -208,13 +224,23 @@ class BaseAgent:
         question: str | None = None,
     ) -> None:
         """Post SCREENSHOT_READY for the runner to render. Suspends the
-        agent (the runner manages re-entry on USER_VISUAL_FEEDBACK)."""
+        agent (the runner manages re-entry on USER_VISUAL_FEEDBACK).
+
+        M1 §9: parks via `scheduler.interrupt(role, "human", kind="visual")`
+        when a scheduler is injected, so the resume path is unified.
+        """
         workspace.pending_screenshots.append(PendingScreenshot(
             from_agent=self.role,
             file_path=file_path,
             viewport=viewport,
             awaiting_feedback=True,
         ))
+        if self._scheduler is not None:
+            from core.scheduler import WaitingForHuman
+            self._scheduler.interrupt(
+                self.role, "human",
+                WaitingForHuman(kind="visual", question=question or file_path),
+            )
         await self.signal(
             workspace,
             SignalType.SCREENSHOT_READY,
@@ -574,7 +600,9 @@ class BaseAgent:
         if self._llm is None:
             raise ToolError("agent has no LLM client")
 
-        system = await self.effective_system_prompt(teammate_brief=teammate_brief)
+        # Use the runner-injected brief if caller doesn't supply one.
+        effective_brief = teammate_brief or self._teammate_brief
+        system = await self.effective_system_prompt(teammate_brief=effective_brief)
         tools = self._tool_schemas_for_llm()
 
         return await self._llm.complete(
@@ -716,6 +744,29 @@ class BaseAgent:
             tool_text = self._manifest.render_for_prompt()
             if tool_text:
                 parts.append(tool_text)
+
+        # Layer 5.5 — protocol voice (M1 spec §4, verbatim)
+        parts.append(
+            "PROTOCOL VOICE\n"
+            "When you emit a protocol message (COMMIT, VERIFY_RESULT, DELTA, ACTION,\n"
+            "ASK, ANSWER, STATUS, REQUEST_SKIP), you are writing for another agent, not a human.\n\n"
+            "Rules:\n"
+            "- summary, detail, body fields: ≤ 12 words each\n"
+            "- imperative or declarative only (\"auth endpoint done\" not \"I have implemented\")\n"
+            "- no marketing words: robust, comprehensive, seamless, production-ready\n"
+            "- no apology: \"unfortunately\", \"I'm sorry\"\n"
+            "- no preamble: \"I have now\", \"as requested\", \"let me\"\n"
+            "- no restating the task back at the requester\n"
+            "- specific over vague: \"POST /auth returns 500 on empty body\" not \"login broken\"\n\n"
+            "Your reasoning stays in your scratchpad (between tool calls). Only the\n"
+            "protocol message goes on the wire.\n\n"
+            "GOOD: [COMMIT]\n  summary: auth endpoint done; 400/401/500 covered\n"
+            "BAD:  [COMMIT]\n  summary: I have successfully implemented a robust auth endpoint\n\n"
+            "GOOD: [VERIFY] FAIL\n  detail: login: POST /auth returns 500 on empty body\n"
+            "BAD:  [VERIFY] FAIL\n  detail: Unfortunately tests indicate login may have issues\n\n"
+            "If your upstream work is empty or vague, emit [ASK] targeting that role FIRST —\n"
+            "before any [ACTION] or [COMMIT]. Do not invent requirements."
+        )
 
         parts.append(
             "Before producing output, briefly consider edge cases and what "
