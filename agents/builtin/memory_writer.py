@@ -158,6 +158,9 @@ class MemoryWriter(BaseAgent):
         # Persist atomically.
         self._save(persona, run_id)
 
+        # M2: append to history.json for this run.
+        self._append_history(persona, role, workspace, run_id, project)
+
     # ── 1. Episode ──────────────────────────────────────────────────────────
 
     def _build_episode(
@@ -581,6 +584,89 @@ class MemoryWriter(BaseAgent):
         profile_data["last_active_run_id"] = run_id
         profile_data["last_active_ts"] = datetime.now(timezone.utc).isoformat()
         profile_path.write_text(json.dumps(profile_data, indent=2, default=str), encoding="utf-8")
+
+    def _append_history(
+        self, persona: Persona, role: str, workspace: Any, run_id: str, project: Any
+    ) -> None:
+        """Append one entry to data/personas/{id}/history.json (M2 §7).
+
+        Atomic write: read → append → write to .tmp → rename.
+        """
+        persona_dir = getattr(persona, "_dir", None)
+        if persona_dir is None:
+            return
+        persona_dir = Path(persona_dir)
+
+        # Determine outcome from board signals.
+        approved = any(
+            s.from_agent == role and getattr(s.type, "value", "") == "APPROVED"
+            for s in getattr(workspace, "board", [])
+        )
+        sat_out = (
+            role in (workspace.agent_states or {})
+            and getattr(workspace.agent_states.get(role), "value", "") == "sat_out"
+        )
+        failed = (
+            role in (workspace.agent_states or {})
+            and getattr(workspace.agent_states.get(role), "value", "") == "failed"
+        )
+        if approved:
+            outcome = "approved"
+        elif sat_out:
+            outcome = "sat_out"
+        elif failed:
+            outcome = "failed"
+        else:
+            outcome = "completed"
+
+        project_id = getattr(project, "project_id", "") if project is not None else ""
+        # Determine branch name (convention: agent/{role}).
+        branch = f"agent/{role}"
+
+        entry: dict[str, Any] = {
+            "run_id": run_id,
+            "project_id": project_id,
+            "role": role,
+            "outcome": outcome,
+            "iteration_count": getattr(workspace, "iteration", 0),
+            "started_ts": None,  # runner doesn't expose per-agent start time yet
+            "ended_ts": datetime.now(timezone.utc).timestamp(),
+            "branch": branch,
+        }
+
+        history_path = persona_dir / "history.json"
+        try:
+            if history_path.exists():
+                existing = json.loads(history_path.read_text(encoding="utf-8"))
+                if not isinstance(existing, dict) or "entries" not in existing:
+                    existing = {"entries": []}
+            else:
+                existing = {"entries": []}
+        except (json.JSONDecodeError, OSError):
+            existing = {"entries": []}
+
+        entries: list[dict] = existing["entries"]
+        entries.append(entry)
+
+        # Rotation: keep last 1000 entries inline, archive older to history.archive.jsonl
+        if len(entries) > 1000:
+            archive_path = persona_dir / "history.archive.jsonl"
+            overflow = entries[:-1000]
+            try:
+                with archive_path.open("a", encoding="utf-8") as f:
+                    for e in overflow:
+                        f.write(json.dumps(e, default=str) + "\n")
+            except OSError:
+                pass
+            entries = entries[-1000:]
+
+        payload = json.dumps({"entries": entries}, indent=2, default=str)
+        tmp_path = history_path.with_suffix(".tmp")
+        try:
+            tmp_path.write_text(payload, encoding="utf-8")
+            tmp_path.replace(history_path)
+        except OSError:
+            pass
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

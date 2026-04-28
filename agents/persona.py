@@ -74,6 +74,10 @@ class PersonaProfile:
     preferred_model: ModelPreference = field(default_factory=ModelPreference)
     base_system_prompt: str = ""
     tools_required: list[str] = field(default_factory=list)
+    # M2 — CrewAI-style one-sentence goal (≤120 chars). Used in teammate
+    # brief (Layer 3.5) and studio worker card. Synthesized from specialty +
+    # character on first load when absent; cached back to profile.json.
+    goal: str = ""
     recency_half_life_days: float = DEFAULT_HALF_LIFE_DAYS
     created_at: str = ""
     created_by: str = "system"
@@ -89,6 +93,7 @@ class PersonaProfile:
             base_role_type=d.get("base_role_type", "developer"),
             character=d.get("character", ""),
             stake_framing=d.get("stake_framing", ""),
+            goal=d.get("goal", ""),
             preferred_model=ModelPreference(
                 provider=pm.get("provider", "anthropic"),
                 model=pm.get("model", ""),
@@ -521,6 +526,43 @@ def _applies_filter(query_tags: set[str], applies_when: list[str], excludes: lis
     return True
 
 
+# ── Goal synthesis (M2) ────────────────────────────────────────────────────
+
+
+def _synthesize_goal(profile: "PersonaProfile") -> str:
+    """Derive a one-sentence goal (≤120 chars) from specialty + character.
+
+    Imperative phrasing, no marketing words. This runs synchronously so it
+    can be called inside Persona.load() without async context.
+    """
+    specialty = (profile.specialty or "").strip()
+    character = (profile.character or "").strip()
+    # Extract first sentence of character (likely the most relevant)
+    first_sentence = character.split(".")[0].strip() if character else ""
+
+    if specialty and first_sentence:
+        raw = f"Deliver {specialty} solutions: {first_sentence.lower()}."
+    elif specialty:
+        raw = f"Deliver reliable {specialty} work."
+    elif first_sentence:
+        raw = first_sentence + "."
+    else:
+        raw = "Deliver quality work within your specialty."
+    return raw[:120]
+
+
+def _cache_goal(persona_dir: "Path", goal: str) -> None:
+    """Write goal back to profile.json. Silently skips on any IO error."""
+    import json as _json
+    profile_path = persona_dir / "profile.json"
+    try:
+        data = _json.loads(profile_path.read_text(encoding="utf-8")) if profile_path.exists() else {}
+        data["goal"] = goal
+        profile_path.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+    except (OSError, ValueError):
+        pass
+
+
 # ── Persona — the loaded entity ─────────────────────────────────────────────
 
 
@@ -572,7 +614,7 @@ class Persona:
         reputation = cls._load_reputation(persona_dir)
         history = cls._load_history(persona_dir)
 
-        return cls(
+        persona = cls(
             profile=profile,
             episodes=episodes,
             patterns=patterns_file.patterns,
@@ -581,6 +623,13 @@ class Persona:
             reputation=reputation,
             history=history,
         )
+
+        # M2: synthesize goal on first load if absent; cache back to profile.json.
+        if not persona.profile.goal:
+            persona.profile.goal = _synthesize_goal(persona.profile)
+            _cache_goal(persona_dir, persona.profile.goal)
+
+        return persona
 
     @classmethod
     def empty(cls, persona_id: str, name: str, specialty: str, **profile_kwargs) -> "Persona":

@@ -116,6 +116,9 @@ class AgentConfig:
     # LoopGuard config — per-attempt wall-clock + repetition detection.
     # None means use LoopGuardConfig defaults.
     loop_guard: LoopGuardConfig | None = None
+    # M2 — one-sentence goal for the persona filling this slot. Written to
+    # profile.json on create_new bootstrap; used in teammate brief (Layer 3.5).
+    persona_goal: str = ""
 
 
 @dataclass
@@ -158,6 +161,10 @@ class ProjectConfig:
     # Shape: {"name": str, "goal": str, "owner_role": str | None,
     #         "parent_story_id": str | None}.
     stories: list[dict[str, Any]] = field(default_factory=list)
+    # M2: project-overlay desk seeds from meta-agent proposal.
+    # dict[persona_id → list[DeskFileSeed dicts]]. Runner materializes before
+    # _build_agents() so DeskIndex sees the files on first iteration.
+    desk_seeds: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     # When mode == "training", the rubric_scorer reads this scenario
     # bundle from disk to score the run. Stored on the project at
     # invoke time by the training launcher.
@@ -177,6 +184,50 @@ def _split_paths(raw: str) -> list[str]:
     if not raw:
         return []
     return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def _extract_input_summary(rel_path: str, content: str) -> str:
+    """One-line summary for an inputs/ file (M2 §6)."""
+    import re as _re
+    suffix = rel_path.rsplit(".", 1)[-1].lower() if "." in rel_path else ""
+    content = content.strip()
+
+    if suffix in ("md", "markdown", "rst", "txt"):
+        # First H1 heading, else first 80 chars
+        m = _re.search(r"^#\s+(.+)", content, _re.MULTILINE)
+        if m:
+            return m.group(1).strip()[:80]
+        first = content.replace("\n", " ")[:80].strip()
+        return first if first else "(empty)"
+
+    if suffix == "json":
+        try:
+            import json as _json
+            d = _json.loads(content)
+            if isinstance(d, dict):
+                for key in ("description", "name", "title"):
+                    if key in d and isinstance(d[key], str):
+                        return d[key][:80]
+            keys = list(d.keys()) if isinstance(d, dict) else []
+            return f"JSON file ({len(keys)} keys)" if keys else "JSON file"
+        except Exception:
+            return "JSON file"
+
+    if suffix in ("py", "js", "ts", "jsx", "tsx", "go", "rs", "java", "c", "cpp", "h"):
+        # First docstring or comment
+        m = _re.search(r'"""(.+?)"""', content, _re.DOTALL)
+        if m:
+            return m.group(1).strip().split("\n")[0][:80]
+        m = _re.search(r"#\s+(.+)", content)
+        if m:
+            return m.group(1).strip()[:80]
+        m = _re.search(r"//\s*(.+)", content)
+        if m:
+            return m.group(1).strip()[:80]
+        return f"Source file ({suffix})"
+
+    first = content.replace("\n", " ")[:80].strip()
+    return first if first else "(empty)"
 
 
 _STORY_STOPWORDS: frozenset[str] = frozenset({
@@ -273,6 +324,8 @@ class AgentRunner:
         # this, every demo / training / hired-persona run completes
         # without updating reputation — silent product failure.
         self.personas_root = Path(personas_root) if personas_root else None
+        # M2: store project_dir for manifesto + rules + desk loading.
+        self.project_dir = Path(project_dir) if project_dir else None
         # Phase K.1 — project-level roadmap document. Read once at
         # construction; threaded into each agent's prompt as Layer 3.8.
         # Empty / missing file → empty string → layer omitted (no
@@ -326,6 +379,8 @@ class AgentRunner:
         # M1: subscribe so ANSWER / SKIP_GRANTED / SKIP_DENIED / HUMAN_RESPONDED
         # routes back to scheduler.resume() and unparks the asker.
         self.workspace.subscribe(self._on_signal_for_resume)
+        # M2: subscribe so DESK_HANDOFF refreshes target's DeskIndex and fires quip.
+        self.workspace.subscribe(self._on_desk_handoff)
         # Phase G-prime.0 — incremental board persistence so a crashed
         # mid-run leaves a complete trail on disk for the resume loader.
         # board.jsonl co-exists with the end-of-run consolidated
@@ -396,6 +451,8 @@ class AgentRunner:
         from agents.tools.text import TextDiff, TextEstimateTokens
         from agents.tools.time_tool import TimeDiff, TimeNow
         from agents.tools.web import WebFetch, WebSearch
+        from agents.tools.desk_search import DeskSearchTool
+        from agents.tools.desk_push import DeskPushTool
         for cls in (
             CodeExec, CodeOutline,
             DataCsv, DataJson, DataXml, DataYaml,
@@ -404,12 +461,38 @@ class AgentRunner:
             TextDiff, TextEstimateTokens,
             TimeDiff, TimeNow,
             WebFetch, WebSearch,
+            DeskSearchTool, DeskPushTool,
         ):
             self._local_registry[cls.name] = LocalToolEntry(
                 name=cls.name,
                 description=cls.description,
                 input_schema=getattr(cls, "input_schema", {}) or {},
             )
+
+    def _build_desk_index(self, cfg: "AgentConfig") -> "Any":
+        """Build a DeskIndex for this agent merging persona-default + project overlay.
+
+        Returns None if neither layer exists (avoids importing persona_desk on
+        runs where no personas are loaded — keeps startup fast).
+        """
+        persona_desk_dir: Path | None = None
+        project_desk_dir: Path | None = None
+
+        if cfg.persona_id and self.personas_root is not None:
+            d = self.personas_root / cfg.persona_id / "desk"
+            if d.is_dir():
+                persona_desk_dir = d
+
+        if self.project_dir is not None and cfg.persona_id:
+            d = self.project_dir / "persona_desks" / cfg.persona_id
+            if d.is_dir():
+                project_desk_dir = d
+
+        if persona_desk_dir is None and project_desk_dir is None:
+            return None
+
+        from agents.persona_desk import DeskIndex
+        return DeskIndex.build(persona_desk_dir, project_desk_dir)
 
     def _instantiate_local_tools(self, role: str) -> dict[str, BaseTool]:
         """Create the BaseTool instances for the tools available to this role."""
@@ -492,6 +575,28 @@ class AgentRunner:
             WebFetch.name: WebFetch(),
             WebSearch.name: WebSearch(),
         }
+        # M2: add desk tools wired to this agent's desk index.
+        from agents.tools.desk_search import DeskSearchTool
+        from agents.tools.desk_push import DeskPushTool
+        agent = self.agents.get(role)
+        desk_index = getattr(agent, "_desk_index", None) if agent else None
+        tools[DeskSearchTool.name] = DeskSearchTool(desk_index=desk_index, role=role)
+        # desk-push: resolve project desks root and role→persona map
+        if self.project_dir is not None:
+            project_id = self.project.project_id if hasattr(self.project, "project_id") else ""
+            desks_root = self.project_dir / "persona_desks"
+            role_to_persona = {
+                cfg.role: cfg.persona_id
+                for cfg in self.project.agents if cfg.persona_id
+            }
+            tools[DeskPushTool.name] = DeskPushTool(
+                sender_role=role,
+                project_id=project_id,
+                project_desks_root=desks_root,
+                workspace=self.workspace,
+                role_to_persona=role_to_persona,
+            )
+        return tools
 
     # ── Board persister (Phase G-prime.0) ───────────────────────────────────
 
@@ -639,12 +744,34 @@ class AgentRunner:
                     agent.persona = persona
                 except Exception:
                     pass
+
+            # M2: inject manifesto (Layer 3.6) + project rules (Layer 3.7).
+            if self.project_dir is not None:
+                project_id = self.project.project_id if hasattr(self.project, "project_id") else ""
+                if project_id:
+                    from agents.base import BaseAgent as _BA
+                    agent._manifesto = _BA.load_manifesto(project_id)
+                    persona_id = cfg.persona_id or None
+                    agent._project_rules = _BA.load_project_rules(project_id, persona_id)
+
+            # M2: build DeskIndex (persona-default + project-overlay) and inject.
+            agent._desk_index = self._build_desk_index(cfg)
+
             self.agents[cfg.role] = agent
 
     # ── Main run loop ───────────────────────────────────────────────────────
 
     async def run(self) -> SchedulerResult:
+        # M2: materialize meta-agent desk_seeds into project overlay BEFORE
+        # _build_agents() so DeskIndex sees them on first iteration.
+        self._materialize_desk_seeds()
+
         self._build_agents()
+
+        # M2: generate inputs/README.md index before agents start so
+        # meta-agent (and any agent) can read a one-line summary of
+        # every input file without walking the whole directory.
+        await self._generate_inputs_readme()
 
         # Populate quip voices from the now-built agents so each quip
         # is spoken in the right persona's voice.
@@ -1185,6 +1312,94 @@ class AgentRunner:
 
         return block, any_incomplete
 
+    def _materialize_desk_seeds(self) -> None:
+        """Write desk_seeds from the proposal into each persona's project overlay.
+
+        Called before _build_agents() so DeskIndex sees the seeded files on first
+        iteration. Files are written to:
+          data/projects/{id}/persona_desks/{persona_id}/{name}.md
+
+        Idempotent — overwrites if a seed with the same name was previously written.
+        Safe to call when desk_seeds is empty.
+        """
+        if not self.project.desk_seeds or self.project_dir is None:
+            return
+        project_id = self.project.project_id if hasattr(self.project, "project_id") else ""
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        for persona_id, seeds in self.project.desk_seeds.items():
+            if not seeds:
+                continue
+            target_dir = self.project_dir / "persona_desks" / persona_id
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for seed in seeds:
+                name = str(seed.get("name", "")).strip().lower().replace(" ", "-")
+                if not name:
+                    continue
+                triggers = seed.get("triggers") or []
+                body = str(seed.get("body", ""))
+                kind = str(seed.get("kind", "convention"))
+                priority = str(seed.get("priority", "normal"))
+                trigger_str = "[" + ", ".join(f'"{t}"' for t in triggers) + "]"
+                content = (
+                    f"---\n"
+                    f"name: {name}\n"
+                    f"triggers: {trigger_str}\n"
+                    f"kind: {kind}\n"
+                    f"priority: {priority}\n"
+                    f"tags: [\"project-seed\", \"from:meta\"]\n"
+                    f"---\n"
+                    f"{body}"
+                )
+                dest = target_dir / f"{name}.md"
+                try:
+                    dest.write_text(content, encoding="utf-8")
+                    _log.debug("desk_seed: wrote %s for persona %s", name, persona_id)
+                except OSError as e:
+                    _log.warning("desk_seed: failed to write %s for %s: %s", name, persona_id, e)
+
+    async def _generate_inputs_readme(self) -> None:
+        """Write inputs/README.md listing every input file with a one-line summary.
+
+        Safe to call when inputs/ is empty. Idempotent — overwrites on each run start.
+        """
+        try:
+            paths = await self.files.list_inputs(recursive=True)
+            if not paths:
+                return
+            entries: list[str] = []
+            for rel_path in paths:
+                if rel_path == "README.md":
+                    continue
+                try:
+                    content = await self.files.read_input(rel_path)
+                    summary = _extract_input_summary(rel_path, content)
+                except OSError:
+                    summary = "(unreadable)"
+                entries.append(f"- `{rel_path}` — {summary}")
+            if not entries:
+                return
+            readme = (
+                "# inputs/\n\n"
+                "Files available to read at runtime (read-only).\n\n"
+                + "\n".join(entries)
+            )
+            await self.files.write_input_readme(readme)
+        except Exception:
+            pass  # README generation failure never breaks the run
+
+    def _build_desk_inject(self, agent: BaseAgent, cfg: "AgentConfig", task: str) -> str:
+        """Build the auto-injected desk notes block for this iteration."""
+        desk_index = getattr(agent, "_desk_index", None)
+        if desk_index is None:
+            return ""
+        try:
+            from agents.persona_desk import render_desk_inject_block
+            items = desk_index.auto_inject(task, role=cfg.role)
+            return render_desk_inject_block(items)
+        except Exception:
+            return ""
+
     def _persona_name(self, role: str) -> str:
         agent = self.agents.get(role)
         if agent and agent.persona is not None:
@@ -1341,6 +1556,11 @@ class AgentRunner:
         )
         if incoming_work_block:
             task_prompt = incoming_work_block + "\n\n" + task_prompt
+
+        # M2: prepend desk auto-inject block (triggered notes from persona desk).
+        desk_block = self._build_desk_inject(agent, cfg, self.project.goal)
+        if desk_block:
+            task_prompt = desk_block + "\n\n" + task_prompt
 
         messages: list[LLMMessage] = [LLMMessage(role="user", content=task_prompt)]
         guard = LoopGuard(cfg.loop_guard)
@@ -1576,6 +1796,59 @@ class AgentRunner:
             unsubscribe()
 
         return decision_holder and decision_holder[0] is SignalType.APPROVAL_GRANTED
+
+    # ── M2: desk handoff subscriber ─────────────────────────────────────────
+
+    def _on_desk_handoff(self, sig: Signal) -> None:
+        """Refresh target agent's DeskIndex after a desk-push and fire quip."""
+        if sig.type is not SignalType.PROTOCOL:
+            return
+        detail = sig.detail or ""
+        if "DESK_HANDOFF" not in detail:
+            return
+        try:
+            import json as _json
+            payload = _json.loads(detail)
+        except (ValueError, TypeError):
+            return
+        if payload.get("type") != "DESK_HANDOFF":
+            return
+
+        target_role = payload.get("target_role", "")
+        from_role = payload.get("from_role", "")
+        doc_name = payload.get("doc_name", "")
+        note = payload.get("note", "")
+
+        # Rebuild target agent's DeskIndex so the new file is loaded.
+        target_agent = self.agents.get(target_role)
+        if target_agent is not None:
+            for cfg in self.project.agents:
+                if cfg.role == target_role:
+                    target_agent._desk_index = self._build_desk_index(cfg)
+                    # Also refresh the desk-search tool instance for this agent.
+                    tool = target_agent._local_tools.get("desk-search")
+                    if tool is not None:
+                        tool._index = target_agent._desk_index  # type: ignore[attr-defined]
+                    break
+
+        # Emit quip for the handoff.
+        if self.quip_engine is not None:
+            try:
+                from_name = self._persona_name(from_role)
+                target_name = self._persona_name(target_role)
+                text = f"{from_name} → {target_name}: handed over \"{doc_name}\""
+                if note:
+                    text += f" — {note}"
+                import asyncio as _asyncio
+                _asyncio.ensure_future(
+                    self.quip_engine.emit_quip(
+                        persona=from_role,
+                        text=text,
+                        event_type="desk_handoff",
+                    )
+                )
+            except Exception:
+                pass
 
     # ── Escalation (DESIGN §23, Phase C.3) ──────────────────────────────────
 

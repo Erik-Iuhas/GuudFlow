@@ -119,6 +119,8 @@ class BaseAgent:
     # Injected by the runner immediately after Scheduler construction.
     _scheduler: Any = None  # core.scheduler.Scheduler
     _project_rules: str = ""
+    # M2 — manifesto (Layer 3.6). Set by runner from per-project manifesto.md.
+    _manifesto: str = ""
     # Phase K.1 — project's roadmap.md (free-form markdown the user
     # owns). Empty / unset = layer is omitted from the effective
     # prompt; same observable behaviour as today's runs.
@@ -126,9 +128,52 @@ class BaseAgent:
     _current_task: str = ""
     # M1 — teammate brief (Layer 3.5). Set by runner before each LLM call.
     _teammate_brief: str = ""
+    # M2 — persona desk index. Set by runner from DeskIndex built for this agent.
+    _desk_index: Any = None  # agents.persona_desk.DeskIndex
 
     # Per-instance current iteration (set by runner per attempt).
     iteration: int = 0
+
+    # ── M2: manifesto + project rules loaders ─────────────────────────────
+
+    @staticmethod
+    def load_manifesto(project_id: str) -> str:
+        """Read per-project manifesto.md. Returns "" if missing (surfaces bug)."""
+        from pathlib import Path
+        path = Path(f"data/projects/{project_id}/manifesto.md")
+        if path.exists():
+            try:
+                return path.read_text(encoding="utf-8")
+            except OSError:
+                return ""
+        return ""
+
+    @staticmethod
+    def load_project_rules(project_id: str, persona_id: str | None) -> str:
+        """Read shared + persona-specific project rules."""
+        from pathlib import Path
+        rules_dir = Path(f"data/projects/{project_id}/persona_rules")
+        if not rules_dir.exists():
+            return ""
+        parts: list[str] = []
+        shared = rules_dir / "_shared.md"
+        if shared.exists():
+            try:
+                text = shared.read_text(encoding="utf-8").strip()
+                if text:
+                    parts.append(text)
+            except OSError:
+                pass
+        if persona_id:
+            personal = rules_dir / f"{persona_id}.md"
+            if personal.exists():
+                try:
+                    text = personal.read_text(encoding="utf-8").strip()
+                    if text:
+                        parts.append(text)
+                except OSError:
+                    pass
+        return "\n\n---\n\n".join(parts)
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -691,6 +736,7 @@ class BaseAgent:
           2. character
           3. stake_framing
           3.5. teammate_brief (§23)
+          3.6. manifesto (M2) — office-wide rules of engagement
           3.7. project_rules (§36)
           3.8. project_context (Phase K.1) — roadmap.md
           4. memory (§26 / §34) — recalled, not full dump
@@ -722,6 +768,8 @@ class BaseAgent:
             parts.append(stake)
         if teammate_brief:
             parts.append("YOUR TEAMMATES:\n\n" + teammate_brief)
+        if self._manifesto:
+            parts.append("OFFICE RULES (read before every task):\n\n" + self._manifesto)
         if self._project_rules:
             parts.append("PROJECT RULES (this project specifically):\n\n" + self._project_rules)
         if self._project_context:

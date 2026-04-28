@@ -98,7 +98,35 @@ class ProjectStore:
             data[project["project_id"]] = project
             await self._write_locked(data)
             self.uploads_dir(project["project_id"]).mkdir(parents=True, exist_ok=True)
+            # M2: seed per-project manifesto and persona_rules directory.
+            self._init_project_workspace(project["project_id"])
             return project
+
+    def _init_project_workspace(self, project_id: str) -> None:
+        """Create per-project manifesto.md + persona_rules/ skeleton (M2 §2-3)."""
+        project_dir = self.project_dir(project_id)
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        manifesto_src = Path("data/manifestos/default.md")
+        manifesto_dest = project_dir / "manifesto.md"
+        if not manifesto_dest.exists():
+            if manifesto_src.is_file():
+                shutil.copy2(manifesto_src, manifesto_dest)
+            else:
+                # Fallback: write a minimal placeholder so the file always exists.
+                manifesto_dest.write_text(
+                    "# Project Manifesto\n\nAdd rules of engagement here.\n",
+                    encoding="utf-8",
+                )
+
+        rules_dir = project_dir / "persona_rules"
+        rules_dir.mkdir(exist_ok=True)
+        shared_rules = rules_dir / "_shared.md"
+        if not shared_rules.exists():
+            shared_rules.write_text(
+                "# Shared rules for all personas on this project\n\n",
+                encoding="utf-8",
+            )
 
     async def update(self, project_id: str, project: dict[str, Any]) -> dict[str, Any] | None:
         async with self._lock:

@@ -106,6 +106,13 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
     }
     approval_gates.update(raw_gates)
 
+    raw_desk_seeds = data.get("desk_seeds") or {}
+    desk_seeds: dict[str, list[dict]] = {}
+    if isinstance(raw_desk_seeds, dict):
+        for persona_id_key, seeds in raw_desk_seeds.items():
+            if isinstance(seeds, list):
+                desk_seeds[str(persona_id_key)] = seeds
+
     return ProjectConfig(
         project_id=data.get("project_id", ""),
         goal=data.get("goal", ""),
@@ -117,6 +124,7 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         approval_gates=approval_gates,
         mode=str(data.get("mode") or "production"),
         training_scenario_id=data.get("training_scenario_id"),
+        desk_seeds=desk_seeds,
     )
 
 
@@ -145,16 +153,32 @@ def _bootstrap_personas(project: ProjectConfig, personas_root: Path) -> None:
             # "aria-dev-v1" → "Aria", "mike-backend-v2" → "Mike"
             name_parts = cfg.persona_id.split("-")
             name = name_parts[0].capitalize() if name_parts else cfg.persona_id
-            profile = {
+            profile: dict[str, Any] = {
                 "persona_id": cfg.persona_id,
                 "name": name,
                 "specialty": cfg.role,
                 "character": f"A focused and competent {cfg.role}.",
                 "stake_framing": f"Your work as {cfg.role} shapes the outcome of every run.",
             }
+            # M2: include goal from proposal if provided.
+            persona_goal = getattr(cfg, "persona_goal", "") or ""
+            if persona_goal:
+                profile["goal"] = persona_goal
             (persona_dir / "profile.json").write_text(
                 json.dumps(profile, indent=2), encoding="utf-8"
             )
+
+            # M2: seed persona desk from role template if one exists.
+            desk_dir = persona_dir / "desk"
+            desk_dir.mkdir(exist_ok=True)
+            template_desk = Path("data/role_templates") / cfg.role / "desk"
+            if template_desk.is_dir():
+                import shutil as _shutil
+                for tmpl_file in template_desk.iterdir():
+                    if tmpl_file.is_file() and tmpl_file.suffix == ".md":
+                        dest = desk_dir / tmpl_file.name
+                        if not dest.exists():
+                            _shutil.copy2(tmpl_file, dest)
             # Skeleton files so the persona is never in a partial state if the
             # run crashes before memory_writer completes.
             (persona_dir / "episodes.jsonl").write_text("", encoding="utf-8")
@@ -206,6 +230,12 @@ def _bootstrap_personas(project: ProjectConfig, personas_root: Path) -> None:
                 ),
                 encoding="utf-8",
             )
+            # M2: history.json skeleton (append point in memory_writer).
+            history_path = persona_dir / "history.json"
+            if not history_path.exists():
+                history_path.write_text(
+                    json.dumps({"entries": []}, indent=2), encoding="utf-8"
+                )
         except OSError as exc:
             _logger.error(
                 "Failed to bootstrap persona dir %s: %s", persona_dir, exc

@@ -115,6 +115,8 @@ class TeamProposal:
     persona_hires: list[PersonaHire] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     deltas: list[dict[str, Any]] = field(default_factory=list)
+    # M2: project-overlay desk seeds. dict[persona_id → list[DeskFileSeed dicts]].
+    desk_seeds: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise for the API response. AgentConfig dataclass →
@@ -140,6 +142,7 @@ class TeamProposal:
             ],
             "warnings": list(self.warnings),
             "deltas": list(self.deltas),
+            "desk_seeds": dict(self.desk_seeds),
         }
 
 
@@ -255,6 +258,7 @@ class MetaAgent(BaseAgent):
             persona_hires=result.persona_hires,
             warnings=result.warnings,
             deltas=deltas,
+            desk_seeds=result.desk_seeds,
         )
 
     @staticmethod

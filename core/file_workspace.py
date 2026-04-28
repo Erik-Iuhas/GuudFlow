@@ -170,6 +170,16 @@ class FileWorkspace:
 
         return await asyncio.to_thread(_walk)
 
+    async def write_input_readme(self, content: str) -> None:
+        """Write inputs/README.md. The ONLY runner write to inputs/.
+
+        Called once at run init to create the file index; safe to call
+        again (idempotent overwrite). This is the single sanctioned
+        exception to inputs/ being read-only at agent runtime.
+        """
+        dest = self.inputs / "README.md"
+        await asyncio.to_thread(dest.write_text, content, encoding="utf-8")
+
     # ── Deliverables (promoted final outputs) ───────────────────────────────
 
     async def promote(
