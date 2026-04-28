@@ -175,6 +175,95 @@ After milestone completion:
 
 ---
 
+## Post-implementation — things worth noting
+
+Surfaced during the chunks 1–8 review. Captured here so M4+ doesn't
+re-discover them and so reviewers know what was deliberately left.
+
+### Documentation sync not yet done
+
+The "Definition of done" in `chunks.md` calls for these
+documentation updates; they were skipped to keep the implementation
+PR focused on code. Status:
+
+- `README.md` — status line not yet updated to mention M3.5.
+- `DESIGN.md` — addendum §38.12 (M3.5 — Per-agent task desks +
+  scope envelopes) not yet written.
+- `docs/ARCHITECTURE.md` — refactor log entry for M3.5 not added.
+- `docs/diagrams/04-class-agents.md` — `Task` + `TaskRef` not yet
+  drawn adjacent to `StoryState`.
+- `docs/diagrams/06-sequence-run-lifecycle.md` — planner-pickup
+  variant not yet added as a sequence alternate.
+
+These are doc-only, no code risk. Land in a follow-up commit
+before merging M3.5 to main.
+
+### Chunk-3 fix-along bundled, not split
+
+Commit `e517dcc` (M3.5.3) also added two pre-existing tools to
+`_build_local_registry`: `BoardMessage` and `GitChangedFiles`. Both
+were already instantiated per agent in `_instantiate_local_tools`
+but never registered, meaning their manifest entries were silently
+empty for any non-baseline scope check.
+
+This is a real fix unrelated to M3.5 — the kind of thing that
+should be its own commit titled `fix(runner): register
+BoardMessage + GitChangedFiles`. Splitting now requires interactive
+rebase + force-push of an already-pushed feature branch; held off
+on that to avoid history rewrite. **Policy going forward**:
+drive-by fixes get their own commit even when discovered mid-chunk.
+
+### Manual smoke test recommended before merge
+
+The desk rendering and `closes:` flow have unit + integration test
+coverage but have not been exercised against a real LLM. Suggested
+smoke-test scenario before merging M3.5:
+
+1. Create a project with `architect → developer → code_reviewer`.
+2. Architect emits an `assign-task` call decomposing the goal.
+3. Verify the developer's iteration sees the desk block.
+4. Verify the developer's `[COMMIT]` includes a `closes:` field.
+5. Verify the runner posts `TASK_COMPLETED` and the reviewer
+   cross-checks against `acceptance_criteria`.
+
+Cost: ~$0.50–$2 of LLM time on Sonnet. Catches prompt-shape issues
+that no unit test can — especially whether the LLM actually emits
+the `closes:` trailer reliably given the layered prompt.
+
+### `_rebuild_tasks_from_board` is lossy on fields not encoded in signals
+
+The fallback path in `core/run_loader._rebuild_tasks_from_board` —
+used when `tasks.jsonl` is absent but `board.jsonl` carries TASK_*
+events — recovers Task identity, assignee, status, and timing. It
+**loses**:
+
+- `acceptance_criteria` — not serialised in the signal summary.
+- `references` — same.
+- `out_of_scope` — same.
+
+This is consistent with DESIGN §1.3 ("the signal trail is the
+source of truth for state, the dedicated jsonl is an optimization,
+not the source of truth"). The lost fields are *content*, not
+*state*.
+
+Practical impact: only relevant when a run crashed AND the task
+persister never wrote AND the run is resumed. Uncommon. Reviewers
+on the resumed run will see bare-bones tasks (no acceptance
+criteria to check against) for those entries; they fall back to
+their normal git-diff review behaviour.
+
+If this becomes painful, options:
+
+- (a) Fatten the `TASK_ASSIGNED` signal `detail` field to include
+  the full Task payload as JSON. Cheap, ~50 tokens per task.
+- (b) Make tasks.jsonl write contractually mandatory at run start
+  (currently best-effort), so the fallback path becomes truly a
+  last-ditch recovery rather than the expected behaviour.
+
+Both deferred to whoever first hits the issue.
+
+---
+
 ## When to revisit this file
 
 Update this file when:
@@ -184,3 +273,5 @@ Update this file when:
    add to Out-of-scope with a justification.
 3. The Open-questions section in `decisions.md` gets answered —
    migrate the answer here as a deferred-but-now-claimed item.
+4. The post-implementation notes above land — strike through as
+   each one is resolved (doc updates merged, smoke test run, etc.).
