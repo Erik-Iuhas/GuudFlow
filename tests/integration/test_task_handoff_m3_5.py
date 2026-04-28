@@ -19,8 +19,8 @@ from typing import Any
 from core import protocol
 from core.llm import MockLLMClient
 from core.runner import AgentConfig, AgentRunner, ProjectConfig
-from core.signals import SignalType
-from core.workspace import Task, TaskRef
+from core.signals import Signal, SignalType
+from core.workspace import AgentState, Task, TaskRef
 
 
 def _runner(tmp_path: Path) -> AgentRunner:
@@ -315,3 +315,175 @@ def test_end_to_end_assign_start_close_cascade(tmp_path: Path) -> None:
     assert ws.tasks["c2"].status == "COMPLETE"
     assert ws.tasks["parent"].status == "COMPLETE"
     assert ws.tasks["parent"].closed_by_commit == "hash2"
+
+
+# ── USER_COMMENT routing (Chunk 6, DESIGN §38.12 §4.5) ─────────────────────
+
+
+def _runner_with_team(tmp_path: Path, *team: tuple[str, str]) -> AgentRunner:
+    """Construct a runner with a team. Each entry is
+    (role, agent_class_role_type) — the role_type drives planner
+    detection in the routing path."""
+    agents = [
+        AgentConfig(role=role, agent_class_role_type=rt) for role, rt in team
+    ]
+    proj = ProjectConfig(project_id="p1", goal="g", agents=agents, rbac={})
+    return AgentRunner(
+        project=proj, run_id="r1",
+        run_root=tmp_path / "run", llm=MockLLMClient([]),
+    )
+
+
+def _post_user_comment(ws: Any, text: str = "what's the status?") -> Signal:
+    sig = Signal(type=SignalType.USER_COMMENT, summary=text, from_user=True)
+    ws.post_signal(sig)
+    return sig
+
+
+def test_user_comment_lands_on_tech_lead_desk(tmp_path: Path) -> None:
+    r = _runner_with_team(
+        tmp_path, ("lead", "tech_lead"), ("dev", None),
+    )
+    sig = _post_user_comment(r.workspace, "please add unit tests")
+
+    desk = r.workspace.desk_for("lead")
+    assert len(desk) == 1
+    task = desk[0]
+    assert task.task_id.startswith("comment_")
+    assert "respond to user comment" in task.goal
+    assert "please add unit tests" in task.goal
+    assert task.created_by == "user"
+    # The comment is marked seen by the absorbing planner so their
+    # check_user_board() doesn't double-process.
+    assert "lead" in sig.seen_by
+
+
+def test_user_comment_with_no_planner_no_synthetic_task(tmp_path: Path) -> None:
+    """Empty-planner team falls back to today's check_user_board flow."""
+    r = _runner_with_team(
+        tmp_path, ("dev", None), ("reviewer", "code_reviewer"),
+    )
+    sig = _post_user_comment(r.workspace)
+    assert r.workspace.tasks == {}
+    assert sig.seen_by == []  # no planner absorbed it
+
+
+def test_priority_tech_lead_over_architect(tmp_path: Path) -> None:
+    r = _runner_with_team(
+        tmp_path,
+        ("design_lead", "architect"),
+        ("eng_lead", "tech_lead"),
+        ("requirements", "requirements_writer"),
+    )
+    _post_user_comment(r.workspace)
+
+    assert len(r.workspace.desk_for("eng_lead")) == 1
+    assert len(r.workspace.desk_for("design_lead")) == 0
+    assert len(r.workspace.desk_for("requirements")) == 0
+
+
+def test_priority_falls_through_to_architect_when_tech_lead_running(tmp_path: Path) -> None:
+    r = _runner_with_team(
+        tmp_path,
+        ("eng_lead", "tech_lead"),
+        ("design_lead", "architect"),
+    )
+    r.workspace.agent_states["eng_lead"] = AgentState.RUNNING
+    _post_user_comment(r.workspace)
+
+    assert len(r.workspace.desk_for("eng_lead")) == 0
+    assert len(r.workspace.desk_for("design_lead")) == 1
+
+
+def test_all_planners_running_no_synthetic_task(tmp_path: Path) -> None:
+    """Defers to check_user_board() at next iteration."""
+    r = _runner_with_team(
+        tmp_path,
+        ("eng_lead", "tech_lead"),
+        ("design_lead", "architect"),
+    )
+    r.workspace.agent_states["eng_lead"] = AgentState.RUNNING
+    r.workspace.agent_states["design_lead"] = AgentState.RUNNING
+    _post_user_comment(r.workspace)
+
+    assert r.workspace.tasks == {}
+
+
+def test_user_comment_priority_also_routed(tmp_path: Path) -> None:
+    r = _runner_with_team(tmp_path, ("lead", "tech_lead"))
+    sig = Signal(
+        type=SignalType.USER_COMMENT_PRIORITY,
+        summary="urgent question",
+        from_user=True, priority="high",
+    )
+    r.workspace.post_signal(sig)
+    desk = r.workspace.desk_for("lead")
+    assert len(desk) == 1
+
+
+def test_active_story_attached_as_reference(tmp_path: Path) -> None:
+    r = _runner_with_team(tmp_path, ("lead", "tech_lead"))
+    r.workspace.active_story["lead"] = "story_xyz"
+    _post_user_comment(r.workspace)
+
+    desk = r.workspace.desk_for("lead")
+    assert len(desk[0].references) == 1
+    assert desk[0].references[0].kind == "story"
+    assert desk[0].references[0].value == "story_xyz"
+    assert desk[0].story_id == "story_xyz"
+
+
+def test_idle_planner_marked_ready(tmp_path: Path) -> None:
+    r = _runner_with_team(tmp_path, ("lead", "tech_lead"))
+    _post_user_comment(r.workspace)
+    assert r.workspace.agent_states["lead"] is AgentState.READY
+
+
+def test_running_planner_state_unchanged(tmp_path: Path) -> None:
+    """Don't clobber a RUNNING planner's state — the scheduler will
+    pick the new desk entry up on the next iteration boundary."""
+    r = _runner_with_team(
+        tmp_path, ("lead", "tech_lead"), ("design", "architect"),
+    )
+    r.workspace.agent_states["lead"] = AgentState.RUNNING
+    _post_user_comment(r.workspace)
+    # tech_lead is RUNNING → architect picks it up; tech_lead state untouched.
+    assert r.workspace.agent_states["lead"] is AgentState.RUNNING
+    assert r.workspace.agent_states["design"] is AgentState.READY
+
+
+def test_duplicate_comment_signal_no_duplicate_task(tmp_path: Path) -> None:
+    """Subscriber idempotency. Resume replay or duplicate posts must
+    not create two tasks for the same comment."""
+    r = _runner_with_team(tmp_path, ("lead", "tech_lead"))
+    sig = _post_user_comment(r.workspace)
+    # Manually fire the routing again with the same signal.
+    r._on_user_comment_routing(sig)
+    desk = r.workspace.desk_for("lead")
+    assert len(desk) == 1
+
+
+def test_routing_ignores_non_user_comment_signals(tmp_path: Path) -> None:
+    r = _runner_with_team(tmp_path, ("lead", "tech_lead"))
+    r.workspace.post_signal(Signal(
+        type=SignalType.GIT_COMMIT, summary="x", from_agent="dev",
+    ))
+    assert r.workspace.tasks == {}
+
+
+def test_planner_system_prompts_include_user_comment_addendum() -> None:
+    """§4.5 — planners get a one-liner about user comments arriving
+    on their desk being the team's interface to the user."""
+    from agents.builtin.architect import ARCHITECT_SYSTEM_PROMPT
+    from agents.builtin.requirements_writer import (
+        REQUIREMENTS_WRITER_SYSTEM_PROMPT,
+    )
+    from agents.builtin.tech_lead import TECH_LEAD_SYSTEM_PROMPT
+
+    for prompt in (
+        TECH_LEAD_SYSTEM_PROMPT,
+        ARCHITECT_SYSTEM_PROMPT,
+        REQUIREMENTS_WRITER_SYSTEM_PROMPT,
+    ):
+        assert "USER COMMENTS" in prompt
+        assert "comment_" in prompt

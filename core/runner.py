@@ -384,6 +384,9 @@ class AgentRunner:
         self.workspace.subscribe(self._on_signal_for_resume)
         # M2: subscribe so DESK_HANDOFF refreshes target's DeskIndex and fires quip.
         self.workspace.subscribe(self._on_desk_handoff)
+        # M3.5: subscribe so USER_COMMENT lands on a planner's desk
+        # when the team has one hired (DESIGN §38.12 §4.5).
+        self.workspace.subscribe(self._on_user_comment_routing)
         # Phase G-prime.0 — incremental board persistence so a crashed
         # mid-run leaves a complete trail on disk for the resume loader.
         # board.jsonl co-exists with the end-of-run consolidated
@@ -2080,6 +2083,98 @@ class AgentRunner:
             unsubscribe()
 
         return decision_holder and decision_holder[0] is SignalType.APPROVAL_GRANTED
+
+    # ── M3.5: USER_COMMENT routing to planner desk (DESIGN §38.12 §4.5) ────
+
+    # Priority order for picking which planner absorbs a user comment.
+    # Meta is excluded — it runs at proposal time, not mid-run.
+    _PLANNER_ROLE_TYPES: tuple[str, ...] = (
+        "tech_lead", "architect", "requirements_writer",
+    )
+
+    def _pick_planner_for_user_comment(self) -> str | None:
+        """Return the role name of the highest-priority on-standby
+        planner, or None if no planner is hired or all hired planners
+        are currently RUNNING. Priority: tech_lead > architect >
+        requirements_writer."""
+        by_role_type: dict[str, str] = {}
+        for cfg in self.project.agents:
+            if cfg.agent_class_role_type in self._PLANNER_ROLE_TYPES:
+                by_role_type.setdefault(cfg.agent_class_role_type, cfg.role)
+
+        for role_type in self._PLANNER_ROLE_TYPES:
+            role = by_role_type.get(role_type)
+            if role is None:
+                continue
+            state = self.workspace.agent_states.get(role)
+            if state is AgentState.RUNNING:
+                continue
+            return role
+        return None
+
+    def _on_user_comment_routing(self, sig: Signal) -> None:
+        """Subscriber. On USER_COMMENT (or _PRIORITY), add a synthetic
+        task to the highest-priority on-standby planner's desk so the
+        planner picks it up next iteration. If no planner is hired,
+        do nothing — agents fall back to today's check_user_board()
+        behaviour at step boundaries."""
+        if sig.type not in (
+            SignalType.USER_COMMENT, SignalType.USER_COMMENT_PRIORITY,
+        ):
+            return
+
+        planner_role = self._pick_planner_for_user_comment()
+        if planner_role is None:
+            return
+
+        # Avoid duplicate synthetic tasks for the same comment if the
+        # subscriber fires twice (e.g. during resume replay).
+        synthetic_id = f"comment_{sig.id.hex[:10]}"
+        if synthetic_id in self.workspace.tasks:
+            return
+
+        active_story = self.workspace.active_story.get(planner_role, "")
+        from core.workspace import Task as _Task, TaskRef as _TaskRef
+        refs: list[_TaskRef] = []
+        if active_story:
+            refs.append(_TaskRef(
+                kind="story", value=active_story, note="active story",
+            ))
+
+        text_preview = (sig.summary or "").strip().replace("\n", " ")
+        if len(text_preview) > 120:
+            text_preview = text_preview[:117] + "..."
+
+        task = _Task(
+            task_id=synthetic_id,
+            story_id=active_story,
+            assigned_to=planner_role,
+            created_by="user",
+            created_at_iter=self.workspace.iteration,
+            goal=f"respond to user comment: {text_preview}",
+            acceptance_criteria=[
+                "answer the user directly, decompose into tasks for "
+                "downstream agents, or post HUMAN_NEEDED if you can't proceed",
+            ],
+            references=refs,
+        )
+        try:
+            self.workspace.add_task(task)
+        except ValueError:
+            # Subscriber must never raise — broken routing shouldn't
+            # take the run down. The user_board fallback still works.
+            return
+
+        # Mark the absorbed comment as seen by the planner so the
+        # planner's check_user_board() doesn't double-process it.
+        sig.mark_seen_by(planner_role)
+
+        # Nudge the planner to READY if they're idle. If they're
+        # already RUNNING, the scheduler will pick the new desk
+        # entry up on their next iteration.
+        state = self.workspace.agent_states.get(planner_role)
+        if state in (None, AgentState.PENDING, AgentState.COMPLETE):
+            self.workspace.agent_states[planner_role] = AgentState.READY
 
     # ── M2: desk handoff subscriber ─────────────────────────────────────────
 

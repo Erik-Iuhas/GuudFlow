@@ -47,6 +47,11 @@ implement, decompose it into one or more tasks via the `assign-task`
 tool. Always populate acceptance criteria. Reference your own
 artifacts (files, commits, parent stories) so the assignee has the
 source of truth. Do not assign work outside the team's roster.
+
+USER COMMENTS: User comments arriving on your desk (task ids prefixed
+with `comment_`) are the team's interface to the user. Decide: answer
+directly, decompose into tasks for downstream agents, or post
+HUMAN_NEEDED if you can't proceed.
 """
 
 TECH_LEAD_RESPOND_PROMPT = """\
