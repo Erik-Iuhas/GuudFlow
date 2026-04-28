@@ -155,8 +155,62 @@ def _bootstrap_personas(project: ProjectConfig, personas_root: Path) -> None:
             (persona_dir / "profile.json").write_text(
                 json.dumps(profile, indent=2), encoding="utf-8"
             )
-        except OSError:
-            pass  # non-fatal — agent runs without persona
+            # Skeleton files so the persona is never in a partial state if the
+            # run crashes before memory_writer completes.
+            (persona_dir / "episodes.jsonl").write_text("", encoding="utf-8")
+            (persona_dir / "patterns.json").write_text(
+                json.dumps({"version": 3, "patterns": [], "anti_patterns": [], "archived": []}, indent=2),
+                encoding="utf-8",
+            )
+            (persona_dir / "reputation.json").write_text(
+                json.dumps(
+                    {
+                        "production": {
+                            "total_runs": 0,
+                            "completed_runs": 0,
+                            "failed_runs": 0,
+                            "average_iterations_to_approval": 0.0,
+                            "reviewer_first_pass_rate": 0.0,
+                            "by_task_type": {},
+                            "common_feedback_themes": [],
+                        },
+                        "training": {
+                            "total_runs": 0,
+                            "completed_runs": 0,
+                            "failed_runs": 0,
+                            "average_iterations_to_approval": 0.0,
+                            "reviewer_first_pass_rate": 0.0,
+                            "by_task_type": {},
+                            "common_feedback_themes": [],
+                            "graduation_status": "ungraduated",
+                            "scenarios_completed": [],
+                            "average_rubric_score": 0.0,
+                        },
+                        "total_episodes": 0,
+                        "active_patterns": 0,
+                        "active_anti_patterns": 0,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            (persona_dir / "style.json").write_text(
+                json.dumps(
+                    {
+                        "tendencies": {},
+                        "reviewer_relationships": {},
+                        "project_type_performance": {},
+                        "model_compatibility": {},
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            _logger.error(
+                "Failed to bootstrap persona dir %s: %s", persona_dir, exc
+            )
+            raise
 
 
 # ── Persistence ────────────────────────────────────────────────────────────

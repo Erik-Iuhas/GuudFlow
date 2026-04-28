@@ -156,7 +156,7 @@ class MemoryWriter(BaseAgent):
         await self._reconcile(persona, now)
 
         # Persist atomically.
-        self._save(persona)
+        self._save(persona, run_id)
 
     # ── 1. Episode ──────────────────────────────────────────────────────────
 
@@ -505,8 +505,8 @@ class MemoryWriter(BaseAgent):
 
     # ── Persistence ────────────────────────────────────────────────────────
 
-    def _save(self, persona: Persona) -> None:
-        """Atomic rewrite of patterns.json and episodes.jsonl."""
+    def _save(self, persona: Persona, run_id: str = "") -> None:
+        """Atomic rewrite of patterns.json and episodes.jsonl; updates profile.json last_active fields."""
         # Find the persona dir from a handle — we expect runner to have
         # passed `data_root/persona_id`. We don't have that path here
         # directly; the Persona instance knows where it was loaded from
@@ -568,6 +568,19 @@ class MemoryWriter(BaseAgent):
         style_path.write_text(
             json.dumps(style_payload, indent=2, default=str), encoding="utf-8"
         )
+
+        # Update profile.json with last_active metadata so the persona is
+        # always findable in /roster after a run, even if it was newly created.
+        profile_path = persona_dir / "profile.json"
+        try:
+            profile_data = json.loads(profile_path.read_text(encoding="utf-8")) if profile_path.exists() else {}
+        except json.JSONDecodeError:
+            profile_data = {}
+        profile_data["persona_id"] = profile_data.get("persona_id") or persona.profile.persona_id
+        profile_data["name"] = profile_data.get("name") or persona.profile.name
+        profile_data["last_active_run_id"] = run_id
+        profile_data["last_active_ts"] = datetime.now(timezone.utc).isoformat()
+        profile_path.write_text(json.dumps(profile_data, indent=2, default=str), encoding="utf-8")
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

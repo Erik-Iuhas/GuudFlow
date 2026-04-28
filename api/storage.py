@@ -203,13 +203,13 @@ class PersonaStore:
         for persona_dir in self.root.iterdir():
             if not persona_dir.is_dir() or persona_dir.name.startswith("_"):
                 continue
-            profile = persona_dir / "profile.json"
-            if not profile.exists():
-                continue
-            try:
-                data = json.loads(profile.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                continue
+            profile_path = persona_dir / "profile.json"
+            data: dict[str, Any] = {}
+            if profile_path.exists():
+                try:
+                    data = json.loads(profile_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    pass
             rosters.append(_summarise_persona(persona_dir, data))
         return rosters
 
@@ -218,13 +218,16 @@ class PersonaStore:
         if not persona_dir.is_dir():
             return None
         profile_path = persona_dir / "profile.json"
-        if not profile_path.exists():
-            return None
-        try:
-            profile = json.loads(profile_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return None
-        return _summarise_persona(persona_dir, profile)
+        data: dict[str, Any] = {}
+        if profile_path.exists():
+            try:
+                data = json.loads(profile_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                pass
+        return _summarise_persona(persona_dir, data)
+
+
+_PERSONA_REQUIRED_FILES = ("profile.json", "episodes.jsonl", "patterns.json", "reputation.json", "style.json")
 
 
 def _summarise_persona(persona_dir: Path, profile: dict[str, Any]) -> dict[str, Any]:
@@ -244,6 +247,8 @@ def _summarise_persona(persona_dir: Path, profile: dict[str, Any]) -> dict[str, 
             if _.strip()
         )
 
+    missing = [f for f in _PERSONA_REQUIRED_FILES if not (persona_dir / f).exists()]
+
     return {
         "persona_id": profile.get("persona_id") or profile.get("id") or persona_dir.name,
         "name": profile.get("name", ""),
@@ -251,4 +256,6 @@ def _summarise_persona(persona_dir: Path, profile: dict[str, Any]) -> dict[str, 
         "character": profile.get("character", ""),
         "n_episodes": n_episodes,
         "reputation": reputation,
+        "degraded": len(missing) > 0,
+        "missing_files": missing,
     }
