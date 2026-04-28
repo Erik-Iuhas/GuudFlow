@@ -399,7 +399,7 @@ source of truth. Do not assign work outside the team's roster.
 This is ~50 tokens per planner per iteration. Within the cacheable
 prefix.
 
-### 5.3 Specialist/Reviewer prompt addition
+### 5.3 Specialist prompt addition (non-reviewer)
 
 Conditional on the agent having a non-empty desk on first iteration:
 
@@ -412,6 +412,24 @@ unclear, emit ASK to the task's created_by role before working on it.
 
 Injected once at the start of the user-turn message when desk is
 non-empty. ~40 tokens; not cached (volatile).
+
+### 5.4 Reviewer prompt addition
+
+Reviewer archetypes get one extra line in their static system prompt
+(cacheable):
+
+```
+TASK-AWARE REVIEW: When a COMMIT names "closes: task:<id>", look up
+that task's acceptance_criteria and references. Cross-check the
+git-diff against the references; verify each acceptance criterion is
+satisfied; emit VERIFY_RESULT per criterion. The runner posts
+TASK_OUT_OF_SCOPE signals when a commit closes a task it shouldn't —
+treat those as evidence, not as final verdicts.
+```
+
+~50 tokens once, in the cacheable prefix. No volatile injection
+needed for reviewers — git diff + the task on the closing agent's
+desk is what they read.
 
 ---
 
