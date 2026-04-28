@@ -1279,6 +1279,16 @@ class AgentRunner:
                 detail=detail,
             ))
 
+        # If the working tree was clean, _auto_commit returned None.
+        # The agent emitted closes: anyway — surface it so the
+        # reviewer sees that nothing actually shipped against
+        # the named tasks.
+        if commit_hash is None:
+            _warn(
+                f"{role} commit closes tasks but produced no git commit",
+                f"closes={raw_closes};commit_hash=None",
+            )
+
         closed_parent_ids: set[str] = set()
         for tid in ids:
             task = ws.tasks.get(tid)
@@ -1853,10 +1863,16 @@ class AgentRunner:
                 aborted_reason: str | None = None
                 for tc_idx, tc in enumerate(response.tool_calls):
                     # M3.5 — auto-emit TASK_STARTED on the first tool
-                    # call of the agent's run (DESIGN §38.12 §4.2). If
-                    # the call references a task_id from the desk, mark
-                    # that task; otherwise FIFO-pick the first PENDING.
-                    if iteration == 0 and tc_idx == 0 and not cfg.is_reviewer:
+                    # call of each iteration where nothing is yet
+                    # IN_PROGRESS (DESIGN §38.12 §4.2). Retrying per
+                    # iteration covers the case where iteration 0
+                    # produces no tool calls (LLM emits text + a
+                    # bare COMMIT block) — without this the desk
+                    # would skip PENDING → COMPLETE and lose the
+                    # TASK_STARTED audit step. _maybe_auto_start_task
+                    # is a no-op if a task is already IN_PROGRESS,
+                    # so calling it on every iteration is safe.
+                    if tc_idx == 0 and not cfg.is_reviewer:
                         self._maybe_auto_start_task(cfg.role, tc.arguments)
 
                     try:

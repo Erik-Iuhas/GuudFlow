@@ -118,6 +118,29 @@ def test_closing_already_complete_emits_warning(tmp_path: Path) -> None:
     assert "COMPLETE" in warnings[0].detail
 
 
+def test_closes_with_no_commit_hash_emits_warning(tmp_path: Path) -> None:
+    """When _auto_commit returned None (clean working tree) but the
+    agent emits closes: anyway, surface a TASK_OUT_OF_SCOPE warning so
+    the reviewer knows nothing actually shipped against the named task.
+    The closure itself still proceeds — bookkeeping, not gating."""
+    r = _runner(tmp_path)
+    r.workspace.add_task(Task(
+        task_id="t1", story_id="s", assigned_to="dev", goal="x",
+    ))
+    r.workspace.mutate_task("t1", "IN_PROGRESS")
+
+    r._handle_task_closures(
+        "dev", _commit_block(closes="task:t1"), commit_hash=None,
+    )
+
+    warnings = [s for s in r.workspace.board if s.type == SignalType.TASK_OUT_OF_SCOPE]
+    summaries = [w.summary for w in warnings]
+    assert any("no git commit" in s for s in summaries)
+    # The closure still fires — we don't block work product on this.
+    assert r.workspace.tasks["t1"].status == "COMPLETE"
+    assert r.workspace.tasks["t1"].closed_by_commit == ""
+
+
 def test_commit_without_closes_no_op(tmp_path: Path) -> None:
     """Regression guard: M1 COMMIT flow unchanged when closes: absent."""
     r = _runner(tmp_path)

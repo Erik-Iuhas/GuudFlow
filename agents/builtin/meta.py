@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
 from agents.base import BaseAgent
 from agents.catalog import list_all_archetypes
@@ -154,12 +154,6 @@ class MetaAgent(BaseAgent):
     directly by the API route layer at proposal time."""
 
     role: str = "meta"
-
-    # M3.5 — meta is one of the four planning archetypes designated
-    # by DESIGN §38.12 D2. The scope is a marker only: meta runs
-    # outside the scheduler and doesn't currently call assign-task,
-    # but listing it keeps the four planners visible in one place.
-    default_rbac_scopes: ClassVar[tuple[str, ...]] = ("assign-task",)
 
     def __init__(self, **kwargs):
         super().__init__(

@@ -131,9 +131,14 @@ def test_planner_system_prompts_include_task_assignment_line() -> None:
     assert "assign-task" in REQUIREMENTS_WRITER_SYSTEM_PROMPT
 
 
-def test_reviewer_system_prompt_includes_task_aware_review_line() -> None:
-    """§5.4 — reviewers cross-check closes: against acceptance_criteria
-    using the existing git tools."""
+def test_reviewer_system_prompts_include_task_aware_review_line() -> None:
+    """§5.4 — both per-step (CodeReviewer) and final-stage (Architect)
+    reviewers cross-check closes: against acceptance_criteria using
+    the existing git tools."""
     assert "TASK-AWARE REVIEW" in REVIEWER_SYSTEM_PROMPT
     assert "closes: task" in REVIEWER_SYSTEM_PROMPT
     assert "TASK_OUT_OF_SCOPE" in REVIEWER_SYSTEM_PROMPT
+
+    assert "TASK-AWARE REVIEW" in ARCHITECT_SYSTEM_PROMPT
+    assert "closes: task" in ARCHITECT_SYSTEM_PROMPT
+    assert "TASK_OUT_OF_SCOPE" in ARCHITECT_SYSTEM_PROMPT

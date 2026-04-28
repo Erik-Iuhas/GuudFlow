@@ -190,13 +190,14 @@ def test_planner_with_scope_sees_assign_task() -> None:
 
 
 def test_planner_archetype_classes_declare_assign_task_scope() -> None:
-    """The four planning archetypes (DESIGN §38.12 D2) hold the scope.
-    Concrete classes pulled in to confirm the meta-agent / catalog read
-    the right defaults at proposal time."""
+    """The three in-pipeline planner archetypes hold the scope. Meta
+    is excluded — it runs outside the scheduler at proposal time and
+    its job is to set the team up, not to assign work mid-run."""
     assert "assign-task" in TechLead.default_rbac_scopes
     assert "assign-task" in Architect.default_rbac_scopes
     assert "assign-task" in RequirementsWriter.default_rbac_scopes
-    assert "assign-task" in MetaAgent.default_rbac_scopes
+    # Meta does not get this scope — verify by absence.
+    assert "assign-task" not in getattr(MetaAgent, "default_rbac_scopes", ())
 
 
 def test_planner_archetype_classes_declare_assign_task_tool() -> None:

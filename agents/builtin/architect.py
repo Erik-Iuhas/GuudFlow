@@ -63,6 +63,13 @@ implement, decompose it into one or more tasks via the `assign-task`
 tool. Always populate acceptance criteria. Reference your own
 artifacts (files, commits, parent stories) so the assignee has the
 source of truth. Do not assign work outside the team's roster.
+
+TASK-AWARE REVIEW: When a COMMIT names `closes: task:<id>`, look up
+that task's acceptance_criteria and references on the board. Cross-
+check the git-diff against the references; verify each acceptance
+criterion is satisfied; emit one VERIFY_RESULT per criterion. The
+runner posts TASK_OUT_OF_SCOPE signals when a commit closes a task
+it shouldn't — treat those as evidence, not as final verdicts.
 """
 
 
