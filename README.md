@@ -5,12 +5,18 @@ proposes a team, you approve it, and the team runs — with a shared
 workspace, a shared git repo, structured inter-agent communication, and a
 sandboxed code-execution surface.
 
-**Status: phases A, B, C, D-prime, D, F, G-prime, G shipped — 885
-backend tests + studio typecheck/build green.** Phases E (production
-deploy + multi-tenant), I (headless service), F.5 (persona author
-depth), J (knowledge surface) registered as future work; see
-[ROADMAP.md](ROADMAP.md). User stories driving priorities are in
-[docs/USER_STORIES.md](docs/USER_STORIES.md).
+**Status: phases A, B, C, D-prime, D, F, G-prime, G, K and milestones
+M0–M3 shipped — backend tests + studio typecheck/build green.**
+Phases E (production deploy + multi-tenant), I (headless service), F.5
+(persona author depth), J (knowledge surface) registered as future
+work; see [ROADMAP.md](ROADMAP.md). User stories driving priorities are
+in [docs/USER_STORIES.md](docs/USER_STORIES.md).
+
+**Architecture diagrams** — Mermaid UML, sequence, state, deployment,
+and prompt-stack diagrams reflecting the current (post-M3) shape of the
+codebase live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Read
+that before `DESIGN.md` if you want the live picture; read `DESIGN.md`
+for original intent + rationale.
 
 ## What it actually is
 
@@ -36,12 +42,30 @@ If a run fails   Resume from the persisted state — completed agents
 ```
 
 **Beyond the run loop:** training camp (toy scenarios + tournaments
-+ ranking board), persona chat for one-off consultation, and a
-roster review UI with reputation + graduation status. First-timers
-get seed personas (Mike, Sarah, Alex) and a "Try demo" button.
++ ranking board), persona chat for one-off consultation, a roster
+review UI with reputation + graduation status, persona desks
+(role-template knowledge handoff), and an office-wide manifesto layer
+that prepends to every agent's system prompt. First-timers get seed
+personas (Mike, Sarah, Alex) and a "Try demo" button.
 
-The full architecture is in [DESIGN.md](DESIGN.md) (37 sections). The
-build plan and stage-by-stage progress is in
+**Inter-agent protocol.** Agents communicate through a structured
+handshake — `COMMIT`, `VERIFY_RESULT`, `ASK / ANSWER`,
+`REQUEST_SKIP / SKIP_GRANTED / SKIP_DENIED`, `STORY_OPENED / CLOSED`.
+The scheduler enforces one-outstanding-ASK and parks agents via
+`Scheduler.interrupt()` / `resume()`. Peer waits and skip
+confirmations have wall-clock deadlines (`PEER_TIMEOUT`,
+`SKIP_TIMEOUT`).
+
+**Multi-model.** Five models across Anthropic, Groq, DeepSeek + 6
+providers — see `data/models.json`. Tier resolution (`heavy` /
+`solid` / `fast`) plus per-agent preference. Anthropic prompt-cache
+hits across iterations on the stable system-prompt prefix.
+
+The high-level architecture is in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (Mermaid diagrams,
+current-state). The full intent / rationale is in
+[DESIGN.md](DESIGN.md) (37 sections, plus a refactor addendum at the
+end). Build plan and stage-by-stage progress is in
 [`.claude/progress/`](.claude/progress/).
 
 ## Run it locally
@@ -143,17 +167,23 @@ Set environment variables in `.env` (the compose file reads it):
 
 ```
 agentflow/
-├── core/              ← signals, protocol, workspace, scheduler,
-│                        runner, llm, loop_guard, ...
-├── agents/            ← BaseAgent, persona, registry, tools/, builtin/
+├── core/              ← signals, protocol, workspace, scheduler, runner,
+│                        llm/ (split package), loop_guard, edit_blocks,
+│                        run_initializer, run_loader, training/, ...
+├── agents/            ← BaseAgent, abstract archetypes, persona,
+│                        persona_desk, persona_chat, registry, catalog,
+│                        tools/, builtin/
 ├── api/               ← FastAPI app + routes + WebSocket
 ├── worker/            ← JobRunner, queue, DockerManager
 ├── studio/            ← Vite + React + TS frontend
 ├── sandbox/           ← per-run sandbox Dockerfile (§29)
-├── data/              ← runs, personas, projects (created on first run)
-├── tests/             ← pytest suite (885 tests)
+├── data/              ← personas, projects, runs, role_templates,
+│                        manifestos, models.json, training_camp/
+├── tests/             ← pytest suite
 ├── scripts/           ← setup + sandbox build helpers
-├── DESIGN.md          ← full architecture (37 sections)
+├── docs/              ← USER_STORIES, worker-archetypes,
+│                        ARCHITECTURE.md + diagrams/
+├── DESIGN.md          ← full architecture (37 sections + refactor addendum)
 ├── CLAUDE.md          ← operating instructions for AI assistants
 └── ROADMAP.md         ← what's next
 ```
@@ -183,8 +213,10 @@ pytest
 cd studio && npm run typecheck
 ```
 
-Backend suite is 885 tests, runs in ~35 seconds. No real LLM calls (all
-mocked). No Docker required (DockerManager dev-mode is a stub).
+Backend suite runs in ~35 seconds. No real LLM calls (all mocked). No
+Docker required (DockerManager dev-mode is a stub). Test gate after the
+M1 milestone landed at 980 passed / 2 skipped / 0 failures; current
+counts are tracked in the latest milestone commit messages.
 
 ## What's missing / what's next
 
@@ -199,6 +231,11 @@ Shipped:
 - ✅ Phase D — real meta-agent proposal (reads inputs + roster + 16-archetype catalog)
 - ✅ Phase F — Training Camp + persona chat + memory-writer LLM synthesis
 - ✅ Phase G-prime + G — run resume + studio polish (roster, pipeline graph, onboarding, training tab, review-point tags)
+- ✅ Phase K — project roadmap context (Layer 3.8 of the system prompt)
+- ✅ M0 — persona bootstrap skeleton + degraded roster entries
+- ✅ M1 — handshake protocol (ASK/ANSWER/SKIP/STORY) + roster awareness + edit-block parser
+- ✅ M2 — persona desk + manifesto layer + history tracking
+- ✅ M3 — multi-model abstraction + error taxonomy + prompt caching
 
 Future:
 - Phase F.5 — persona author depth (publish, scaffolding, curated reference URLs, sandboxed pytest checks)

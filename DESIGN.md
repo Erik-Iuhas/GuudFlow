@@ -5562,3 +5562,154 @@ solid. Listed here so it's not retrofitted awkwardly later.
 - Stage 8 — Studio UI: "Chat with persona" surface in the Roster view.
 - No new core / agents / worker code required — the endpoint is a thin
   shell over `recall()` + a single LLM call.
+
+
+---
+
+## 38. Refactor Addendum (post-DESIGN milestones)
+
+This section captures the deltas that have landed since sections 1–37
+were written. **Sections 1–37 remain the canonical statement of intent.**
+This addendum exists so a reader cross-checking the code does not get
+confused by superficial differences.
+
+For diagrams of the current shape, read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+### 38.1 LLM plane is a package, not a single module
+
+**Was:** `core/llm.py`.
+
+**Now:** `core/llm/` package — `client.py`, `errors.py`,
+`anthropic.py`, `openai.py`, `registry.py`. All public symbols are
+re-exported from the package root for backwards compatibility.
+
+`AnthropicLLMClient` supports `cache_system=True` so the stable
+prefix of the system prompt is wrapped with `cache_control:
+ephemeral`. `LLMResponse` carries `cache_read_tokens` and
+`cache_creation_tokens`. `ModelRegistry` reads
+`data/models.json` and resolves tier + preference per agent.
+
+### 38.2 The system prompt has 12 layers, not 7
+
+DESIGN §20 specifies a 7-layer prompt. The actual stack composed in
+`agents/base.py::effective_system_prompt` is:
+
+1. identity
+2. character
+3. stake_framing
+3.5. teammate brief (M1)
+3.6. manifesto (M2 — `data/manifestos/default.md` or per-project)
+3.7. project rules (DESIGN §36)
+3.8. project context — `roadmap.md` (Phase K)
+4. recalled memory
+5. base prompt + tool catalog from manifest
+5.5. protocol voice (M1 — verbatim ≤12-word rules)
+6. CoT primer
+6.5. autonomy rules ("START WORKING NOW. Make at least one tool call.")
+7. positive framing ("Make this something you are proud of.")
+
+The cache boundary is between layer 7 and the volatile suffix (current
+task, upstream context block, encouragement, pending AGENT_MESSAGE).
+Recalled memory (layer 4) is in the cacheable prefix despite being
+per-call because the cache key is content-hashed by the provider —
+identical recall produces identical bytes.
+
+### 38.3 Inter-agent protocol is wider
+
+DESIGN §18 lists `COMMIT / VERIFY_RESULT / DELTA / ACTION / ASK / ANSWER /
+STATUS`. Current set adds:
+
+- `REQUEST_SKIP / SKIP_GRANTED / SKIP_DENIED` (M1) — agent asks
+  a peer-or-tech_lead to skip a checkpoint.
+- `STORY_OPENED / STORY_CLOSED` (M1) — story lifecycle on the
+  workspace; runner auto-tags emitted protocol messages with the active
+  story.
+
+### 38.4 Scheduler interrupt model
+
+`Scheduler.interrupt(role, kind, payload)` and `resume(token,
+value)` are the single parking mechanism for:
+
+- `kind="human"` — `ask_human()` and
+  `request_visual_feedback()` route through here. (DESIGN §13 rule 7
+  remains true: the human pause does not stop already-running agents.)
+- `kind="peer"` — `emit_ask` parks the asker; resumes on
+  `ANSWER` or `PEER_TIMEOUT`.
+- `kind="skip"` — `emit_request_skip` parks the requester;
+  resumes on `SKIP_GRANTED / SKIP_DENIED` or `SKIP_TIMEOUT` (which
+  escalates to a human).
+
+A deadline watcher inside the scheduler arms timers per outstanding
+interrupt. The agent state machine has `WAITING_FOR_PEER` and
+`WAITING_FOR_SKIP_CONFIRM` to match.
+
+### 38.5 Autonomy block + AGENT_MESSAGE
+
+Agents were drifting into chatbot behaviour — presenting options to
+humans, completing turns with zero tool calls, disclaiming
+capabilities. Two changes in commit `d2cdfb1`:
+
+- New mandatory `AUTONOMY RULES` block in
+  `effective_system_prompt` ("START WORKING NOW. Make at least one
+  tool call. Never present options to humans for things you can
+  decide.").
+- New `AGENT_MESSAGE` signal type + `board-message` tool — agents
+  send directed non-blocking messages to a named peer; the peer reads
+  them at the start of its next turn. Distinct from `ASK` (which
+  parks the sender via `Scheduler.interrupt`).
+
+### 38.6 Reviewer file-by-file process
+
+Full-diff review on a large branch hit context-window 429s. Commit
+`41c26d4`:
+
+- `git-diff` accepts an optional `path` argument and is hard-capped
+  at ~6000 chars per call.
+- New `git-changed-files` tool registered in
+  `BASELINE_LOCAL_SCOPES` and `Reviewer.default_tools`.
+- `CodeReviewer` system prompt rewritten to enforce: list changed
+  files → build a markdown checklist → `git-diff path=<file>` per
+  file → mark ✅/❌ → emit `[VERIFY]` only after all files reviewed.
+
+### 38.7 Tool naming is hyphenated
+
+Tool names are hyphen-separated (`fs-write`, `git-diff`,
+`code-exec`, `desk-search`). RBAC scope strings match 1:1. The
+underscore form is gone (commit `0709f1b`).
+
+### 38.8 Persona desk
+
+A new knowledge surface (commit `d4516f0`) — `agents/persona_desk.py`:
+
+- `DeskIndex` parses YAML-fronted markdown from
+  `data/role_templates/{role}/desk/` and serves contextual snippets.
+- New tools: `desk-search` and `desk-push`.
+- The runner builds a `DeskIndex` per agent at run start and injects
+  it into `BaseAgent._desk_index`.
+
+### 38.9 Six persona files, history rotation
+
+DESIGN §26 lists six persona files (profile / episodes / patterns /
+style / reputation / history). `history.json` is now atomic-write +
+1000-entry rotation to `history.archive.jsonl`. M2 also added an
+`antipatterns.json` file (separated from `patterns.json` for
+clarity); flips between them are detected by `memory_writer` (Phase
+F.3.2).
+
+### 38.10 Phase G-prime — resume after crash
+
+- `Workspace` carries an optional `_board_persister` that writes
+  every signal to `data/runs/{run_id}/board.jsonl`.
+- `core/run_loader.py::restore_workspace` rebuilds the `Workspace`
+  from disk; `derive_agent_states` infers state from signal history.
+- `POST /api/runs/{id}/resume` plus a worker resume path that picks
+  up the restored workspace.
+
+### 38.11 Where to read what
+
+- Diagrams of the current shape — `docs/ARCHITECTURE.md` and
+  `docs/diagrams/`.
+- Original intent + rationale — sections 1–37 above.
+- Build progress and stage notes — `.claude/progress/`.
+- Hard rules and operating constraints — `CLAUDE.md`.
+
