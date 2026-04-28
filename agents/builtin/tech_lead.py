@@ -41,6 +41,17 @@ Process:
      function, the change).
 
 You are the senior here. The team is stuck. Make the call.
+
+TASK ASSIGNMENT: When you produce work that another agent should
+implement, decompose it into one or more tasks via the `assign-task`
+tool. Always populate acceptance criteria. Reference your own
+artifacts (files, commits, parent stories) so the assignee has the
+source of truth. Do not assign work outside the team's roster.
+
+USER COMMENTS: User comments arriving on your desk (task ids prefixed
+with `comment_`) are the team's interface to the user. Decide: answer
+directly, decompose into tasks for downstream agents, or post
+HUMAN_NEEDED if you can't proceed.
 """
 
 TECH_LEAD_RESPOND_PROMPT = """\
@@ -90,6 +101,16 @@ class TechLead(EscalationHandler):
     # to decide the actual count; this attribute declares the trigger
     # signal type for catalog/meta-agent reasoning.
     wake_on_signal_type: ClassVar[SignalType | None] = SignalType.REJECTED
+
+    # M3.5 — tech_lead is the senior planner. It can rebalance work
+    # via the assign-task tool when escalations or user comments
+    # arrive (DESIGN §38.12 D2).
+    default_tools: ClassVar[tuple[str, ...]] = (
+        *EscalationHandler.default_tools, "assign-task",
+    )
+    default_rbac_scopes: ClassVar[tuple[str, ...]] = (
+        *EscalationHandler.default_rbac_scopes, "assign-task",
+    )
 
     archetype_description: ClassVar[str] = (
         "Investigates stuck cycles (multiple rejections on the same "

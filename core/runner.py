@@ -35,7 +35,7 @@ from typing import Any, Awaitable, Callable
 
 from agents.base import BaseAgent, ToolNotAvailable
 from agents.tools.base import BaseTool
-from agents.tools.board import BoardMessage
+from agents.tools.board import AssignTask, BoardMessage
 from agents.tools.fs import (
     FsCreate,
     FsDelete,
@@ -80,6 +80,7 @@ from core.workspace import (
     ApprovalRequest,
     Artifact,
     CommitRecord,
+    Task,
     Workspace,
 )
 
@@ -384,11 +385,17 @@ class AgentRunner:
         self.workspace.subscribe(self._on_signal_for_resume)
         # M2: subscribe so DESK_HANDOFF refreshes target's DeskIndex and fires quip.
         self.workspace.subscribe(self._on_desk_handoff)
+        # M3.5: subscribe so USER_COMMENT lands on a planner's desk
+        # when the team has one hired (DESIGN §38.12 §4.5).
+        self.workspace.subscribe(self._on_user_comment_routing)
         # Phase G-prime.0 — incremental board persistence so a crashed
         # mid-run leaves a complete trail on disk for the resume loader.
         # board.jsonl co-exists with the end-of-run consolidated
         # board.json; both readers and writers tolerate either source.
         self.workspace.set_board_persister(self._build_board_persister())
+        # M3.5 chunk 7 — task mutation persister so resume can restore
+        # the per-agent desks without replaying every TASK_* signal.
+        self.workspace.set_task_persister(self._build_task_persister())
         # Phase G-prime.1 — artifact persistence. When a completed
         # agent's artifact is set via workspace.set_artifact, persist
         # the full dict so a resumed run can read the agent's output
@@ -439,7 +446,8 @@ class AgentRunner:
         for cls in (
             FsRead, FsList, FsExists, FsReadRange, FsGrep,
             FsCreate, FsWrite, FsEdit, FsDelete, FsRename,
-            GitDiff, GitLog, GitRead, GitStatus,
+            GitDiff, GitChangedFiles, GitLog, GitRead, GitStatus,
+            BoardMessage, AssignTask,
         ):
             self._local_registry[cls.name] = LocalToolEntry(
                 name=cls.name,
@@ -557,6 +565,7 @@ class AgentRunner:
             FsDelete.name: FsDelete(self.files, claim_emitter, release_emitter),
             FsRename.name: FsRename(self.files, claim_emitter, release_emitter),
             BoardMessage.name: BoardMessage(role, self.workspace),
+            AssignTask.name: AssignTask(role, self.workspace, runner=self),
             GitDiff.name: GitDiff(self.git),
             GitChangedFiles.name: GitChangedFiles(self.git),
             GitLog.name: GitLog(self.git),
@@ -629,6 +638,31 @@ class AgentRunner:
                 # Disk write failures shouldn't break the run. The
                 # consolidated board.json at end-of-run is the
                 # safety net.
+                pass
+
+        return _persist
+
+    def _build_task_persister(self):
+        """Return a callable that appends each task mutation to
+        `{run_root}/tasks.jsonl` (M3.5 chunk 7). Mirrors the board
+        persister: JSONL append per call, swallow OSError so a broken
+        disk doesn't take the run down. The signal trail in
+        board.jsonl remains the source of truth — tasks.jsonl is the
+        cached query view that `restore_workspace` replays first.
+        """
+        from worker.job_runner import serialise_task
+        try:
+            self.run_root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None
+        tasks_path = self.run_root / "tasks.jsonl"
+
+        def _persist(task: Task) -> None:
+            try:
+                line = json.dumps(serialise_task(task), default=str)
+                with open(tasks_path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except OSError:
                 pass
 
         return _persist
@@ -1064,6 +1098,13 @@ class AgentRunner:
             # Auto-commit any uncommitted changes on the agent's branch.
             commit_hash = await self._auto_commit(cfg.role, workspace)
 
+            # M3.5 — process the COMMIT's optional `closes: task:<id>`
+            # trailer (DESIGN §38.12 §4.3). Validates assignee + state,
+            # mutates each closed task to COMPLETE, cascades parent
+            # closure, and posts TASK_OUT_OF_SCOPE warnings on
+            # invariant violations. The COMMIT itself is not blocked.
+            self._handle_task_closures(cfg.role, drive_result, commit_hash)
+
             # `drive_result` is either a parsed CompactBlock (the runner
             # extracted a trailing protocol block from the LLM response)
             # or a raw string (subclasses that override `run()` and the
@@ -1219,6 +1260,233 @@ class AgentRunner:
             ))
 
         return render_teammate_brief(role, entries)
+
+    def _handle_task_closures(
+        self,
+        role: str,
+        drive_result: "protocol.CompactBlock | str",
+        commit_hash: str | None,
+    ) -> None:
+        """Process the COMMIT block's `closes:` field per design §4.3.
+
+        Bookkeeping only — runner-side validation that each named task
+        is on the committing agent's desk and IN_PROGRESS. Verifying
+        that the work actually matches the design is the reviewer's
+        job (they have git-changed-files + git-diff). Invariant
+        violations post TASK_OUT_OF_SCOPE warnings; the COMMIT itself
+        is never blocked. Cascades parent task closure when the last
+        child of a parent closes (§4.4).
+        """
+        if not isinstance(drive_result, protocol.CompactBlock):
+            return
+        if drive_result.kind != "COMMIT":
+            return
+        raw_closes = drive_result.fields.get("closes", "").strip()
+        if not raw_closes:
+            return
+
+        # Accept either bare ids ("t1") or task: prefixed ("task:t1");
+        # the design §2.3 wire format prefers prefixed but the agent
+        # may emit the bare id and the runner shouldn't reject either.
+        ids: list[str] = []
+        for tok in raw_closes.split("|"):
+            tok = tok.strip()
+            if not tok:
+                continue
+            if tok.startswith("task:"):
+                tok = tok[len("task:"):]
+            ids.append(tok)
+        if not ids:
+            return
+
+        ws = self.workspace
+        iteration = ws.iteration
+
+        def _warn(summary: str, detail: str) -> None:
+            ws.post_signal(Signal(
+                type=SignalType.TASK_OUT_OF_SCOPE,
+                summary=summary,
+                from_agent=role,
+                iteration=iteration,
+                detail=detail,
+            ))
+
+        # If the working tree was clean, _auto_commit returned None.
+        # The agent emitted closes: anyway — surface it so the
+        # reviewer sees that nothing actually shipped against
+        # the named tasks.
+        if commit_hash is None:
+            _warn(
+                f"{role} commit closes tasks but produced no git commit",
+                f"closes={raw_closes};commit_hash=None",
+            )
+
+        closed_parent_ids: set[str] = set()
+        for tid in ids:
+            task = ws.tasks.get(tid)
+            if task is None:
+                _warn(
+                    f"{role} commit closes unknown task:{tid}",
+                    f"task_id={tid}",
+                )
+                continue
+            if task.assigned_to != role:
+                _warn(
+                    f"{role} commit closes task:{tid} assigned to {task.assigned_to}",
+                    f"task_id={tid};expected_role={task.assigned_to}",
+                )
+                continue
+            if task.status not in ("IN_PROGRESS", "PENDING"):
+                _warn(
+                    f"{role} commit closes task:{tid} in state {task.status}",
+                    f"task_id={tid};state={task.status}",
+                )
+                continue
+
+            ws.mutate_task(
+                tid, "COMPLETE",
+                iteration=iteration,
+                closed_by_commit=commit_hash or "",
+            )
+            if task.parent_task_id:
+                closed_parent_ids.add(task.parent_task_id)
+
+        # Subtask cascade (§4.4): close any parent whose remaining
+        # children are all COMPLETE / CANCELLED. The parent's
+        # closed_by_commit is taken from the last child's commit so
+        # the audit trail is complete.
+        for parent_id in closed_parent_ids:
+            parent = ws.tasks.get(parent_id)
+            if parent is None or parent.status == "COMPLETE":
+                continue
+            siblings = ws.child_tasks(parent_id)
+            if not siblings:
+                continue
+            if all(s.status in ("COMPLETE", "CANCELLED", "SAT_OUT") for s in siblings):
+                last_commit = ""
+                for s in siblings:
+                    if s.closed_by_commit:
+                        last_commit = s.closed_by_commit
+                ws.mutate_task(
+                    parent_id, "COMPLETE",
+                    iteration=iteration,
+                    closed_by_commit=last_commit,
+                )
+
+    def _maybe_auto_start_task(
+        self,
+        role: str,
+        tool_arguments: dict[str, Any] | None = None,
+    ) -> None:
+        """Auto-emit TASK_STARTED per design §4.2.
+
+        Called once per agent iteration after the first tool call lands.
+        If the tool call's arguments reference a `task_id` that's on the
+        agent's desk and PENDING, mark that task IN_PROGRESS. Otherwise
+        FIFO-pick the first PENDING desk task. No-op for reviewers and
+        for agents with no PENDING desk items.
+        """
+        ws = self.workspace
+        # Don't double-start: skip if anything on the desk is already in flight.
+        desk = ws.desk_for(role)
+        if not desk:
+            return
+        if any(t.status == "IN_PROGRESS" for t in desk):
+            return
+        pending = [t for t in desk if t.status == "PENDING"]
+        if not pending:
+            return
+
+        target_id: str | None = None
+        if tool_arguments:
+            ref = tool_arguments.get("task_id") or tool_arguments.get("task")
+            if isinstance(ref, str):
+                ref = ref[len("task:"):] if ref.startswith("task:") else ref
+                if any(t.task_id == ref for t in pending):
+                    target_id = ref
+        if target_id is None:
+            target_id = pending[0].task_id
+
+        ws.mutate_task(target_id, "IN_PROGRESS", iteration=ws.iteration)
+
+    def _render_task_desk_block(self, role: str) -> str:
+        """Render the `=== YOUR DESK ===` block for `role` (M3.5 §4.1).
+
+        Returns "" when the desk is empty so the user-turn message is
+        byte-identical to today's behaviour for projects that don't use
+        the planner-driven task flow. Subtasks render indented under
+        their parent (depth cap = 2 levels, enforced at add_task time).
+        """
+        desk = self.workspace.desk_for(role)
+        if not desk:
+            return ""
+
+        # Group: top-level tasks first (parent_task_id is None), each
+        # followed by its still-open children. BLOCKED/CANCELLED render
+        # at the bottom with a divider.
+        top_level = [t for t in desk if t.parent_task_id is None]
+        children_by_parent: dict[str, list] = {}
+        for t in desk:
+            if t.parent_task_id is not None:
+                children_by_parent.setdefault(t.parent_task_id, []).append(t)
+
+        active_lines: list[str] = []
+        blocked_lines: list[str] = []
+
+        def _render_one(task: Any, indent: str = "") -> list[str]:
+            lines = [
+                f"{indent}[task:{task.task_id}] {task.status} — {task.goal}"
+            ]
+            if task.acceptance_criteria:
+                lines.append(f"{indent}  acceptance:")
+                for crit in task.acceptance_criteria:
+                    lines.append(f"{indent}    - {crit}")
+            if task.out_of_scope:
+                lines.append(f"{indent}  out_of_scope:")
+                for o in task.out_of_scope:
+                    lines.append(f"{indent}    - {o}")
+            if task.references:
+                lines.append(f"{indent}  See:")
+                for ref in task.references:
+                    note = f"  ({ref.note})" if ref.note else ""
+                    lines.append(f"{indent}    {ref.kind}: {ref.value}{note}")
+            if task.status == "BLOCKED" and task.blocked_on:
+                lines.append(
+                    f"{indent}  blocked_on: " + ", ".join(task.blocked_on)
+                )
+            return lines
+
+        for parent in top_level:
+            block = _render_one(parent)
+            children = children_by_parent.get(parent.task_id, [])
+            if children:
+                block.append("  └─ subtasks:")
+                for child in children:
+                    block.extend(_render_one(child, indent="     "))
+            (blocked_lines if parent.status in ("BLOCKED", "CANCELLED")
+             else active_lines).extend(block)
+            active_lines.append("") if parent.status not in ("BLOCKED", "CANCELLED") else blocked_lines.append("")
+
+        # Children whose parent is no longer on the desk (e.g. completed
+        # parents whose children are still open) render under "Other".
+        orphans = [
+            t for t in desk
+            if t.parent_task_id is not None
+            and not any(p.task_id == t.parent_task_id for p in top_level)
+        ]
+        if orphans:
+            active_lines.append("Other:")
+            for o in orphans:
+                active_lines.extend(_render_one(o, indent="  "))
+            active_lines.append("")
+
+        out = ["=== YOUR DESK ===", ""]
+        out.extend(active_lines)
+        if blocked_lines:
+            out.append("--- blocked / cancelled ---")
+            out.extend(blocked_lines)
+        out.append("=== END DESK ===")
+        return "\n".join(out).rstrip() + "\n"
 
     def _build_incoming_work(self, cfg: AgentConfig) -> tuple[str, bool]:
         """Build the INCOMING WORK block for cfg.role.
@@ -1573,6 +1841,25 @@ class AgentRunner:
         if incoming_work_block:
             task_prompt = incoming_work_block + "\n\n" + task_prompt
 
+        # M3.5: prepend the per-agent task desk (DESIGN §38.12 §4.1).
+        # Empty desks emit nothing, preserving M1 behaviour byte-for-byte.
+        task_desk_block = self._render_task_desk_block(cfg.role)
+        if task_desk_block:
+            # DESK DISCIPLINE prompt addition (§5.3). Specialists with
+            # non-empty desks need an explicit instruction to work the
+            # desk top-to-bottom and close each task with `closes:`.
+            # Reviewers don't get this — they verify against the
+            # closer's desk via git-diff, not their own desk.
+            if not cfg.is_reviewer:
+                task_desk_block = (
+                    task_desk_block
+                    + "\nDESK DISCIPLINE: Your desk lists explicit tasks with acceptance "
+                    "criteria. Work the desk top-to-bottom. Close each task with a "
+                    "COMMIT that names it via `closes: task:<id>`. If a criterion is "
+                    "unclear, emit ASK to the task's created_by role before working on it.\n"
+                )
+            task_prompt = task_desk_block + "\n" + task_prompt
+
         # M2: prepend desk auto-inject block (triggered notes from persona desk).
         desk_block = self._build_desk_inject(agent, cfg, self.project.goal)
         if desk_block:
@@ -1606,7 +1893,20 @@ class AgentRunner:
 
                 tool_results: list[dict[str, Any]] = []
                 aborted_reason: str | None = None
-                for tc in response.tool_calls:
+                for tc_idx, tc in enumerate(response.tool_calls):
+                    # M3.5 — auto-emit TASK_STARTED on the first tool
+                    # call of each iteration where nothing is yet
+                    # IN_PROGRESS (DESIGN §38.12 §4.2). Retrying per
+                    # iteration covers the case where iteration 0
+                    # produces no tool calls (LLM emits text + a
+                    # bare COMMIT block) — without this the desk
+                    # would skip PENDING → COMPLETE and lose the
+                    # TASK_STARTED audit step. _maybe_auto_start_task
+                    # is a no-op if a task is already IN_PROGRESS,
+                    # so calling it on every iteration is safe.
+                    if tc_idx == 0 and not cfg.is_reviewer:
+                        self._maybe_auto_start_task(cfg.role, tc.arguments)
+
                     try:
                         result = await agent.call_tool(self.workspace, tc.name, tc.arguments)
                         is_error = bool(result.get("error")) or result.get("ok") is False
@@ -1812,6 +2112,98 @@ class AgentRunner:
             unsubscribe()
 
         return decision_holder and decision_holder[0] is SignalType.APPROVAL_GRANTED
+
+    # ── M3.5: USER_COMMENT routing to planner desk (DESIGN §38.12 §4.5) ────
+
+    # Priority order for picking which planner absorbs a user comment.
+    # Meta is excluded — it runs at proposal time, not mid-run.
+    _PLANNER_ROLE_TYPES: tuple[str, ...] = (
+        "tech_lead", "architect", "requirements_writer",
+    )
+
+    def _pick_planner_for_user_comment(self) -> str | None:
+        """Return the role name of the highest-priority on-standby
+        planner, or None if no planner is hired or all hired planners
+        are currently RUNNING. Priority: tech_lead > architect >
+        requirements_writer."""
+        by_role_type: dict[str, str] = {}
+        for cfg in self.project.agents:
+            if cfg.agent_class_role_type in self._PLANNER_ROLE_TYPES:
+                by_role_type.setdefault(cfg.agent_class_role_type, cfg.role)
+
+        for role_type in self._PLANNER_ROLE_TYPES:
+            role = by_role_type.get(role_type)
+            if role is None:
+                continue
+            state = self.workspace.agent_states.get(role)
+            if state is AgentState.RUNNING:
+                continue
+            return role
+        return None
+
+    def _on_user_comment_routing(self, sig: Signal) -> None:
+        """Subscriber. On USER_COMMENT (or _PRIORITY), add a synthetic
+        task to the highest-priority on-standby planner's desk so the
+        planner picks it up next iteration. If no planner is hired,
+        do nothing — agents fall back to today's check_user_board()
+        behaviour at step boundaries."""
+        if sig.type not in (
+            SignalType.USER_COMMENT, SignalType.USER_COMMENT_PRIORITY,
+        ):
+            return
+
+        planner_role = self._pick_planner_for_user_comment()
+        if planner_role is None:
+            return
+
+        # Avoid duplicate synthetic tasks for the same comment if the
+        # subscriber fires twice (e.g. during resume replay).
+        synthetic_id = f"comment_{sig.id.hex[:10]}"
+        if synthetic_id in self.workspace.tasks:
+            return
+
+        active_story = self.workspace.active_story.get(planner_role, "")
+        from core.workspace import Task as _Task, TaskRef as _TaskRef
+        refs: list[_TaskRef] = []
+        if active_story:
+            refs.append(_TaskRef(
+                kind="story", value=active_story, note="active story",
+            ))
+
+        text_preview = (sig.summary or "").strip().replace("\n", " ")
+        if len(text_preview) > 120:
+            text_preview = text_preview[:117] + "..."
+
+        task = _Task(
+            task_id=synthetic_id,
+            story_id=active_story,
+            assigned_to=planner_role,
+            created_by="user",
+            created_at_iter=self.workspace.iteration,
+            goal=f"respond to user comment: {text_preview}",
+            acceptance_criteria=[
+                "answer the user directly, decompose into tasks for "
+                "downstream agents, or post HUMAN_NEEDED if you can't proceed",
+            ],
+            references=refs,
+        )
+        try:
+            self.workspace.add_task(task)
+        except ValueError:
+            # Subscriber must never raise — broken routing shouldn't
+            # take the run down. The user_board fallback still works.
+            return
+
+        # Mark the absorbed comment as seen by the planner so the
+        # planner's check_user_board() doesn't double-process it.
+        sig.mark_seen_by(planner_role)
+
+        # Nudge the planner to READY if they're idle. If they're
+        # already RUNNING, the scheduler will pick the new desk
+        # entry up on their next iteration.
+        state = self.workspace.agent_states.get(planner_role)
+        if state in (None, AgentState.PENDING, AgentState.COMPLETE):
+            self.workspace.agent_states[planner_role] = AgentState.READY
 
     # ── M2: desk handoff subscriber ─────────────────────────────────────────
 

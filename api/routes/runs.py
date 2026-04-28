@@ -54,6 +54,44 @@ async def get_run_board(request: Request, run_id: str) -> list[dict]:
     return board
 
 
+@router.get("/{run_id}/desks", dependencies=[Depends(require_bearer)])
+async def get_run_desks(request: Request, run_id: str) -> dict:
+    """Return the per-agent task desks for a run (M3.5 chunk 8).
+
+    Live runs read from the in-memory workspace; completed runs read
+    `tasks.jsonl` from disk via RunStore. The response shape:
+
+      {
+        "desks": {role: [task, ...], ...},
+        "tasks_by_id": {task_id: task, ...}
+      }
+
+    Bearer-auth gated. Read-only.
+    """
+    from worker.job_runner import serialise_task
+
+    registry = getattr(request.app.state, "run_registry", None)
+    workspace = await registry.get(run_id) if registry is not None else None
+    if workspace is not None:
+        tasks_by_id = {
+            tid: serialise_task(t) for tid, t in workspace.tasks.items()
+        }
+        desks: dict[str, list[dict]] = {}
+        for role, ids in workspace.task_queues.items():
+            desks[role] = [
+                tasks_by_id[tid] for tid in ids if tid in tasks_by_id
+            ]
+        return {"desks": desks, "tasks_by_id": tasks_by_id}
+
+    # Run is not active — fall through to disk.
+    payload = await _store(request).get_tasks(run_id)
+    if payload is None:
+        raise HTTPException(
+            status_code=404, detail=f"run {run_id!r} not found",
+        )
+    return payload
+
+
 @router.post("/{run_id}/approval/{approval_id}", dependencies=[Depends(require_bearer)])
 async def post_approval_decision(
     request: Request,

@@ -211,6 +211,26 @@ class RunStore:
         except json.JSONDecodeError:
             return None
 
+    async def get_tasks(self, run_id: str) -> dict[str, Any] | None:
+        """Load the per-agent task desks for a non-running run from
+        `tasks.jsonl` (M3.5 chunk 8). Returns the same shape the API
+        endpoint exposes — dict with `desks` (role → list of tasks)
+        and `tasks_by_id`. Returns None if the run doesn't exist;
+        empty dicts if it exists but never used the task surface."""
+        run_root = self.runs_root / run_id
+        if not run_root.is_dir():
+            return None
+        from core.run_loader import load_persisted_tasks
+        tasks_dict, queues = load_persisted_tasks(run_root)
+        from worker.job_runner import serialise_task
+        tasks_by_id = {tid: serialise_task(t) for tid, t in tasks_dict.items()}
+        desks: dict[str, list[dict[str, Any]]] = {}
+        for role, ids in queues.items():
+            desks[role] = [
+                tasks_by_id[tid] for tid in ids if tid in tasks_by_id
+            ]
+        return {"desks": desks, "tasks_by_id": tasks_by_id}
+
     def workspace_dir(self, run_id: str) -> Path:
         return self.runs_root / run_id / "workspace"
 

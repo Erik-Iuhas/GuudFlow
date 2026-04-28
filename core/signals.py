@@ -79,6 +79,18 @@ class SignalType(str, Enum):
     # change). Agents pick up the new manifest at the next step boundary.
     MANIFEST_INVALIDATED = "MANIFEST_INVALIDATED"
 
+    # M3.5 — per-agent task desks (DESIGN §38.12). Tasks are intra-role
+    # work items posted by planning archetypes via the assign-task tool.
+    # Closure happens at COMMIT time via a `closes: task:<id>` trailer;
+    # the runner posts TASK_OUT_OF_SCOPE when a commit closes a task it
+    # shouldn't (wrong assignee, wrong state, unknown id).
+    TASK_ASSIGNED = "TASK_ASSIGNED"
+    TASK_STARTED = "TASK_STARTED"
+    TASK_COMPLETED = "TASK_COMPLETED"
+    TASK_BLOCKED = "TASK_BLOCKED"
+    TASK_CANCELLED = "TASK_CANCELLED"
+    TASK_OUT_OF_SCOPE = "TASK_OUT_OF_SCOPE"
+
     # Training Camp (DESIGN §35, Phase F.1) — rubric_scorer posts
     # RUBRIC_SCORE at end-of-training-run with the weighted score and
     # per-check breakdown. Tournament launcher aggregates per-run scores

@@ -48,6 +48,17 @@ Process:
 
 Be precise. Downstream agents will treat your `requirements.md` as the
 contract; ambiguity here becomes wrong code later.
+
+TASK ASSIGNMENT: When you produce work that another agent should
+implement, decompose it into one or more tasks via the `assign-task`
+tool. Always populate acceptance criteria. Reference your own
+artifacts (files, commits, parent stories) so the assignee has the
+source of truth. Do not assign work outside the team's roster.
+
+USER COMMENTS: User comments arriving on your desk (task ids prefixed
+with `comment_`) are the team's interface to the user. Decide: answer
+directly, decompose into tasks for downstream agents, or post
+HUMAN_NEEDED if you can't proceed.
 """
 
 
@@ -61,10 +72,14 @@ class RequirementsWriter(Specialist):
         "fs-read", "fs-list", "fs-read_range", "fs-grep",
         "fs-write",
         "doc-pdf", "doc-docx", "doc-markdown",
+        # M3.5 — requirements writers are planners: they decompose
+        # requirements into tasks for downstream developers (DESIGN §38.12 D2).
+        "assign-task",
     )
     default_rbac_scopes: ClassVar[tuple[str, ...]] = (
         "fs-write",
         "doc-pdf", "doc-docx", "doc-markdown",
+        "assign-task",
     )
 
     archetype_description: ClassVar[str] = (

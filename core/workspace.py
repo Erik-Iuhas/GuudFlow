@@ -12,8 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable
-from uuid import UUID
+from typing import TYPE_CHECKING, Any, Callable, Literal
+from uuid import UUID, uuid4
 
 from core.signals import Signal, SignalType
 
@@ -103,6 +103,70 @@ class StoryState:
     closed: bool = False
     closed_outcome: str | None = None  # "shipped" | "abandoned" | "deferred"
     closed_summary: str = ""
+
+
+# ── Per-agent task desks (DESIGN §38.12) ────────────────────────────────────
+
+
+TaskStatus = Literal[
+    "PENDING",      # on desk, not yet picked up
+    "IN_PROGRESS",  # assignee is working on it (latest STARTED w/o COMPLETE)
+    "BLOCKED",      # explicitly paused; blocked_on populated
+    "COMPLETE",     # closed by a COMMIT that named this task
+    "CANCELLED",    # planner withdrew it (rare)
+    "SAT_OUT",      # tech_lead granted skip
+]
+
+TaskRefKind = Literal["file", "commit", "task", "story"]
+
+
+@dataclass
+class TaskRef:
+    """One named source-of-truth pointer attached to a Task. Reviewers
+    cross-check the assignee's diff against these refs (DESIGN §38.12)."""
+
+    kind: TaskRefKind
+    value: str
+    note: str = ""
+
+
+@dataclass
+class Task:
+    """One work item on an agent's desk. Issued by a planning archetype
+    via the `assign-task` tool. Closed at COMMIT time when the assignee
+    emits `closes: task:<task_id>`. See DESIGN §38.12."""
+
+    task_id: str
+    story_id: str
+    parent_task_id: str | None = None
+
+    assigned_to: str = ""
+    created_by: str = ""
+    created_at_iter: int = 0
+
+    goal: str = ""
+    acceptance_criteria: list[str] = field(default_factory=list)
+    out_of_scope: list[str] = field(default_factory=list)
+    references: list[TaskRef] = field(default_factory=list)
+
+    status: TaskStatus = "PENDING"
+    started_at_iter: int | None = None
+    completed_at_iter: int | None = None
+    closed_by_commit: str = ""
+    blocked_on: list[str] = field(default_factory=list)
+    cancelled_reason: str = ""
+
+
+# Map a TaskStatus transition to the SignalType the runner posts when
+# `mutate_task` fires. PENDING is the initial state and never re-enters
+# (callers must use `add_task` for the assignment).
+_STATUS_SIGNAL: dict[str, SignalType] = {
+    "IN_PROGRESS": SignalType.TASK_STARTED,
+    "COMPLETE": SignalType.TASK_COMPLETED,
+    "BLOCKED": SignalType.TASK_BLOCKED,
+    "CANCELLED": SignalType.TASK_CANCELLED,
+    "SAT_OUT": SignalType.TASK_CANCELLED,
+}
 
 
 @dataclass
@@ -221,6 +285,13 @@ class Workspace:
     active_story: dict[str, str] = field(default_factory=dict)
     embeddings_enabled: bool = False
 
+    # M3.5 — per-agent task desks (DESIGN §38.12). `tasks` is the index by
+    # task_id; `task_queues[role]` is the FIFO desk for `role`. Same
+    # append-only invariant as `agent_states`: every transition posts a
+    # signal AND mutates the dict atomically.
+    tasks: dict[str, Task] = field(default_factory=dict)
+    task_queues: dict[str, list[str]] = field(default_factory=dict)
+
     # Run-level wall-clock deadline (epoch seconds). Set by the runner
     # from a configurable budget. The scheduler checks this between
     # spawn passes and returns SchedulerStatus.DEADLINE_EXCEEDED if hit.
@@ -243,6 +314,10 @@ class Workspace:
     _artifact_persister: Callable[[dict[str, "Artifact"]], None] | None = field(
         default=None, repr=False,
     )
+    # Task persister (M3.5) — fires after every add_task / mutate_task so a
+    # crashed run leaves a complete task mutation log on disk for resume.
+    # Mirrors `_board_persister`. Callback receives the mutated Task.
+    _task_persister: Callable[["Task"], None] | None = field(default=None, repr=False)
 
     # ── Board management ────────────────────────────────────────────────────
 
@@ -362,3 +437,118 @@ class Workspace:
         and for read_protocol() filtering PROTOCOL signals."""
         type_set = set(types)
         return [s for s in self.board if s.type in type_set]
+
+    # ── Task desks (M3.5, DESIGN §38.12) ────────────────────────────────────
+
+    def set_task_persister(self, callback: Callable[["Task"], None] | None) -> None:
+        """Install (or clear) the task persister. Fires after every
+        `add_task` / `mutate_task` with the just-mutated Task."""
+        self._task_persister = callback
+
+    def add_task(self, task: Task) -> None:
+        """Place a new task on its assignee's desk. Posts TASK_ASSIGNED
+        AND appends to `task_queues[assigned_to]` AND inserts into
+        `tasks` atomically. Generates a fresh `task_id` if blank."""
+        if not task.assigned_to:
+            raise ValueError("Task.assigned_to is required")
+        if not task.task_id:
+            task.task_id = uuid4().hex
+        if task.task_id in self.tasks:
+            raise ValueError(f"task_id {task.task_id!r} already exists")
+        if task.parent_task_id is not None:
+            parent = self.tasks.get(task.parent_task_id)
+            if parent is None:
+                raise ValueError(f"unknown parent_task_id {task.parent_task_id!r}")
+            if parent.parent_task_id is not None:
+                raise ValueError(
+                    "subtask depth cap (2 levels): parent already has a parent"
+                )
+
+        self.tasks[task.task_id] = task
+        self.task_queues.setdefault(task.assigned_to, []).append(task.task_id)
+
+        self.post_signal(Signal(
+            type=SignalType.TASK_ASSIGNED,
+            summary=f"task:{task.task_id} → {task.assigned_to}: {task.goal[:80]}",
+            from_agent=task.created_by or None,
+            iteration=task.created_at_iter,
+            detail=task.task_id,
+        ))
+        if self._task_persister is not None:
+            try:
+                self._task_persister(task)
+            except Exception:
+                pass
+
+    def mutate_task(
+        self,
+        task_id: str,
+        status: TaskStatus,
+        *,
+        iteration: int | None = None,
+        **kwargs: Any,
+    ) -> Task:
+        """Transition `task_id` to `status` and post the matching TASK_*
+        signal atomically. Extra kwargs are applied to the Task before
+        the signal fires (e.g. `closed_by_commit`, `blocked_on`,
+        `cancelled_reason`). Returns the mutated Task."""
+        task = self.tasks.get(task_id)
+        if task is None:
+            raise KeyError(f"unknown task_id {task_id!r}")
+        if status == "PENDING":
+            raise ValueError("PENDING is the initial state; use add_task")
+
+        task.status = status
+        for key, value in kwargs.items():
+            if not hasattr(task, key):
+                raise ValueError(f"Task has no attribute {key!r}")
+            setattr(task, key, value)
+        if status == "IN_PROGRESS" and task.started_at_iter is None and iteration is not None:
+            task.started_at_iter = iteration
+        if status == "COMPLETE" and iteration is not None:
+            task.completed_at_iter = iteration
+
+        signal_type = _STATUS_SIGNAL[status]
+        detail = task.task_id
+        if status == "COMPLETE" and task.closed_by_commit:
+            detail = f"{task.task_id};commit={task.closed_by_commit}"
+        self.post_signal(Signal(
+            type=signal_type,
+            summary=f"task:{task.task_id} → {status}",
+            from_agent=task.assigned_to or None,
+            iteration=iteration if iteration is not None else self.iteration,
+            detail=detail,
+        ))
+        if self._task_persister is not None:
+            try:
+                self._task_persister(task)
+            except Exception:
+                pass
+        return task
+
+    def desk_for(
+        self,
+        role: str,
+        *,
+        include_complete: bool = False,
+    ) -> list[Task]:
+        """Return tasks currently on `role`'s desk in FIFO order.
+        COMPLETE and CANCELLED are filtered by default."""
+        ids = self.task_queues.get(role, [])
+        out: list[Task] = []
+        for tid in ids:
+            t = self.tasks.get(tid)
+            if t is None:
+                continue
+            if not include_complete and t.status in ("COMPLETE", "CANCELLED", "SAT_OUT"):
+                continue
+            out.append(t)
+        return out
+
+    def child_tasks(self, parent_id: str) -> list[Task]:
+        """Return immediate children of `parent_id` in FIFO order
+        (creation order — `tasks` is insertion-ordered)."""
+        return [
+            t for t in self.tasks.values()
+            if t.parent_task_id == parent_id
+        ]

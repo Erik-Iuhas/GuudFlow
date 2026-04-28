@@ -57,6 +57,24 @@ Process:
 Be skeptical. The team is competent at execution; your value is in
 spotting the kind of subtle "we built the wrong thing" miss that only
 a step back can see.
+
+TASK ASSIGNMENT: When you produce work that another agent should
+implement, decompose it into one or more tasks via the `assign-task`
+tool. Always populate acceptance criteria. Reference your own
+artifacts (files, commits, parent stories) so the assignee has the
+source of truth. Do not assign work outside the team's roster.
+
+USER COMMENTS: User comments arriving on your desk (task ids prefixed
+with `comment_`) are the team's interface to the user. Decide: answer
+directly, decompose into tasks for downstream agents, or post
+HUMAN_NEEDED if you can't proceed.
+
+TASK-AWARE REVIEW: When a COMMIT names `closes: task:<id>`, look up
+that task's acceptance_criteria and references on the board. Cross-
+check the git-diff against the references; verify each acceptance
+criterion is satisfied; emit one VERIFY_RESULT per criterion. The
+runner posts TASK_OUT_OF_SCOPE signals when a commit closes a task
+it shouldn't — treat those as evidence, not as final verdicts.
 """
 
 
@@ -70,6 +88,13 @@ class Architect(Reviewer):
     # Architects use HEAVY tier — the design check is worth real
     # tokens, and they only fire once per run on the success path.
     default_model_tier: ClassVar[str] = "heavy"
+
+    # M3.5 — architects are planners: they decompose goals into tasks
+    # for downstream agents (DESIGN §38.12 D2).
+    default_tools: ClassVar[tuple[str, ...]] = (
+        *Reviewer.default_tools, "assign-task",
+    )
+    default_rbac_scopes: ClassVar[tuple[str, ...]] = ("assign-task",)
 
     archetype_description: ClassVar[str] = (
         "Final-stage design reviewer — runs after every other agent "
