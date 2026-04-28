@@ -91,16 +91,16 @@ def test_bootstrap_reputation_json_structure(tmp_path: Path):
 # ── 2. Mid-run crash: persona appears as degraded in roster ──────────────
 
 
-async def test_persona_appears_degraded_after_partial_bootstrap(tmp_path: Path):
-    """Simulate a run that bootstrapped the persona dir but then crashed
-    before memory_writer ran — only profile.json written (old bootstrap
-    behaviour). Persona must still appear in the roster as degraded.
+async def test_persona_with_missing_skeleton_files_marked_degraded(tmp_path: Path):
+    """A persona dir with only profile.json (e.g. from manual deletion,
+    external corruption, or pre-M0 bootstrap state) must still appear in
+    the roster, marked degraded with missing files enumerated.
     """
     personas_root = tmp_path / "personas"
-    persona_dir = personas_root / "crash-persona-v1"
+    persona_dir = personas_root / "partial-persona-v1"
     persona_dir.mkdir(parents=True)
     (persona_dir / "profile.json").write_text(
-        json.dumps({"persona_id": "crash-persona-v1", "name": "Crash"}),
+        json.dumps({"persona_id": "partial-persona-v1", "name": "Partial"}),
         encoding="utf-8",
     )
     # Deliberately DO NOT write episodes.jsonl / patterns.json etc.
@@ -110,10 +110,49 @@ async def test_persona_appears_degraded_after_partial_bootstrap(tmp_path: Path):
 
     assert len(entries) == 1
     entry = entries[0]
-    assert entry["persona_id"] == "crash-persona-v1"
+    assert entry["persona_id"] == "partial-persona-v1"
     assert entry["degraded"] is True
     assert "episodes.jsonl" in entry["missing_files"]
     assert "patterns.json" in entry["missing_files"]
+
+
+async def test_persona_with_no_profile_appears_degraded(tmp_path: Path):
+    """A persona dir missing profile.json entirely must still appear in
+    the roster (not silently filtered) — surfaces the bug instead of
+    hiding it. Falls back to dir name as persona_id.
+    """
+    personas_root = tmp_path / "personas"
+    persona_dir = personas_root / "orphan-v1"
+    persona_dir.mkdir(parents=True)
+
+    store = PersonaStore(personas_root)
+    entries = await store.list()
+
+    assert len(entries) == 1
+    assert entries[0]["persona_id"] == "orphan-v1"
+    assert entries[0]["degraded"] is True
+    assert "profile.json" in entries[0]["missing_files"]
+
+
+def test_bootstrap_raises_on_oserror(tmp_path: Path, monkeypatch):
+    """The old behaviour silently swallowed OSError, leaving personas
+    invisibly missing. The new behaviour must log and re-raise so the
+    failure surfaces.
+    """
+    personas_root = tmp_path / "personas"
+    personas_root.mkdir()
+
+    real_mkdir = Path.mkdir
+
+    def fail_mkdir(self, *args, **kwargs):
+        if self.parent == personas_root:
+            raise OSError("simulated disk failure")
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", fail_mkdir)
+
+    with pytest.raises(OSError, match="simulated disk failure"):
+        _bootstrap_personas(_make_project("doomed-v1"), personas_root)
 
 
 async def test_fully_bootstrapped_persona_not_degraded(tmp_path: Path):
