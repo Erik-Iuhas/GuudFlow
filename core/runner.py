@@ -35,7 +35,7 @@ from typing import Any, Awaitable, Callable
 
 from agents.base import BaseAgent, ToolNotAvailable
 from agents.tools.base import BaseTool
-from agents.tools.board import BoardMessage
+from agents.tools.board import AssignTask, BoardMessage
 from agents.tools.fs import (
     FsCreate,
     FsDelete,
@@ -439,7 +439,8 @@ class AgentRunner:
         for cls in (
             FsRead, FsList, FsExists, FsReadRange, FsGrep,
             FsCreate, FsWrite, FsEdit, FsDelete, FsRename,
-            GitDiff, GitLog, GitRead, GitStatus,
+            GitDiff, GitChangedFiles, GitLog, GitRead, GitStatus,
+            BoardMessage, AssignTask,
         ):
             self._local_registry[cls.name] = LocalToolEntry(
                 name=cls.name,
@@ -557,6 +558,7 @@ class AgentRunner:
             FsDelete.name: FsDelete(self.files, claim_emitter, release_emitter),
             FsRename.name: FsRename(self.files, claim_emitter, release_emitter),
             BoardMessage.name: BoardMessage(role, self.workspace),
+            AssignTask.name: AssignTask(role, self.workspace, runner=self),
             GitDiff.name: GitDiff(self.git),
             GitChangedFiles.name: GitChangedFiles(self.git),
             GitLog.name: GitLog(self.git),

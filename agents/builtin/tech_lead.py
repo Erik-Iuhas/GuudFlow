@@ -91,6 +91,16 @@ class TechLead(EscalationHandler):
     # signal type for catalog/meta-agent reasoning.
     wake_on_signal_type: ClassVar[SignalType | None] = SignalType.REJECTED
 
+    # M3.5 — tech_lead is the senior planner. It can rebalance work
+    # via the assign-task tool when escalations or user comments
+    # arrive (DESIGN §38.12 D2).
+    default_tools: ClassVar[tuple[str, ...]] = (
+        *EscalationHandler.default_tools, "assign-task",
+    )
+    default_rbac_scopes: ClassVar[tuple[str, ...]] = (
+        *EscalationHandler.default_rbac_scopes, "assign-task",
+    )
+
     archetype_description: ClassVar[str] = (
         "Investigates stuck cycles (multiple rejections on the same "
         "agent) and posts a specific ACTION recommendation that "

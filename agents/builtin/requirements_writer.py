@@ -61,10 +61,14 @@ class RequirementsWriter(Specialist):
         "fs-read", "fs-list", "fs-read_range", "fs-grep",
         "fs-write",
         "doc-pdf", "doc-docx", "doc-markdown",
+        # M3.5 — requirements writers are planners: they decompose
+        # requirements into tasks for downstream developers (DESIGN §38.12 D2).
+        "assign-task",
     )
     default_rbac_scopes: ClassVar[tuple[str, ...]] = (
         "fs-write",
         "doc-pdf", "doc-docx", "doc-markdown",
+        "assign-task",
     )
 
     archetype_description: ClassVar[str] = (

@@ -71,6 +71,13 @@ class Architect(Reviewer):
     # tokens, and they only fire once per run on the success path.
     default_model_tier: ClassVar[str] = "heavy"
 
+    # M3.5 — architects are planners: they decompose goals into tasks
+    # for downstream agents (DESIGN §38.12 D2).
+    default_tools: ClassVar[tuple[str, ...]] = (
+        *Reviewer.default_tools, "assign-task",
+    )
+    default_rbac_scopes: ClassVar[tuple[str, ...]] = ("assign-task",)
+
     archetype_description: ClassVar[str] = (
         "Final-stage design reviewer — runs after every other agent "
         "and reviews the merged result against the original goal as a "
