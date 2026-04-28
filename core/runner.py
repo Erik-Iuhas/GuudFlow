@@ -1066,6 +1066,13 @@ class AgentRunner:
             # Auto-commit any uncommitted changes on the agent's branch.
             commit_hash = await self._auto_commit(cfg.role, workspace)
 
+            # M3.5 — process the COMMIT's optional `closes: task:<id>`
+            # trailer (DESIGN §38.12 §4.3). Validates assignee + state,
+            # mutates each closed task to COMPLETE, cascades parent
+            # closure, and posts TASK_OUT_OF_SCOPE warnings on
+            # invariant violations. The COMMIT itself is not blocked.
+            self._handle_task_closures(cfg.role, drive_result, commit_hash)
+
             # `drive_result` is either a parsed CompactBlock (the runner
             # extracted a trailing protocol block from the LLM response)
             # or a raw string (subclasses that override `run()` and the
@@ -1221,6 +1228,144 @@ class AgentRunner:
             ))
 
         return render_teammate_brief(role, entries)
+
+    def _handle_task_closures(
+        self,
+        role: str,
+        drive_result: "protocol.CompactBlock | str",
+        commit_hash: str | None,
+    ) -> None:
+        """Process the COMMIT block's `closes:` field per design §4.3.
+
+        Bookkeeping only — runner-side validation that each named task
+        is on the committing agent's desk and IN_PROGRESS. Verifying
+        that the work actually matches the design is the reviewer's
+        job (they have git-changed-files + git-diff). Invariant
+        violations post TASK_OUT_OF_SCOPE warnings; the COMMIT itself
+        is never blocked. Cascades parent task closure when the last
+        child of a parent closes (§4.4).
+        """
+        if not isinstance(drive_result, protocol.CompactBlock):
+            return
+        if drive_result.kind != "COMMIT":
+            return
+        raw_closes = drive_result.fields.get("closes", "").strip()
+        if not raw_closes:
+            return
+
+        # Accept either bare ids ("t1") or task: prefixed ("task:t1");
+        # the design §2.3 wire format prefers prefixed but the agent
+        # may emit the bare id and the runner shouldn't reject either.
+        ids: list[str] = []
+        for tok in raw_closes.split("|"):
+            tok = tok.strip()
+            if not tok:
+                continue
+            if tok.startswith("task:"):
+                tok = tok[len("task:"):]
+            ids.append(tok)
+        if not ids:
+            return
+
+        ws = self.workspace
+        iteration = ws.iteration
+
+        def _warn(summary: str, detail: str) -> None:
+            ws.post_signal(Signal(
+                type=SignalType.TASK_OUT_OF_SCOPE,
+                summary=summary,
+                from_agent=role,
+                iteration=iteration,
+                detail=detail,
+            ))
+
+        closed_parent_ids: set[str] = set()
+        for tid in ids:
+            task = ws.tasks.get(tid)
+            if task is None:
+                _warn(
+                    f"{role} commit closes unknown task:{tid}",
+                    f"task_id={tid}",
+                )
+                continue
+            if task.assigned_to != role:
+                _warn(
+                    f"{role} commit closes task:{tid} assigned to {task.assigned_to}",
+                    f"task_id={tid};expected_role={task.assigned_to}",
+                )
+                continue
+            if task.status not in ("IN_PROGRESS", "PENDING"):
+                _warn(
+                    f"{role} commit closes task:{tid} in state {task.status}",
+                    f"task_id={tid};state={task.status}",
+                )
+                continue
+
+            ws.mutate_task(
+                tid, "COMPLETE",
+                iteration=iteration,
+                closed_by_commit=commit_hash or "",
+            )
+            if task.parent_task_id:
+                closed_parent_ids.add(task.parent_task_id)
+
+        # Subtask cascade (§4.4): close any parent whose remaining
+        # children are all COMPLETE / CANCELLED. The parent's
+        # closed_by_commit is taken from the last child's commit so
+        # the audit trail is complete.
+        for parent_id in closed_parent_ids:
+            parent = ws.tasks.get(parent_id)
+            if parent is None or parent.status == "COMPLETE":
+                continue
+            siblings = ws.child_tasks(parent_id)
+            if not siblings:
+                continue
+            if all(s.status in ("COMPLETE", "CANCELLED", "SAT_OUT") for s in siblings):
+                last_commit = ""
+                for s in siblings:
+                    if s.closed_by_commit:
+                        last_commit = s.closed_by_commit
+                ws.mutate_task(
+                    parent_id, "COMPLETE",
+                    iteration=iteration,
+                    closed_by_commit=last_commit,
+                )
+
+    def _maybe_auto_start_task(
+        self,
+        role: str,
+        tool_arguments: dict[str, Any] | None = None,
+    ) -> None:
+        """Auto-emit TASK_STARTED per design §4.2.
+
+        Called once per agent iteration after the first tool call lands.
+        If the tool call's arguments reference a `task_id` that's on the
+        agent's desk and PENDING, mark that task IN_PROGRESS. Otherwise
+        FIFO-pick the first PENDING desk task. No-op for reviewers and
+        for agents with no PENDING desk items.
+        """
+        ws = self.workspace
+        # Don't double-start: skip if anything on the desk is already in flight.
+        desk = ws.desk_for(role)
+        if not desk:
+            return
+        if any(t.status == "IN_PROGRESS" for t in desk):
+            return
+        pending = [t for t in desk if t.status == "PENDING"]
+        if not pending:
+            return
+
+        target_id: str | None = None
+        if tool_arguments:
+            ref = tool_arguments.get("task_id") or tool_arguments.get("task")
+            if isinstance(ref, str):
+                ref = ref[len("task:"):] if ref.startswith("task:") else ref
+                if any(t.task_id == ref for t in pending):
+                    target_id = ref
+        if target_id is None:
+            target_id = pending[0].task_id
+
+        ws.mutate_task(target_id, "IN_PROGRESS", iteration=ws.iteration)
 
     def _render_task_desk_block(self, role: str) -> str:
         """Render the `=== YOUR DESK ===` block for `role` (M3.5 §4.1).
@@ -1706,7 +1851,14 @@ class AgentRunner:
 
                 tool_results: list[dict[str, Any]] = []
                 aborted_reason: str | None = None
-                for tc in response.tool_calls:
+                for tc_idx, tc in enumerate(response.tool_calls):
+                    # M3.5 — auto-emit TASK_STARTED on the first tool
+                    # call of the agent's run (DESIGN §38.12 §4.2). If
+                    # the call references a task_id from the desk, mark
+                    # that task; otherwise FIFO-pick the first PENDING.
+                    if iteration == 0 and tc_idx == 0 and not cfg.is_reviewer:
+                        self._maybe_auto_start_task(cfg.role, tc.arguments)
+
                     try:
                         result = await agent.call_tool(self.workspace, tc.name, tc.arguments)
                         is_error = bool(result.get("error")) or result.get("ok") is False
