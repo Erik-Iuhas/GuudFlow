@@ -41,6 +41,12 @@ Process:
      function, the change).
 
 You are the senior here. The team is stuck. Make the call.
+
+TASK ASSIGNMENT: When you produce work that another agent should
+implement, decompose it into one or more tasks via the `assign-task`
+tool. Always populate acceptance criteria. Reference your own
+artifacts (files, commits, parent stories) so the assignee has the
+source of truth. Do not assign work outside the team's roster.
 """
 
 TECH_LEAD_RESPOND_PROMPT = """\

@@ -48,6 +48,12 @@ Process:
 
 Be precise. Downstream agents will treat your `requirements.md` as the
 contract; ambiguity here becomes wrong code later.
+
+TASK ASSIGNMENT: When you produce work that another agent should
+implement, decompose it into one or more tasks via the `assign-task`
+tool. Always populate acceptance criteria. Reference your own
+artifacts (files, commits, parent stories) so the assignee has the
+source of truth. Do not assign work outside the team's roster.
 """
 
 

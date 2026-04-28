@@ -1222,6 +1222,85 @@ class AgentRunner:
 
         return render_teammate_brief(role, entries)
 
+    def _render_task_desk_block(self, role: str) -> str:
+        """Render the `=== YOUR DESK ===` block for `role` (M3.5 §4.1).
+
+        Returns "" when the desk is empty so the user-turn message is
+        byte-identical to today's behaviour for projects that don't use
+        the planner-driven task flow. Subtasks render indented under
+        their parent (depth cap = 2 levels, enforced at add_task time).
+        """
+        desk = self.workspace.desk_for(role)
+        if not desk:
+            return ""
+
+        # Group: top-level tasks first (parent_task_id is None), each
+        # followed by its still-open children. BLOCKED/CANCELLED render
+        # at the bottom with a divider.
+        top_level = [t for t in desk if t.parent_task_id is None]
+        children_by_parent: dict[str, list] = {}
+        for t in desk:
+            if t.parent_task_id is not None:
+                children_by_parent.setdefault(t.parent_task_id, []).append(t)
+
+        active_lines: list[str] = []
+        blocked_lines: list[str] = []
+
+        def _render_one(task: Any, indent: str = "") -> list[str]:
+            lines = [
+                f"{indent}[task:{task.task_id}] {task.status} — {task.goal}"
+            ]
+            if task.acceptance_criteria:
+                lines.append(f"{indent}  acceptance:")
+                for crit in task.acceptance_criteria:
+                    lines.append(f"{indent}    - {crit}")
+            if task.out_of_scope:
+                lines.append(f"{indent}  out_of_scope:")
+                for o in task.out_of_scope:
+                    lines.append(f"{indent}    - {o}")
+            if task.references:
+                lines.append(f"{indent}  See:")
+                for ref in task.references:
+                    note = f"  ({ref.note})" if ref.note else ""
+                    lines.append(f"{indent}    {ref.kind}: {ref.value}{note}")
+            if task.status == "BLOCKED" and task.blocked_on:
+                lines.append(
+                    f"{indent}  blocked_on: " + ", ".join(task.blocked_on)
+                )
+            return lines
+
+        for parent in top_level:
+            block = _render_one(parent)
+            children = children_by_parent.get(parent.task_id, [])
+            if children:
+                block.append("  └─ subtasks:")
+                for child in children:
+                    block.extend(_render_one(child, indent="     "))
+            (blocked_lines if parent.status in ("BLOCKED", "CANCELLED")
+             else active_lines).extend(block)
+            active_lines.append("") if parent.status not in ("BLOCKED", "CANCELLED") else blocked_lines.append("")
+
+        # Children whose parent is no longer on the desk (e.g. completed
+        # parents whose children are still open) render under "Other".
+        orphans = [
+            t for t in desk
+            if t.parent_task_id is not None
+            and not any(p.task_id == t.parent_task_id for p in top_level)
+        ]
+        if orphans:
+            active_lines.append("Other:")
+            for o in orphans:
+                active_lines.extend(_render_one(o, indent="  "))
+            active_lines.append("")
+
+        out = ["=== YOUR DESK ===", ""]
+        out.extend(active_lines)
+        if blocked_lines:
+            out.append("--- blocked / cancelled ---")
+            out.extend(blocked_lines)
+        out.append("=== END DESK ===")
+        return "\n".join(out).rstrip() + "\n"
+
     def _build_incoming_work(self, cfg: AgentConfig) -> tuple[str, bool]:
         """Build the INCOMING WORK block for cfg.role.
 
@@ -1574,6 +1653,25 @@ class AgentRunner:
         )
         if incoming_work_block:
             task_prompt = incoming_work_block + "\n\n" + task_prompt
+
+        # M3.5: prepend the per-agent task desk (DESIGN §38.12 §4.1).
+        # Empty desks emit nothing, preserving M1 behaviour byte-for-byte.
+        task_desk_block = self._render_task_desk_block(cfg.role)
+        if task_desk_block:
+            # DESK DISCIPLINE prompt addition (§5.3). Specialists with
+            # non-empty desks need an explicit instruction to work the
+            # desk top-to-bottom and close each task with `closes:`.
+            # Reviewers don't get this — they verify against the
+            # closer's desk via git-diff, not their own desk.
+            if not cfg.is_reviewer:
+                task_desk_block = (
+                    task_desk_block
+                    + "\nDESK DISCIPLINE: Your desk lists explicit tasks with acceptance "
+                    "criteria. Work the desk top-to-bottom. Close each task with a "
+                    "COMMIT that names it via `closes: task:<id>`. If a criterion is "
+                    "unclear, emit ASK to the task's created_by role before working on it.\n"
+                )
+            task_prompt = task_desk_block + "\n" + task_prompt
 
         # M2: prepend desk auto-inject block (triggered notes from persona desk).
         desk_block = self._build_desk_inject(agent, cfg, self.project.goal)

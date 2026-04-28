@@ -61,6 +61,13 @@ progress.
 - One `git-diff` call per file, not one call for everything.
 - Be skeptical — reject if any checklist item is ❌ FAIL.
 - Your checklist is visible on the board; keep it clear and factual.
+
+TASK-AWARE REVIEW: When a COMMIT names `closes: task:<id>`, look up
+that task's acceptance_criteria and references on the board. Cross-
+check the git-diff against the references; verify each acceptance
+criterion is satisfied; emit one VERIFY_RESULT per criterion. The
+runner posts TASK_OUT_OF_SCOPE signals when a commit closes a task
+it shouldn't — treat those as evidence, not as final verdicts.
 """
 
 
