@@ -24,6 +24,9 @@ PROTOCOL_TYPES: frozenset[str] = frozenset({
     "COMMIT", "VERIFY_RESULT", "DELTA", "ACTION", "ASK", "ANSWER", "STATUS",
     "REQUEST_SKIP", "SKIP_GRANTED", "SKIP_DENIED",
     "STORY_OPENED", "STORY_CLOSED",
+    # M3.5 — task lifecycle (DESIGN §38.12)
+    "ASSIGN_TASK", "TASK_STARTED", "TASK_COMPLETED",
+    "TASK_BLOCKED", "TASK_CANCELLED",
 })
 
 
@@ -97,10 +100,20 @@ def render_commit(
     commit_hash: str,
     files: Iterable[FileChange],
     checkpoints: Iterable[str],
+    *,
+    closes: Iterable[str] | None = None,
 ) -> str:
+    """Render a COMMIT protocol message. `closes` (M3.5) is an optional
+    list of `task:<id>` references; the runner reads it to bookkeep
+    desk completion. Existing callers without `closes` produce
+    byte-identical output."""
     lines = [f"COMMIT {agent} {commit_hash}"]
     lines.extend(_file_change_line(fc) for fc in files)
     lines.append("VERIFY: " + "|".join(checkpoints))
+    if closes is not None:
+        ids = [tid.strip() for tid in closes if tid and tid.strip()]
+        if ids:
+            lines.append("closes: " + " | ".join(ids))
     return "\n".join(lines)
 
 
@@ -220,6 +233,86 @@ def render_story_closed(
     lines = [f"STORY_CLOSED story:{story_id} outcome:{outcome}"]
     if summary:
         lines.append(f"  {summary}")
+    return "\n".join(lines)
+
+
+# ── M3.5 — task lifecycle (DESIGN §38.12) ───────────────────────────────────
+
+
+@dataclass
+class TaskRefField:
+    """Parser/renderer-internal mirror of `core.workspace.TaskRef`. Lives
+    here so `core/protocol.py` doesn't import workspace."""
+
+    kind: str    # "file" | "commit" | "task" | "story"
+    value: str
+    note: str = ""
+
+
+def render_assign_task(
+    assignee: str,
+    task_id: str,
+    *,
+    goal: str,
+    acceptance: Iterable[str] = (),
+    out_of_scope: Iterable[str] = (),
+    parent_task: str | None = None,
+    story: str | None = None,
+    references: Iterable[TaskRefField] = (),
+) -> str:
+    """Render an `ASSIGN_TASK` protocol message. All fields except the
+    header line are optional. `acceptance` / `out_of_scope` use `|` as
+    separator (matches the existing VERIFY: convention)."""
+    lines = [f"ASSIGN_TASK {assignee} task:{task_id}"]
+    if goal:
+        lines.append(f"  goal: {goal}")
+    acc = [a.strip() for a in acceptance if a and a.strip()]
+    if acc:
+        lines.append("  acceptance: " + " | ".join(acc))
+    oos = [o.strip() for o in out_of_scope if o and o.strip()]
+    if oos:
+        lines.append("  out_of_scope: " + " | ".join(oos))
+    if parent_task:
+        lines.append(f"  parent_task: {parent_task}")
+    if story:
+        lines.append(f"  story: {story}")
+    refs = list(references)
+    if refs:
+        lines.append("  refs:")
+        for ref in refs:
+            note = f' "{ref.note}"' if ref.note else ""
+            lines.append(f"    {ref.kind}:{ref.value}{note}")
+    return "\n".join(lines)
+
+
+def render_task_started(task_id: str, by_role: str) -> str:
+    return f"TASK_STARTED task:{task_id} by:{by_role}"
+
+
+def render_task_completed(task_id: str, commit_hash: str) -> str:
+    return f"TASK_COMPLETED task:{task_id} commit:{commit_hash}"
+
+
+def render_task_blocked(
+    task_id: str,
+    by_role: str,
+    *,
+    reason: str = "",
+    blocked_on: Iterable[str] = (),
+) -> str:
+    lines = [f"TASK_BLOCKED task:{task_id} by:{by_role}"]
+    if reason:
+        lines.append(f"  reason: {reason}")
+    blockers = [b.strip() for b in blocked_on if b and b.strip()]
+    if blockers:
+        lines.append("  blocked_on: " + " | ".join(blockers))
+    return "\n".join(lines)
+
+
+def render_task_cancelled(task_id: str, by_role: str, reason: str = "") -> str:
+    lines = [f"TASK_CANCELLED task:{task_id} by:{by_role}"]
+    if reason:
+        lines.append(f"  reason: {reason}")
     return "\n".join(lines)
 
 
@@ -417,6 +510,14 @@ _SKIP_GRANTED_HEADER = re.compile(r"^SKIP_GRANTED\s+skip:(\S+)\s+by:(\S+)\s*$")
 _SKIP_DENIED_HEADER = re.compile(r"^SKIP_DENIED\s+skip:(\S+)\s+by:(\S+)\s*$")
 _STORY_OPENED_HEADER = re.compile(r"^STORY_OPENED\s+story:(\S+)\s*$")
 _STORY_CLOSED_HEADER = re.compile(r"^STORY_CLOSED\s+story:(\S+)\s+outcome:(\S+)\s*$")
+_ASSIGN_TASK_HEADER = re.compile(r"^ASSIGN_TASK\s+(\S+)\s+task:(\S+)\s*$")
+_TASK_STARTED_HEADER = re.compile(r"^TASK_STARTED\s+task:(\S+)\s+by:(\S+)\s*$")
+_TASK_COMPLETED_HEADER = re.compile(r"^TASK_COMPLETED\s+task:(\S+)\s+commit:(\S+)\s*$")
+_TASK_BLOCKED_HEADER = re.compile(r"^TASK_BLOCKED\s+task:(\S+)\s+by:(\S+)\s*$")
+_TASK_CANCELLED_HEADER = re.compile(r"^TASK_CANCELLED\s+task:(\S+)\s+by:(\S+)\s*$")
+_TASK_REF_LINE = re.compile(
+    r'^(file|commit|task|story):(\S+?)(?:\s+"([^"]*)")?\s*$'
+)
 
 _FILE_LINE = re.compile(
     r"^\s*([+~\-])\s+(\S+)\s+\[(new|del|mod:(\d+))\](?:\s{1,}(.*))?\s*$"
@@ -443,10 +544,17 @@ def _parse_commit(raw: str, lines: list[str]) -> ProtocolMessage:
 
     files: list[FileChange] = []
     checkpoints: list[str] = []
+    closes: list[str] = []
     for line in lines[1:]:
         if line.startswith("VERIFY:"):
             cks = line[len("VERIFY:"):].strip()
             checkpoints = [c.strip() for c in cks.split("|") if c.strip()]
+            continue
+        # M3.5 — optional `closes: task:<id> | task:<id>` trailer.
+        stripped = line.lstrip()
+        if stripped.startswith("closes:"):
+            payload = stripped[len("closes:"):].strip()
+            closes = [tid.strip() for tid in payload.split("|") if tid.strip()]
             continue
         m = _FILE_LINE.match(line)
         if not m:
@@ -471,12 +579,15 @@ def _parse_commit(raw: str, lines: list[str]) -> ProtocolMessage:
     if not checkpoints:
         raise ValueError("COMMIT message missing VERIFY: line")
 
+    parsed: dict = {"files": files, "checkpoints": checkpoints}
+    if closes:
+        parsed["closes"] = closes
     return ProtocolMessage(
         type="COMMIT",
         from_agent=agent,
         commit_hash=commit_hash,
         raw=raw,
-        parsed={"files": files, "checkpoints": checkpoints},
+        parsed=parsed,
     )
 
 
@@ -745,6 +856,143 @@ def _parse_story_closed(raw: str, lines: list[str]) -> ProtocolMessage:
     )
 
 
+def _parse_assign_task(raw: str, lines: list[str]) -> ProtocolMessage:
+    m = _ASSIGN_TASK_HEADER.match(lines[0])
+    if not m:
+        raise ValueError(f"malformed ASSIGN_TASK header: {lines[0]!r}")
+    assignee, task_id = m.groups()
+    goal = ""
+    acceptance: list[str] = []
+    out_of_scope: list[str] = []
+    parent_task: str | None = None
+    story_id: str | None = None
+    references: list[TaskRefField] = []
+    in_refs = False
+    for line in lines[1:]:
+        s = line.strip()
+        if s.startswith("goal:"):
+            goal = s[5:].strip()
+            in_refs = False
+        elif s.startswith("acceptance:"):
+            acceptance = [a.strip() for a in s[11:].split("|") if a.strip()]
+            in_refs = False
+        elif s.startswith("out_of_scope:"):
+            out_of_scope = [o.strip() for o in s[13:].split("|") if o.strip()]
+            in_refs = False
+        elif s.startswith("parent_task:"):
+            parent_task = s[12:].strip() or None
+            in_refs = False
+        elif s.startswith("story:"):
+            story_id = s[6:].strip() or None
+            in_refs = False
+        elif s.startswith("refs:"):
+            in_refs = True
+            tail = s[5:].strip()
+            if tail:
+                rm = _TASK_REF_LINE.match(tail)
+                if rm:
+                    kind, value, note = rm.groups()
+                    references.append(TaskRefField(kind, value, note or ""))
+        elif in_refs:
+            rm = _TASK_REF_LINE.match(s)
+            if not rm:
+                raise ValueError(f"malformed task ref line: {line!r}")
+            kind, value, note = rm.groups()
+            references.append(TaskRefField(kind, value, note or ""))
+        else:
+            raise ValueError(f"unrecognised ASSIGN_TASK line: {line!r}")
+    return ProtocolMessage(
+        type="ASSIGN_TASK",
+        from_agent=None,
+        commit_hash=None,
+        raw=raw,
+        parsed={
+            "assignee": assignee,
+            "task_id": task_id,
+            "goal": goal,
+            "acceptance": acceptance,
+            "out_of_scope": out_of_scope,
+            "parent_task": parent_task,
+            "story_id": story_id,
+            "references": references,
+        },
+    )
+
+
+def _parse_task_started(raw: str, lines: list[str]) -> ProtocolMessage:
+    m = _TASK_STARTED_HEADER.match(lines[0])
+    if not m:
+        raise ValueError(f"malformed TASK_STARTED header: {lines[0]!r}")
+    task_id, by_role = m.groups()
+    return ProtocolMessage(
+        type="TASK_STARTED",
+        from_agent=by_role,
+        commit_hash=None,
+        raw=raw,
+        parsed={"task_id": task_id, "by_role": by_role},
+    )
+
+
+def _parse_task_completed(raw: str, lines: list[str]) -> ProtocolMessage:
+    m = _TASK_COMPLETED_HEADER.match(lines[0])
+    if not m:
+        raise ValueError(f"malformed TASK_COMPLETED header: {lines[0]!r}")
+    task_id, commit_hash = m.groups()
+    return ProtocolMessage(
+        type="TASK_COMPLETED",
+        from_agent=None,
+        commit_hash=commit_hash,
+        raw=raw,
+        parsed={"task_id": task_id, "commit_hash": commit_hash},
+    )
+
+
+def _parse_task_blocked(raw: str, lines: list[str]) -> ProtocolMessage:
+    m = _TASK_BLOCKED_HEADER.match(lines[0])
+    if not m:
+        raise ValueError(f"malformed TASK_BLOCKED header: {lines[0]!r}")
+    task_id, by_role = m.groups()
+    reason = ""
+    blocked_on: list[str] = []
+    for line in lines[1:]:
+        s = line.strip()
+        if s.startswith("reason:"):
+            reason = s[7:].strip()
+        elif s.startswith("blocked_on:"):
+            blocked_on = [b.strip() for b in s[11:].split("|") if b.strip()]
+    return ProtocolMessage(
+        type="TASK_BLOCKED",
+        from_agent=by_role,
+        commit_hash=None,
+        raw=raw,
+        parsed={
+            "task_id": task_id,
+            "by_role": by_role,
+            "reason": reason,
+            "blocked_on": blocked_on,
+        },
+    )
+
+
+def _parse_task_cancelled(raw: str, lines: list[str]) -> ProtocolMessage:
+    m = _TASK_CANCELLED_HEADER.match(lines[0])
+    if not m:
+        raise ValueError(f"malformed TASK_CANCELLED header: {lines[0]!r}")
+    task_id, by_role = m.groups()
+    reason = ""
+    for line in lines[1:]:
+        s = line.strip()
+        if s.startswith("reason:"):
+            reason = s[7:].strip()
+    return ProtocolMessage(
+        type="TASK_CANCELLED",
+        from_agent=by_role,
+        commit_hash=None,
+        raw=raw,
+        parsed={"task_id": task_id, "by_role": by_role, "reason": reason},
+    )
+
+
 _DISPATCH = {
     "COMMIT": _parse_commit,
     "VERIFY_RESULT": _parse_verify,
@@ -758,6 +1006,11 @@ _DISPATCH = {
     "SKIP_DENIED": _parse_skip_denied,
     "STORY_OPENED": _parse_story_opened,
     "STORY_CLOSED": _parse_story_closed,
+    "ASSIGN_TASK": _parse_assign_task,
+    "TASK_STARTED": _parse_task_started,
+    "TASK_COMPLETED": _parse_task_completed,
+    "TASK_BLOCKED": _parse_task_blocked,
+    "TASK_CANCELLED": _parse_task_cancelled,
 }
 
 
