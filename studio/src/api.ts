@@ -139,6 +139,12 @@ export const runsApi = {
    *  every APPROVED merge. Used by the Run view's tag panel. */
   tags: (id: string) =>
     request<RunTag[]>("GET", `/api/runs/${encodeURIComponent(id)}/tags`),
+  /** M4.7 — per-agent task desks. */
+  desks: (id: string) =>
+    request<{ desks: Record<string, unknown[]>; tasks_by_id: Record<string, unknown> }>(
+      "GET",
+      `/api/runs/${encodeURIComponent(id)}/desks`,
+    ),
 };
 
 export interface RunTag {
@@ -401,7 +407,7 @@ export const metaApi = {
    *  response will populate `deltas` rather than just a fresh team. */
   propose: (
     goal: string,
-    options?: { projectId?: string; priorRunId?: string },
+    options?: { projectId?: string; priorRunId?: string; metaModel?: string },
   ) =>
     request<MetaProposal>(
       "POST",
@@ -410,6 +416,7 @@ export const metaApi = {
         goal,
         ...(options?.projectId ? { project_id: options.projectId } : {}),
         ...(options?.priorRunId ? { prior_run_id: options.priorRunId } : {}),
+        ...(options?.metaModel ? { meta_model: options.metaModel } : {}),
       },
       true,
     ),
@@ -522,5 +529,52 @@ export function connectQuipStream(
   }
   return ws;
 }
+
+import type { ToolEntry } from "./components/ToolsMultiSelect";
+
+export interface DashboardData {
+  active_runs: {
+    run_id: string;
+    project_id: string;
+    project_name: string;
+    goal: string;
+    status: string;
+    current_agents: { role: string; state: string; persona_id?: string }[];
+    started_at?: string;
+    elapsed_s: number;
+    task_progress: { closed: number; total: number };
+  }[];
+  recent_completions: {
+    run_id: string;
+    project_id: string;
+    outcome: string;
+    duration_s?: number;
+    ended_at?: string;
+  }[];
+  pending_approvals: {
+    run_id: string;
+    approval_id: string;
+    title: string;
+    kind: string;
+  }[];
+  top_personas: {
+    persona_id: string;
+    name: string;
+    role: string;
+    recent_runs: number;
+    win_rate: number;
+  }[];
+}
+
+export const dashboardApi = {
+  get: () => request<DashboardData>("GET", "/api/dashboard", undefined, true),
+};
+
+export const toolsApi = {
+  list: () =>
+    request<{ tools: ToolEntry[] }>("GET", "/api/tools", undefined, true).then(
+      (r) => r.tools,
+    ),
+};
 
 export { ApiError };

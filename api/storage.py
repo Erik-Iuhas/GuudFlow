@@ -297,13 +297,23 @@ def _summarise_persona(persona_dir: Path, profile: dict[str, Any]) -> dict[str, 
 
     missing = [f for f in _PERSONA_REQUIRED_FILES if not (persona_dir / f).exists()]
 
+    style: dict[str, Any] = {}
+    style_path = persona_dir / "style.json"
+    if style_path.exists():
+        try:
+            style = json.loads(style_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            style = {}
+
     return {
         "persona_id": profile.get("persona_id") or profile.get("id") or persona_dir.name,
         "name": profile.get("name", ""),
         "specialty": profile.get("specialty", ""),
         "character": profile.get("character", ""),
+        "goal": profile.get("goal", ""),
         "n_episodes": n_episodes,
         "reputation": reputation,
+        "style_tendencies": style.get("tendencies", {}),
         "degraded": len(missing) > 0,
         "missing_files": missing,
     }

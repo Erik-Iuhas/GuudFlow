@@ -292,6 +292,33 @@ button.small { padding: 2px 8px; font-size: 12px; }
 }
 .modal h3 { margin: 0 0 8px 0; }
 
+/* ─── Slide-over panel (WorkerSettingsPanel, PersonaSlideOver) ─────────── */
+
+.slide-over-backdrop {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.3); z-index: 200;
+}
+.slide-over {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: 480px; max-width: 100vw;
+  background: #fff; z-index: 201;
+  display: flex; flex-direction: column;
+  box-shadow: -4px 0 24px rgba(15, 23, 42, 0.15);
+  overflow: hidden;
+}
+.slide-over-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+.slide-over-body {
+  flex: 1; overflow-y: auto; padding: 16px 20px;
+}
+.close-btn {
+  background: none; border: none; font-size: 22px; line-height: 1;
+  color: #94a3b8; cursor: pointer; padding: 4px 8px;
+}
+.close-btn:hover { color: #1e293b; background: none; }
+
 /* ─── meta-agent proposal (Phase D.4) ─────────────────────────────────── */
 
 .rationale {

@@ -89,16 +89,25 @@ def _skeleton_response(goal: str) -> dict[str, Any]:
     }
 
 
-def _build_meta_llm(request: Request) -> LLMClient:
+_VALID_META_MODEL_TIERS = frozenset({"heavy", "solid", "fast"})
+
+
+def _build_meta_llm(request: Request, meta_model: str | None = None) -> LLMClient:
     """The route's LLM source. Tests inject via `app.state.meta_llm`;
-    production falls through to the default Anthropic client (which
-    reads ANTHROPIC_API_KEY from env)."""
+    production resolves through the ModelRegistry when meta_model tier is given,
+    otherwise falls through to the default Anthropic client."""
     injected = getattr(request.app.state, "meta_llm", None)
     if injected is not None:
         return injected
-    # Production default. Construction is cheap (no network until the
-    # first .complete() call); keeping it lazy here means dev runs
-    # without ANTHROPIC_API_KEY don't crash on import.
+    if meta_model is not None:
+        registry = getattr(request.app.state, "model_registry", None)
+        if registry is not None:
+            try:
+                model_info = registry.resolve(meta_model)
+                return registry.get_client(model_info)
+            except Exception:
+                pass
+    # Production default.
     return AnthropicClient()
 
 
@@ -137,6 +146,14 @@ async def propose(
         raise HTTPException(
             status_code=400, detail="prior_run_id must be a string",
         )
+
+    meta_model: str | None = body.get("meta_model")
+    if meta_model is not None:
+        if not isinstance(meta_model, str) or meta_model not in _VALID_META_MODEL_TIERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"meta_model must be one of: {sorted(_VALID_META_MODEL_TIERS)}",
+            )
 
     # Greenfield (no project_id) is the normal Propose-view path: the
     # user is asking the meta-agent to design a team for a goal before
@@ -186,7 +203,7 @@ async def propose(
         meta_project_id = "_greenfield"
 
     meta = MetaAgent()
-    meta._llm = _build_meta_llm(request)
+    meta._llm = _build_meta_llm(request, meta_model=meta_model)
     try:
         proposal: TeamProposal = await meta.propose(
             project_dir=project_dir,

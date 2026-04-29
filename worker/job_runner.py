@@ -602,7 +602,7 @@ class JobRunner:
         # turns on quip generation.
         if self.quip_registry is not None:
             quip_log_path = run_root / "quip_log.json"
-            quip_engine = QuipEngine(llm=llm, log_path=quip_log_path)
+            quip_engine = QuipEngine(llm=llm or AnthropicClient(), log_path=quip_log_path)
             runner.quip_engine = quip_engine
             try:
                 await self.quip_registry.register(job.run_id, quip_engine)

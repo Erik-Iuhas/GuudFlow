@@ -184,6 +184,44 @@ Layer 3.8 of the system prompt — `data/projects/{id}/roadmap.md` is
 loaded and injected so each run is aware of the project's larger arc
 (continuous app building).
 
+### M3.5 — Task desks + planner pickup (commits `a501574`–`4aef259`)
+
+- `core/workspace.py`: `Task` + `TaskRef` dataclasses; `Workspace.tasks`
+  dict + `task_queues` per-role list; `add_task`, `mutate_task`.
+- `core/runner.py`: `_handle_task_closures` (closes tasks on `closes:`
+  in COMMIT), `_maybe_auto_start_task` (marks next pending task
+  IN_PROGRESS), `_handle_user_comment_routing` (drops USER_COMMENT on
+  planner's desk when mention detected), planner pickup loop.
+- `GET /api/runs/{id}/desks` — reads live workspace or falls back to
+  persisted `tasks.jsonl`.
+- `worker/job_runner.py::serialise_task` — canonical Task → dict.
+
+### M4 — Studio UI Pass 1
+
+- `GET /api/tools` — catalog from `LOCAL_TOOL_CLASSES` with baseline +
+  archetype-grant metadata.
+- `GET /api/dashboard` — aggregates RunRegistry + RunStore + PersonaStore
+  into one polling endpoint.
+- `POST /api/meta/propose` — optional `meta_model` tier string.
+- `studio/src/lib/avatar.ts` — `avatarFor(seed)`: FNV-1a deterministic
+  gradient + initials, memoized.
+- `WorkerCard` — single component, four modes: `config` (full editable),
+  `preview` (read-only), `live` (ActiveTaskChip + gear), `roster` (click
+  → PersonaSlideOver).
+- `ToolsMultiSelect` — RBAC-aware; disables tools not granted by
+  baseline / archetype / project scopes.
+- `WorkerSettingsPanel` — right-edge slide-over; optimistic save +
+  revert.
+- `Dashboard` — new `/` route; 5s poll, pauses on `document.hidden`.
+- `RunWsContext` — tiny pub/sub context; Run view populates it from its
+  existing WS ref; `useDesks` subscribes and debounce-refetches on
+  `TASK_*`/`COMMIT`.
+- `ActiveTaskChip` — derives from `useDesks`; shows IN_PROGRESS → PENDING
+  → idle; popover shows acceptance criteria + references.
+- `PersonaSlideOver` — goal, reputation snapshot, style tendencies, last
+  5 episodes; no edit.
+- `AgentCard` deleted.
+
 ---
 
 ## What the diagrams **don't** cover yet

@@ -7,8 +7,13 @@ const API_TARGET = process.env.AGENTFLOW_API_URL || "http://localhost:8000";
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test-setup.ts"],
+  },
   server: {
-    port: 3000,
+    port: 3001,
     proxy: {
       "/api": { target: API_TARGET, changeOrigin: true },
       "/ws": { target: API_TARGET, ws: true, changeOrigin: true },

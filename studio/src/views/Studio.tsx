@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, invokeApi, projectsApi, runsApi } from "../api";
-import { AgentCard } from "../components/AgentCard";
+import { PersonaSlideOver } from "../components/PersonaSlideOver";
+import { WorkerCard } from "../components/WorkerCard";
+import { WorkerSettingsPanel } from "../components/WorkerSettingsPanel";
 import { CostStrip } from "../components/CostStrip";
 import { PipelineGraph } from "../components/PipelineGraph";
 import { ResumeButton } from "../components/ResumeButton";
@@ -26,6 +28,8 @@ export function Studio() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<Tab>("team");
+  const [settingsRole, setSettingsRole] = useState<string | null>(null);
+  const [slideOverPersonaId, setSlideOverPersonaId] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -222,12 +226,18 @@ export function Studio() {
           )}
           <div className="grid-2">
             {(project.agents ?? []).map((a) => (
-              <AgentCard
+              <WorkerCard
                 key={a.role}
                 agent={a}
                 allRoles={(project.agents ?? []).map((x) => x.role)}
+                mode="config"
                 onChange={(partial) => updateAgent(a.role, partial)}
                 onRemove={() => removeAgent(a.role)}
+                onOpenSettings={() => setSettingsRole(a.role)}
+                onOpenPersona={(pid) => setSlideOverPersonaId(pid)}
+                projectRbacScopes={
+                  (project.rbac ?? {})[a.role]?.allowed_scopes ?? []
+                }
               />
             ))}
           </div>
@@ -330,6 +340,39 @@ export function Studio() {
           </div>
         </div>
       )}
+
+      {slideOverPersonaId && (
+        <PersonaSlideOver
+          personaId={slideOverPersonaId}
+          onClose={() => setSlideOverPersonaId(null)}
+        />
+      )}
+
+      {/* WorkerSettingsPanel — opens when gear is clicked on a WorkerCard */}
+      {settingsRole && project && (() => {
+        const agent = (project.agents ?? []).find((a) => a.role === settingsRole);
+        if (!agent) return null;
+        return (
+          <WorkerSettingsPanel
+            agent={agent}
+            allRoles={(project.agents ?? []).map((a) => a.role)}
+            projectRbacScopes={(project.rbac ?? {})[settingsRole]?.allowed_scopes ?? []}
+            onClose={() => setSettingsRole(null)}
+            onChange={(partial) => updateAgent(settingsRole, partial)}
+            onSave={async (partial) => {
+              if (!id) return;
+              // Background save with the latest project state
+              const latest = {
+                ...project,
+                agents: (project.agents ?? []).map((a) =>
+                  a.role === settingsRole ? { ...a, ...partial } : a,
+                ),
+              };
+              await projectsApi.update(id, latest);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

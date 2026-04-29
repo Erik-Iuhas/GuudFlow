@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError, metaApi, projectsApi } from "../api";
 import { CostStrip } from "../components/CostStrip";
+import { WorkerCard } from "../components/WorkerCard";
 import type {
   MetaProposal,
+  ModelTier,
   PersonaHire,
   ProjectConfig,
   RoleDelta,
@@ -43,6 +45,7 @@ export function Propose() {
   const initialPriorRunId = searchParams.get("prior_run_id") ?? "";
 
   const [goal, setGoal] = useState("");
+  const [metaModel, setMetaModel] = useState<ModelTier>("heavy");
   const [proposal, setProposal] = useState<MetaProposal | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -55,9 +58,10 @@ export function Propose() {
     setError(null);
     setLoading(true);
     try {
-      const opts: { projectId?: string; priorRunId?: string } = {};
+      const opts: { projectId?: string; priorRunId?: string; metaModel?: ModelTier } = {};
       if (initialProjectId) opts.projectId = initialProjectId;
       if (initialPriorRunId) opts.priorRunId = initialPriorRunId;
+      opts.metaModel = metaModel;
       const p = await metaApi.propose(goal, opts);
       setProposal(p);
       // Suggest a project id from the goal slug ONLY when this is a
@@ -111,6 +115,18 @@ export function Propose() {
       {error && <div className="error">{error}</div>}
 
       <div className="card">
+        <div style={{ marginBottom: 12 }}>
+          <label className="small">Meta-agent model</label>
+          <select
+            value={metaModel}
+            onChange={(e) => setMetaModel(e.target.value as ModelTier)}
+            style={{ width: "auto", marginLeft: 8 }}
+          >
+            <option value="heavy">Heavy (default)</option>
+            <option value="solid">Solid</option>
+            <option value="fast">Fast</option>
+          </select>
+        </div>
         <label>{isContinuation ? "What's the new ask?" : "Project goal"}</label>
         <textarea
           rows={3}
@@ -163,46 +179,13 @@ export function Propose() {
 
           <hr />
           <div className="grid-2">
-            {proposal.agents.map((a) => {
-              const hire = hires.find((h) => h.role === a.role);
-              return (
-                <div key={a.role} className="card agent-card">
-                  <div className="role">{a.role}</div>
-                  <div className="muted small">{a.description}</div>
-                  <div className="tier-row">
-                    <span className={`tag ${a.model_tier ?? "solid"}`}>
-                      {a.model_tier ?? "solid"}
-                    </span>
-                    {a.is_reviewer && <span className="tag">reviewer</span>}
-                    {a.is_final_reviewer && (
-                      <span className="tag">final reviewer</span>
-                    )}
-                  </div>
-                  {hire && (
-                    <div className="hire-row">
-                      <span
-                        className={`tag tag-hire-${hire.action}`}
-                      >
-                        {hire.action === "create_new" ? "new" : "re-hire"}
-                      </span>
-                      <strong>{hire.display_name}</strong>
-                      <span className="mono small muted">
-                        {hire.persona_id}
-                      </span>
-                    </div>
-                  )}
-                  <div className="muted small">
-                    tools:{" "}
-                    {(a.declared_local_tools ?? []).join(", ") || "(none)"}
-                  </div>
-                  {a.depends_on && a.depends_on.length > 0 && (
-                    <div className="muted small">
-                      depends on: {a.depends_on.join(", ")}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {proposal.agents.map((a) => (
+              <WorkerCard
+                key={a.role}
+                agent={a}
+                mode="preview"
+              />
+            ))}
           </div>
 
           <hr />

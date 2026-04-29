@@ -6,14 +6,18 @@ workspace, a shared git repo, structured inter-agent communication, and a
 sandboxed code-execution surface.
 
 **Status: phases A, B, C, D-prime, D, F, G-prime, G, K and milestones
-M0–M3 shipped — backend tests + studio typecheck/build green.**
+M0–M4 shipped — backend tests + studio typecheck/build green.**
+M4 (Studio UI Pass 1): `/api/tools`, `/api/dashboard`, `meta_model` on
+propose, `WorkerCard` (all 4 modes), `ToolsMultiSelect` (RBAC-aware),
+`WorkerSettingsPanel`, `Dashboard` view (5s poll), `RunWsContext` +
+`useDesks` + `ActiveTaskChip`, `PersonaSlideOver`; `AgentCard` deleted.
 Phases E (production deploy + multi-tenant), I (headless service), F.5
 (persona author depth), J (knowledge surface) registered as future
 work; see [ROADMAP.md](ROADMAP.md). User stories driving priorities are
 in [docs/USER_STORIES.md](docs/USER_STORIES.md).
 
 **Architecture diagrams** — Mermaid UML, sequence, state, deployment,
-and prompt-stack diagrams reflecting the current (post-M3) shape of the
+and prompt-stack diagrams reflecting the current (post-M4) shape of the
 codebase live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Read
 that before `DESIGN.md` if you want the live picture; read `DESIGN.md`
 for original intent + rationale.

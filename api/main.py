@@ -43,7 +43,9 @@ from api.routes import meta as meta_router
 from api.routes import personas as personas_router
 from api.routes import projects as projects_router
 from api.routes import runs as runs_router
+from api.routes import dashboard as dashboard_router
 from api.routes import models as models_router
+from api.routes import tools as tools_router
 from api.routes import training as training_router
 from api.storage import PersonaStore, ProjectStore, RunStore
 from api.websocket import QuipRegistry, RunRegistry, router as ws_router
@@ -134,7 +136,9 @@ def create_app() -> FastAPI:
     app.include_router(personas_router.router)
     app.include_router(meta_router.router)
     app.include_router(invoke_router.router)
+    app.include_router(dashboard_router.router)
     app.include_router(models_router.router)
+    app.include_router(tools_router.router)
     app.include_router(training_router.router)
     app.include_router(ws_router)
 

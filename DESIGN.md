@@ -5713,3 +5713,41 @@ F.3.2).
 - Build progress and stage notes — `.claude/progress/`.
 - Hard rules and operating constraints — `CLAUDE.md`.
 
+### 38.12 M3.5 — Task desks + planner pickup
+
+Tasks live on `Workspace.tasks: dict[str, Task]` and per-role
+`task_queues: dict[str, list[str]]`. The `Task` dataclass tracks goal,
+acceptance criteria, references (`TaskRef`), status
+(`PENDING/IN_PROGRESS/COMPLETE/CANCELLED`), and the commit sha that
+closed it. `_handle_task_closures` scans every new COMMIT signal for a
+`closes: <task_id>` field and marks the task COMPLETE. After any
+completion, `_maybe_auto_start_task` promotes the next PENDING task on
+that role's desk to IN_PROGRESS. `_handle_user_comment_routing` detects
+planner-mentions in USER_COMMENT signals and routes them to the planner's
+desk. `GET /api/runs/{id}/desks` exposes the live (or persisted) desk
+state; `serialise_task` in `worker/job_runner.py` is the canonical
+Task→dict mapping used by both the API route and the persistence layer.
+
+### 38.13 M4 — Studio UI Pass 1
+
+Eight independent, individually-testable chunks:
+
+1. `GET /api/tools` — tool catalog with `baseline` flag and
+   `granted_by_archetypes` list; `LOCAL_TOOL_CLASSES` constant in
+   `core/runner.py` is the single source of truth.
+2. `GET /api/dashboard` + `meta_model` on propose — aggregator route +
+   tier override for the meta-agent LLM.
+3. `WorkerCard` (config + preview modes) replaces `AgentCard`.
+4. `ToolsMultiSelect` — RBAC-aware multi-select; tool enabled iff
+   baseline ∨ archetype ∨ project RBAC grants it.
+5. `WorkerSettingsPanel` — slide-over with optimistic save + revert.
+6. `Dashboard` view — new `/` route; 5s poll, visibility-aware.
+7. `RunWsContext` + `useDesks` + `ActiveTaskChip` + `WorkerCard live` —
+   live task chip derived from desks; WS pub/sub context avoids a second
+   WS connection; falls back to 5s poll outside `RunWsProvider`.
+8. `PersonaSlideOver` + `WorkerCard roster` mode + `AgentCard` deleted +
+   doc sync.
+
+The `AgentCard` component no longer exists. All card rendering uses
+`WorkerCard` with the appropriate mode.
+

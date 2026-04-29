@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { GlobalErrorHandler, ToastProvider } from "./components/Toaster";
+import { Dashboard } from "./views/Dashboard";
 import { Projects } from "./views/Projects";
 import { Propose } from "./views/Propose";
 import { Roster } from "./views/Roster";
@@ -38,6 +39,9 @@ function AppShell({
       <header className="topbar">
         <Link to="/" className="brand">AgentFlow</Link>
         <nav className="nav">
+          <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
+            Dashboard
+          </NavLink>
           <NavLink to="/projects" className={({ isActive }) => (isActive ? "active" : "")}>
             Projects
           </NavLink>
@@ -61,7 +65,7 @@ function AppShell({
       </header>
       <main className="main">
         <Routes>
-          <Route path="/" element={<Projects />} />
+          <Route path="/" element={<Dashboard />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:id" element={<Studio />} />
           <Route path="/propose" element={<Propose />} />

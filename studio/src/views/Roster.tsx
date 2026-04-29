@@ -3,7 +3,9 @@ import { Link, useParams } from "react-router-dom";
 import { agentsApi, ApiError, personasApi } from "../api";
 import type { CatalogStatus } from "../api";
 import { PersonaChatBox } from "../components/PersonaChatBox";
+import { PersonaSlideOver } from "../components/PersonaSlideOver";
 import { RankingsPanel } from "../components/RankingsPanel";
+import { WorkerCard } from "../components/WorkerCard";
 import type { PersonaSummary } from "../types";
 
 type RosterTab = "all" | "rankings";
@@ -19,6 +21,7 @@ export function Roster() {
     patterns: unknown[];
     anti_patterns: unknown[];
   } | null>(null);
+  const [slideOverPersonaId, setSlideOverPersonaId] = useState<string | null>(null);
 
   useEffect(() => {
     void loadList();
@@ -91,33 +94,15 @@ export function Roster() {
               <RosterEmptyState catalog={catalog} />
             ) : (
               personas.map((p) => (
-                <Link
-                  to={`/roster/${p.persona_id}`}
+                <WorkerCard
                   key={p.persona_id}
-                  style={{ display: "block", textDecoration: "none", color: "inherit" }}
-                >
-                  <div
-                    className={`card persona-card ${id === p.persona_id ? "selected" : ""}`}
-                    style={{
-                      borderColor: id === p.persona_id ? "#2563eb" : undefined,
-                    }}
-                  >
-                    <div className="name">{p.name}</div>
-                    <div className="specialty">{p.specialty}</div>
-                    <div className="reputation">
-                      {p.n_episodes} episodes ·{" "}
-                      {p.reputation?.production?.total_runs ?? 0} production runs
-                      {p.reputation?.training?.graduation_status === "graduated" && (
-                        <span
-                          className="tag tag-graduated"
-                          style={{ marginLeft: 8 }}
-                        >
-                          graduated
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </Link>
+                  agent={{
+                    role: p.specialty || p.name,
+                    persona_id: p.persona_id,
+                  }}
+                  mode="roster"
+                  onOpenPersona={(pid) => setSlideOverPersonaId(pid)}
+                />
               ))
             )}
           </div>
@@ -135,6 +120,13 @@ export function Roster() {
             )}
           </div>
         </div>
+      )}
+
+      {slideOverPersonaId && (
+        <PersonaSlideOver
+          personaId={slideOverPersonaId}
+          onClose={() => setSlideOverPersonaId(null)}
+        />
       )}
     </div>
   );

@@ -59,6 +59,7 @@ export interface PersonaSummary {
   name: string;
   specialty: string;
   character?: string;
+  goal?: string;
   n_episodes: number;
   reputation: {
     production?: { total_runs?: number; reviewer_first_pass_rate?: number };
@@ -66,6 +67,7 @@ export interface PersonaSummary {
     total_episodes?: number;
     active_patterns?: number;
   };
+  style_tendencies?: Record<string, number>;
 }
 
 export interface InvokeResponse {
@@ -172,4 +174,34 @@ export interface InputsState {
 export interface SecretFinding {
   path: string;
   reason: string;
+}
+
+// ── Task desks (M3.5 §38.12) ───────────────────────────────────────────────
+
+export interface TaskRef {
+  kind: string;
+  value: string;
+  note: string | null;
+}
+
+export interface Task {
+  task_id: string;
+  story_id: string;
+  parent_task_id: string | null;
+  assigned_to: string;
+  created_by: string;
+  created_at_iter: number;
+  goal: string;
+  acceptance_criteria: string[];
+  out_of_scope: string[];
+  references: TaskRef[];
+  status: "PENDING" | "IN_PROGRESS" | "COMPLETE" | "CANCELLED";
+  started_at_iter: number | null;
+  completed_at_iter: number | null;
+  closed_by_commit: string | null;
+}
+
+export interface DesksData {
+  desks: Record<string, Task[]>;
+  tasksById: Record<string, Task>;
 }

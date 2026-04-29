@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
@@ -17,6 +17,10 @@ import { PipelineGraph } from "../components/PipelineGraph";
 import { QuipFeed } from "../components/QuipFeed";
 import { ScreenshotPane } from "../components/ScreenshotPane";
 import { TagsPanel } from "../components/TagsPanel";
+import { PersonaSlideOver } from "../components/PersonaSlideOver";
+import { WorkerCard } from "../components/WorkerCard";
+import { RunWsProvider } from "../contexts/RunWsContext";
+import type { RunWsSubscriber } from "../contexts/RunWsContext";
 import { summariseAgents } from "../lib/iterations";
 import type { ProjectConfig, RunMeta, Signal } from "../types";
 
@@ -61,6 +65,8 @@ export function Run() {
   const [feedback, setFeedback] = useState("");
   const [continueBusy, setContinueBusy] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const signalHandlersRef = useRef<Set<(s: Signal) => void>>(new Set());
+  const [slideOverPersonaId, setSlideOverPersonaId] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
   const [boardTab, setBoardTab] = useState<"signals" | "files">("signals");
   const navigate = useNavigate();
@@ -90,7 +96,9 @@ export function Run() {
           setSignals(msg.signals);
           setConnected(true);
         } else if (msg.type === "signal" && msg.signal) {
-          setSignals((prev) => [...prev, msg.signal as Signal]);
+          const sig = msg.signal as Signal;
+          setSignals((prev) => [...prev, sig]);
+          signalHandlersRef.current.forEach((h) => h(sig));
         } else if (msg.type === "error") {
           setError("run not found or finished");
         }
@@ -149,7 +157,9 @@ export function Run() {
             setSignals(msg.signals);
             setConnected(true);
           } else if (msg.type === "signal" && msg.signal) {
-            setSignals((prev) => [...prev, msg.signal as Signal]);
+            const sig = msg.signal as Signal;
+            setSignals((prev) => [...prev, sig]);
+            signalHandlersRef.current.forEach((h) => h(sig));
           }
         },
         () => setConnected(false),
@@ -195,9 +205,17 @@ export function Run() {
     }
   }
 
+  const wsSubscriber = useMemo<RunWsSubscriber>(() => ({
+    subscribe: (handler) => {
+      signalHandlersRef.current.add(handler);
+      return () => signalHandlersRef.current.delete(handler);
+    },
+  }), []);
+
   if (!runId) return null;
 
   return (
+    <RunWsProvider value={wsSubscriber}>
     <div className="page" style={{ maxWidth: "100%" }}>
       <div className="run-layout">
         <div className="run-header">
@@ -320,13 +338,25 @@ export function Run() {
                   (project.agents ?? []).map((a) => a.role),
                   signals,
                 ).values(),
-              ).map((s) => (
-                <AgentStateCard
-                  key={s.role}
-                  summary={s}
-                  allSignals={signals}
-                />
-              ))}
+              ).map((s) => {
+                const agentCfg = (project.agents ?? []).find((a) => a.role === s.role);
+                return (
+                  <div key={s.role}>
+                    <AgentStateCard
+                      summary={s}
+                      allSignals={signals}
+                    />
+                    {agentCfg && (
+                      <WorkerCard
+                        agent={agentCfg}
+                        mode="live"
+                        runId={runId}
+                        onOpenPersona={(pid) => setSlideOverPersonaId(pid)}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
           <QuipFeed runId={runId} />
@@ -380,6 +410,14 @@ export function Run() {
           </div>
         </div>
       )}
+
+      {slideOverPersonaId && (
+        <PersonaSlideOver
+          personaId={slideOverPersonaId}
+          onClose={() => setSlideOverPersonaId(null)}
+        />
+      )}
     </div>
+    </RunWsProvider>
   );
 }

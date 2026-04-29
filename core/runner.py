@@ -36,6 +36,11 @@ from typing import Any, Awaitable, Callable
 from agents.base import BaseAgent, ToolNotAvailable
 from agents.tools.base import BaseTool
 from agents.tools.board import AssignTask, BoardMessage
+from agents.tools.code import CodeExec, CodeOutline
+from agents.tools.data import DataCsv, DataJson, DataXml, DataYaml
+from agents.tools.desk_push import DeskPushTool
+from agents.tools.desk_search import DeskSearchTool
+from agents.tools.doc import DocHtml, DocMarkdown
 from agents.tools.fs import (
     FsCreate,
     FsDelete,
@@ -49,6 +54,10 @@ from agents.tools.fs import (
     FsWrite,
 )
 from agents.tools.git import GitChangedFiles, GitDiff, GitLog, GitRead, GitStatus
+from agents.tools.math_tool import MathEval
+from agents.tools.text import TextDiff, TextEstimateTokens
+from agents.tools.time_tool import TimeDiff, TimeNow
+from agents.tools.web import WebFetch, WebSearch
 from core import protocol
 from core.context_manager import ContextManager
 from core.credentials_broker import CredentialsBroker
@@ -279,6 +288,24 @@ def _extract_field(detail: str | None, key: str) -> str | None:
     return None
 
 
+# All built-in tool classes registered in _build_local_registry.
+# Used by /api/tools to enumerate the catalog without constructing a runner.
+LOCAL_TOOL_CLASSES: tuple[type[BaseTool], ...] = (
+    FsRead, FsList, FsExists, FsReadRange, FsGrep,
+    FsCreate, FsWrite, FsEdit, FsDelete, FsRename,
+    GitDiff, GitChangedFiles, GitLog, GitRead, GitStatus,
+    BoardMessage, AssignTask,
+    CodeExec, CodeOutline,
+    DataCsv, DataJson, DataXml, DataYaml,
+    DocHtml, DocMarkdown,
+    MathEval,
+    TextDiff, TextEstimateTokens,
+    TimeDiff, TimeNow,
+    WebFetch, WebSearch,
+    DeskSearchTool, DeskPushTool,
+)
+
+
 class AgentRunner:
     """One run. Owns the workspace, scheduler, agents, broker, LLM."""
 
@@ -443,37 +470,7 @@ class AgentRunner:
 
         The catalog drives manifest filtering. Actual instances are created
         per-agent in `_instantiate_local_tools`."""
-        for cls in (
-            FsRead, FsList, FsExists, FsReadRange, FsGrep,
-            FsCreate, FsWrite, FsEdit, FsDelete, FsRename,
-            GitDiff, GitChangedFiles, GitLog, GitRead, GitStatus,
-            BoardMessage, AssignTask,
-        ):
-            self._local_registry[cls.name] = LocalToolEntry(
-                name=cls.name,
-                description=cls.description,
-                input_schema=getattr(cls, "input_schema", {}) or {},
-            )
-        # Tools imported lazily to avoid circular deps:
-        from agents.tools.code import CodeExec, CodeOutline
-        from agents.tools.data import DataCsv, DataJson, DataXml, DataYaml
-        from agents.tools.doc import DocHtml, DocMarkdown
-        from agents.tools.math_tool import MathEval
-        from agents.tools.text import TextDiff, TextEstimateTokens
-        from agents.tools.time_tool import TimeDiff, TimeNow
-        from agents.tools.web import WebFetch, WebSearch
-        from agents.tools.desk_search import DeskSearchTool
-        from agents.tools.desk_push import DeskPushTool
-        for cls in (
-            CodeExec, CodeOutline,
-            DataCsv, DataJson, DataXml, DataYaml,
-            DocHtml, DocMarkdown,
-            MathEval,
-            TextDiff, TextEstimateTokens,
-            TimeDiff, TimeNow,
-            WebFetch, WebSearch,
-            DeskSearchTool, DeskPushTool,
-        ):
+        for cls in LOCAL_TOOL_CLASSES:
             self._local_registry[cls.name] = LocalToolEntry(
                 name=cls.name,
                 description=cls.description,

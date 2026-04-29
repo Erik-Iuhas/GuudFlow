@@ -52,6 +52,10 @@ class QuipEngine:
 
     def __init__(self, llm: LLMClient, log_path: Path | str):
         self.llm = llm
+        print(
+            f"[QUIP_DEBUG] __init__ llm={type(llm).__name__} id={id(llm)} log_path={log_path}",
+            flush=True,
+        )
         self.log_path = Path(log_path)
         self._voices: list[AgentVoice] = []
         self._quips: list[Quip] = []
@@ -269,6 +273,10 @@ class QuipEngine:
             "no quotation marks, no preamble. Speak as yourself."
         )
         try:
+            print(
+                f"[QUIP_DEBUG] _generate self.llm={type(self.llm).__name__} id={id(self.llm)} engine_id={id(self)}",
+                flush=True,
+            )
             response = await self.llm.complete(
                 system=system,
                 messages=[LLMMessage(role="user", content=context)],
@@ -278,7 +286,9 @@ class QuipEngine:
             )
             text = response.text.strip() or "(no comment)"
         except Exception as e:
+            import traceback as _tb
             text = f"(quip failed: {e})"
+            print(f"[QUIP_DEBUG] generate failed: {e}\n{_tb.format_exc()}", flush=True)
         return Quip(
             ts=datetime.now(timezone.utc).isoformat(),
             persona=voice.name,
