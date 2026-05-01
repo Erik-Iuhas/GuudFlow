@@ -267,12 +267,13 @@ class QuipEngine:
                 return persona_id
         return role
 
-    def _roster_block(self, workspace: Workspace | None = None) -> str:
+    def _roster_block(self, workspace: Workspace | None = None, exclude_role: str | None = None) -> str:
         """Build a 'Your coworkers on this run' block from known voices."""
         ws = workspace or self._workspace
-        if not self._voices:
+        voices = [v for v in self._voices if v.role != exclude_role]
+        if not voices:
             return ""
-        entries = [f"{v.name} ({v.role})" for v in self._voices]
+        entries = [f"{v.name} ({v.role})" for v in voices]
         return "Your coworkers on this run: " + ", ".join(entries) + ". Use their names, not their roles."
 
     def _random_voice(self) -> AgentVoice:
@@ -292,12 +293,13 @@ class QuipEngine:
         self, voice: AgentVoice, context: str, event: str,
         workspace: Workspace | None = None,
     ) -> Quip:
-        roster = self._roster_block(workspace)
+        roster = self._roster_block(workspace, exclude_role=voice.role)
         system = (
-            f"{voice.character}\n\n"
+            f"Your name is {voice.name}. {voice.character}\n\n"
             + (f"{roster}\n\n" if roster else "")
             + "React to what just happened in ONE punchy sentence — in character, "
-            "no quotation marks, no preamble. Speak as yourself."
+            "no quotation marks, no preamble. Always write in first person using 'I' — "
+            "never refer to yourself by name."
         )
         try:
             print(
