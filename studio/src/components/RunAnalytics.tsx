@@ -80,7 +80,7 @@ function RoleTotals({ rows }: { rows: IterationMetrics[] }) {
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
       <thead>
         <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-          <th style={TH}>role</th>
+          <th style={TH_LEFT}>role</th>
           <th style={TH}>iters</th>
           <th style={TH}>input</th>
           <th style={TH}>output</th>
@@ -92,11 +92,11 @@ function RoleTotals({ rows }: { rows: IterationMetrics[] }) {
           const t = byRole[role];
           return (
             <tr key={role} style={{ borderBottom: "1px solid #f1f5f9" }}>
-              <td style={TD}><code style={{ fontSize: 11 }}>{role}</code></td>
-              <td style={{ ...TD, textAlign: "right" }}>{t.iters}</td>
-              <td style={{ ...TD, textAlign: "right" }}>{t.input.toLocaleString()}</td>
-              <td style={{ ...TD, textAlign: "right" }}>{t.output.toLocaleString()}</td>
-              <td style={{ ...TD, textAlign: "right" }}>{t.cache.toLocaleString()}</td>
+              <td style={TD_LEFT}><code style={{ fontSize: 11 }}>{role}</code></td>
+              <td style={TD}>{t.iters}</td>
+              <td style={TD}>{t.input.toLocaleString()}</td>
+              <td style={TD}>{t.output.toLocaleString()}</td>
+              <td style={TD}>{t.cache.toLocaleString()}</td>
             </tr>
           );
         })}
@@ -108,20 +108,26 @@ function RoleTotals({ rows }: { rows: IterationMetrics[] }) {
 // ── Styles ─────────────────────────────────────────────────────────────────
 
 const TH: React.CSSProperties = {
-  padding: "6px 10px",
-  textAlign: "left",
+  padding: "6px 12px",
+  textAlign: "center",
   fontWeight: 600,
   fontSize: 11,
   color: "#64748b",
   textTransform: "uppercase",
   letterSpacing: "0.03em",
+  whiteSpace: "nowrap",
 };
 
+const TH_LEFT: React.CSSProperties = { ...TH, textAlign: "left" };
+
 const TD: React.CSSProperties = {
-  padding: "5px 10px",
+  padding: "5px 12px",
   fontSize: 12,
   color: "#334155",
+  textAlign: "center",
 };
+
+const TD_LEFT: React.CSSProperties = { ...TD, textAlign: "left" };
 
 // ── Main component ─────────────────────────────────────────────────────────
 
@@ -176,29 +182,29 @@ export function RunAnalytics({ runId, isActive }: Props) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                  <th style={TH}>role</th>
+                  <th style={TH_LEFT}>role</th>
                   <th style={TH}>iter</th>
                   <th style={TH}>model</th>
                   <th style={TH}>input</th>
                   <th style={TH}>output</th>
                   <th style={TH}>cache_read</th>
                   <th style={TH}>elapsed (s)</th>
-                  <th style={TH}>tools</th>
+                  <th style={TH_LEFT}>tools</th>
                   <th style={TH}>no_op</th>
                 </tr>
               </thead>
               <tbody>
                 {sorted.map((r, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid #f1f5f9", background: r.failed ? "#fff1f2" : undefined }}>
-                    <td style={TD}><code style={{ fontSize: 11 }}>{r.role}</code></td>
-                    <td style={{ ...TD, textAlign: "right" }}>{r.iteration}</td>
+                    <td style={TD_LEFT}><code style={{ fontSize: 11 }}>{r.role}</code></td>
+                    <td style={TD}>{r.iteration}</td>
                     <td style={{ ...TD, fontSize: 11, color: "#64748b" }}>{r.model.split("-").slice(-2).join("-")}</td>
-                    <td style={{ ...TD, textAlign: "right" }}>{r.input_tokens.toLocaleString()}</td>
-                    <td style={{ ...TD, textAlign: "right" }}>{r.output_tokens.toLocaleString()}</td>
-                    <td style={{ ...TD, textAlign: "right" }}>{r.cache_read_tokens.toLocaleString()}</td>
-                    <td style={{ ...TD, textAlign: "right" }}>{r.elapsed_seconds.toFixed(1)}</td>
-                    <td style={{ ...TD, fontSize: 11, color: "#64748b" }}>{r.tools_called.slice(-4).join(", ")}</td>
-                    <td style={{ ...TD, textAlign: "center" }}>{r.no_op ? "✓" : ""}</td>
+                    <td style={TD}>{r.input_tokens.toLocaleString()}</td>
+                    <td style={TD}>{r.output_tokens.toLocaleString()}</td>
+                    <td style={TD}>{r.cache_read_tokens.toLocaleString()}</td>
+                    <td style={TD}>{r.elapsed_seconds.toFixed(1)}</td>
+                    <td style={{ ...TD_LEFT, fontSize: 11, color: "#64748b" }}>{r.tools_called.slice(-4).join(", ")}</td>
+                    <td style={TD}>{r.no_op ? "✓" : ""}</td>
                   </tr>
                 ))}
               </tbody>
