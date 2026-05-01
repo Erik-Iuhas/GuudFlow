@@ -92,6 +92,7 @@ from core.workspace import (
     ApprovalRequest,
     Artifact,
     CommitRecord,
+    IterationMetrics,
     Task,
     Workspace,
 )
@@ -1439,6 +1440,14 @@ class AgentRunner:
                 )
                 return
 
+            # Track 1: initialise per-iteration metrics before the run.
+            agent._current_metrics = IterationMetrics(
+                run_id=workspace.run_id,
+                role=cfg.role,
+                iteration=agent.iteration,
+                model=agent._model,
+                started_at=_time.time(),
+            )
             try:
                 drive_result = await self._drive_agent_run(agent, cfg)
             except Exception as e:
@@ -1448,7 +1457,17 @@ class AgentRunner:
                     summary=f"{cfg.role} crashed",
                     detail=str(e),
                 )
+                if agent._current_metrics is not None:
+                    agent._current_metrics.failed = True
                 raise
+            finally:
+                _m = agent._current_metrics
+                if _m is not None:
+                    _m.ended_at = _time.time()
+                    _m.elapsed_seconds = _m.ended_at - _m.started_at
+                    _m.completed = not _m.failed
+                    workspace.add_iteration_metrics(_m)
+                    agent._current_metrics = None
 
             # M1: handle REQUEST_SKIP before treating the block as work output.
             if (

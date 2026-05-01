@@ -39,11 +39,13 @@ from core.context_manager import AgentContext, ContextManager
 from core.credentials_broker import CredentialResult, CredentialsBroker
 from core.llm import LLMClient, LLMMessage, LLMResponse
 from core.protocol import FileChange, ProtocolMessage, VerifyResult
+from core.repo_map import _approx_tokens
 from core.signals import Signal, SignalType
 from core.tool_manifest import ToolDescriptor, ToolManifest
 from core.workspace import (
     AgentState,
     HumanRequest,
+    IterationMetrics,
     PackageRequest,
     PendingScreenshot,
     Workspace,
@@ -138,6 +140,9 @@ class BaseAgent:
 
     # Per-instance current iteration (set by runner per attempt).
     iteration: int = 0
+
+    # Track 1: set by the runner before each _drive_agent_run; cleared after.
+    _current_metrics: IterationMetrics | None = field(default=None, repr=False)
 
     # ── M2: manifesto + project rules loaders ─────────────────────────────
 
@@ -557,11 +562,18 @@ class BaseAgent:
                 f"{name!r} not in manifest for role {self.role!r}"
             )
 
+        m = self._current_metrics
+        if m is not None:
+            m.tools_called.append(name)
+
         if d.invocation == "local":
             tool = self._local_tools.get(name)
             if tool is None:
                 raise ToolError(f"local tool {name!r} declared but not instantiated")
-            return await tool.run(arguments)
+            try:
+                return await tool.run(arguments)
+            except Exception:
+                raise
 
         # Broker-routed.
         result = await self.request_credential(
@@ -655,7 +667,7 @@ class BaseAgent:
         system = await self.effective_system_prompt(teammate_brief=effective_brief)
         tools = self._tool_schemas_for_llm()
 
-        return await self._llm.complete(
+        resp = await self._llm.complete(
             system=system,
             messages=messages,
             tools=tools or None,
@@ -663,6 +675,17 @@ class BaseAgent:
             model=self._model,
             cache_system=True,
         )
+        m = self._current_metrics
+        if m is not None:
+            m.input_tokens += resp.input_tokens
+            m.output_tokens += resp.output_tokens
+            m.cache_read_tokens += resp.cache_read_tokens
+            m.cache_creation_tokens += resp.cache_creation_tokens
+            m.llm_calls += 1
+            if resp.model:
+                m.model = resp.model
+            m.final_message_tokens = _approx_tokens(resp.text)
+        return resp
 
     def _tool_schemas_for_llm(self) -> list[dict[str, Any]]:
         """Convert manifest descriptors into the Anthropic tool schema."""
