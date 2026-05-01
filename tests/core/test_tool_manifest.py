@@ -77,30 +77,34 @@ def test_manifest_iteration_and_names():
     assert len(m) == 2
 
 
-def test_manifest_render_for_prompt_groups_by_category():
+def test_manifest_render_for_prompt_lists_all_tools():
+    """Track 3d.4: rendering changed from category-grouped to priority-sorted.
+    The catalog must still include every tool regardless of category."""
     m = ToolManifest([
         ToolDescriptor("fs-read", "Read a file",
                        {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
-                       "local"),
+                       "local", priority=60),
         ToolDescriptor("fs-write", "Write a file",
                        {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
-                       "local"),
+                       "local", priority=105),
         ToolDescriptor("doc-pdf", "Extract text from PDF",
                        {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
-                       "local"),
+                       "local", priority=65),
         ToolDescriptor("mcp-github-get_pr", "Get a GitHub PR", {}, "broker",
-                       scope="mcp-github-read", server="github"),
+                       scope="mcp-github-read", server="github", priority=75),
     ])
     text = m.render_for_prompt()
-    assert "### fs" in text
-    assert "### doc" in text
-    assert "### mcp-github" in text
+    # Every tool name appears.
     assert "fs-read" in text
     assert "fs-write" in text
     assert "doc-pdf" in text
     assert "mcp-github-get_pr" in text
-    # Schema summary present for one of them
+    # Schema summary present for one of them.
     assert "path" in text
+    # Header announces the new ordering rule.
+    assert "lower number = reach first" in text
+    # Priority order: fs-read (60) < doc-pdf (65) < mcp-github (75) < fs-write (105).
+    assert text.index("fs-read") < text.index("doc-pdf") < text.index("mcp-github-get_pr") < text.index("fs-write")
 
 
 def test_manifest_render_empty_returns_empty():
