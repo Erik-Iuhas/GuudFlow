@@ -566,6 +566,9 @@ class AgentRunner:
                 name=cls.name,
                 description=cls.description,
                 input_schema=getattr(cls, "input_schema", {}) or {},
+                # Track 3d.4 — propagate manifest-driven guidance from the class.
+                priority=getattr(cls, "priority", 100),
+                when_to_use=getattr(cls, "when_to_use", ""),
             )
 
     def _build_desk_index(self, cfg: "AgentConfig") -> "Any":

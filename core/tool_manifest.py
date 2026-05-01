@@ -42,6 +42,9 @@ class ToolDescriptor:
     invocation: Invocation
     scope: str | None = None
     server: str | None = None  # set for MCP tools — convenience for the broker
+    # Track 3d.4 — manifest-driven guidance copied from the tool class.
+    priority: int = 100
+    when_to_use: str = ""
 
     def __post_init__(self) -> None:
         if self.invocation == "broker" and not self.scope:
@@ -78,33 +81,34 @@ class ToolManifest:
     def render_for_prompt(self) -> str:
         """Compact catalog for injection into Layer 5 of effective_system_prompt.
 
-        Format is Markdown-ish: tool name, one-line description, arg shape.
-        Tools that share a category are grouped to keep the catalog scannable.
+        Track 3d.4 — tools are now sorted by `priority` (lower = reach first),
+        and each line carries an inline `when_to_use` hint when populated.
+        Replaces the previous category-grouped layout: priority order encodes
+        the funnel (read → reason → act) directly so the LLM doesn't have to
+        infer it from category names.
         """
         if not self.descriptors:
             return ""
 
-        # Group by category prefix ("fs-", "doc-", "mcp-github-" → "mcp-github").
-        groups: dict[str, list[ToolDescriptor]] = {}
-        for d in self.descriptors:
-            head, _, _ = d.name.partition("-")
-            if head == "mcp" and "-" in d.name[4:]:
-                # mcp-server-tool → group by "mcp-server"
-                _, server, _ = d.name.split("-", 2)
-                key = f"mcp-{server}"
-            else:
-                key = head or "tools"
-            groups.setdefault(key, []).append(d)
+        # Stable sort: priority asc, then name for determinism on ties.
+        ordered = sorted(self.descriptors, key=lambda d: (d.priority, d.name))
 
-        lines = ["AVAILABLE TOOLS:", ""]
-        for category in sorted(groups.keys()):
-            lines.append(f"### {category}")
-            for d in groups[category]:
-                lines.append(f"- `{d.name}` — {d.description}")
-                if d.input_schema:
-                    args = _summarise_schema(d.input_schema)
-                    if args:
-                        lines.append(f"    arguments: {args}")
+        lines = [
+            "AVAILABLE TOOLS (use in this order of preference — "
+            "lower number = reach first; prefer batch variants when applicable):",
+            "",
+        ]
+        for d in ordered:
+            tag = f"[{d.priority:>3}]"
+            if d.when_to_use:
+                lines.append(f"{tag} `{d.name}` — {d.when_to_use}")
+                lines.append(f"      {d.description}")
+            else:
+                lines.append(f"{tag} `{d.name}` — {d.description}")
+            if d.input_schema:
+                args = _summarise_schema(d.input_schema)
+                if args:
+                    lines.append(f"      arguments: {args}")
             lines.append("")
         return "\n".join(lines).rstrip()
 
@@ -225,6 +229,9 @@ class LocalToolEntry:
     name: str
     description: str
     input_schema: dict[str, Any] = field(default_factory=dict)
+    # Track 3d.4 — manifest-driven guidance.
+    priority: int = 100
+    when_to_use: str = ""
 
 
 class ToolManifestBuilder:
@@ -271,6 +278,8 @@ class ToolManifestBuilder:
                 input_schema=entry.input_schema,
                 invocation="local",
                 scope=scope,
+                priority=entry.priority,
+                when_to_use=entry.when_to_use,
             ))
 
         # 1b. Auto-include baseline tools not already added via declared_local_tools
@@ -287,6 +296,8 @@ class ToolManifestBuilder:
                 input_schema=entry.input_schema,
                 invocation="local",
                 scope=scope,
+                priority=entry.priority,
+                when_to_use=entry.when_to_use,
             ))
             already_names.add(entry.name)
 
@@ -310,6 +321,8 @@ class ToolManifestBuilder:
                 input_schema=child_entry.input_schema,
                 invocation="local",
                 scope=d.scope,  # share the parent's scope for RBAC accounting
+                priority=child_entry.priority,
+                when_to_use=child_entry.when_to_use,
             ))
             already_names.add(child_entry.name)
 
