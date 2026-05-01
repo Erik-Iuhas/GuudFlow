@@ -259,7 +259,10 @@ class ToolManifestBuilder:
             entry = self.local_registry.get(tool_name)
             if entry is None:
                 continue  # declared but not registered — skip silently
-            scope = tool_name  # local scope name == tool name
+            # Track 3e — batch tools piggyback on their parent's scope, so a
+            # role with `fs-edit` declared+granted gets `fs-edit-batch` for
+            # free without needing a separate RBAC entry.
+            scope = BATCH_PARENT_SCOPES.get(tool_name, tool_name)
             if not _scope_is_baseline(scope) and not role_rbac.grants(scope):
                 continue
             descriptors.append(ToolDescriptor(
@@ -271,12 +274,12 @@ class ToolManifestBuilder:
             ))
 
         # 1b. Auto-include baseline tools not already added via declared_local_tools
-        already = {d.scope for d in descriptors}
+        already_names = {d.name for d in descriptors}
         for scope in BASELINE_LOCAL_SCOPES:
-            if scope in already:
-                continue
             entry = self.local_registry.get(scope)
             if entry is None:
+                continue
+            if entry.name in already_names:
                 continue
             descriptors.append(ToolDescriptor(
                 name=entry.name,
@@ -285,6 +288,30 @@ class ToolManifestBuilder:
                 invocation="local",
                 scope=scope,
             ))
+            already_names.add(entry.name)
+
+        # 1c. Track 3e — auto-include batch variants when the parent is in the
+        # manifest. Means agents that have fs-edit/fs-write get the batch
+        # variants automatically without explicit declaration.
+        parent_to_child = {parent: child for child, parent in BATCH_PARENT_SCOPES.items()}
+        existing_scopes = {d.scope for d in descriptors}
+        for d in list(descriptors):  # snapshot — we mutate below
+            child_name = parent_to_child.get(d.scope)
+            if child_name is None:
+                continue
+            if child_name in already_names:
+                continue
+            child_entry = self.local_registry.get(child_name)
+            if child_entry is None:
+                continue
+            descriptors.append(ToolDescriptor(
+                name=child_entry.name,
+                description=child_entry.description,
+                input_schema=child_entry.input_schema,
+                invocation="local",
+                scope=d.scope,  # share the parent's scope for RBAC accounting
+            ))
+            already_names.add(child_entry.name)
 
         # 2. MCP tools
         for server in declared_mcp_servers:
@@ -318,6 +345,7 @@ BASELINE_LOCAL_SCOPES: frozenset[str] = frozenset({
     "board-message",
     "git-diff", "git-changed-files", "git-log", "git-read", "git-status",
     "code-outline",
+    "code-outline-batch",   # Track 3e — read-only, same as code-outline
     "doc-markdown", "doc-html",
     "web-fetch", "web-search",
     "text-diff", "text-estimate_tokens",
@@ -328,6 +356,15 @@ BASELINE_LOCAL_SCOPES: frozenset[str] = frozenset({
     # Any agent that writes docs may open or close a story.
     "story-open", "story-complete",
 })
+
+
+# Track 3e — write-class batch tools piggyback on their singular counterpart's
+# scope, so any role with `fs-edit` granted automatically gets `fs-edit-batch`
+# without project-config changes.
+BATCH_PARENT_SCOPES: dict[str, str] = {
+    "fs-edit-batch": "fs-edit",
+    "fs-write-batch": "fs-write",
+}
 
 
 def _scope_is_baseline(scope: str) -> bool:
