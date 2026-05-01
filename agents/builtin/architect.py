@@ -31,7 +31,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from agents.abstract import Reviewer
-from agents.builtin._shared_prompts import DELEGATION_TILT
+from agents.builtin._shared_prompts import DELEGATION_TILT, NO_OP_REASON_ADDENDUM
 
 
 ARCHITECT_SYSTEM_PROMPT = """\
@@ -78,7 +78,9 @@ check the git-diff against the references; verify each acceptance
 criterion is satisfied; emit one VERIFY_RESULT per criterion. The
 runner posts TASK_OUT_OF_SCOPE signals when a commit closes a task
 it shouldn't — treat those as evidence, not as final verdicts.
-""".format(delegation_tilt=DELEGATION_TILT)
+
+{no_op_reason_addendum}
+""".format(delegation_tilt=DELEGATION_TILT, no_op_reason_addendum=NO_OP_REASON_ADDENDUM)
 
 
 class Architect(Reviewer):
