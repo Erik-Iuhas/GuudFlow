@@ -105,11 +105,14 @@ def render_commit(
     checkpoints: Iterable[str],
     *,
     closes: Iterable[str] | None = None,
+    no_op_reason: str | None = None,
 ) -> str:
     """Render a COMMIT protocol message. `closes` (M3.5) is an optional
     list of `task:<id>` references; the runner reads it to bookkeep
-    desk completion. Existing callers without `closes` produce
-    byte-identical output."""
+    desk completion. `no_op_reason` (Track 2b) is populated when the
+    agent's branch was clean — conveys *why* no commits were needed so
+    downstream agents and reviewers don't treat silence as failure.
+    Existing callers without these kwargs produce byte-identical output."""
     lines = [f"COMMIT {agent} {commit_hash}"]
     lines.extend(_file_change_line(fc) for fc in files)
     lines.append("VERIFY: " + "|".join(checkpoints))
@@ -117,6 +120,8 @@ def render_commit(
         ids = [tid.strip() for tid in closes if tid and tid.strip()]
         if ids:
             lines.append("closes: " + " | ".join(ids))
+    if no_op_reason:
+        lines.append(f"no_op_reason: {no_op_reason.strip()}")
     return "\n".join(lines)
 
 
@@ -573,16 +578,21 @@ def _parse_commit(raw: str, lines: list[str]) -> ProtocolMessage:
     files: list[FileChange] = []
     checkpoints: list[str] = []
     closes: list[str] = []
+    no_op_reason: str | None = None
     for line in lines[1:]:
         if line.startswith("VERIFY:"):
             cks = line[len("VERIFY:"):].strip()
             checkpoints = [c.strip() for c in cks.split("|") if c.strip()]
             continue
-        # M3.5 — optional `closes: task:<id> | task:<id>` trailer.
         stripped = line.lstrip()
+        # M3.5 — optional `closes: task:<id> | task:<id>` trailer.
         if stripped.startswith("closes:"):
             payload = stripped[len("closes:"):].strip()
             closes = [tid.strip() for tid in payload.split("|") if tid.strip()]
+            continue
+        # Track 2b — optional no-op rationale.
+        if stripped.startswith("no_op_reason:"):
+            no_op_reason = stripped[len("no_op_reason:"):].strip()
             continue
         m = _FILE_LINE.match(line)
         if not m:
@@ -610,6 +620,8 @@ def _parse_commit(raw: str, lines: list[str]) -> ProtocolMessage:
     parsed: dict = {"files": files, "checkpoints": checkpoints}
     if closes:
         parsed["closes"] = closes
+    if no_op_reason:
+        parsed["no_op_reason"] = no_op_reason
     return ProtocolMessage(
         type="COMMIT",
         from_agent=agent,
