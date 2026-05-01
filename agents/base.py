@@ -164,6 +164,13 @@ class BaseAgent:
     # populate IterationMetrics.no_op. Reset to False before each run.
     _last_commit_was_noop: bool = field(default=False, repr=False)
 
+    # Track 1c: workspace handle set by the runner before each run() so
+    # effective_system_prompt() can inject Layer 4.5 (codebase structure
+    # from workspace.repo_map). None during construction and in tests
+    # that don't drive a runner — the layer is suppressed cleanly in that
+    # case. CLAUDE.md §28 mandates always-on repo_map injection.
+    _workspace: Any = field(default=None, repr=False)  # core.workspace.Workspace
+
     # ── M2: manifesto + project rules loaders ─────────────────────────────
 
     @staticmethod
@@ -830,9 +837,34 @@ class BaseAgent:
 
     # ── Effective system prompt (§20 + §31 + §36) ──────────────────────────
 
+    def _render_repo_map_layer(self, workspace: Any) -> str:
+        """Track 1c — render workspace.repo_map for prompt injection (CLAUDE.md §28).
+
+        Uses repo_map's render_compact (signatures-only, PageRank-ranked,
+        hard-capped at max_tokens). Returns "" on empty maps so the layer
+        suppresses cleanly when there's nothing to show (early iterations,
+        empty workspaces, tests).
+        """
+        if workspace is None:
+            return ""
+        rmap = getattr(workspace, "repo_map", None)
+        if rmap is None or not getattr(rmap, "entries", None):
+            return ""
+        from core.repo_map import render_compact
+        body = render_compact(rmap, max_tokens=1500)
+        if not body.strip():
+            return ""
+        return (
+            "CODEBASE STRUCTURE (always-on map of this run's working tree —\n"
+            "consult before fs-list / fs-grep / fs-read; paths are relative "
+            "to repo root):\n\n"
+            + body
+        )
+
     async def effective_system_prompt(
         self,
         teammate_brief: str = "",
+        workspace: Any = None,
     ) -> str:
         """Compose the layered system prompt per DESIGN §20 (updated).
 
@@ -845,9 +877,14 @@ class BaseAgent:
           3.7. project_rules (§36)
           3.8. project_context (Phase K.1) — roadmap.md
           4. memory (§26 / §34) — recalled, not full dump
+          4.5. repo_map (Track 1c, CLAUDE.md §28) — always-on codebase structure
           5. base prompt + tool catalog from manifest (§31)
           6. CoT primer
           7. positive framing
+
+        `workspace` defaults to `self._workspace` (set by the runner before
+        run()). Tests can pass it explicitly. None / empty repo_map suppresses
+        the 4.5 layer.
         """
         parts: list[str] = []
 
@@ -896,6 +933,13 @@ class BaseAgent:
             if m is not None:
                 m.recall_episodes_count = len(recall.episodes) if recall.episodes else 0
                 m.recall_patterns_count = len(recall.patterns) if recall.patterns else 0
+
+        # Layer 4.5 — repo_map (Track 1c). Always-on per CLAUDE.md §28.
+        # Falls back to self._workspace when the caller didn't pass one.
+        ws = workspace if workspace is not None else self._workspace
+        repo_map_text = self._render_repo_map_layer(ws)
+        if repo_map_text:
+            parts.append(repo_map_text)
 
         if self.system_prompt:
             parts.append(self.system_prompt)
