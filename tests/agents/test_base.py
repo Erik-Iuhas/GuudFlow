@@ -339,6 +339,116 @@ async def test_effective_system_prompt_skips_empty_layers():
     assert "PROJECT RULES" not in text
 
 
+# ── Track 1c — Layer 4.5: repo_map injection ──────────────────────────────
+
+
+def _ws_with_repo_map(entries: list[tuple[str, list[str]]]):
+    """Build a Workspace with a populated RepoMap from (path, symbols) tuples."""
+    from core.workspace import RepoMap, RepoMapEntry, Workspace
+
+    ws = Workspace(run_id="r-1c", goal="test repo_map layer")
+    ws.repo_map = RepoMap(
+        entries=[
+            RepoMapEntry(path=p, type="py", symbols=syms, rank=1.0)
+            for p, syms in entries
+        ]
+    )
+    return ws
+
+
+async def test_repo_map_layer_present_when_map_populated():
+    """A populated repo_map produces a CODEBASE STRUCTURE section listing paths."""
+    ws = _ws_with_repo_map([
+        ("src/auth.py", ["login", "logout"]),
+        ("src/db.py", ["connect"]),
+    ])
+    a = BaseAgent(role="developer", system_prompt="prompt")
+    text = await a.effective_system_prompt(workspace=ws)
+
+    assert "CODEBASE STRUCTURE" in text
+    assert "src/auth.py" in text
+    assert "src/db.py" in text
+
+
+async def test_repo_map_layer_absent_when_map_empty():
+    """Empty repo_map suppresses the layer cleanly."""
+    from core.workspace import RepoMap, Workspace
+
+    ws = Workspace(run_id="r-1c", goal="empty")
+    ws.repo_map = RepoMap(entries=[])
+    a = BaseAgent(role="developer", system_prompt="prompt")
+    text = await a.effective_system_prompt(workspace=ws)
+
+    assert "CODEBASE STRUCTURE" not in text
+
+
+async def test_repo_map_layer_absent_when_workspace_none():
+    """No workspace → no layer (existing behavior preserved)."""
+    a = BaseAgent(role="developer", system_prompt="prompt")
+    text = await a.effective_system_prompt()  # no workspace passed
+    assert "CODEBASE STRUCTURE" not in text
+
+
+async def test_repo_map_layer_uses_self_workspace_fallback():
+    """When workspace isn't passed, falls back to self._workspace
+    (set by the runner before run())."""
+    ws = _ws_with_repo_map([("src/main.py", ["main"])])
+    a = BaseAgent(role="developer", system_prompt="prompt")
+    a._workspace = ws
+
+    text = await a.effective_system_prompt()  # no explicit workspace
+    assert "CODEBASE STRUCTURE" in text
+    assert "src/main.py" in text
+
+
+async def test_repo_map_layer_respects_budget():
+    """Render is hard-capped at ~1500 tokens regardless of entry count."""
+    from core.repo_map import _approx_tokens
+
+    # Many entries with long symbol names — should still be bounded.
+    entries = [
+        (f"src/module_{i:03d}/file.py", [f"function_with_a_long_name_{j}" for j in range(8)])
+        for i in range(200)
+    ]
+    ws = _ws_with_repo_map(entries)
+    a = BaseAgent(role="developer", system_prompt="prompt")
+    text = await a.effective_system_prompt(workspace=ws)
+
+    # Find the section and measure just its body.
+    assert "CODEBASE STRUCTURE" in text
+    # Whole prompt may have other layers, but the rendered body inside this layer
+    # should not exceed render_compact's max_tokens=1500 by more than the small
+    # banner overhead (~30 tokens).
+    section_start = text.index("CODEBASE STRUCTURE")
+    # The next layer (system_prompt: "prompt") follows — find a unique marker.
+    # Safer measure: section length itself.
+    section_end = text.find("PROTOCOL VOICE", section_start)
+    assert section_end > section_start
+    section = text[section_start:section_end]
+    assert _approx_tokens(section) <= 1700  # 1500 budget + banner overhead
+
+
+async def test_repo_map_layer_position_after_memory_before_base_prompt():
+    """Layer 4.5 appears after memory recall and before the base prompt."""
+    from agents.persona import Persona
+
+    persona = Persona.empty("dev-v1", "Dev", "describe", character="c", stake_framing="s")
+    ws = _ws_with_repo_map([("src/x.py", ["foo"])])
+    a = BaseAgent(
+        role="developer",
+        system_prompt="MARKER_BASE_PROMPT",
+        persona=persona,
+    )
+    a._current_task = "do work"
+    a._workspace = ws
+
+    text = await a.effective_system_prompt()
+
+    idx_repomap = text.index("CODEBASE STRUCTURE")
+    idx_base = text.index("MARKER_BASE_PROMPT")
+    assert idx_repomap < idx_base, "repo_map layer must come before base prompt"
+
+
 # ── Recall ─────────────────────────────────────────────────────────────────
 
 
