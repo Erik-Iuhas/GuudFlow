@@ -4,7 +4,7 @@ Detailed plans for the GuudFlow multi-track roadmap. Parent strategy doc: `~/.cl
 
 Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance criteria and a commit plan. Treat the parent roadmap as "why," and these as "how."
 
-**Progress: 2 / 9 tracks shipped.** ✅ Track 1, ✅ Track 1b.
+**Progress: 3 / 10 tracks shipped.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c.
 
 ## Files
 
@@ -12,6 +12,7 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 |---|---|---|---|---|---|
 | `track_1_iteration_metrics.md` | 1 | Foundation | ✅ **Shipped** (with logging gap — fixed by 1b) | — | 200–300k |
 | `track_1b_logging_fix.md` | 1b | Logging truth-telling (Sprint 1.5) | ✅ **Shipped** | Track 1 | 80–150k |
+| `track_1c_wire_repomap.md` | 1c | Wire repo_map into prompt (Sprint 1.6) | ✅ **Shipped** | Track 1b | 80–150k |
 | `track_2a_orphan_question.md` | 2a | Bug fix | ⬜ Not started | — | 100–200k |
 | `track_2b_no_op_rationale.md` | 2b | Bug fix | ⬜ Not started | — (pairs with 2a) | 100–200k |
 | `track_3a_outline_funnel.md` | 3 (code-side) | Architecture | ⬜ Not started (partially adopted in personas) | Track 1 | 250–400k |
@@ -33,10 +34,13 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 ## Recommended order
 
 ```
-Sprint 1.5 (gates everything else):
-  Track 1b  ←── logging truth-telling. Two consecutive runs show context-token
-                fields stuck at 0. Without this, every Sprint 2 track ships
-                blind. Small (80–150k tokens) and standalone.
+Sprint 1.5 (gates measurement) — SHIPPED:
+  Track 1b  ✅ logging truth-telling. tool_token_breakdown +
+            direct_file_read_tokens now populate.
+
+Sprint 1.6 (gates token efficiency) — SHIPPED:
+  Track 1c  ✅ wire workspace.repo_map into effective_system_prompt as
+            Layer 4.5. CLAUDE.md §28 compliance restored.
 
 Sprint 2 (parallel-safe):
   Track 2a  ←── bug, highest user value
