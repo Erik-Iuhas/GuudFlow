@@ -144,6 +144,10 @@ class BaseAgent:
     # Track 1: set by the runner before each _drive_agent_run; cleared after.
     _current_metrics: IterationMetrics | None = field(default=None, repr=False)
 
+    # Track 2b: set by emit_no_op(); read by the runner's finalize block to
+    # populate IterationMetrics.no_op. Reset to False before each run.
+    _last_commit_was_noop: bool = field(default=False, repr=False)
+
     # ── M2: manifesto + project rules loaders ─────────────────────────────
 
     @staticmethod
@@ -222,6 +226,32 @@ class BaseAgent:
         if self.persona is None:
             return summary
         return f"{self.persona.profile.name}: {summary}"
+
+    async def emit_no_op(self, workspace: Workspace, reason: str) -> None:
+        """Post a no-op COMMIT protocol signal when no file changes were made.
+
+        Track 2b: agents that finish without commits MUST call this instead
+        of silently returning. The runner enforces this — a completion without
+        commits and without a posted no-op block is treated as a protocol
+        violation and triggers a synthetic FAIL.
+        """
+        from core import protocol as _proto
+        if not reason or not reason.strip():
+            raise ValueError("emit_no_op requires a non-empty reason")
+        self._last_commit_was_noop = True
+        raw = _proto.render_commit(
+            agent=self.role,
+            commit_hash="no-op",
+            files=[],
+            checkpoints=["no-op-verified"],
+            no_op_reason=reason.strip(),
+        )
+        await self.signal(
+            workspace,
+            SignalType.PROTOCOL,
+            summary=self._namespace("COMMIT (no-op)"),
+            detail=raw,
+        )
 
     # ── Hard pause: ask_human ──────────────────────────────────────────────
 

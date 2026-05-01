@@ -109,3 +109,55 @@ async def test_llm_no_op_when_no_metrics_set(agent: SimpleAgent):
     agent._current_metrics = None
     resp = await agent.llm([LLMMessage(role="user", content="x")])
     assert resp.model == "claude-sonnet-4-6"
+
+
+# ── Track 3d.2: IterationMetrics field existence ─────────────────────────────
+
+
+def test_direct_file_read_tokens_field_exists():
+    """IterationMetrics must have direct_file_read_tokens with default 0."""
+    m = IterationMetrics(run_id="r", role="dev", iteration=1)
+    assert hasattr(m, "direct_file_read_tokens")
+    assert m.direct_file_read_tokens == 0
+
+
+# ── Track 3d.2: ContextSnapshot aggregation ──────────────────────────────────
+
+
+def test_context_tokens_propagate_to_iteration_metrics():
+    """ContextSnapshot records written to workspace.context_log are summed into
+    IterationMetrics by the runner finalize block.
+
+    This test directly drives the aggregation loop (mirrors what runner does)
+    to verify the field assignments are correct and the sums are accurate.
+    """
+    from core.workspace import ContextSnapshot
+
+    ws = Workspace(run_id="r-ctx", goal="test context aggregation")
+
+    snap = ContextSnapshot(
+        run_id="r-ctx",
+        role="developer",
+        iteration=1,
+        task="write auth module",
+        used_tokens=800,
+        repo_map_tokens=200,
+        git_diff_tokens=150,
+        relevant_files=[("src/auth.py", 300), ("src/utils.py", 150)],
+    )
+    ws.record_context_snapshot(snap)
+
+    m = IterationMetrics(run_id="r-ctx", role="developer", iteration=1)
+
+    # Replicate the runner finalize aggregation loop (core/runner.py).
+    for s in ws.context_log:
+        if s.role == m.role and s.iteration == m.iteration:
+            m.repo_map_tokens += s.repo_map_tokens
+            m.git_diff_tokens += s.git_diff_tokens
+            m.relevant_files_tokens += sum(t for _, t in s.relevant_files)
+            m.context_tokens_total += s.used_tokens
+
+    assert m.context_tokens_total == 800
+    assert m.repo_map_tokens == 200
+    assert m.git_diff_tokens == 150
+    assert m.relevant_files_tokens == 450  # 300 + 150

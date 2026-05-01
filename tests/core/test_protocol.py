@@ -302,6 +302,56 @@ def test_extract_trailing_no_block_returns_none():
     assert extract_trailing(None) is None  # type: ignore[arg-type]
 
 
+# ── Track 2b: no_op_reason roundtrip tests ─────────────────────────────────
+
+
+def test_no_op_reason_roundtrip():
+    """render_commit with no_op_reason → parse → parsed["no_op_reason"] matches."""
+    from core.protocol import parse, render_commit
+    raw = render_commit(
+        agent="reviewer",
+        commit_hash="no-op",
+        files=[],
+        checkpoints=["no-op-verified"],
+        no_op_reason="all edge cases already tested; no schema drift",
+    )
+    assert "no_op_reason:" in raw
+    msg = parse(raw)
+    assert msg is not None
+    assert msg.type == "COMMIT"
+    assert msg.parsed.get("no_op_reason") == "all edge cases already tested; no schema drift"
+
+
+def test_no_op_reason_absent_when_not_provided():
+    """render_commit without no_op_reason → parse → key absent from parsed."""
+    from core.protocol import parse, render_commit
+    from core.protocol import FileChange
+    raw = render_commit(
+        agent="dev",
+        commit_hash="abc1234",
+        files=[FileChange(path="main.py", status="new")],
+        checkpoints=["tests pass"],
+    )
+    msg = parse(raw)
+    assert msg is not None
+    assert "no_op_reason" not in msg.parsed
+
+
+def test_no_op_reason_stripped_of_whitespace():
+    """Leading/trailing whitespace in the reason is stripped on round-trip."""
+    from core.protocol import parse, render_commit
+    raw = render_commit(
+        agent="reviewer",
+        commit_hash="no-op",
+        files=[],
+        checkpoints=["verified"],
+        no_op_reason="  branch already up-to-date  ",
+    )
+    msg = parse(raw)
+    assert msg is not None
+    assert msg.parsed.get("no_op_reason") == "branch already up-to-date"
+
+
 def test_extract_trailing_picks_last_block_only():
     """Earlier `[COMMIT]` mentions inside reasoning don't fool the parser —
     only the trailing block counts."""

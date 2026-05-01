@@ -1473,6 +1473,7 @@ class AgentRunner:
                 return
 
             # Track 1: initialise per-iteration metrics before the run.
+            agent._last_commit_was_noop = False  # reset from any prior run
             agent._current_metrics = IterationMetrics(
                 run_id=workspace.run_id,
                 role=cfg.role,
@@ -1498,6 +1499,19 @@ class AgentRunner:
                     _m.ended_at = _time.time()
                     _m.elapsed_seconds = _m.ended_at - _m.started_at
                     _m.completed = not _m.failed
+                    _m.no_op = agent._last_commit_was_noop  # Track 2b
+                    # Track 3d.2: aggregate ContextSnapshots recorded during
+                    # this iteration into the metrics row. Agents that skip
+                    # get_context() entirely will show 0 here; their file I/O
+                    # is captured separately in direct_file_read_tokens.
+                    for snap in workspace.context_log:
+                        if snap.role == cfg.role and snap.iteration == agent.iteration:
+                            _m.repo_map_tokens += snap.repo_map_tokens
+                            _m.git_diff_tokens += snap.git_diff_tokens
+                            _m.relevant_files_tokens += sum(
+                                t for _, t in snap.relevant_files
+                            )
+                            _m.context_tokens_total += snap.used_tokens
                     workspace.add_iteration_metrics(_m)
                     agent._current_metrics = None
                 # Log the full turn — messages + output — to agent_turns.jsonl.
@@ -1652,7 +1666,9 @@ class AgentRunner:
             # An agent that produces no commits must state (≥ 10 chars) why
             # in its CompactBlock summary, so downstream agents and reviewers
             # see structured context instead of a silent COMPLETE.
-            if commit_hash is None:
+            # Exemption: reviewers are never expected to commit — their output
+            # is a [VERIFY] block, not a [COMMIT] block.
+            if commit_hash is None and not cfg.is_reviewer:
                 rationale = ""
                 if (
                     isinstance(drive_result, protocol.CompactBlock)

@@ -293,6 +293,135 @@ async def test_max_iterations_cutoff_halts_cleanly():
     assert result.spawn_counts.get("A") == 3
 
 
+# ── 7. Orphan question respawn (Track 2a) ───────────────────────────────────
+
+
+async def test_orphan_question_respawn():
+    """When a subscriber resets a completed agent to READY (mimicking the
+    runner's question-respawn path), the scheduler re-spawns it once.
+
+    The test wires a local subscriber that simulates
+    runner._on_signal_for_question_respawn: on AGENT_MESSAGE targeting a
+    completed role it removes that role from completed_agents, sets READY,
+    and wakes the scheduler. The scheduler must then re-spawn the role.
+    """
+    import json
+
+    ws = Workspace(run_id="r1", goal="x", max_iterations=5)
+    question_respawn_counts: dict[str, int] = {}
+    QUESTION_RESPAWN_CAP = 3
+    sched_ref: list[Scheduler] = []  # filled after scheduler is created
+
+    def _question_subscriber(sig: Signal) -> None:
+        if sig.type is not SignalType.AGENT_MESSAGE:
+            return
+        try:
+            parsed = json.loads(sig.detail or "")
+            target = parsed.get("to", "")
+        except (json.JSONDecodeError, AttributeError):
+            return
+        if not target or target not in ws.completed_agents:
+            return
+        count = question_respawn_counts.get(target, 0)
+        if count >= QUESTION_RESPAWN_CAP:
+            return
+        question_respawn_counts[target] = count + 1
+        ws.completed_agents.remove(target)
+        ws.agent_states[target] = AgentState.READY
+        if sched_ref:
+            sched_ref[0].notify()
+
+    ws.subscribe(_question_subscriber)
+
+    a_runs: list[str] = []
+
+    async def a_runner(workspace: Workspace) -> None:
+        a_runs.append("run")
+        workspace.completed_agents.append("A")
+        workspace.agent_states["A"] = AgentState.COMPLETE
+        workspace.post_signal(Signal(
+            type=SignalType.COMPLETE, summary="A done", from_agent="A",
+        ))
+
+    async def b_runner(workspace: Workspace) -> None:
+        workspace.post_signal(Signal(
+            type=SignalType.AGENT_MESSAGE,
+            summary="B → A: what is X?",
+            from_agent="B",
+            detail=json.dumps({"to": "A", "from": "B", "message": "what is X?"}),
+        ))
+        workspace.completed_agents.append("B")
+        workspace.agent_states["B"] = AgentState.COMPLETE
+        workspace.post_signal(Signal(
+            type=SignalType.COMPLETE, summary="B done", from_agent="B",
+        ))
+
+    a = AgentSpec(role="A", runner=a_runner, depends_on=[])
+    b = AgentSpec(role="B", runner=b_runner, depends_on=["A"])
+
+    sched = Scheduler([a, b], ws, max_iterations=5)
+    sched_ref.append(sched)
+
+    result = await sched.run()
+
+    assert result.status is SchedulerStatus.COMPLETE
+    assert len(a_runs) == 2, f"A should run twice (original + answer) but ran {len(a_runs)} times"
+    assert question_respawn_counts.get("A") == 1
+
+
+async def test_orphan_question_respawn_cap():
+    """Respawn cap prevents infinite re-queuing. After 3 respawns, further
+    AGENT_MESSAGEs targeting the completed role are silently dropped."""
+    import json
+
+    ws = Workspace(run_id="r1", goal="x", max_iterations=10)
+    question_respawn_counts: dict[str, int] = {}
+    QUESTION_RESPAWN_CAP = 3
+
+    def _question_subscriber(sig: Signal) -> None:
+        if sig.type is not SignalType.AGENT_MESSAGE:
+            return
+        try:
+            parsed = json.loads(sig.detail or "")
+            target = parsed.get("to", "")
+        except (json.JSONDecodeError, AttributeError):
+            return
+        if not target or target not in ws.completed_agents:
+            return
+        count = question_respawn_counts.get(target, 0)
+        if count >= QUESTION_RESPAWN_CAP:
+            return
+        question_respawn_counts[target] = count + 1
+        ws.completed_agents.remove(target)
+        ws.agent_states[target] = AgentState.READY
+
+    ws.subscribe(_question_subscriber)
+
+    def _msg(n: int) -> Signal:
+        return Signal(
+            type=SignalType.AGENT_MESSAGE,
+            summary=f"question {n}",
+            from_agent="B",
+            detail=json.dumps({"to": "A", "from": "B", "message": f"q{n}"}),
+        )
+
+    # Manually drive the respawn logic without running the full scheduler.
+    ws.completed_agents.append("A")
+    ws.agent_states["A"] = AgentState.COMPLETE
+
+    for i in range(3):
+        ws.post_signal(_msg(i))
+        assert question_respawn_counts.get("A") == i + 1
+        # Simulate A completing its answer run for the next round.
+        ws.completed_agents.append("A")
+        ws.agent_states["A"] = AgentState.COMPLETE
+
+    # 4th question: cap hit; state must not change.
+    ws.post_signal(_msg(4))
+    assert question_respawn_counts.get("A") == 3
+    assert "A" in ws.completed_agents
+
+
 # ── No-asyncio.gather contract ──────────────────────────────────────────────
 
 
