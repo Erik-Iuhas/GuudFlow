@@ -4,7 +4,7 @@ Detailed plans for the GuudFlow multi-track roadmap. Parent strategy doc: `~/.cl
 
 Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance criteria and a commit plan. Treat the parent roadmap as "why," and these as "how."
 
-**Progress: 4 / 14 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d.
+**Progress: 5 / 14 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d, ✅ Track 3e.
 
 ## Files
 
@@ -19,7 +19,7 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 | `track_3a_outline_funnel.md` | 3 (code-side) | Architecture | ⬜ Not started (partially adopted in personas) | Track 1 | 250–400k |
 | `track_3c_output_compression.md` | 3c | Context economy (RTK-inspired) | ⬜ Not started | Track 1 | 200–350k |
 | `track_3d_agent_io_hygiene.md` | 3d | Hygiene + drift + cost (4 sub-deliverables; 3d.3 superseded by 3e) | ⬜ Not started | Track 1 | 280–450k |
-| `track_3e_batch_tool_calls.md` | 3e | Batch tools: fs-edit-batch, fs-write-batch, code-outline-batch | ⬜ Not started | Track 1 | 200–350k |
+| `track_3e_batch_tool_calls.md` | 3e | Batch tools: fs-edit-batch, fs-write-batch, code-outline-batch | ✅ **Shipped** | Track 1 | 200–350k |
 | `track_4_flow_dir_design.md` | 4 | Design spec (needs sign-off) | ⬜ Pending review | — | 100–150k |
 | `track_6_peer_rework.md` | 6 | Feature | ⬜ Not started | — | 150–250k |
 
@@ -53,11 +53,11 @@ Sprint 1.7 (cache stability + task-aware relevance) — SHIPPED:
             prompt (aider-style: PageRank structure + task-keyword
             relevance). Closes the architectural gap from run_ff1e92d43c.
 
-Sprint 1.8 (turn-count reduction — observed in run_0a886033d7):
-  Track 3e  ←── batch tool calls. fs-edit-batch / fs-write-batch /
+Sprint 1.8 (turn-count reduction) — SHIPPED:
+  Track 3e  ✅ batch tool calls. fs-edit-batch / fs-write-batch /
             code-outline-batch collapse N sequential round-trips into 1.
-            Targets the 18-20-edit bursts seen in real runs. Lifted out
-            of Track 3d.3 to ship faster.
+            Manifest piggyback rule: fs-edit grant auto-includes
+            fs-edit-batch. No project-config changes needed.
 
 Sprint 2 (parallel-safe):
   Track 2a  ←── bug, highest user value
