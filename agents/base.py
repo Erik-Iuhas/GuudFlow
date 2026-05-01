@@ -838,12 +838,10 @@ class BaseAgent:
     # ── Effective system prompt (§20 + §31 + §36) ──────────────────────────
 
     def _render_repo_map_layer(self, workspace: Any) -> str:
-        """Track 1c — render workspace.repo_map for prompt injection (CLAUDE.md §28).
+        """Track 1c/1d — codebase structure section (CLAUDE.md §28, always-on).
 
-        Uses repo_map's render_compact (signatures-only, PageRank-ranked,
-        hard-capped at max_tokens). Returns "" on empty maps so the layer
-        suppresses cleanly when there's nothing to show (early iterations,
-        empty workspaces, tests).
+        PageRank top-N entries, signatures only. Task-blind by design — paired
+        with _render_task_relevance_layer for the task-aware half.
         """
         if workspace is None:
             return ""
@@ -851,14 +849,61 @@ class BaseAgent:
         if rmap is None or not getattr(rmap, "entries", None):
             return ""
         from core.repo_map import render_compact
-        body = render_compact(rmap, max_tokens=1500)
+        # Track 1d: 400 tokens (down from 1500). The remaining budget moves to
+        # the task-relevance layer below, so the agent sees both structural
+        # importance AND task-specific relevance without bloating the prompt.
+        body = render_compact(rmap, max_tokens=400)
         if not body.strip():
             return ""
         return (
-            "CODEBASE STRUCTURE (always-on map of this run's working tree —\n"
-            "consult before fs-list / fs-grep / fs-read; paths are relative "
-            "to repo root):\n\n"
+            "CODEBASE STRUCTURE (top files by structural importance — "
+            "PageRank over imports; consult before fs-list / fs-grep / fs-read):\n\n"
             + body
+        )
+
+    def _render_task_relevance_layer(self, workspace: Any) -> str:
+        """Track 1d — files scored relevant to this agent's current task.
+
+        Mixes PageRank with symbol/path keyword overlap (aider-style). Suppressed
+        cleanly when there's no current task, no entries, or zero overlap.
+        """
+        if workspace is None:
+            return ""
+        rmap = getattr(workspace, "repo_map", None)
+        if rmap is None or not getattr(rmap, "entries", None):
+            return ""
+        task = (self._current_task or "").strip()
+        if not task:
+            return ""
+        from core.repo_map import score_entries_for_task, _approx_tokens
+        scored = score_entries_for_task(rmap, task)
+        if not scored:
+            return ""
+
+        BUDGET = 300
+        lines: list[str] = []
+        used = 0
+        for _score, entry in scored:
+            sym = ", ".join(entry.symbols[:8])
+            imp = ", ".join(entry.imports[:6])
+            line = f"{entry.path}  [{entry.type}]"
+            if sym:
+                line += f"  symbols: {sym}"
+            if imp:
+                line += f"  imports: {imp}"
+            cost = _approx_tokens(line) + 1  # +1 for newline
+            if used + cost > BUDGET:
+                break
+            lines.append(line)
+            used += cost
+        if not lines:
+            return ""
+
+        # Truncate the task echo so a verbose goal doesn't dominate the header.
+        task_echo = task if len(task) <= 120 else task[:117] + "..."
+        return (
+            f"RELEVANT TO YOUR CURRENT TASK ({task_echo!r}):\n\n"
+            + "\n".join(lines)
         )
 
     async def effective_system_prompt(
@@ -877,7 +922,8 @@ class BaseAgent:
           3.7. project_rules (§36)
           3.8. project_context (Phase K.1) — roadmap.md
           4. memory (§26 / §34) — recalled, not full dump
-          4.5. repo_map (Track 1c, CLAUDE.md §28) — always-on codebase structure
+          4.5a. repo_map structure (Track 1c, CLAUDE.md §28) — PageRank top-N
+          4.5b. task-relevant entries (Track 1d) — scored vs `_current_task`
           5. base prompt + tool catalog from manifest (§31)
           6. CoT primer
           7. positive framing
@@ -934,12 +980,16 @@ class BaseAgent:
                 m.recall_episodes_count = len(recall.episodes) if recall.episodes else 0
                 m.recall_patterns_count = len(recall.patterns) if recall.patterns else 0
 
-        # Layer 4.5 — repo_map (Track 1c). Always-on per CLAUDE.md §28.
-        # Falls back to self._workspace when the caller didn't pass one.
+        # Layer 4.5 — repo_map structure (Track 1c) + task-aware relevance
+        # (Track 1d). Both always-on per CLAUDE.md §28; relevance suppresses
+        # cleanly when no _current_task is set or no entries match.
         ws = workspace if workspace is not None else self._workspace
-        repo_map_text = self._render_repo_map_layer(ws)
-        if repo_map_text:
-            parts.append(repo_map_text)
+        structure_text = self._render_repo_map_layer(ws)
+        if structure_text:
+            parts.append(structure_text)
+        relevance_text = self._render_task_relevance_layer(ws)
+        if relevance_text:
+            parts.append(relevance_text)
 
         if self.system_prompt:
             parts.append(self.system_prompt)
