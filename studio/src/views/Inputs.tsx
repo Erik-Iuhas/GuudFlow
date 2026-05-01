@@ -106,6 +106,15 @@ export function Inputs({ projectId }: InputsProps) {
     }
   }
 
+  async function handleDetachSourceRepo() {
+    try {
+      await inputsApi.detachSourceRepo(projectId);
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+
   async function handleAttachPriorRun(runId: string, feedback: string) {
     try {
       await inputsApi.attachPriorRun(projectId, runId, feedback || undefined);
@@ -184,6 +193,7 @@ export function Inputs({ projectId }: InputsProps) {
         current={state.source_repo}
         onImportGit={handleImportGit}
         onImportLocalPath={handleImportLocalPath}
+        onDetach={handleDetachSourceRepo}
       />
 
       <h3 style={{ marginTop: 24 }}>Prior runs</h3>

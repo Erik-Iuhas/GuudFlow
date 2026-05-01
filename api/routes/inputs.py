@@ -304,6 +304,26 @@ async def attach_prior_run(
 
 
 @router.delete(
+    "/source_repo",
+    dependencies=[Depends(require_bearer)],
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def detach_source_repo(request: Request, project_id: str):
+    await _require_project(request, project_id)
+    store = _store(request)
+    target = store.source_repo_dir(project_id)
+    meta_path = store.source_repo_meta_path(project_id)
+    if not target.exists() and not meta_path.exists():
+        raise HTTPException(status_code=404, detail="no source repo attached to this project")
+    if target.exists():
+        shutil.rmtree(target, onerror=_force_rw)
+    if meta_path.exists():
+        meta_path.unlink()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete(
     "/from_run/{run_id}",
     dependencies=[Depends(require_bearer)],
     status_code=status.HTTP_204_NO_CONTENT,

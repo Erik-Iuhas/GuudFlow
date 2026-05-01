@@ -499,6 +499,13 @@ export const inputsApi = {
       { feedback: feedback ?? "" },
       true,
     ),
+  detachSourceRepo: (projectId: string) =>
+    request<void>(
+      "DELETE",
+      `/api/projects/${encodeURIComponent(projectId)}/inputs/source_repo`,
+      undefined,
+      true,
+    ),
   detachPriorRun: (projectId: string, runId: string) =>
     request<void>(
       "DELETE",
