@@ -1,5 +1,11 @@
 # AgentFlow — Claude Code Instructions
 
+## ⚠️ TOP PRIORITY — Commit after every code change
+
+After every file modification, run `git add` on the changed files and create a commit before ending the turn. Do not batch multiple sessions of changes into one commit. If tests pass, commit. If tests fail, fix them, then commit. Never leave modified files uncommitted when handing back to the user.
+
+---
+
 ## Read this first, then DESIGN.md in full before writing any code.
 
 ---
