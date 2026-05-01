@@ -116,6 +116,10 @@ class IterationMetrics:
     relevant_files_tokens: int = 0
     git_diff_tokens: int = 0
     context_tokens_total: int = 0
+    # Track 3d.2: tokens from direct fs-read / fs-list / fs-read_range calls
+    # that bypassed get_context(). Separate from context_tokens_total so the
+    # row tells the full story when agents skip the context manager.
+    direct_file_read_tokens: int = 0
 
     tools_called: list[str] = field(default_factory=list)
 
