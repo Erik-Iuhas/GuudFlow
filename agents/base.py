@@ -816,6 +816,10 @@ class BaseAgent:
             rendered = recall.render_for_prompt()
             if rendered:
                 parts.append(rendered)
+            m = self._current_metrics
+            if m is not None:
+                m.recall_episodes_count = len(recall.episodes) if recall.episodes else 0
+                m.recall_patterns_count = len(recall.patterns) if recall.patterns else 0
 
         if self.system_prompt:
             parts.append(self.system_prompt)
