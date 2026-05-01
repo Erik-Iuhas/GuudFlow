@@ -1473,6 +1473,7 @@ class AgentRunner:
                 return
 
             # Track 1: initialise per-iteration metrics before the run.
+            agent._last_commit_was_noop = False  # reset from any prior run
             agent._current_metrics = IterationMetrics(
                 run_id=workspace.run_id,
                 role=cfg.role,
@@ -1498,6 +1499,7 @@ class AgentRunner:
                     _m.ended_at = _time.time()
                     _m.elapsed_seconds = _m.ended_at - _m.started_at
                     _m.completed = not _m.failed
+                    _m.no_op = agent._last_commit_was_noop  # Track 2b
                     workspace.add_iteration_metrics(_m)
                     agent._current_metrics = None
                 # Log the full turn — messages + output — to agent_turns.jsonl.
