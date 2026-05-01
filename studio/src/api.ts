@@ -166,10 +166,10 @@ export const runsApi = {
     ),
   /** Track 1: per-iteration token + timing metrics. */
   iterationMetrics: (id: string) =>
-    request<IterationMetrics[]>("GET", `/api/runs/${encodeURIComponent(id)}/iteration_metrics`),
+    request<IterationMetrics[]>("GET", `/api/runs/${encodeURIComponent(id)}/iteration_metrics`, undefined, true),
   /** Track 1: per-get_context() call composition snapshots. */
   contextLog: (id: string) =>
-    request<ContextSnapshot[]>("GET", `/api/runs/${encodeURIComponent(id)}/context_log`),
+    request<ContextSnapshot[]>("GET", `/api/runs/${encodeURIComponent(id)}/context_log`, undefined, true),
 };
 
 export interface RunTag {
