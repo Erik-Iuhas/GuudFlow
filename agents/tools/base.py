@@ -33,6 +33,33 @@ class BaseTool(ABC):
     description: str = ""
     input_schema: dict[str, Any] = {}
 
+    # Track 3d.4 — manifest-driven guidance.
+    #
+    # `priority` controls ordering in the rendered tool catalog (Layer 5 of
+    # effective_system_prompt). LOWER = reach first. Convention buckets:
+    #     5  — implicit / always-on (rarely set on actual tools)
+    #    10  — discovery (where am I? what's around?)
+    #    20  — structure (signatures, outlines)
+    #    30  — search & filter (grep, list)
+    #    40  — read recent state (git-diff, git-status, git-log)
+    #    50  — read precise (read_range, desk-search)
+    #    60  — read full (fs-read, doc-markdown)
+    #    70  — fetch external (web-fetch, web-search, data-*)
+    #    80  — convenience (math, text-diff, time-now)
+    #   100  — write batch (fs-edit-batch, fs-write-batch)
+    #   105  — write single (fs-edit, fs-write, fs-create)
+    #   110  — destructive (fs-delete, fs-rename)
+    #   115  — execute / commit (code-exec)
+    #   120  — coordination (assign-task, desk-push, board-message)
+    #   130  — story lifecycle (story-open, story-complete)
+    #
+    # `when_to_use` is a short (≤ ~80 char) hint shown next to the tool name
+    # in the catalog. Empty string suppresses the hint cleanly. The hint
+    # should answer "when should I reach for this tool?" — NOT what it does
+    # (that's `description`).
+    priority: int = 100
+    when_to_use: str = ""
+
     @abstractmethod
     async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
         """Execute the tool. Returns a result dict that the LLM will see.
