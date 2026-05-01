@@ -295,11 +295,12 @@ class QuipEngine:
     ) -> Quip:
         roster = self._roster_block(workspace, exclude_role=voice.role)
         system = (
-            f"Your name is {voice.name}. {voice.character}\n\n"
+            f"{voice.character}\n\n"
             + (f"{roster}\n\n" if roster else "")
             + "React to what just happened in ONE punchy sentence — in character, "
-            "no quotation marks, no preamble. Always write in first person using 'I' — "
-            "never refer to yourself by name."
+            "no quotation marks, no preamble. "
+            f"Write only in first person (use 'I', 'my', 'me'). "
+            f"Do NOT write your name ({voice.name}) anywhere in your response."
         )
         try:
             print(
