@@ -16,12 +16,13 @@ Default behaviour:
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from core.repo_map import _approx_tokens, render_compact
 from core.signals import Signal
-from core.workspace import RepoMap, Workspace
+from core.workspace import ContextSnapshot, RepoMap, Workspace
 
 if TYPE_CHECKING:
     from core.file_workspace import FileWorkspace
@@ -177,6 +178,8 @@ class ContextManager:
                     diff_used = True
 
         # Fill remaining budget with full contents of top-ranked relevant files.
+        # Track per-file token counts for the ContextSnapshot.
+        _file_token_pairs: list[tuple[str, int]] = []
         if not diff_used and self.files is not None and repo_map.entries:
             query_tokens = _tokens(task)
             scored = [(_score_entry(e, query_tokens), e) for e in repo_map.entries]
@@ -193,6 +196,7 @@ class ContextManager:
                 if used + cost > max_tokens:
                     continue
                 ctx.relevant_files[entry.path] = content
+                _file_token_pairs.append((entry.path, cost))
                 used += cost
 
         # Recent signals relevant to this role.
@@ -200,6 +204,26 @@ class ContextManager:
         used += sum(_approx_tokens(s.summary) for s in ctx.recent_signals)
 
         ctx.token_count = used
+
+        # Build and record a ContextSnapshot for Track 1 analytics.
+        _repo_map_tokens = _approx_tokens(repo_map_text) if repo_map_text else 0
+        _diff_tokens = _approx_tokens(ctx.git_diff) if ctx.git_diff else 0
+        snapshot = ContextSnapshot(
+            run_id=self.workspace.run_id,
+            role=agent_role,
+            iteration=self.workspace.iteration,
+            task=task[:500],
+            tier=tier,
+            max_tokens=max_tokens,
+            used_tokens=used,
+            repo_map_tokens=_repo_map_tokens,
+            git_diff_tokens=_diff_tokens,
+            relevant_files=_file_token_pairs,
+            recent_signals_count=len(ctx.recent_signals),
+            timestamp=time.time(),
+        )
+        self.workspace.record_context_snapshot(snapshot)
+
         return ctx
 
     async def search(self, query: str, limit: int = 5) -> list[SearchResult]:
