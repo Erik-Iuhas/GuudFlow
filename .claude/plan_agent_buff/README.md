@@ -4,14 +4,14 @@ Detailed plans for the GuudFlow multi-track roadmap. Parent strategy doc: `~/.cl
 
 Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance criteria and a commit plan. Treat the parent roadmap as "why," and these as "how."
 
-**Progress: 1 / 9 tracks shipped.** ✅ Track 1.
+**Progress: 2 / 9 tracks shipped.** ✅ Track 1, ✅ Track 1b.
 
 ## Files
 
 | File | Track | Type | Status | Depends on | Token est. |
 |---|---|---|---|---|---|
 | `track_1_iteration_metrics.md` | 1 | Foundation | ✅ **Shipped** (with logging gap — fixed by 1b) | — | 200–300k |
-| `track_1b_logging_fix.md` | 1b | Logging truth-telling (Sprint 1.5) | ⬜ Not started | Track 1 | 80–150k |
+| `track_1b_logging_fix.md` | 1b | Logging truth-telling (Sprint 1.5) | ✅ **Shipped** | Track 1 | 80–150k |
 | `track_2a_orphan_question.md` | 2a | Bug fix | ⬜ Not started | — | 100–200k |
 | `track_2b_no_op_rationale.md` | 2b | Bug fix | ⬜ Not started | — (pairs with 2a) | 100–200k |
 | `track_3a_outline_funnel.md` | 3 (code-side) | Architecture | ⬜ Not started (partially adopted in personas) | Track 1 | 250–400k |
