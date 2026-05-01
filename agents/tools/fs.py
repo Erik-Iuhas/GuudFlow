@@ -47,6 +47,8 @@ def _ok(**kwargs: Any) -> dict[str, Any]:
 
 class FsRead(BaseTool):
     name = "fs-read"
+    priority = 60
+    when_to_use = "when you need full file bodies; prefer code-outline or fs-read_range when possible"
     description = "Read a file under working/ as UTF-8 text."
     input_schema = {
         "type": "object",
@@ -87,6 +89,8 @@ class FsRead(BaseTool):
 
 class FsList(BaseTool):
     name = "fs-list"
+    priority = 30
+    when_to_use = "to discover what files exist in a directory"
     description = (
         "List files under a working/ subpath. Optional recursive flag. "
         "Markdown files include their `story:` frontmatter tag when present, "
@@ -182,6 +186,8 @@ class FsList(BaseTool):
 
 class FsExists(BaseTool):
     name = "fs-exists"
+    priority = 10
+    when_to_use = "to check existence before reading or writing"
     description = "Check whether a working/ path exists."
     input_schema = {
         "type": "object",
@@ -208,6 +214,8 @@ class FsReadRange(BaseTool):
     """
 
     name = "fs-read_range"
+    priority = 50
+    when_to_use = "when you need a specific line range, not the full file"
     description = "Read a specific line range from a file (1-indexed, inclusive). Use after fs-exists or code-outline to read just the section you need."
     input_schema = {
         "type": "object",
@@ -271,6 +279,8 @@ class FsGrep(BaseTool):
     """
 
     name = "fs-grep"
+    priority = 35
+    when_to_use = "to find symbols or text across files when you don't already know which file"
     description = "Search file contents under working/ for a query. Returns matches with line numbers and surrounding context."
     input_schema = {
         "type": "object",
@@ -410,7 +420,13 @@ class _ClaimingTool(BaseTool):
 
 class FsWrite(_ClaimingTool):
     name = "fs-write"
-    description = "Write/overwrite a file under working/. Creates parent dirs as needed."
+    priority = 105
+    when_to_use = "single file write; PREFER fs-write-batch when you have ≥ 2 files to create"
+    description = (
+        "Write/overwrite a file under working/. Creates parent dirs as needed. "
+        "TIP: when writing several files in a row, prefer fs-write-batch — "
+        "one tool call replaces N sequential round-trips."
+    )
     input_schema = {
         "type": "object",
         "properties": {
@@ -453,6 +469,8 @@ class FsWrite(_ClaimingTool):
 
 class FsCreate(_ClaimingTool):
     name = "fs-create"
+    priority = 107
+    when_to_use = "to create a NEW file (errors if it already exists); use fs-write-batch for multiple"
     description = "Create a NEW file under working/. Errors if it already exists."
     input_schema = {
         "type": "object",
@@ -497,7 +515,13 @@ class FsEdit(_ClaimingTool):
     """
 
     name = "fs-edit"
-    description = "Surgical edit on an existing file: find/replace exact strings."
+    priority = 105
+    when_to_use = "single edit; PREFER fs-edit-batch when you have ≥ 2 edits planned"
+    description = (
+        "Surgical edit on an existing file: find/replace exact strings. "
+        "TIP: when applying several edits in a row, prefer fs-edit-batch — "
+        "one tool call replaces N sequential round-trips."
+    )
     input_schema = {
         "type": "object",
         "properties": {
@@ -578,6 +602,8 @@ class FsEdit(_ClaimingTool):
 
 class FsDelete(_ClaimingTool):
     name = "fs-delete"
+    priority = 110
+    when_to_use = "destructive — verify with fs-list/fs-exists first"
     description = "Delete a file or directory under working/."
     input_schema = {
         "type": "object",
@@ -619,6 +645,8 @@ class FsDiff(BaseTool):
     """
 
     name = "fs-diff"
+    priority = 42
+    when_to_use = "story-scoped diff of one file vs the story baseline"
     description = (
         "Show a unified diff of a file against the active story's baseline ref "
         "(or an explicit ref/branch). Use this to see what's new for your story "
@@ -722,6 +750,8 @@ class FsDiff(BaseTool):
 
 class FsRename(_ClaimingTool):
     name = "fs-rename"
+    priority = 110
+    when_to_use = "rename or move a file"
     description = "Rename or move a file under working/."
     input_schema = {
         "type": "object",

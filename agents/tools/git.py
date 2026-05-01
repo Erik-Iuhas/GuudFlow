@@ -22,6 +22,8 @@ _DIFF_CHAR_LIMIT = 6000  # ~1500 tokens — safe for a single file diff
 
 class GitDiff(BaseTool):
     name = "git-diff"
+    priority = 40
+    when_to_use = "review YOUR OWN recent commits — always pass `path` to scope the diff"
     description = (
         "Show the diff between two branches. "
         "Always pass `path` to diff a single file — never call without `path` "
@@ -79,6 +81,8 @@ class GitDiff(BaseTool):
 
 class GitChangedFiles(BaseTool):
     name = "git-changed-files"
+    priority = 42
+    when_to_use = "list which files changed before git-diff (cheaper than diffing the whole tree)"
     description = "List file paths changed in branch_a vs branch_b. Use this before git-diff to review files one at a time."
     input_schema = {
         "type": "object",
@@ -108,6 +112,8 @@ class GitChangedFiles(BaseTool):
 
 class GitLog(BaseTool):
     name = "git-log"
+    priority = 44
+    when_to_use = "see commit history for one path or branch"
     description = "List recent commits on a branch (default current HEAD)."
     input_schema = {
         "type": "object",
@@ -147,6 +153,8 @@ class GitLog(BaseTool):
 
 class GitStatus(BaseTool):
     name = "git-status"
+    priority = 46
+    when_to_use = "check what's uncommitted on your branch"
     description = "Show uncommitted changes on the current branch (staged, unstaged, untracked)."
     input_schema = {"type": "object", "properties": {}}
 
@@ -173,6 +181,8 @@ class GitStatus(BaseTool):
 
 class GitRead(BaseTool):
     name = "git-read"
+    priority = 48
+    when_to_use = "read a file at a specific commit or branch tip without a checkout"
     description = "Read a file's contents at the tip of a specific branch (no checkout)."
     input_schema = {
         "type": "object",

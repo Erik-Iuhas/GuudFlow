@@ -318,6 +318,8 @@ class CodeExec(BaseTool):
     """
 
     name = "code-exec"
+    priority = 115
+    when_to_use = "run tests / scripts; expensive — gather context first"
     description = "Execute code (Python or shell). In dev mode runs on host with hardening (env scrub, cwd pin, rlimits, audit); in production routes to sandbox container."
     input_schema = {
         "type": "object",
@@ -393,7 +395,14 @@ class CodeOutline(BaseTool):
     """
 
     name = "code-outline"
-    description = "Extract structure of a source file: imports, classes (with methods), functions. Cheap reconnaissance before fs-read_range."
+    priority = 20
+    when_to_use = "signatures of one file BEFORE fs-read; PREFER code-outline-batch for ≥ 3 files"
+    description = (
+        "Extract structure of a source file: imports, classes (with methods), "
+        "functions. Cheap reconnaissance before fs-read_range. "
+        "TIP: when outlining several files in a row, prefer code-outline-batch "
+        "— one tool call replaces N sequential round-trips."
+    )
     input_schema = {
         "type": "object",
         "properties": {"path": {"type": "string"}},

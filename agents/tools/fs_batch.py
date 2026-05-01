@@ -63,6 +63,8 @@ class FsWriteBatch(BaseTool):
     """
 
     name = "fs-write-batch"
+    priority = 100
+    when_to_use = "PREFER over fs-write when creating multiple files in one logical step"
     description = (
         "Write/overwrite many files in one tool call. Use when you have "
         "multiple file writes lined up — one batch call replaces N sequential "
@@ -189,6 +191,8 @@ class FsEditBatch(BaseTool):
     """
 
     name = "fs-edit-batch"
+    priority = 100
+    when_to_use = "PREFER over fs-edit when you have ≥ 2 edits — one call replaces N round-trips"
     description = (
         "Surgical find/replace on many files in one tool call. Each entry "
         "follows fs-edit semantics (exact match unless replace_all=true). "

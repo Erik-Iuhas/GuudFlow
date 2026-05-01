@@ -24,6 +24,8 @@ class CodeOutlineBatch(BaseTool):
     """
 
     name = "code-outline-batch"
+    priority = 22
+    when_to_use = "PREFER over code-outline when navigating ≥ 3 files at once"
     description = (
         "Extract structural outlines for many files in one tool call. Use "
         "during navigation passes when you want signatures across several "
