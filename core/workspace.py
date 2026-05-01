@@ -122,6 +122,10 @@ class IterationMetrics:
     direct_file_read_tokens: int = 0
 
     tools_called: list[str] = field(default_factory=list)
+    # Track 1b: per-tool token contribution. Keys are tool names, values are
+    # the total token cost of all results returned by that tool this
+    # iteration. Read-class tool entries also feed direct_file_read_tokens.
+    tool_token_breakdown: dict[str, int] = field(default_factory=dict)
 
     completed: bool = False
     failed: bool = False
