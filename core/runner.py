@@ -4135,11 +4135,13 @@ AgentFactory = Callable[[AgentConfig], BaseAgent]
 
 def default_agent_factory(cfg: AgentConfig) -> BaseAgent:
     """Default factory: prompt-defined agent unless `agent_class_role_type`
-    points at a registered subclass."""
+    points at a registered subclass. Falls back to BaseAgent if the type is
+    an archetype label (e.g. 'specialist') rather than a concrete registry entry."""
     if cfg.agent_class_role_type:
-        from agents.registry import get
-        cls = get(cfg.agent_class_role_type)
-        return cls(role=cfg.role)
+        from agents.registry import has, get
+        if has(cfg.agent_class_role_type):
+            cls = get(cfg.agent_class_role_type)
+            return cls(role=cfg.role)
     return BaseAgent(role=cfg.role)
 
 
