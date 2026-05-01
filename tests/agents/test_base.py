@@ -449,6 +449,116 @@ async def test_repo_map_layer_position_after_memory_before_base_prompt():
     assert idx_repomap < idx_base, "repo_map layer must come before base prompt"
 
 
+# ── Track 1d — Layer 4.5b: task-aware relevance ────────────────────────────
+
+
+async def test_task_relevance_layer_present_when_task_set_with_overlap():
+    """When _current_task overlaps with repo_map symbols/paths, the relevance
+    section appears with the matching files only."""
+    ws = _ws_with_repo_map([
+        ("src/auth.py", ["User", "login", "logout"]),
+        ("src/random.py", ["foo", "bar"]),
+        ("src/db.py", ["Connection"]),
+    ])
+    a = BaseAgent(role="developer", system_prompt="prompt")
+    a._workspace = ws
+    a._current_task = "implement login flow"
+
+    text = await a.effective_system_prompt()
+
+    assert "RELEVANT TO YOUR CURRENT TASK" in text
+    # The auth.py entry should appear (login symbol matches).
+    relevance_section = text[text.index("RELEVANT TO YOUR CURRENT TASK"):]
+    assert "src/auth.py" in relevance_section
+    # The random.py entry should NOT appear in the relevance section
+    # (zero-overlap entries are filtered out).
+    assert "src/random.py" not in relevance_section
+
+
+async def test_task_relevance_layer_absent_when_no_current_task():
+    """No _current_task → relevance section suppressed cleanly."""
+    ws = _ws_with_repo_map([("src/auth.py", ["User", "login"])])
+    a = BaseAgent(role="developer", system_prompt="prompt")
+    a._workspace = ws
+    a._current_task = ""  # explicitly empty
+
+    text = await a.effective_system_prompt()
+    assert "RELEVANT TO YOUR CURRENT TASK" not in text
+    # Structure section is still present (always-on).
+    assert "CODEBASE STRUCTURE" in text
+
+
+async def test_task_relevance_layer_absent_when_no_overlap():
+    """Task with zero keyword overlap with any entry → relevance suppressed."""
+    ws = _ws_with_repo_map([
+        ("src/foo.py", ["one"]),
+        ("src/bar.py", ["two"]),
+    ])
+    a = BaseAgent(role="developer", system_prompt="prompt")
+    a._workspace = ws
+    a._current_task = "write deployment scripts"
+
+    text = await a.effective_system_prompt()
+    assert "RELEVANT TO YOUR CURRENT TASK" not in text
+
+
+async def test_task_relevance_layer_echoes_truncated_task_in_header():
+    """A long task description is truncated in the header (≤ 120 chars + …)."""
+    ws = _ws_with_repo_map([("src/auth.py", ["login"])])
+    a = BaseAgent(role="developer", system_prompt="prompt")
+    a._workspace = ws
+    a._current_task = "implement login flow with " + ("very_long_clarification " * 20)
+
+    text = await a.effective_system_prompt()
+    # The header shows the task in quotes; verify there's a truncation marker.
+    relevance_idx = text.index("RELEVANT TO YOUR CURRENT TASK")
+    header_line = text[relevance_idx:relevance_idx + 200]
+    assert "..." in header_line
+
+
+async def test_repo_map_structure_layer_uses_400_token_budget():
+    """Track 1d lowered the structure budget from 1500 → 400. The rendered
+    section should not exceed ~470 tokens (400 budget + banner overhead)."""
+    from core.repo_map import _approx_tokens
+
+    # Many entries to force budget enforcement.
+    entries = [
+        (f"src/module_{i:03d}/file.py", [f"sym_{j}" for j in range(5)])
+        for i in range(200)
+    ]
+    ws = _ws_with_repo_map(entries)
+    a = BaseAgent(role="developer", system_prompt="prompt")
+    a._workspace = ws
+
+    text = await a.effective_system_prompt()
+    section_start = text.index("CODEBASE STRUCTURE")
+    # Find the next section boundary (relevance section or PROTOCOL VOICE).
+    section_end = min(
+        idx for idx in [
+            text.find("RELEVANT TO YOUR CURRENT TASK", section_start),
+            text.find("PROTOCOL VOICE", section_start),
+        ]
+        if idx > section_start
+    )
+    section = text[section_start:section_end]
+    # 400 budget + banner ~30 tokens overhead ⇒ cap at ~500.
+    assert _approx_tokens(section) <= 500
+
+
+async def test_task_relevance_section_position_after_structure():
+    """Relevance section follows the structure section, both before base prompt."""
+    ws = _ws_with_repo_map([("src/auth.py", ["login"])])
+    a = BaseAgent(role="developer", system_prompt="MARKER_BASE")
+    a._workspace = ws
+    a._current_task = "implement login"
+
+    text = await a.effective_system_prompt()
+    idx_structure = text.index("CODEBASE STRUCTURE")
+    idx_relevance = text.index("RELEVANT TO YOUR CURRENT TASK")
+    idx_base = text.index("MARKER_BASE")
+    assert idx_structure < idx_relevance < idx_base
+
+
 # ── Recall ─────────────────────────────────────────────────────────────────
 
 
