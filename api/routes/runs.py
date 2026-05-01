@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -862,4 +863,50 @@ async def get_git_tree(
     _walk(tree)
     out.sort(key=lambda f: f["path"])
     return out
+
+
+# ── Track 1: iteration metrics + context log ─────────────────────────────────
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    """Read a JSONL file and return a list of parsed objects. Returns [] if missing."""
+    if not path.exists():
+        return []
+    rows: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+    return rows
+
+
+@router.get("/{run_id}/iteration_metrics", dependencies=[Depends(require_bearer)])
+async def get_iteration_metrics(request: Request, run_id: str) -> list[dict]:
+    """Return all IterationMetrics rows for a run (Track 1).
+
+    Reads iteration_metrics.jsonl from the run root directory.
+    Returns 404 if the run directory doesn't exist at all.
+    """
+    data_root = Path(request.app.state.data_root)
+    run_root = data_root / "runs" / run_id
+    if not run_root.exists():
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+    return _read_jsonl(run_root / "iteration_metrics.jsonl")
+
+
+@router.get("/{run_id}/context_log", dependencies=[Depends(require_bearer)])
+async def get_context_log(request: Request, run_id: str) -> list[dict]:
+    """Return all ContextSnapshot rows for a run (Track 1).
+
+    Reads context_log.jsonl from the run root directory.
+    Returns 404 if the run directory doesn't exist at all.
+    """
+    data_root = Path(request.app.state.data_root)
+    run_root = data_root / "runs" / run_id
+    if not run_root.exists():
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+    return _read_jsonl(run_root / "context_log.jsonl")
 
