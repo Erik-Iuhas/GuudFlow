@@ -17,7 +17,7 @@ DESIGN sections: §3 / §5 / §6 / §22 / §23.
 
 ### Scaffold
 - [x] `studio/package.json` — react, react-dom, react-router-dom, vite, @vitejs/plugin-react, typescript
-- [x] `studio/vite.config.ts` — `/api` and `/ws` proxy to `AGENTFLOW_API_URL` (default `http://localhost:8000`)
+- [x] `studio/vite.config.ts` — `/api` and `/ws` proxy to `GUUDFLOW_API_URL` (default `http://localhost:8000`)
 - [x] `studio/tsconfig.json` — strict TS, ES2022, JSX react-jsx
 - [x] `studio/index.html`, `studio/src/main.tsx`, `studio/src/styles.css`
 - [x] `studio/src/types.ts` — shared API shapes (ProjectConfig, AgentConfig, Signal, PersonaSummary, MetaProposal, etc.)

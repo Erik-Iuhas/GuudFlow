@@ -47,7 +47,7 @@ CONTAINER_LIMITS: dict[str, Any] = {
     "security_opt": ["no-new-privileges"],
 }
 
-DEFAULT_IMAGE = "agentflow-sandbox:latest"
+DEFAULT_IMAGE = "guudflow-sandbox:latest"
 
 
 @dataclass
@@ -91,7 +91,7 @@ class DockerManager:
         image: str = DEFAULT_IMAGE,
         client: Any = None,  # docker.DockerClient — typed lazily
     ):
-        self.mode = mode or os.environ.get("AGENTFLOW_MODE", "dev")
+        self.mode = mode or os.environ.get("GUUDFLOW_MODE", "dev")
         self.image = image
         self._client = client
         self._containers: dict[str, ContainerHandle] = {}
@@ -115,7 +115,7 @@ class DockerManager:
             except ImportError as e:
                 raise DockerManagerError(
                     "production mode requires the `docker` SDK; install it or "
-                    "set AGENTFLOW_MODE=dev"
+                    "set GUUDFLOW_MODE=dev"
                 ) from e
             try:
                 self._client = docker.from_env()

@@ -6,7 +6,7 @@
 > tokens compact. A future generator (Phase F) will rebuild this markdown
 > from the YAML automatically.
 
-This document is the **design surface** for AgentFlow agent archetypes
+This document is the **design surface** for GuudFlow agent archetypes
 — the meta-agent reads the YAML at proposal time alongside the runtime
 catalog (`GET /api/agents/catalog`) to pick a team.
 

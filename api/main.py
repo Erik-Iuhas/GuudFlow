@@ -16,7 +16,7 @@ from pathlib import Path
 
 # Load .env before anything else reads env vars. The Anthropic SDK
 # pulls ANTHROPIC_API_KEY from os.environ at client construction
-# time; the auth bearer pulls AGENTFLOW_API_TOKEN. Both need the
+# time; the auth bearer pulls GUUDFLOW_API_TOKEN. Both need the
 # .env values present before they're imported anywhere.
 #
 # `override=True` is intentional: an inherited shell environment
@@ -56,7 +56,7 @@ from worker.queue import InMemoryJobQueue
 
 
 def _data_root() -> Path:
-    return Path(os.environ.get("AGENTFLOW_DATA_DIR", "./data")).resolve()
+    return Path(os.environ.get("GUUDFLOW_DATA_DIR", "./data")).resolve()
 
 
 # Register catalog-able builtins at module import so `GET /api/agents/catalog`
@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
     In dev mode the worker drains the same in-memory queue the API enqueues
     to. In production the queue swaps to Redis and the worker runs as a
     separate process; this in-process worker is then disabled via
-    `AGENTFLOW_DISABLE_INPROC_WORKER=1`.
+    `GUUDFLOW_DISABLE_INPROC_WORKER=1`.
     """
     data_root = _data_root()
     data_root.mkdir(parents=True, exist_ok=True)
@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
     app.state.quip_registry = QuipRegistry()
 
     worker_task = None
-    if os.environ.get("AGENTFLOW_DISABLE_INPROC_WORKER") != "1":
+    if os.environ.get("GUUDFLOW_DISABLE_INPROC_WORKER") != "1":
         async def loader(project_id: str):
             return await app.state.project_store.get(project_id)
 
@@ -116,7 +116,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="AgentFlow",
+        title="GuudFlow",
         description="Managed multi-agent orchestration platform",
         version="0.1.0",
         lifespan=lifespan,
@@ -124,7 +124,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=os.environ.get("AGENTFLOW_CORS_ORIGINS", "*").split(","),
+        allow_origins=os.environ.get("GUUDFLOW_CORS_ORIGINS", "*").split(","),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -152,7 +152,7 @@ def create_app() -> FastAPI:
     # single container hosts the API + frontend. API routes registered
     # above take precedence — FastAPI matches exact + prefixed paths
     # before falling through to the static mount.
-    studio_dist = os.environ.get("AGENTFLOW_STUDIO_DIST")
+    studio_dist = os.environ.get("GUUDFLOW_STUDIO_DIST")
     if studio_dist and Path(studio_dist).is_dir():
         app.mount(
             "/",

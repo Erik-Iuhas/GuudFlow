@@ -45,10 +45,10 @@ def _now_iso() -> str:
 
 
 def _allowlist_permits(path: Path) -> bool:
-    """If AGENTFLOW_LOCAL_PATH_ALLOWLIST is set (comma-separated path
+    """If GUUDFLOW_LOCAL_PATH_ALLOWLIST is set (comma-separated path
     prefixes), `path` must resolve under one of them. Unset = single-user
     dev posture, no restriction."""
-    raw = os.environ.get("AGENTFLOW_LOCAL_PATH_ALLOWLIST", "").strip()
+    raw = os.environ.get("GUUDFLOW_LOCAL_PATH_ALLOWLIST", "").strip()
     if not raw:
         return True
     resolved = path.resolve()
@@ -233,7 +233,7 @@ async def import_local_path(
     if not _allowlist_permits(src):
         raise HTTPException(
             status_code=403,
-            detail="path is not under AGENTFLOW_LOCAL_PATH_ALLOWLIST",
+            detail="path is not under GUUDFLOW_LOCAL_PATH_ALLOWLIST",
         )
     if not src.is_dir():
         raise HTTPException(status_code=400, detail=f"path is not a directory: {src}")

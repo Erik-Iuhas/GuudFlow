@@ -14,7 +14,7 @@ DESIGN sections: §29.
 
 ## Verification
 - Dockerfile reviewed against §29's CONTAINER_LIMITS contract (worker/docker_manager.py): network_mode none, mem 512m, pids 50, read_only root, tmpfs /tmp, no-new-privileges, non-root user
-- `docker build -t agentflow-sandbox:latest sandbox/` — built successfully on Docker 27.4.0 (Desktop on Windows). Final image sha256:556c53fe…
+- `docker build -t guudflow-sandbox:latest sandbox/` — built successfully on Docker 27.4.0 (Desktop on Windows). Final image sha256:556c53fe…
 - Smoke tests pass:
   - `python -c "print('python ok')"` → ok
   - `bash -lc "echo bash ok"` → ok
@@ -38,7 +38,7 @@ DESIGN sections: §29.
 ## What's STILL missing for full production code:exec routing
 
 The Dockerfile lands the IMAGE; the wire-up of `code:exec` to route through `DockerManager.exec_in()` in production mode is recorded in [followups.md](followups.md) under "Stage 7 follow-ons". Roughly:
-- Detect `AGENTFLOW_MODE=production` in the runner
+- Detect `GUUDFLOW_MODE=production` in the runner
 - Replace the dev host `code:exec` runner with `lambda lang, args, opts: docker.exec_in(run_id, lang, opts['code'])`
 - Test against a real local Docker daemon
 
@@ -48,11 +48,11 @@ That's a small (~30 line) follow-on; the Dockerfile is a prerequisite, now satis
 ```bash
 ./scripts/build_sandbox.sh
 # or
-docker build -t agentflow-sandbox:latest sandbox/
+docker build -t guudflow-sandbox:latest sandbox/
 ```
 
 ## Smoke test
 ```bash
-docker run --rm agentflow-sandbox:latest python -c "print('hi')"
-docker run --rm agentflow-sandbox:latest bash -lc "echo hi"
+docker run --rm guudflow-sandbox:latest python -c "print('hi')"
+docker run --rm guudflow-sandbox:latest bash -lc "echo hi"
 ```

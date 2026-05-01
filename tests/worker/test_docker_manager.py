@@ -31,7 +31,7 @@ def test_container_limits_match_design_spec():
 
 
 async def test_dev_mode_start_returns_stub_handle(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
     dm = DockerManager()
     assert dm.is_dev_stub is True
 
@@ -43,7 +43,7 @@ async def test_dev_mode_start_returns_stub_handle(tmp_path: Path, monkeypatch):
 
 
 async def test_dev_mode_exec_returns_stub_result(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
     dm = DockerManager()
     await dm.start("run_1", tmp_path / "ws")
     res = await dm.exec_in("run_1", "python", "print('x')")
@@ -53,14 +53,14 @@ async def test_dev_mode_exec_returns_stub_result(tmp_path: Path, monkeypatch):
 
 
 async def test_dev_mode_exec_unknown_run_raises(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
     dm = DockerManager()
     with pytest.raises(DockerManagerError, match="no container"):
         await dm.exec_in("ghost_run", "python", "x")
 
 
 async def test_dev_mode_stop_clears_container(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
     dm = DockerManager()
     await dm.start("run_1", tmp_path / "ws")
     assert "run_1" in dm.active_runs()
@@ -69,14 +69,14 @@ async def test_dev_mode_stop_clears_container(tmp_path: Path, monkeypatch):
 
 
 async def test_dev_mode_stop_unknown_is_noop(monkeypatch):
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
     dm = DockerManager()
     # Should not raise.
     await dm.stop("ghost")
 
 
 async def test_dev_mode_multiple_runs(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
     dm = DockerManager()
     await dm.start("a", tmp_path / "a")
     await dm.start("b", tmp_path / "b")
@@ -89,7 +89,7 @@ async def test_dev_mode_multiple_runs(tmp_path: Path, monkeypatch):
 def test_production_without_docker_sdk_raises(monkeypatch):
     """If `docker` is importable but the daemon is unreachable, fail
     fast. CLAUDE.md hard rule from §29."""
-    monkeypatch.setenv("AGENTFLOW_MODE", "production")
+    monkeypatch.setenv("GUUDFLOW_MODE", "production")
 
     # Simulate Docker SDK unavailable by injecting a client that errors on ping.
     class FakeBrokenClient:
@@ -114,7 +114,7 @@ def test_production_with_passing_client_constructs(monkeypatch):
 
 
 def test_explicit_mode_overrides_env(monkeypatch):
-    monkeypatch.setenv("AGENTFLOW_MODE", "production")
+    monkeypatch.setenv("GUUDFLOW_MODE", "production")
     # Explicit mode='dev' wins; we don't hit the production verification.
     dm = DockerManager(mode="dev")
     assert dm.is_dev_stub is True

@@ -1,7 +1,7 @@
 """Tests for the dev-mode `code:exec` hardening.
 
 Covers:
-  - Mode enforcement (AGENTFLOW_MODE=production rejects host runner)
+  - Mode enforcement (GUUDFLOW_MODE=production rejects host runner)
   - Per-run quota
   - Audit log
   - Env scrubbing (secrets don't leak into subprocess)
@@ -33,14 +33,14 @@ from worker.docker_manager import ExecResult
 
 
 async def test_production_mode_blocks_default_runner(monkeypatch):
-    monkeypatch.setenv("AGENTFLOW_MODE", "production")
+    monkeypatch.setenv("GUUDFLOW_MODE", "production")
     res = await CodeExec().run({"language": "python", "code": "print('x')"})
     assert "error" in res
     assert "production" in res["error"].lower()
 
 
 async def test_dev_mode_allows_default_runner(monkeypatch):
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
     res = await CodeExec().run({"language": "python", "code": "print('hello')"})
     assert res.get("ok") is True
 
@@ -48,7 +48,7 @@ async def test_dev_mode_allows_default_runner(monkeypatch):
 async def test_production_mode_does_not_block_custom_runner(monkeypatch):
     """When the runner is NOT the dev host runner (i.e. the container
     runner injected by Stage 7), the production-mode check doesn't apply."""
-    monkeypatch.setenv("AGENTFLOW_MODE", "production")
+    monkeypatch.setenv("GUUDFLOW_MODE", "production")
     captured = {"called": False}
     async def fake(lang, args, options):
         captured["called"] = True

@@ -340,7 +340,7 @@ function OnboardingPanel({
 }) {
   return (
     <div className="card onboarding-card">
-      <h2 style={{ marginTop: 0 }}>Welcome to AgentFlow</h2>
+      <h2 style={{ marginTop: 0 }}>Welcome to GuudFlow</h2>
       <p className="muted">
         Two paths to your first run, depending on what you want:
       </p>
@@ -380,7 +380,7 @@ function OnboardingPanel({
         <Link to="/roster">Roster</Link> to see them and chat directly,
         or browse the{" "}
         <a
-          href="https://github.com/Erik-Iuhas/AgentFlow#readme"
+          href="https://github.com/Erik-Iuhas/GuudFlow#readme"
           target="_blank"
           rel="noreferrer"
         >

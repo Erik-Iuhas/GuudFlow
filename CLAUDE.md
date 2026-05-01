@@ -1,4 +1,4 @@
-# AgentFlow — Claude Code Instructions
+# GuudFlow — Claude Code Instructions
 
 ## ⚠️ TOP PRIORITY — Commit after every code change
 

@@ -1,6 +1,6 @@
 # 01 — System Context
 
-A top-down view of AgentFlow as a deployed system. Boxes outside the dashed
+A top-down view of GuudFlow as a deployed system. Boxes outside the dashed
 boundary are actors or third-party services; everything inside is code in this
 repository.
 
@@ -22,7 +22,7 @@ flowchart LR
       Web[Web search /<br/>web fetch]:::external
     end
 
-    subgraph host["AgentFlow host process"]
+    subgraph host["GuudFlow host process"]
       direction TB
       Studio[studio/<br/>Vite + React UI]:::internal
       API[api/<br/>FastAPI app + WS]:::internal
@@ -57,7 +57,7 @@ flowchart LR
 
 - The **API** and **Worker** can run as one process (default — in-process
   worker, started by `api.main.lifespan`) or as two (set
-  `AGENTFLOW_DISABLE_INPROC_WORKER=1`).
+  `GUUDFLOW_DISABLE_INPROC_WORKER=1`).
 - `code-exec` is the only tool that crosses into the sandbox; every other
   tool runs in-process so file I/O can stay path-safe inside `FileWorkspace`.
 - LLM calls always go through the runner-side `LLMClient` abstraction.

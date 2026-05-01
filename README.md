@@ -1,4 +1,4 @@
-# AgentFlow
+# GuudFlow
 
 A managed multi-agent orchestration platform. Describe a goal, a meta-agent
 proposes a team, you approve it, and the team runs — with a shared
@@ -93,7 +93,7 @@ exist. Open `.env` and add your `ANTHROPIC_API_KEY`.
 
 > **Optional:** semantic embeddings (PyTorch + sentence-transformers,
 > ~600 MB) are off by default per DESIGN §28. To enable, set
-> `AGENTFLOW_WITH_EMBEDDINGS=1` before running setup, or
+> `GUUDFLOW_WITH_EMBEDDINGS=1` before running setup, or
 > `pip install -r requirements-optional.txt` separately later.
 
 Then start the API + in-process worker:
@@ -116,7 +116,7 @@ npm run dev
 
 Studio runs at `http://localhost:3000` and proxies `/api` and `/ws` to
 the backend on `:8000`. Paste your API token (whatever you set in
-`AGENTFLOW_API_TOKEN`) in the top-right field.
+`GUUDFLOW_API_TOKEN`) in the top-right field.
 
 ### 3. (Optional) Sandbox image
 
@@ -130,7 +130,7 @@ For production-style runs, build the per-run sandbox image:
 ./scripts/build_sandbox.sh
 ```
 
-Then set `AGENTFLOW_MODE=production`. The worker now routes every
+Then set `GUUDFLOW_MODE=production`. The worker now routes every
 `code-exec` invocation through `DockerManager.exec_in()` against the
 run's ephemeral container — `network_mode: none`, read-only root,
 512 MiB memory cap, 1 CPU, 50 PID cap, no-new-privileges, tmpfs `/tmp`
@@ -138,7 +138,7 @@ run's ephemeral container — `network_mode: none`, read-only root,
 
 Misconfigured production deploys fail closed: if the worker reaches
 production mode without a Docker daemon (or without the sandbox image),
-it refuses to start. If somehow `AGENTFLOW_MODE=production` is set
+it refuses to start. If somehow `GUUDFLOW_MODE=production` is set
 without a `DockerManager`, `code-exec` itself refuses to run on the
 host.
 
@@ -165,12 +165,12 @@ The compose stack:
 
 Set environment variables in `.env` (the compose file reads it):
 - `ANTHROPIC_API_KEY` (required for real LLM calls)
-- `AGENTFLOW_API_TOKEN` (optional — required for production)
+- `GUUDFLOW_API_TOKEN` (optional — required for production)
 
 ## Project layout
 
 ```
-agentflow/
+guudflow/
 ├── core/              ← signals, protocol, workspace, scheduler, runner,
 │                        llm/ (split package), loop_guard, edit_blocks,
 │                        run_initializer, run_loader, training/, ...
@@ -200,12 +200,12 @@ you need.
 | Variable | Default | What it does |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | (unset) | Required for real LLM calls |
-| `AGENTFLOW_API_TOKEN` | (unset) | Bearer token for credentialed routes. Unset = dev-permissive; required in production |
-| `AGENTFLOW_MODE` | `dev` | `dev` or `production`. Production refuses to start without Docker; gates `code-exec` to container path |
-| `AGENTFLOW_DATA_DIR` | `./data` | Where runs, personas, and projects are stored |
-| `AGENTFLOW_DISABLE_INPROC_WORKER` | unset | Set to `1` to disable the in-process worker (use a separate worker process instead) |
-| `AGENTFLOW_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
-| `AGENTFLOW_STUDIO_DIST` | unset | If set to a directory of static files, the API serves them at `/` |
+| `GUUDFLOW_API_TOKEN` | (unset) | Bearer token for credentialed routes. Unset = dev-permissive; required in production |
+| `GUUDFLOW_MODE` | `dev` | `dev` or `production`. Production refuses to start without Docker; gates `code-exec` to container path |
+| `GUUDFLOW_DATA_DIR` | `./data` | Where runs, personas, and projects are stored |
+| `GUUDFLOW_DISABLE_INPROC_WORKER` | unset | Set to `1` to disable the in-process worker (use a separate worker process instead) |
+| `GUUDFLOW_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
+| `GUUDFLOW_STUDIO_DIST` | unset | If set to a directory of static files, the API serves them at `/` |
 
 ## Testing
 

@@ -15,13 +15,13 @@ or a no-op stub (dev).
 
 ## Modes
 
-`AGENTFLOW_MODE=dev` (default):
+`GUUDFLOW_MODE=dev` (default):
 
 - DockerManager is a stub. `start()` / `stop()` are no-ops.
 - `code-exec` runs on the host with §29 dev-mode hardening (env scrub,
   cwd pin, audit log, POSIX rlimits).
 
-`AGENTFLOW_MODE=production`:
+`GUUDFLOW_MODE=production`:
 
 - DockerManager requires `docker` SDK + reachable daemon. Refuses to
   start otherwise.

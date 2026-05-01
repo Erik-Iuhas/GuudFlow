@@ -1,6 +1,6 @@
-# AgentFlow — User Stories
+# GuudFlow — User Stories
 
-This file captures **who shows up at AgentFlow and what they're trying
+This file captures **who shows up at GuudFlow and what they're trying
 to do**, grounded in the architecture we've actually built (Phases A,
 B, C, D-prime, D, F shipped). The original story — "describe a goal,
 get a team, watch them work" — is still true but it's no longer the
@@ -70,7 +70,7 @@ Concrete-enough to be useful, not so granular we end up with twelve
 of them.
 
 ### 1. Solo developer (Mode A)
-Builds with AgentFlow as a daily driver. Has a small persona roster
+Builds with GuudFlow as a daily driver. Has a small persona roster
 (3–5 they trust). Sessions are 30–90 min on real features. Cares
 about: low friction, persona memory paying off, cost transparency.
 
@@ -81,7 +81,7 @@ approval gates conservatively. Cares about: predictability,
 cost ceilings, audit log.
 
 ### 3. Platform / DevOps engineer (Mode B)
-Wires AgentFlow into the dev pipeline. Sets up a webhook from
+Wires GuudFlow into the dev pipeline. Sets up a webhook from
 GitHub → triggers a code-review project → posts the review back as
 PR comments. Cares about: reliable headless invocation, structured
 outputs, low ops burden.
@@ -182,9 +182,9 @@ mode and current support level (`✓` shipped, `~` partial, `✗` missing).
 - ✗ As a platform engineer, I want an **API key per consumer**
   with per-key rate limits — not one bearer token shared across
   GitHub Actions, internal tools, and my SDK. (Today: single
-  `AGENTFLOW_API_TOKEN`.)
+  `GUUDFLOW_API_TOKEN`.)
 - ✗ As a platform engineer, I want a **GitHub Action** I can drop
-  into a repo's workflow that runs an AgentFlow project on a PR
+  into a repo's workflow that runs an GuudFlow project on a PR
   and posts the result as a comment. (Today: would need to glue
   curl + jq myself.)
 - ✗ As a platform engineer, I want **scheduled runs** — "every

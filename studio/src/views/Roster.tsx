@@ -306,7 +306,7 @@ function RosterEmptyState({ catalog }: { catalog: CatalogStatus | null }) {
           <code>python scripts/seed_data.py</code>.
         </p>
         <p className="small">
-          New to AgentFlow? <Link to="/projects">Try the demo</Link> on
+          New to GuudFlow? <Link to="/projects">Try the demo</Link> on
           the Projects page — it hires the seed personas for you.
         </p>
       </div>

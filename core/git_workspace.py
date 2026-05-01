@@ -114,7 +114,7 @@ class GitWorkspace:
     """
 
     AGENT_BRANCH_PREFIX = "agent/"
-    DEFAULT_AUTHOR = ("agentflow", "bot@agentflow.local")
+    DEFAULT_AUTHOR = ("guudflow", "bot@guudflow.local")
 
     def __init__(
         self,
@@ -242,7 +242,7 @@ class GitWorkspace:
             )
 
         persona_name = self._hired_personas.get(role, role)
-        actor = git.Actor(f"{persona_name} ({role})", f"{role}@agentflow.local")
+        actor = git.Actor(f"{persona_name} ({role})", f"{role}@guudflow.local")
         new_commit = self.repo.index.commit(message, author=actor, committer=actor)
         info = GitCommitInfo(
             hash=new_commit.hexsha,

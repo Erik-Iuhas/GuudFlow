@@ -1,4 +1,4 @@
-# AgentFlow local setup — Windows PowerShell.
+# GuudFlow local setup — Windows PowerShell.
 #
 # Run from the repo root:
 #   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 $Repo = Split-Path -Parent $PSScriptRoot
 Set-Location $Repo
 
-Write-Host "AgentFlow setup" -ForegroundColor Cyan
+Write-Host "GuudFlow setup" -ForegroundColor Cyan
 Write-Host "===============" -ForegroundColor Cyan
 Write-Host "Repo: $Repo"
 Write-Host ""
@@ -50,15 +50,15 @@ Write-Host "Installing Python dependencies..."
 & python -m pip install --quiet -r requirements.txt
 
 # Optional embeddings (heavy — pulls PyTorch). Off by default; opt in
-# with $env:AGENTFLOW_WITH_EMBEDDINGS=1.
-if ($env:AGENTFLOW_WITH_EMBEDDINGS -eq "1") {
+# with $env:GUUDFLOW_WITH_EMBEDDINGS=1.
+if ($env:GUUDFLOW_WITH_EMBEDDINGS -eq "1") {
     Write-Host "Installing optional embedding dependencies (this is heavy)..."
     & python -m pip install --quiet -r requirements-optional.txt
 }
 
 # 4. Playwright browsers (skippable)
-if ($env:AGENTFLOW_SKIP_PLAYWRIGHT -ne "1") {
-    Write-Host "Installing Playwright chromium (set AGENTFLOW_SKIP_PLAYWRIGHT=1 to skip)..."
+if ($env:GUUDFLOW_SKIP_PLAYWRIGHT -ne "1") {
+    Write-Host "Installing Playwright chromium (set GUUDFLOW_SKIP_PLAYWRIGHT=1 to skip)..."
     try {
         & python -m playwright install chromium
     } catch {
@@ -69,7 +69,7 @@ if ($env:AGENTFLOW_SKIP_PLAYWRIGHT -ne "1") {
 # 5. Studio (optional)
 $npm = Get-Command npm -ErrorAction SilentlyContinue
 if ($npm) {
-    if ($env:AGENTFLOW_SKIP_NPM -ne "1") {
+    if ($env:GUUDFLOW_SKIP_NPM -ne "1") {
         Write-Host "Installing studio dependencies..."
         Push-Location studio
         & npm install --silent --no-audit --no-fund
@@ -89,8 +89,8 @@ if (-not (Test-Path ".env")) {
     } else {
         @"
 ANTHROPIC_API_KEY=
-AGENTFLOW_API_TOKEN=
-AGENTFLOW_MODE=dev
+GUUDFLOW_API_TOKEN=
+GUUDFLOW_MODE=dev
 "@ | Set-Content -Path ".env" -Encoding UTF8
         Write-Host "Created .env (no .env.example found)"
     }
@@ -100,7 +100,7 @@ AGENTFLOW_MODE=dev
 
 # 7. Seed default personas on first install (idempotent — won't
 # overwrite existing personas; safe to skip on re-run).
-if ($freshInstall -or $env:AGENTFLOW_FORCE_SEED -eq "1") {
+if ($freshInstall -or $env:GUUDFLOW_FORCE_SEED -eq "1") {
     Write-Host "Seeding default personas..."
     try {
         & python scripts/seed_data.py

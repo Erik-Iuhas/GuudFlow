@@ -470,7 +470,7 @@ async def test_local_path_secrets_force_strips(client, auth_header, data_root, p
 
 async def test_local_path_allowlist_blocks_outside(client, auth_header, project, local_src, monkeypatch):
     # Allowlist points elsewhere — local_src is not under it.
-    monkeypatch.setenv("AGENTFLOW_LOCAL_PATH_ALLOWLIST", str(local_src.parent.parent / "other"))
+    monkeypatch.setenv("GUUDFLOW_LOCAL_PATH_ALLOWLIST", str(local_src.parent.parent / "other"))
     r = await client.post(
         f"/api/projects/{project}/inputs/local_path",
         json={"path": str(local_src)},
@@ -480,7 +480,7 @@ async def test_local_path_allowlist_blocks_outside(client, auth_header, project,
 
 
 async def test_local_path_allowlist_permits_inside(client, auth_header, project, local_src, monkeypatch):
-    monkeypatch.setenv("AGENTFLOW_LOCAL_PATH_ALLOWLIST", str(local_src.parent))
+    monkeypatch.setenv("GUUDFLOW_LOCAL_PATH_ALLOWLIST", str(local_src.parent))
     r = await client.post(
         f"/api/projects/{project}/inputs/local_path",
         json={"path": str(local_src)},
@@ -490,7 +490,7 @@ async def test_local_path_allowlist_permits_inside(client, auth_header, project,
 
 
 async def test_local_path_allowlist_unset_permits(client, auth_header, project, local_src, monkeypatch):
-    monkeypatch.delenv("AGENTFLOW_LOCAL_PATH_ALLOWLIST", raising=False)
+    monkeypatch.delenv("GUUDFLOW_LOCAL_PATH_ALLOWLIST", raising=False)
     r = await client.post(
         f"/api/projects/{project}/inputs/local_path",
         json={"path": str(local_src)},

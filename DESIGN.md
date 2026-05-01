@@ -1,11 +1,11 @@
-# AgentFlow — Design Document
+# GuudFlow — Design Document
 ## Architecture, Product Vision & Build Plan
 
 ---
 
 ## 1. What This Is
 
-AgentFlow is a **managed multi-agent orchestration platform**. You describe a goal, a meta-agent proposes a team to accomplish it, you review and approve that team, and then it runs — looping until a reviewer agent is satisfied or a human intervenes.
+GuudFlow is a **managed multi-agent orchestration platform**. You describe a goal, a meta-agent proposes a team to accomplish it, you review and approve that team, and then it runs — looping until a reviewer agent is satisfied or a human intervenes.
 
 The core philosophy is **managed control, not vibe coding**. This is not "describe something, hope for the best." It is closer to briefing a consultant team: they propose an engagement plan, you approve it, they execute, you stay informed without being in every meeting.
 
@@ -713,7 +713,7 @@ hired persona's memory.json and reputation.json. No user action needed.
 ## 8. Project Structure
 
 ```
-agentflow/
+guudflow/
 │
 ├── core/
 │   ├── signals.py          # SignalType enum, Signal dataclass — built first
@@ -1091,7 +1091,7 @@ The AI composes from known building blocks rather than inventing layout from scr
 
 The library is open source and extensible. Adding a new widget type means adding a schema entry, a renderer component, and a code template. Community contributions grow the vocabulary over time.
 
-### Where It Fits in AgentFlow
+### Where It Fits in GuudFlow
 
 UICanvas would be a builtin tool — `ui_canvas` — available to specific agent roles:
 
@@ -1136,7 +1136,7 @@ All of these follow the same pattern as UICanvas: a shared structured schema tha
 
 ### The Two Modes of a Project
 
-Every AgentFlow project has two distinct modes:
+Every GuudFlow project has two distinct modes:
 
 **Authoring mode** — used in the studio. Human describes a goal, meta-agent proposes a team, human approves and tweaks, project is saved. This is how projects get created and modified.
 
@@ -1179,7 +1179,7 @@ The worker is a separate process running `worker/job_runner.py`. Scale it horizo
 ### Project Structure Addition
 
 ```
-agentflow/
+guudflow/
 ├── worker/
 │   ├── job_runner.py     # picks jobs off queue, runs AgentRunner
 │   ├── queue.py          # queue abstraction (in-memory dev / Redis prod)
@@ -1208,18 +1208,18 @@ Webhook endpoints additionally verify the provider signature (GitHub sends `x-hu
 ### GitHub Webhook Setup
 
 1. In your GitHub repo: Settings → Webhooks → Add webhook
-2. Payload URL: `https://your-agentflow.com/api/invoke/webhook/{project_id}`
+2. Payload URL: `https://your-guudflow.com/api/invoke/webhook/{project_id}`
 3. Content type: `application/json`
 4. Secret: copy from project's webhook secret field in studio
 5. Events: select "Pull requests" and/or "Pushes"
 
-AgentFlow automatically extracts PR title, branch, diff URL, author from the GitHub payload and injects it as agent context.
+GuudFlow automatically extracts PR title, branch, diff URL, author from the GitHub payload and injects it as agent context.
 
 ---
 
 ### GitHub Actions Integration
 
-For CI/CD pipelines that need to invoke AgentFlow as a step and optionally gate on the result:
+For CI/CD pipelines that need to invoke GuudFlow as a step and optionally gate on the result:
 
 ```yaml
 # .github/workflows/agent-review.yml
@@ -1233,12 +1233,12 @@ jobs:
   agent-review:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger AgentFlow review
+      - name: Trigger GuudFlow review
         id: trigger
         run: |
           RESPONSE=$(curl -s -X POST \
-            https://your-agentflow.com/api/invoke/${{ vars.PR_REVIEW_PROJECT_ID }} \
-            -H "Authorization: Bearer ${{ secrets.AGENTFLOW_TOKEN }}" \
+            https://your-guudflow.com/api/invoke/${{ vars.PR_REVIEW_PROJECT_ID }} \
+            -H "Authorization: Bearer ${{ secrets.GUUDFLOW_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d '{
               "pr_number": ${{ github.event.pull_request.number }},
@@ -1253,8 +1253,8 @@ jobs:
         run: |
           for i in {1..30}; do
             STATUS=$(curl -s \
-              https://your-agentflow.com/api/invoke/${{ vars.PR_REVIEW_PROJECT_ID }}/runs/${{ steps.trigger.outputs.run_id }} \
-              -H "Authorization: Bearer ${{ secrets.AGENTFLOW_TOKEN }}" \
+              https://your-guudflow.com/api/invoke/${{ vars.PR_REVIEW_PROJECT_ID }}/runs/${{ steps.trigger.outputs.run_id }} \
+              -H "Authorization: Bearer ${{ secrets.GUUDFLOW_TOKEN }}" \
               | jq -r .status)
             if [ "$STATUS" = "complete" ]; then exit 0; fi
             if [ "$STATUS" = "failed" ]; then exit 1; fi
@@ -1270,7 +1270,7 @@ To use as a merge gate, add `required_status_checks` in branch protection rules 
 
 ### Self-Hosting
 
-AgentFlow is designed to self-host with minimal ops overhead:
+GuudFlow is designed to self-host with minimal ops overhead:
 
 **Minimum viable production setup:**
 ```
@@ -2420,9 +2420,9 @@ simulated engineering team.
 
 ## 26. Agent Personas — Persistent Specialists
 
-> This is the feature that differentiates AgentFlow from every other multi-agent platform.
+> This is the feature that differentiates GuudFlow from every other multi-agent platform.
 
-Most platforms make you re-specify agents from scratch each run. AgentFlow agents
+Most platforms make you re-specify agents from scratch each run. GuudFlow agents
 are **persistent specialists** — they have names, specialties, accumulated memory,
 and reputation. You hire them for projects. They get better over time.
 
@@ -2831,14 +2831,14 @@ This is not in the initial build but the architecture supports it from day one.
 
 ### Why This Matters
 
-This is the structural difference between AgentFlow and every other platform:
+This is the structural difference between GuudFlow and every other platform:
 
 - LangGraph: agents are functions, no persistence between runs
 - CrewAI: agents are config, no memory or reputation
 - AutoGen: agents are conversation participants, no identity
 - MetaGPT: agents are roles, no individuality
 
-AgentFlow agents are people you work with. They have names, they have history,
+GuudFlow agents are people you work with. They have names, they have history,
 they get better. The platform value compounds with use rather than starting
 fresh every project.
 
@@ -3164,7 +3164,7 @@ When the container is destroyed, anything written outside `/workspace/` is gone.
 ```python
 # Pseudocode — actual implementation in worker/
 container = docker.run(
-    image="agentflow-sandbox:latest",
+    image="guudflow-sandbox:latest",
     volumes={
         f"data/runs/{run_id}/workspace": {"bind": "/workspace", "mode": "rw"},
         f"data/personas": {"bind": "/personas", "mode": "ro"},
@@ -3307,7 +3307,7 @@ rather than eliminate the risk.
 
 ### The Sandbox Image
 
-A dedicated Docker image for run containers — `agentflow-sandbox` — built
+A dedicated Docker image for run containers — `guudflow-sandbox` — built
 from a minimal base with only what agents need:
 
 ```dockerfile
@@ -3344,7 +3344,7 @@ for production.
 Add to project structure:
 
 ```
-agentflow/
+guudflow/
 ├── sandbox/
 │   ├── Dockerfile          # the sandbox image definition
 │   └── README.md           # what's in the image and why
@@ -3706,7 +3706,7 @@ none, resource caps). Until Stage 7 wires the container, dev mode runs
 on the host. The dev-mode runner has the following hardening built in
 so the gap between dev and production is narrower:
 
-1. **Mode enforcement.** If `AGENTFLOW_MODE=production`, the dev host
+1. **Mode enforcement.** If `GUUDFLOW_MODE=production`, the dev host
    runner refuses to run and returns an error directing the runner to
    use the container path. Custom (production) runners are unaffected
    — only the unsandboxed host runner is gated.
@@ -5152,7 +5152,7 @@ Tournament mode runs N personas on the SAME scenario in parallel
 (separate workspaces) and produces a comparative ranking:
 
 ```
-$ agentflow tournament --scenario auth_flow_v1 --personas aria,kai,nova,alice
+$ guudflow tournament --scenario auth_flow_v1 --personas aria,kai,nova,alice
 
 Tournament: auth_flow_v1
 ─────────────────────────
@@ -5222,7 +5222,7 @@ of a single Opus production run.
 Users can author their own training scenarios:
 
 ```bash
-$ agentflow scenario init my_company_style_v1
+$ guudflow scenario init my_company_style_v1
 # scaffolds data/training_camp/scenarios/{user}/my_company_style_v1/
 # with scenario.json, rubric.json, inputs/, README.md
 ```

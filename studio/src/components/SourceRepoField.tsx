@@ -172,7 +172,7 @@ export function SourceRepoField({
           <p className="muted small" style={{ marginTop: 4 }}>
             The API process must have read access to this path. Multi-tenant
             deployments restrict this via{" "}
-            <span className="mono">AGENTFLOW_LOCAL_PATH_ALLOWLIST</span>.
+            <span className="mono">GUUDFLOW_LOCAL_PATH_ALLOWLIST</span>.
           </p>
         </div>
       )}
