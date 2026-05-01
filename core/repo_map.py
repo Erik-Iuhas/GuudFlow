@@ -373,6 +373,63 @@ def _approx_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+# ── Task-aware scoring (Track 1d) ───────────────────────────────────────────
+
+
+import re as _re
+
+_WORD_RE = _re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+
+
+def _split_camel_snake(word: str) -> set[str]:
+    """Split CamelCase / snake_case identifiers into lower-cased component tokens."""
+    parts = _re.findall(r"[A-Z][a-z0-9]*|[a-z0-9]+", word)
+    return {p.lower() for p in parts if p}
+
+
+def _query_tokens(text: str) -> set[str]:
+    """Identifier-ish tokens (whole + camel/snake split) for keyword matching."""
+    out: set[str] = set()
+    for m in _WORD_RE.finditer(text):
+        word = m.group(0)
+        out.add(word.lower())
+        out.update(_split_camel_snake(word))
+    return out
+
+
+def score_entries_for_task(
+    repo_map: RepoMap,
+    task: str,
+) -> list[tuple[float, RepoMapEntry]]:
+    """Score every entry by symbol/path overlap with task tokens.
+
+    Track 1d — the task-aware companion to PageRank. Returns descending-sorted
+    (score, entry) pairs. Entries with zero overlap are filtered out.
+
+    Score formula (matches core/context_manager.py:_score_entry):
+        2.0 * symbol_hits + 1.0 * path_hits + 0.1 * entry.rank
+    """
+    if not task or not task.strip() or not repo_map.entries:
+        return []
+    qtokens = _query_tokens(task)
+    if not qtokens:
+        return []
+    scored: list[tuple[float, RepoMapEntry]] = []
+    for entry in repo_map.entries:
+        path_t = _query_tokens(entry.path)
+        sym_t: set[str] = set()
+        for s in entry.symbols:
+            sym_t.update(_split_camel_snake(s))
+        path_hits = len(path_t & qtokens)
+        sym_hits = len(sym_t & qtokens)
+        if path_hits == 0 and sym_hits == 0:
+            continue
+        score = 2.0 * sym_hits + 1.0 * path_hits + 0.1 * entry.rank
+        scored.append((score, entry))
+    scored.sort(key=lambda p: p[0], reverse=True)
+    return scored
+
+
 def render_compact(repo_map: RepoMap, max_tokens: int = 1500) -> str:
     """Render the map as compact lines, capped at `max_tokens`.
 
