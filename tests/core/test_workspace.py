@@ -10,8 +10,10 @@ from core.signals import Signal, SignalType
 from core.workspace import (
     AgentState,
     Artifact,
+    ContextSnapshot,
     GitState,
     HumanRequest,
+    IterationMetrics,
     RepoMap,
     USER_BOARD_TYPES,
     Workspace,
@@ -178,3 +180,68 @@ def test_board_append_order_preserved():
     for s in sigs:
         ws.post_signal(s)
     assert ws.board == sigs
+
+
+# ── Track 1: IterationMetrics + ContextSnapshot ──────────────────────────────
+
+
+def test_add_iteration_metrics_appends_to_list():
+    ws = Workspace(run_id="r1", goal="x")
+    m = IterationMetrics(run_id="r1", role="developer", iteration=1, model="claude-sonnet-4-6")
+    ws.add_iteration_metrics(m)
+    assert len(ws.iteration_metrics) == 1
+    assert ws.iteration_metrics[0] is m
+
+
+def test_add_iteration_metrics_fires_persister():
+    ws = Workspace(run_id="r1", goal="x")
+    fired: list[IterationMetrics] = []
+    ws._iteration_metrics_persister = fired.append
+
+    m = IterationMetrics(run_id="r1", role="reviewer", iteration=2, input_tokens=100)
+    ws.add_iteration_metrics(m)
+
+    assert len(fired) == 1
+    assert fired[0] is m
+
+
+def test_add_iteration_metrics_swallows_persister_exception():
+    ws = Workspace(run_id="r1", goal="x")
+
+    def _bad(m: IterationMetrics) -> None:
+        raise RuntimeError("disk full")
+
+    ws._iteration_metrics_persister = _bad
+    m = IterationMetrics(run_id="r1", role="dev", iteration=1)
+    ws.add_iteration_metrics(m)  # must not raise
+    assert ws.iteration_metrics == [m]
+
+
+def test_record_context_snapshot_appends_and_fires_persister():
+    ws = Workspace(run_id="r1", goal="x")
+    fired: list[ContextSnapshot] = []
+    ws._context_log_persister = fired.append
+
+    snap = ContextSnapshot(
+        run_id="r1",
+        role="developer",
+        iteration=1,
+        task="implement auth",
+        used_tokens=3000,
+    )
+    ws.record_context_snapshot(snap)
+
+    assert ws.context_log == [snap]
+    assert fired == [snap]
+
+
+def test_record_context_snapshot_swallows_persister_exception():
+    ws = Workspace(run_id="r1", goal="x")
+
+    def _bad(s: ContextSnapshot) -> None:
+        raise OSError("permission denied")
+
+    ws._context_log_persister = _bad
+    snap = ContextSnapshot(run_id="r1", role="dev", iteration=1, task="x")
+    ws.record_context_snapshot(snap)  # must not raise
+    assert ws.context_log == [snap]

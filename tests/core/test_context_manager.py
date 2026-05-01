@@ -15,7 +15,7 @@ from core.file_workspace import FileWorkspace
 from core.git_workspace import GitWorkspace
 from core.repo_map import build
 from core.signals import Signal, SignalType
-from core.workspace import Workspace
+from core.workspace import ContextSnapshot, Workspace
 
 
 @pytest.fixture
@@ -210,6 +210,71 @@ async def test_search_respects_limit(setup):
     cm = ContextManager(ws, files=fw)
     results = await cm.search("login", limit=1)
     assert len(results) <= 1
+
+
+# ── Track 1: ContextSnapshot capture ────────────────────────────────────────
+
+
+async def test_get_context_records_context_snapshot(setup):
+    """get_context() must append exactly one ContextSnapshot to workspace.context_log."""
+    ws, fw = setup
+    cm = ContextManager(ws, files=fw)
+    ctx = await cm.get_context("implement auth", agent_role="developer", tier="solid")
+
+    assert len(ws.context_log) == 1
+    snap = ws.context_log[0]
+    assert isinstance(snap, ContextSnapshot)
+    assert snap.role == "developer"
+    assert snap.run_id == ws.run_id
+    assert snap.tier == "solid"
+    assert snap.used_tokens == ctx.token_count
+    assert snap.task == "implement auth"
+
+
+async def test_context_snapshot_relevant_files_match_context(setup):
+    """ContextSnapshot.relevant_files must list the same paths as ctx.relevant_files."""
+    ws, fw = setup
+    cm = ContextManager(ws, files=fw)
+    ctx = await cm.get_context("AuthManager login", agent_role="developer")
+
+    snap = ws.context_log[-1]
+    snapshot_paths = {path for path, _ in snap.relevant_files}
+    context_paths = set(ctx.relevant_files.keys())
+    assert snapshot_paths == context_paths
+
+
+async def test_context_snapshot_used_tokens_correct(setup):
+    """Snapshot used_tokens must equal ctx.token_count."""
+    ws, fw = setup
+    cm = ContextManager(ws, files=fw)
+    ctx = await cm.get_context("login", agent_role="developer")
+
+    snap = ws.context_log[-1]
+    assert snap.used_tokens == ctx.token_count
+
+
+async def test_context_snapshot_task_truncated_to_500(setup):
+    """Snapshot task field must be truncated at 500 chars."""
+    ws, fw = setup
+    cm = ContextManager(ws, files=fw)
+    long_task = "x" * 600
+    await cm.get_context(long_task, agent_role="developer")
+
+    snap = ws.context_log[-1]
+    assert len(snap.task) == 500
+
+
+async def test_context_snapshot_fires_persister(setup):
+    """record_context_snapshot() inside get_context() must fire the persister."""
+    ws, fw = setup
+    fired: list[ContextSnapshot] = []
+    ws._context_log_persister = fired.append
+
+    cm = ContextManager(ws, files=fw)
+    await cm.get_context("build tests", agent_role="developer")
+
+    assert len(fired) == 1
+    assert fired[0].role == "developer"
 
 
 # ── Robustness ──────────────────────────────────────────────────────────────
