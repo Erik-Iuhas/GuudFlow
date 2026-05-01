@@ -55,6 +55,22 @@ from core.workspace import (
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
+# Track 1b: tools whose output is content the LLM reasons over (file bodies,
+# search hits, structural maps). Their result tokens contribute to
+# `direct_file_read_tokens` so iteration_metrics.jsonl reflects how many
+# tokens flowed into the prompt from direct tool calls vs. get_context().
+# Write-class tools (fs-write, fs-edit, etc.) get tracked in
+# `tool_token_breakdown` only — their results are confirmations, not context.
+# TODO(track-3d.4): migrate to a `read_class: bool` class attribute on the
+# Tool base when the manifest auto-render lands.
+READ_CLASS_TOOLS: frozenset[str] = frozenset({
+    "fs-read", "fs-read_range", "fs-list", "fs-grep", "fs-exists",
+    "code-outline", "doc-markdown",
+    "git-log", "git-diff", "git-status", "git-changed-files", "git-read",
+    "desk-search", "web-fetch", "web-search",
+})
+
+
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -601,19 +617,49 @@ class BaseAgent:
             if tool is None:
                 raise ToolError(f"local tool {name!r} declared but not instantiated")
             try:
-                return await tool.run(arguments)
+                result = await tool.run(arguments)
             except Exception:
                 raise
+            self._account_tool_tokens(name, result)
+            return result
 
         # Broker-routed.
-        result = await self.request_credential(
+        broker_result = await self.request_credential(
             scope=d.scope or name,
             operation=name,
             payload=arguments,
         )
-        if not result.granted:
-            raise ToolDenied(name, result.reason)
-        return result.result or {}
+        if not broker_result.granted:
+            raise ToolDenied(name, broker_result.reason)
+        result = broker_result.result or {}
+        self._account_tool_tokens(name, result)
+        return result
+
+    def _account_tool_tokens(self, name: str, result: Any) -> None:
+        """Track 1b: record the token cost of a tool result.
+
+        Counts tokens of the JSON-serialised result (the form the LLM will
+        receive as tool_result). Read-class tools also contribute to
+        `direct_file_read_tokens`. Failures here must never break call_tool —
+        on any exception, return silently. Mirrors the persister-error rule:
+        a buggy auxiliary cannot break the primary path.
+        """
+        m = self._current_metrics
+        if m is None:
+            return
+        try:
+            if isinstance(result, str):
+                as_text = result
+            else:
+                as_text = json.dumps(result, default=str)
+            tokens = _approx_tokens(as_text)
+            m.tool_token_breakdown[name] = (
+                m.tool_token_breakdown.get(name, 0) + tokens
+            )
+            if name in READ_CLASS_TOOLS:
+                m.direct_file_read_tokens += tokens
+        except Exception:
+            pass
 
     # ── Broker (§30) ───────────────────────────────────────────────────────
 
