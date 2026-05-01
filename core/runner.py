@@ -450,6 +450,7 @@ class AgentRunner:
         # 3 respawns per role per run to prevent ping-pong loops.
         self._question_respawn_counts: dict[str, int] = {}
         self._question_mode_roles: set[str] = set()
+        self._agent_turns_persister: "Callable[[dict], None] | None" = None
         # Serialize git operations across parallel agents — a shared
         # working directory with concurrent checkouts causes race conditions
         # where one agent's `git add -A` picks up another agent's file writes.
@@ -511,6 +512,7 @@ class AgentRunner:
         self.workspace._context_log_persister = (
             self._build_context_log_persister()
         )
+        self._agent_turns_persister = self._build_agent_turns_persister()
         # Run-level deadline — checked by the scheduler.
         if max_wall_seconds is not None:
             import time as _time
@@ -816,6 +818,29 @@ class AgentRunner:
             try:
                 with open(path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(asdict(s), default=str) + "\n")
+            except OSError:
+                pass
+
+        return _persist
+
+    def _build_agent_turns_persister(self):
+        """Return a callable that appends a full agent turn record to
+        agent_turns.jsonl — one line per completed agent invocation.
+
+        Each record contains: role, iteration, model, all messages (prompt,
+        tool calls, tool results, final response), and the final output text.
+        Crash-safe: each append is independent.
+        """
+        try:
+            self.run_root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None
+        path = self.run_root / "agent_turns.jsonl"
+
+        def _persist(record: dict) -> None:
+            try:
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, default=str) + "\n")
             except OSError:
                 pass
 
@@ -1475,6 +1500,40 @@ class AgentRunner:
                     _m.completed = not _m.failed
                     workspace.add_iteration_metrics(_m)
                     agent._current_metrics = None
+                # Log the full turn — messages + output — to agent_turns.jsonl.
+                if self._agent_turns_persister is not None:
+                    try:
+                        def _serialise_msg(msg: LLMMessage) -> dict:
+                            tc = None
+                            if msg.tool_calls:
+                                tc = [{"id": c.id, "name": c.name, "arguments": c.arguments}
+                                      for c in msg.tool_calls]
+                            return {"role": msg.role, "content": msg.content, "tool_calls": tc}
+
+                        turn_record: dict = {
+                            "run_id": workspace.run_id,
+                            "role": cfg.role,
+                            "iteration": agent.iteration,
+                            "model": agent._model,
+                            "started_at": _m.started_at if _m else None,
+                            "ended_at": _m.ended_at if _m else None,
+                            "elapsed_seconds": _m.elapsed_seconds if _m else None,
+                            "input_tokens": _m.input_tokens if _m else None,
+                            "output_tokens": _m.output_tokens if _m else None,
+                            "llm_calls": _m.llm_calls if _m else None,
+                            "tools_called": _m.tools_called if _m else [],
+                            "completed": _m.completed if _m else False,
+                            "failed": _m.failed if _m else True,
+                            "messages": [_serialise_msg(msg) for msg in self._current_agent_messages],
+                            "final_output": (
+                                {"kind": drive_result.kind, "fields": drive_result.fields}
+                                if isinstance(drive_result, protocol.CompactBlock)
+                                else str(drive_result) if drive_result else None
+                            ),
+                        }
+                        self._agent_turns_persister(turn_record)
+                    except Exception:
+                        pass
 
             # M1: handle REQUEST_SKIP before treating the block as work output.
             if (

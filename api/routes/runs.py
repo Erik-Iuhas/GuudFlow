@@ -910,3 +910,25 @@ async def get_context_log(request: Request, run_id: str) -> list[dict]:
         raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
     return _read_jsonl(run_root / "context_log.jsonl")
 
+
+@router.get("/{run_id}/agent_turns", dependencies=[Depends(require_bearer)])
+async def get_agent_turns(
+    request: Request,
+    run_id: str,
+    role: str | None = None,
+) -> list[dict]:
+    """Return all agent turn records for a run.
+
+    Each entry contains the full message thread (prompt, tool calls, tool
+    results, final LLM response) plus token counts and timing.
+    Pass ?role=<role> to filter to a specific agent.
+    """
+    data_root = Path(request.app.state.data_root)
+    run_root = data_root / "runs" / run_id
+    if not run_root.exists():
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+    rows = _read_jsonl(run_root / "agent_turns.jsonl")
+    if role:
+        rows = [r for r in rows if r.get("role") == role]
+    return rows
+
