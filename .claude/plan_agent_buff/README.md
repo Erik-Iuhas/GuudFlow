@@ -4,7 +4,7 @@ Detailed plans for the GuudFlow multi-track roadmap. Parent strategy doc: `~/.cl
 
 Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance criteria and a commit plan. Treat the parent roadmap as "why," and these as "how."
 
-**Progress: 5 / 14 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d, ✅ Track 3e.
+**Progress: 5 / 15 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d, ✅ Track 3e.
 
 ## Files
 
@@ -20,6 +20,7 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 | `track_3c_output_compression.md` | 3c | Context economy (RTK-inspired) | ⬜ Not started | Track 1 | 200–350k |
 | `track_3d_agent_io_hygiene.md` | 3d | Hygiene + drift + cost (4 sub-deliverables; 3d.3 superseded by 3e) | ⬜ Not started | Track 1 | 280–450k |
 | `track_3e_batch_tool_calls.md` | 3e | Batch tools: fs-edit-batch, fs-write-batch, code-outline-batch | ✅ **Shipped** | Track 1 | 200–350k |
+| `track_3f_cross_reference_graph.md` | 3f | Cross-reference graph (tree-sitter extension; Python/JS/TS/C++) | 🟦 **Deferred** — gated on real-run signals | Track 1, 1c | 550–850k (3 phases) |
 | `track_4_flow_dir_design.md` | 4 | Design spec (needs sign-off) | ⬜ Pending review | — | 100–150k |
 | `track_6_peer_rework.md` | 6 | Feature | ⬜ Not started | — | 150–250k |
 
@@ -73,6 +74,14 @@ Sprint 3:
 Sprint 4:
   Track 4   ←── DESIGN review with Erik (8 sign-off questions in the spec)
   (then Track 5 doc-manager, Track 3b doc-diff, Track 7 subtask-decomp — write specs after 4 lands)
+
+Later (deferred — gated on observed need from real runs):
+  Track 3f  ←── Cross-reference graph. Tree-sitter extension that gives
+            agents "find references / trace variable" across Python, JS/TS,
+            and C++ without depending on LSP. Inspired by 2026 Codebase-
+            Memory paper. Pick up only when real runs show repeated
+            cross-file reference failures that repo_map + grep can't
+            satisfy. 550–850k tokens across 3 phases.
 ```
 
 ## Rules for executors
