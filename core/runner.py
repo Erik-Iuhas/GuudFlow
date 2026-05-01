@@ -445,6 +445,11 @@ class AgentRunner:
         # M1: track outstanding interrupts so signal subscribers can resume.
         # Maps role → InterruptToken. Cleared by _resume_token_for_role().
         self._open_interrupts: dict[str, "InterruptToken"] = {}
+        # Track 2a: question-respawn tracking. Completed agents are re-queued
+        # when another agent sends them an AGENT_MESSAGE (question). Capped at
+        # 3 respawns per role per run to prevent ping-pong loops.
+        self._question_respawn_counts: dict[str, int] = {}
+        self._question_mode_roles: set[str] = set()
         # Serialize git operations across parallel agents — a shared
         # working directory with concurrent checkouts causes race conditions
         # where one agent's `git add -A` picks up another agent's file writes.
@@ -474,6 +479,8 @@ class AgentRunner:
         # handles the "bounce back to author once, then escalate" pattern.
         self.workspace.subscribe(self._on_signal_for_rejection_redispatch)
         self.workspace.subscribe(self._on_signal_for_approval)
+        # Track 2a: re-queue completed agents that receive an AGENT_MESSAGE.
+        self.workspace.subscribe(self._on_signal_for_question_respawn)
         # M1: subscribe so ANSWER / SKIP_GRANTED / SKIP_DENIED / HUMAN_RESPONDED
         # routes back to scheduler.resume() and unparks the asker.
         self.workspace.subscribe(self._on_signal_for_resume)
@@ -1645,6 +1652,7 @@ class AgentRunner:
 
             workspace.completed_agents.append(cfg.role)
             workspace.agent_states[cfg.role] = AgentState.COMPLETE
+            self._question_mode_roles.discard(cfg.role)
 
             # Reviewer verdict comes from the parsed [VERIFY] block. If
             # the agent overrode run() and returned a raw string, fall
@@ -2479,6 +2487,14 @@ class AgentRunner:
                 "Do not describe what you will do — do it. "
                 "End with the required VERIFY_RESULT protocol block once your review is complete."
             )
+        elif cfg.role in self._question_mode_roles:
+            start_directive = (
+                "You have been re-activated to answer a question from another agent. "
+                "Read the most recent AGENT_MESSAGE signal directed at your role to find "
+                "the question. Answer it concisely and completely using your tools as needed. "
+                "Post your reply as an AGENT_MESSAGE signal, then end with a [COMMIT] block "
+                "whose summary begins 'answered: ' followed by one sentence describing your answer."
+            )
         else:
             start_directive = (
                 "START WORKING NOW. Call `fs-list` or `git-changed-files` as your very "
@@ -3241,6 +3257,34 @@ class AgentRunner:
             return
         for target in reviewer_cfg.depends_on:
             self._consecutive_fails.pop(target, None)
+
+    def _on_signal_for_question_respawn(self, sig: Signal) -> None:
+        """Workspace subscriber (Track 2a). When an AGENT_MESSAGE targets a
+        completed agent, re-queue that agent for one answering iteration.
+
+        Capped at 3 respawns per role per run to prevent ping-pong loops.
+        """
+        if sig.type is not SignalType.AGENT_MESSAGE:
+            return
+        detail = sig.detail or ""
+        try:
+            parsed = json.loads(detail)
+            target = parsed.get("to", "")
+        except (json.JSONDecodeError, AttributeError):
+            return
+        if not target:
+            return
+        if target not in self.workspace.completed_agents:
+            return
+        count = self._question_respawn_counts.get(target, 0)
+        if count >= 3:
+            return
+        self._question_respawn_counts[target] = count + 1
+        self.workspace.completed_agents.remove(target)
+        self.workspace.agent_states[target] = AgentState.READY
+        self._question_mode_roles.add(target)
+        if self._scheduler is not None:
+            self._scheduler.notify()
 
     def _reset_downstream_completed(self, root_role: str) -> None:
         """Walk forward through depends_on edges from root_role; for every
