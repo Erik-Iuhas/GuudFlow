@@ -1582,6 +1582,43 @@ class AgentRunner:
             # Auto-commit any uncommitted changes on the agent's branch.
             commit_hash = await self._auto_commit(cfg.role, workspace)
 
+            # Track 2b — enforce no-op rationale when the branch is clean.
+            # An agent that produces no commits must state (≥ 10 chars) why
+            # in its CompactBlock summary, so downstream agents and reviewers
+            # see structured context instead of a silent COMPLETE.
+            if commit_hash is None:
+                rationale = ""
+                if (
+                    isinstance(drive_result, protocol.CompactBlock)
+                    and drive_result.kind == "COMMIT"
+                ):
+                    rationale = drive_result.fields.get("summary", "").strip()
+                if len(rationale) < 10:
+                    workspace.agent_states[cfg.role] = AgentState.FAILED
+                    await agent.signal(
+                        workspace, SignalType.FAILED,
+                        summary=f"{cfg.role}: no-op completion missing rationale",
+                        detail=(
+                            "Agent produced no git commits and did not explain why. "
+                            "The COMMIT block summary must state what was verified and "
+                            "why no change was needed (at least 10 characters)."
+                        ),
+                    )
+                    return
+                # Post a synthetic no-op COMMIT protocol signal so downstream
+                # agents and reviewers can read the rationale as typed context.
+                _no_op_raw = protocol.render_commit(
+                    cfg.role, "no-op", [], ["no-op-verified"],
+                    no_op_reason=rationale,
+                )
+                workspace.post_signal(Signal(
+                    type=SignalType.PROTOCOL,
+                    summary=agent._namespace("COMMIT (no-op)"),
+                    detail=_no_op_raw,
+                    from_agent=cfg.role,
+                    iteration=workspace.iteration,
+                ))
+
             # M3.5 — process the COMMIT's optional `closes: task:<id>`
             # trailer (DESIGN §38.12 §4.3). Validates assignee + state,
             # mutates each closed task to COMPLETE, cascades parent
@@ -2447,7 +2484,10 @@ class AgentRunner:
                 "START WORKING NOW. Call `fs-list` or `git-changed-files` as your very "
                 "first tool call to understand what already exists on disk. Then read, "
                 "build, or review as your role requires. Do not describe what you will do — "
-                "do it. End with the required protocol block once your work is complete."
+                "do it. End with the required protocol block once your work is complete. "
+                "If you produce no file commits, your [COMMIT] summary MUST explain what "
+                "you verified and why no change was needed (e.g. 'tests already cover this case'). "
+                "A bare summary like 'done' or 'no changes' will fail."
             )
         task_prompt = (
             f"Project goal: {self.project.goal}\n\n"
