@@ -941,6 +941,9 @@ class AgentRunner:
             agent._llm, agent._model = self._resolve_llm_for_tier(cfg.model_tier)
             agent._broker = self.broker
             agent._context_manager = self.context_manager
+            # Track 1c — workspace handle so effective_system_prompt() can
+            # inject Layer 4.5 (codebase structure from repo_map) per §28.
+            agent._workspace = self.workspace
             agent._manifest = self.manifest_builder.build_for_agent(
                 role=cfg.role,
                 declared_local_tools=cfg.declared_local_tools,
@@ -4150,6 +4153,8 @@ class AgentRunner:
         agent._llm, agent._model = self._resolve_llm_for_tier(cfg.model_tier)
         agent._broker = self.broker
         agent._context_manager = self.context_manager
+        # Track 1c — see comment at primary spawn site.
+        agent._workspace = self.workspace
         agent._manifest = self.manifest_builder.build_for_agent(
             role=cfg.role,
             declared_local_tools=cfg.declared_local_tools,
