@@ -8,8 +8,9 @@ from typing import Any
 import pytest
 
 from agents.base import BaseAgent
+from agents.tools.base import BaseTool
 from core.llm import LLMMessage, LLMResponse
-from core.tool_manifest import ToolManifest
+from core.tool_manifest import ToolDescriptor, ToolManifest
 from core.workspace import IterationMetrics, Workspace
 
 
@@ -161,3 +162,128 @@ def test_context_tokens_propagate_to_iteration_metrics():
     assert m.repo_map_tokens == 200
     assert m.git_diff_tokens == 150
     assert m.relevant_files_tokens == 450  # 300 + 150
+
+
+# ── Track 1b: tool token accounting in call_tool ─────────────────────────────
+
+
+class _MockTool(BaseTool):
+    """Configurable mock tool. Returns `result` or raises `exc` if set."""
+
+    def __init__(self, name: str, result: Any = None, exc: Exception | None = None):
+        self.name = name
+        self.description = f"mock {name}"
+        self.input_schema = {"type": "object"}
+        self._result = result if result is not None else {"ok": True}
+        self._exc = exc
+
+    async def run(self, arguments: dict[str, Any]) -> Any:
+        if self._exc is not None:
+            raise self._exc
+        return self._result
+
+
+def _wire_tool(agent: SimpleAgent, tool: _MockTool) -> None:
+    """Register a local tool on a test agent."""
+    descriptor = ToolDescriptor(
+        name=tool.name,
+        description=tool.description,
+        input_schema=tool.input_schema,
+        invocation="local",
+    )
+    agent._manifest = ToolManifest(descriptors=[*(agent._manifest or ToolManifest()).descriptors, descriptor])
+    agent._local_tools[tool.name] = tool
+
+
+async def test_call_tool_records_breakdown(agent: SimpleAgent, workspace: Workspace):
+    """Every call_tool invocation populates tool_token_breakdown[name]."""
+    tool = _MockTool("fs-list", result={"entries": ["a.py", "b.py", "c.py"]})
+    _wire_tool(agent, tool)
+    agent._current_metrics = IterationMetrics(run_id="r", role="developer", iteration=1)
+
+    await agent.call_tool(workspace, "fs-list", {"path": "."})
+    await agent.call_tool(workspace, "fs-list", {"path": "."})
+
+    m = agent._current_metrics
+    assert m is not None
+    # Two calls of identical result → breakdown sums to 2× single-call cost.
+    assert "fs-list" in m.tool_token_breakdown
+    assert m.tool_token_breakdown["fs-list"] > 0
+    assert m.tool_token_breakdown["fs-list"] == 2 * (m.tool_token_breakdown["fs-list"] // 2)
+
+
+async def test_call_tool_read_class_increments_direct_reads(agent: SimpleAgent, workspace: Workspace):
+    """fs-read result tokens flow into direct_file_read_tokens."""
+    payload = "x" * 4000  # ~1000 tokens at 4 chars/token
+    tool = _MockTool("fs-read", result={"content": payload})
+    _wire_tool(agent, tool)
+    agent._current_metrics = IterationMetrics(run_id="r", role="developer", iteration=1)
+
+    await agent.call_tool(workspace, "fs-read", {"path": "src/main.py"})
+
+    m = agent._current_metrics
+    assert m is not None
+    assert m.direct_file_read_tokens > 0
+    assert m.tool_token_breakdown["fs-read"] == m.direct_file_read_tokens
+
+
+async def test_call_tool_write_class_does_not_increment_reads(agent: SimpleAgent, workspace: Workspace):
+    """fs-write result tokens do NOT flow into direct_file_read_tokens."""
+    tool = _MockTool("fs-write", result={"ok": True, "bytes_written": 1234})
+    _wire_tool(agent, tool)
+    agent._current_metrics = IterationMetrics(run_id="r", role="developer", iteration=1)
+
+    await agent.call_tool(workspace, "fs-write", {"path": "src/foo.py", "content": "..."})
+
+    m = agent._current_metrics
+    assert m is not None
+    assert m.direct_file_read_tokens == 0
+    assert m.tool_token_breakdown["fs-write"] > 0  # still tracked in breakdown
+
+
+async def test_call_tool_failure_does_not_record_tokens(agent: SimpleAgent, workspace: Workspace):
+    """A tool that raises produces no breakdown entry and no direct-read delta."""
+    tool = _MockTool("fs-read", exc=RuntimeError("boom"))
+    _wire_tool(agent, tool)
+    agent._current_metrics = IterationMetrics(run_id="r", role="developer", iteration=1)
+
+    with pytest.raises(RuntimeError):
+        await agent.call_tool(workspace, "fs-read", {"path": "src/main.py"})
+
+    m = agent._current_metrics
+    assert m is not None
+    assert "fs-read" not in m.tool_token_breakdown
+    assert m.direct_file_read_tokens == 0
+    # tools_called is appended BEFORE invocation (see call_tool); that's expected.
+    assert "fs-read" in m.tools_called
+
+
+async def test_account_tool_tokens_swallows_exceptions(agent: SimpleAgent, workspace: Workspace):
+    """Unserialisable tool result must not break call_tool."""
+
+    class _Unserialisable:
+        def __repr__(self) -> str:
+            raise RuntimeError("repr blew up")
+
+    tool = _MockTool("fs-read", result={"weird": _Unserialisable()})
+    _wire_tool(agent, tool)
+    agent._current_metrics = IterationMetrics(run_id="r", role="developer", iteration=1)
+
+    # Must not raise — accounting failure is swallowed.
+    result = await agent.call_tool(workspace, "fs-read", {"path": "x"})
+    assert result is not None
+    m = agent._current_metrics
+    assert m is not None
+    # Accounting silently no-op'd: no breakdown entry was recorded.
+    assert m.tool_token_breakdown.get("fs-read", 0) == 0
+    assert m.direct_file_read_tokens == 0
+
+
+async def test_call_tool_no_metrics_does_not_crash(agent: SimpleAgent, workspace: Workspace):
+    """call_tool with _current_metrics=None must not raise."""
+    tool = _MockTool("fs-list", result={"entries": []})
+    _wire_tool(agent, tool)
+    agent._current_metrics = None
+
+    result = await agent.call_tool(workspace, "fs-list", {"path": "."})
+    assert result == {"entries": []}
