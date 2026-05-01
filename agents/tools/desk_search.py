@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 class DeskSearchTool(BaseTool):
     name = "desk-search"
+    priority = 50
+    when_to_use = "search your persona desk for relevant notes before reasoning from scratch"
     description = "Search your persona desk for relevant notes. Returns ranked snippets within token budget."
     input_schema = {
         "type": "object",

@@ -31,6 +31,8 @@ class WebSearch(BaseTool):
     in dev mode without a handler, returns a clear `no_handler` result."""
 
     name = "web-search"
+    priority = 78
+    when_to_use = "look something up on the public web"
     description = "Search the public web for the given query. Returns ranked results."
     input_schema = {
         "type": "object",
@@ -69,6 +71,8 @@ class WebFetch(BaseTool):
     through the broker as `mcp:*` or a similar scoped tool."""
 
     name = "web-fetch"
+    priority = 75
+    when_to_use = "fetch a public URL (no credentials)"
     description = "Fetch a public URL (uncredentialed). Returns text body."
     input_schema = {
         "type": "object",

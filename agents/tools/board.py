@@ -39,6 +39,8 @@ class BoardMessage(BaseTool):
     """
 
     name = "board-message"
+    priority = 120
+    when_to_use = "post a directed message to a peer agent on the board"
     description = (
         "Send a directed message to another agent on the board. "
         "Use instead of asking the human when you need clarification "
@@ -104,6 +106,8 @@ class AssignTask(BaseTool):
     """
 
     name = "assign-task"
+    priority = 120
+    when_to_use = "hand a structured task with acceptance criteria to another agent"
     description = (
         "Put a typed work item on another agent's desk. The task carries "
         "a goal, acceptance criteria the reviewer will check against, "

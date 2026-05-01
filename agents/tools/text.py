@@ -33,6 +33,8 @@ class TextDiff(BaseTool):
     """
 
     name = "text-diff"
+    priority = 80
+    when_to_use = "diff two strings or two files (not git-aware — use git-diff for branches)"
     description = "Unified diff between two strings or two files. Pass `a`/`b` for raw text or `a_path`/`b_path` for files."
     input_schema = {
         "type": "object",
@@ -128,6 +130,8 @@ class TextEstimateTokens(BaseTool):
     """
 
     name = "text-estimate_tokens"
+    priority = 80
+    when_to_use = "estimate tokens for a string or file before sending it"
     description = "Estimate token count for a string or a file path. Approximation: chars/4 (same heuristic as context_manager)."
     input_schema = {
         "type": "object",

@@ -27,6 +27,8 @@ def _parse_iso(s: str) -> datetime:
 
 class TimeNow(BaseTool):
     name = "time-now"
+    priority = 90
+    when_to_use = "get the current UTC timestamp"
     description = "Current UTC timestamp. Returns ISO string and epoch (seconds + ms)."
     input_schema = {"type": "object", "properties": {}}
 
@@ -51,6 +53,8 @@ class TimeDiff(BaseTool):
     """
 
     name = "time-diff"
+    priority = 90
+    when_to_use = "compute duration between two ISO timestamps"
     description = "Duration between two ISO timestamps (b - a). Returns total_seconds and a days/hours/minutes/seconds breakdown."
     input_schema = {
         "type": "object",

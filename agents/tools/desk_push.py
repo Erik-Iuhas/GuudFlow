@@ -29,6 +29,8 @@ _DOC_NAME_RE = __import__("re").compile(r"^[a-z0-9_-]+$")
 
 class DeskPushTool(BaseTool):
     name = "desk-push"
+    priority = 122
+    when_to_use = "hand a finished document to a teammate's project desk"
     description = "Hand a document to a teammate's project desk. Use when you have a doc they should follow."
     input_schema = {
         "type": "object",

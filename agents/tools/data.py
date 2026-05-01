@@ -78,6 +78,8 @@ class DataJson(BaseTool):
     """
 
     name = "data-json"
+    priority = 70
+    when_to_use = "parse a JSON file (optionally extract a subtree via json_path)"
     description = "Parse a JSON file. Optional `json_path` (array of keys/indices, or dot-string) extracts a subtree."
     input_schema = {
         "type": "object",
@@ -146,6 +148,8 @@ class DataCsv(BaseTool):
     """
 
     name = "data-csv"
+    priority = 70
+    when_to_use = "parse a CSV file as columns + rows"
     description = "Parse a CSV file. Returns columns + rows-as-dicts (or list-of-lists if has_header=false)."
     input_schema = {
         "type": "object",
@@ -219,6 +223,8 @@ class DataYaml(BaseTool):
     object construction)."""
 
     name = "data-yaml"
+    priority = 70
+    when_to_use = "parse a YAML file (safe_load — no arbitrary objects)"
     description = "Parse a YAML file. Uses safe_load — rejects arbitrary object construction."
     input_schema = {
         "type": "object",
@@ -286,6 +292,8 @@ class DataXml(BaseTool):
     """
 
     name = "data-xml"
+    priority = 70
+    when_to_use = "parse an XML file as a dict tree"
     description = "Parse an XML file (safe via defusedxml). Returns a dict tree of {tag, attrib, text, children}."
     input_schema = {
         "type": "object",

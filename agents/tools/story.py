@@ -37,6 +37,8 @@ class StoryComplete(BaseTool):
     """
 
     name = "story-complete"
+    priority = 130
+    when_to_use = "close out the active story when its work is done"
     input_schema = {
         "type": "object",
         "properties": {
@@ -130,6 +132,8 @@ class StoryOpen(BaseTool):
     """
 
     name = "story-open"
+    priority = 130
+    when_to_use = "start a new story for a coherent piece of work"
     input_schema = {
         "type": "object",
         "properties": {

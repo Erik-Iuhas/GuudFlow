@@ -71,6 +71,8 @@ def _walk(node: ast.AST) -> float | int:
 
 class MathEval(BaseTool):
     name = "math-eval"
+    priority = 90
+    when_to_use = "evaluate a pure-arithmetic expression safely"
     description = "Safely evaluate a numeric expression: + - * / // % ** and parentheses. No names, no calls, no attributes."
     input_schema = {
         "type": "object",

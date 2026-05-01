@@ -39,6 +39,8 @@ class DocMarkdown(BaseTool):
     """
 
     name = "doc-markdown"
+    priority = 65
+    when_to_use = "read a markdown file (design docs, specs) with heading outline"
     description = "Read a markdown file and return raw text + extracted heading outline."
     input_schema = {
         "type": "object",
@@ -118,6 +120,8 @@ class DocHtml(BaseTool):
     """Strip tags from an HTML file and return the visible text."""
 
     name = "doc-html"
+    priority = 65
+    when_to_use = "read an HTML file as visible text (no scripts/styles)"
     description = "Read an HTML file and return its visible text (no scripts/styles)."
     input_schema = {
         "type": "object",
