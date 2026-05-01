@@ -12,16 +12,22 @@ import { ApprovalCard } from "../components/ApprovalCard";
 import { BoardFeed } from "../components/BoardFeed";
 import { CommentBox } from "../components/CommentBox";
 import { FileTreeTab } from "../components/FileTreeTab";
-import { GitLogTab } from "../components/GitLogTab";
+import { FilePreviewPanel } from "../components/FilePreviewPanel";
+import { GitGraph } from "../components/GitGraph";
+import { GitDiffSideOver } from "../components/GitDiffSideOver";
+import { KanbanBoard } from "../components/KanbanBoard";
 import { PipelineGraph } from "../components/PipelineGraph";
+import { useRunGraph } from "../hooks/useRunGraph";
+import { useDesks } from "../hooks/useDesks";
 import { QuipFeed } from "../components/QuipFeed";
 import { ScreenshotPane } from "../components/ScreenshotPane";
 import { TagsPanel } from "../components/TagsPanel";
 import { PersonaSlideOver } from "../components/PersonaSlideOver";
 import { WorkerCard } from "../components/WorkerCard";
+import { WorkerSettingsPanel } from "../components/WorkerSettingsPanel";
 import { RunWsProvider } from "../contexts/RunWsContext";
 import type { RunWsSubscriber } from "../contexts/RunWsContext";
-import { summariseAgents } from "../lib/iterations";
+import { summariseAgents, signalsForRoleIteration } from "../lib/iterations";
 import type { ProjectConfig, RunMeta, Signal } from "../types";
 
 /** Unresolved approval gates: APPROVAL_NEEDED signals whose matching
@@ -48,6 +54,7 @@ const TERMINAL_STATUSES = new Set([
   "deadline_exceeded",
   "errored",
   "failed",
+  "stopped",
 ]);
 
 function isTerminal(status: string | undefined): boolean {
@@ -67,9 +74,15 @@ export function Run() {
   const wsRef = useRef<WebSocket | null>(null);
   const signalHandlersRef = useRef<Set<(s: Signal) => void>>(new Set());
   const [slideOverPersonaId, setSlideOverPersonaId] = useState<string | null>(null);
+  const [agentDetailRole, setAgentDetailRole] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
-  const [boardTab, setBoardTab] = useState<"signals" | "files">("signals");
+  const [stopping, setStopping] = useState(false);
+  const [boardTab, setBoardTab] = useState<"signals" | "kanban" | "git" | "files">("signals");
+  const [openFilePath, setOpenFilePath] = useState<string | null>(null);
+  const [diffSha, setDiffSha] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { data: graphData } = useRunGraph(runId ?? null);
+  const { data: desksData } = useDesks(runId ?? null);
 
   useEffect(() => {
     if (!runId) return;
@@ -134,6 +147,23 @@ export function Run() {
       if (e instanceof ApiError && e.status !== 404) {
         setError(e.detail);
       }
+    }
+  }
+
+  async function handleStop() {
+    if (!runId) return;
+    if (!confirm("Stop this run? Currently-running agents finish their iteration; no new agents will be dispatched. The run can be resumed later.")) {
+      return;
+    }
+    setStopping(true);
+    setError(null);
+    try {
+      await runsApi.stop(runId);
+    } catch (e) {
+      if (e instanceof ApiError) setError(e.detail);
+      else setError(String(e));
+    } finally {
+      setStopping(false);
     }
   }
 
@@ -238,6 +268,19 @@ export function Run() {
                 {connected ? "● live" : "○ disconnected"}
               </span>
               <span>{signals.length} signals</span>
+              {/* Stop button — visible while the run is active (no
+                  on-disk meta yet, or meta exists but isn't terminal). */}
+              {(!meta || !isTerminal(meta.status)) && connected && (
+                <button
+                  className="small"
+                  style={{ background: "#dc2626", color: "#fff", borderColor: "#dc2626" }}
+                  onClick={() => void handleStop()}
+                  disabled={stopping}
+                  title="Soft-cancel: in-flight agents finish; no new dispatches"
+                >
+                  {stopping ? "Stopping…" : "Stop run"}
+                </button>
+              )}
               {/* Phase G.3 — resume button on failed/non-complete runs.
                   Calls runsApi.resume() (G-prime.2 backend). */}
               {meta && meta.status !== "complete" && isTerminal(meta.status) && (
@@ -302,37 +345,63 @@ export function Run() {
                 (project.agents ?? []).map((a) => a.role),
                 signals,
               )}
+              graphData={graphData ?? undefined}
             />
           </div>
         )}
 
         <div className="run-board">
           <div className="tabs" style={{ marginBottom: 0, borderBottom: "1px solid #e2e8f0" }}>
-            <button
-              className={`tab ${boardTab === "signals" ? "tab-active" : ""}`}
-              onClick={() => setBoardTab("signals")}
-            >
-              Signals
-            </button>
-            <button
-              className={`tab ${boardTab === "files" ? "tab-active" : ""}`}
-              onClick={() => setBoardTab("files")}
-            >
-              Files
-            </button>
+            {(["signals", "kanban", "git", "files"] as const).map((tab) => (
+              <button
+                key={tab}
+                className={`tab ${boardTab === tab ? "tab-active" : ""}`}
+                onClick={() => setBoardTab(tab)}
+              >
+                {tab === "signals" ? "Board" : tab === "kanban" ? "Kanban" : tab === "git" ? "Git" : "Files"}
+              </button>
+            ))}
           </div>
-          {boardTab === "signals" ? (
-            <BoardFeed signals={signals} />
-          ) : (
-            <FileTreeTab signals={signals} />
+          {boardTab === "signals" && <BoardFeed signals={signals} />}
+          {boardTab === "kanban" && runId && (
+            <>
+              <KanbanBoard
+                runId={runId}
+                agents={(project?.agents ?? []).map((a) => ({ role: a.role, persona_id: a.persona_id }))}
+                onCardClick={(role) => {
+                  setBoardTab("signals");
+                  // Smooth scroll to role in board feed is handled by BoardFeed itself
+                  const el = document.querySelector(`[data-role="${role}"]`);
+                  el?.scrollIntoView({ behavior: "smooth" });
+                }}
+              />
+              <div style={{ borderTop: "1px solid #e2e8f0", padding: "8px 0 0", marginTop: "auto" }}>
+                <CommentBox runId={runId} />
+              </div>
+            </>
+          )}
+          {boardTab === "git" && runId && (
+            <div style={{ padding: 12 }}>
+              <GitGraph
+                runId={runId}
+                desksData={desksData}
+                onCommitClick={(sha) => setDiffSha(sha)}
+              />
+            </div>
+          )}
+          {boardTab === "files" && (
+            <FileTreeTab
+              signals={signals}
+              runId={runId}
+              onFileClick={(path) => setOpenFilePath(path)}
+            />
           )}
         </div>
 
         <div className="run-side">
-          {/* Agent state cards in the side rail — keeps the pipeline
-              row compact and gives the board full vertical space. */}
           {project && (project.agents ?? []).length > 0 && (
-            <div className="agent-state-cards">
+            <div className="run-side-workers">
+              <div className="small" style={{ fontWeight: 600, textTransform: "uppercase", color: "var(--muted)", marginBottom: 6 }}>Workers</div>
               {Array.from(
                 summariseAgents(
                   (project.agents ?? []).map((a) => a.role),
@@ -340,12 +409,17 @@ export function Run() {
                 ).values(),
               ).map((s) => {
                 const agentCfg = (project.agents ?? []).find((a) => a.role === s.role);
+                const graphNode = graphData?.nodes.find((n) => n.role === s.role);
                 return (
-                  <div key={s.role}>
-                    <AgentStateCard
-                      summary={s}
-                      allSignals={signals}
-                    />
+                  <AgentStateCard
+                    key={s.role}
+                    summary={s}
+                    allSignals={signals}
+                    onRetry={s.state === "failed" ? () => handleResume() : undefined}
+                    onClick={() => setAgentDetailRole(s.role)}
+                    personaId={agentCfg?.persona_id ?? null}
+                    personaName={graphNode?.persona_name ?? null}
+                  >
                     {agentCfg && (
                       <WorkerCard
                         agent={agentCfg}
@@ -354,20 +428,16 @@ export function Run() {
                         onOpenPersona={(pid) => setSlideOverPersonaId(pid)}
                       />
                     )}
-                  </div>
+                  </AgentStateCard>
                 );
               })}
             </div>
           )}
           <QuipFeed runId={runId} />
           <ScreenshotPane signals={signals} />
-          <GitLogTab signals={signals} />
           <TagsPanel runId={runId} />
         </div>
 
-        <div className="run-comments">
-          <CommentBox runId={runId} />
-        </div>
       </div>
 
       {continueOpen && meta?.project_id && (
@@ -415,6 +485,76 @@ export function Run() {
         <PersonaSlideOver
           personaId={slideOverPersonaId}
           onClose={() => setSlideOverPersonaId(null)}
+        />
+      )}
+
+      {/* Agent settings slide-over — WorkerSettingsPanel with live hot-reload */}
+      {agentDetailRole && project && meta && (() => {
+        const agentCfg = (project.agents ?? []).find((a) => a.role === agentDetailRole);
+        if (!agentCfg) return null;
+        return (
+          <WorkerSettingsPanel
+            agent={agentCfg}
+            allRoles={(project.agents ?? []).map((a) => a.role)}
+            projectRbacScopes={(project.rbac ?? {})[agentDetailRole]?.allowed_scopes ?? []}
+            onClose={() => setAgentDetailRole(null)}
+            onChange={(partial) => {
+              setProject((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  agents: (prev.agents ?? []).map((a) =>
+                    a.role === agentDetailRole ? { ...a, ...partial } : a,
+                  ),
+                };
+              });
+            }}
+            onSave={async (partial) => {
+              if (!meta.project_id) return;
+              // 1. Persist to project config (future runs).
+              const latest = {
+                ...project,
+                agents: (project.agents ?? []).map((a) =>
+                  a.role === agentDetailRole ? { ...a, ...partial } : a,
+                ),
+              };
+              await projectsApi.update(meta.project_id, latest);
+              // 2. Hot-reload the live run (best-effort — 404 is normal when run is done).
+              if (runId) {
+                try {
+                  await runsApi.patchAgentConfig(runId, agentDetailRole, partial as Record<string, unknown>);
+                } catch {
+                  // Run not active — project-only update is sufficient.
+                }
+              }
+            }}
+            onRbacChange={(add, remove) => {
+              if (!meta.project_id) return;
+              const rbac = { ...(project.rbac ?? {}) };
+              const current = rbac[agentDetailRole]?.allowed_scopes ?? [];
+              const next = [...new Set([...current.filter((s) => !remove.includes(s)), ...add])];
+              rbac[agentDetailRole] = { allowed_scopes: next };
+              const updated = { ...project, rbac };
+              setProject(updated);
+              void projectsApi.update(meta.project_id, updated);
+            }}
+          />
+        );
+      })()}
+
+      {runId && (
+        <FilePreviewPanel
+          runId={runId}
+          filePath={openFilePath}
+          onClose={() => setOpenFilePath(null)}
+        />
+      )}
+
+      {runId && diffSha && (
+        <GitDiffSideOver
+          runId={runId}
+          sha={diffSha}
+          onClose={() => setDiffSha(null)}
         />
       )}
     </div>

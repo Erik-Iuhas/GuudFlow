@@ -15,6 +15,8 @@ export interface AgentConfig {
   is_reviewer?: boolean;
   is_final_reviewer?: boolean;
   max_tool_iterations?: number;
+  manages?: string[];
+  escalates_to?: string[];
 }
 
 export interface RoleRBAC {

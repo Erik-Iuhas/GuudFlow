@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { connectQuipStream, type QuipWire } from "../api";
+import { avatarFor } from "../lib/avatar";
 
 const EVENT_LABEL: Record<string, string> = {
   agent_complete: "·",
@@ -53,15 +54,27 @@ export function QuipFeed({ runId }: Props) {
       <div className="muted small">In-character commentary on key events.</div>
       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
         {visible.length === 0 && <p className="muted small">No quips yet.</p>}
-        {visible.map((q, i) => (
-          <div className="quip" key={`${q.ts}-${i}`}>
-            <span className="who">{q.persona}</span>
-            <span className="muted small" style={{ margin: "0 4px" }}>
-              {EVENT_LABEL[q.event] ?? q.event}
-            </span>
-            <em>{q.text}</em>
-          </div>
-        ))}
+        {visible.map((q, i) => {
+          const av = avatarFor(q.persona || "system");
+          return (
+            <div className="quip" key={`${q.ts}-${i}`} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <div
+                className="worker-avatar"
+                style={{ background: av.gradient, width: 24, height: 24, fontSize: 10, flexShrink: 0 }}
+                title={q.persona}
+              >
+                {av.initials}
+              </div>
+              <div>
+                <span className="who">{q.persona}</span>
+                <span className="muted small" style={{ margin: "0 4px" }}>
+                  {EVENT_LABEL[q.event] ?? q.event}
+                </span>
+                <em>{q.text}</em>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

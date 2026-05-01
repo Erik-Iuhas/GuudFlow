@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { SecretFinding, SourceRepoMeta } from "../types";
+import { FolderPicker } from "./FolderPicker";
 
 export interface SourceRepoFieldProps {
   current: SourceRepoMeta | null;
@@ -33,6 +34,7 @@ export function SourceRepoField({
   const [findings, setFindings] = useState<SecretFinding[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   async function submit(force: boolean) {
     setError(null);
@@ -148,12 +150,25 @@ export function SourceRepoField({
       ) : (
         <div style={{ marginTop: 8 }}>
           <label>Absolute path on the API host</label>
-          <input
-            type="text"
-            placeholder="/abs/path/to/dir"
-            value={localPath}
-            onChange={(e) => setLocalPath(e.target.value)}
-          />
+          <div className="row" style={{ gap: 6 }}>
+            <input
+              type="text"
+              placeholder="/abs/path/to/dir"
+              value={localPath}
+              onChange={(e) => setLocalPath(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <button type="button" onClick={() => setPickerOpen(true)}>
+              Browse…
+            </button>
+          </div>
+          {pickerOpen && (
+            <FolderPicker
+              initialPath={localPath || undefined}
+              onSelect={setLocalPath}
+              onClose={() => setPickerOpen(false)}
+            />
+          )}
           <p className="muted small" style={{ marginTop: 4 }}>
             The API process must have read access to this path. Multi-tenant
             deployments restrict this via{" "}

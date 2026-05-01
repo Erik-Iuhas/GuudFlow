@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, invokeApi, projectsApi, runsApi } from "../api";
 import { PersonaSlideOver } from "../components/PersonaSlideOver";
-import { WorkerCard } from "../components/WorkerCard";
 import { WorkerSettingsPanel } from "../components/WorkerSettingsPanel";
 import { CostStrip } from "../components/CostStrip";
 import { PipelineGraph } from "../components/PipelineGraph";
@@ -219,28 +218,14 @@ export function Studio() {
           <CostStrip project={project} />
 
           <h2>Agents</h2>
-          {/* Phase G.1 — DAG preview so the user can spot disconnected
-              agents or weird dependencies before launching a run. */}
+          {/* Phase G.1 — DAG preview. Click a node to open agent settings. */}
           {(project.agents ?? []).length > 0 && (
-            <PipelineGraph agents={project.agents ?? []} />
+            <PipelineGraph
+              agents={project.agents ?? []}
+              onClickAgent={(role) => setSettingsRole(role)}
+              onRemoveAgent={removeAgent}
+            />
           )}
-          <div className="grid-2">
-            {(project.agents ?? []).map((a) => (
-              <WorkerCard
-                key={a.role}
-                agent={a}
-                allRoles={(project.agents ?? []).map((x) => x.role)}
-                mode="config"
-                onChange={(partial) => updateAgent(a.role, partial)}
-                onRemove={() => removeAgent(a.role)}
-                onOpenSettings={() => setSettingsRole(a.role)}
-                onOpenPersona={(pid) => setSlideOverPersonaId(pid)}
-                projectRbacScopes={
-                  (project.rbac ?? {})[a.role]?.allowed_scopes ?? []
-                }
-              />
-            ))}
-          </div>
           <button onClick={addAgent} style={{ marginTop: 8 }}>+ Add agent</button>
 
           <h2 style={{ marginTop: 24 }}>Recent runs</h2>
@@ -361,7 +346,6 @@ export function Studio() {
             onChange={(partial) => updateAgent(settingsRole, partial)}
             onSave={async (partial) => {
               if (!id) return;
-              // Background save with the latest project state
               const latest = {
                 ...project,
                 agents: (project.agents ?? []).map((a) =>
@@ -369,6 +353,16 @@ export function Studio() {
                 ),
               };
               await projectsApi.update(id, latest);
+            }}
+            onRbacChange={(add, remove) => {
+              if (!id) return;
+              const rbac = { ...(project.rbac ?? {}) };
+              const current = rbac[settingsRole]?.allowed_scopes ?? [];
+              const next = [...new Set([...current.filter((s) => !remove.includes(s)), ...add])];
+              rbac[settingsRole] = { allowed_scopes: next };
+              const updated = { ...project, rbac };
+              setProject(updated);
+              void projectsApi.update(id, updated);
             }}
           />
         );

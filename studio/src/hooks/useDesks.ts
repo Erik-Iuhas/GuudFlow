@@ -30,6 +30,9 @@ export function useDesks(runId: string | null): {
     if (!runId) return;
     try {
       const raw = await runsApi.desks(runId);
+      if (typeof window !== "undefined" && (window as unknown as { DEBUG_DESKS?: boolean }).DEBUG_DESKS) {
+        console.debug("[useDesks] raw API response:", raw);
+      }
       setData(normalise(raw));
       setError(null);
     } catch (e) {
@@ -52,7 +55,12 @@ export function useDesks(runId: string | null): {
     if (ws) {
       // Subscribe to WS signals; refetch on TASK_* or COMMIT
       const unsub = ws.subscribe((signal) => {
-        if (signal.type.startsWith("TASK_") || signal.type === "COMMIT") {
+        if (
+          signal.type.startsWith("TASK_") ||
+          signal.type === "COMMIT" ||
+          signal.type === "STARTED" ||
+          signal.type === "COMPLETE"
+        ) {
           scheduleDebounced();
         }
       });

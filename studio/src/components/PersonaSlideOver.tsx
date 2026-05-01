@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { personasApi, ApiError } from "../api";
 import type { PersonaSummary } from "../types";
 import { avatarFor } from "../lib/avatar";
+import { DeskFilesSection } from "./DeskFilesSection";
 
 interface Props {
   personaId: string;
@@ -161,6 +162,8 @@ export function PersonaSlideOver({ personaId, onClose }: Props) {
           {episodes && episodes.length === 0 && (
             <div className="muted small">No episodes yet.</div>
           )}
+
+          <DeskFilesSection personaId={personaId} />
         </div>
       </div>
     </>

@@ -3,12 +3,19 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { WorkerSettingsPanel } from "../WorkerSettingsPanel";
 import type { AgentConfig } from "../../types";
 
-// Mock toolsApi so RBAC section doesn't hang on network
+// Mock toolsApi and modelsApi so components don't hang on network
 vi.mock("../../api", () => ({
   toolsApi: {
     list: vi.fn().mockResolvedValue([
       { name: "fs-read", scope: "fs-read", description: "Read", baseline: true },
-      { name: "fs-write", scope: "fs-write", description: "Write", baseline: false },
+      { name: "fs-write", scope: "fs-write", description: "Write", baseline: false, granted_by_archetypes: [] },
+    ]),
+  },
+  modelsApi: {
+    list: vi.fn().mockResolvedValue([
+      { id: "claude-sonnet-4-6", provider: "anthropic", tier: "solid", supports_tools: true, deprecated: false },
+      { id: "claude-opus-4-7", provider: "anthropic", tier: "heavy", supports_tools: true, deprecated: false },
+      { id: "claude-haiku-4-5-20251001", provider: "anthropic", tier: "fast", supports_tools: true, deprecated: false },
     ]),
   },
 }));
@@ -27,6 +34,7 @@ function renderPanel(overrides: Partial<Parameters<typeof WorkerSettingsPanel>[0
   const onChange = vi.fn();
   const onSave = vi.fn().mockResolvedValue(undefined);
   const onClose = vi.fn();
+  const onRbacChange = vi.fn();
   render(
     <WorkerSettingsPanel
       agent={agent}
@@ -35,10 +43,11 @@ function renderPanel(overrides: Partial<Parameters<typeof WorkerSettingsPanel>[0
       onClose={onClose}
       onChange={onChange}
       onSave={onSave}
+      onRbacChange={onRbacChange}
       {...overrides}
     />,
   );
-  return { onChange, onSave, onClose };
+  return { onChange, onSave, onClose, onRbacChange };
 }
 
 describe("WorkerSettingsPanel", () => {
@@ -62,8 +71,9 @@ describe("WorkerSettingsPanel", () => {
 
   it("editing model tier fires onChange with model_tier", async () => {
     const { onChange } = renderPanel();
-    const select = screen.getByDisplayValue("Solid");
-    fireEvent.change(select, { target: { value: "fast" } });
+    // Wait for the async model picker to load
+    const modelSelect = await waitFor(() => screen.getByLabelText("Model"));
+    fireEvent.change(modelSelect, { target: { value: "claude-haiku-4-5-20251001" } });
     expect(onChange).toHaveBeenCalledWith({ model_tier: "fast" });
   });
 
@@ -94,6 +104,86 @@ describe("WorkerSettingsPanel", () => {
     expect(inRbac).toBeTruthy();
   });
 
+  it("baseline tools render as checked and disabled regardless of declared_local_tools", async () => {
+    // declared_local_tools is empty but baseline=true tools must still appear checked+disabled
+    const { onChange } = renderPanel({
+      agent: { ...agent, declared_local_tools: [] },
+    });
+    // Wait for the "File System" group header to appear (tools loaded)
+    const fsGroupHeader = await waitFor(() => screen.getByText("File System"));
+    // Expand the group
+    fireEvent.click(fsGroupHeader);
+
+    // Now fs-read checkbox should be visible, checked, and disabled
+    await waitFor(() => {
+      const checkboxes = document.querySelectorAll<HTMLInputElement>("input[type=checkbox]");
+      const baselineBox = [...checkboxes].find((cb) =>
+        cb.closest("label")?.textContent?.includes("fs-read"),
+      );
+      expect(baselineBox).toBeTruthy();
+      expect(baselineBox!.checked).toBe(true);
+      expect(baselineBox!.disabled).toBe(true);
+    });
+    // Clicking a baseline tool must NOT call onChange
+    const baselineBox = [...document.querySelectorAll<HTMLInputElement>("input[type=checkbox]")].find(
+      (cb) => cb.closest("label")?.textContent?.includes("fs-read"),
+    )!;
+    fireEvent.click(baselineBox);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("off-archetype tool check fires onChange AND onRbacChange with scope to add", async () => {
+    const { onChange, onRbacChange } = renderPanel({
+      agent: { ...agent, declared_local_tools: [], agent_class_role_type: "code_reviewer" },
+      projectRbacScopes: [],
+    });
+    // Expand the File System group
+    const fsGroupHeader = await waitFor(() => screen.getByText("File System"));
+    fireEvent.click(fsGroupHeader);
+
+    // fs-write is off-archetype for code_reviewer (not in granted_by_archetypes=[])
+    await waitFor(() => {
+      const cb = [...document.querySelectorAll<HTMLInputElement>("input[type=checkbox]")].find(
+        (c) => c.closest("label")?.textContent?.includes("fs-write"),
+      );
+      expect(cb).toBeTruthy();
+      expect(cb!.disabled).toBe(false);
+    });
+    const fsWriteBox = [...document.querySelectorAll<HTMLInputElement>("input[type=checkbox]")].find(
+      (c) => c.closest("label")?.textContent?.includes("fs-write"),
+    )!;
+    fireEvent.click(fsWriteBox);
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ declared_local_tools: expect.arrayContaining(["fs-write"]) }));
+      expect(onRbacChange).toHaveBeenCalledWith(["fs-write"], []);
+    });
+  });
+
+  it("off-archetype tool uncheck fires onRbacChange with scope to remove", async () => {
+    const { onRbacChange } = renderPanel({
+      agent: { ...agent, declared_local_tools: ["fs-write"], agent_class_role_type: "code_reviewer" },
+      projectRbacScopes: [],
+    });
+    const fsGroupHeader = await waitFor(() => screen.getByText("File System"));
+    fireEvent.click(fsGroupHeader);
+
+    await waitFor(() => {
+      const cb = [...document.querySelectorAll<HTMLInputElement>("input[type=checkbox]")].find(
+        (c) => c.closest("label")?.textContent?.includes("fs-write"),
+      );
+      expect(cb?.checked).toBe(true);
+    });
+    const fsWriteBox = [...document.querySelectorAll<HTMLInputElement>("input[type=checkbox]")].find(
+      (c) => c.closest("label")?.textContent?.includes("fs-write"),
+    )!;
+    fireEvent.click(fsWriteBox);
+
+    await waitFor(() => {
+      expect(onRbacChange).toHaveBeenCalledWith([], ["fs-write"]);
+    });
+  });
+
   it("optimistic save: rejects network → field reverts", async () => {
     const onChange = vi.fn();
     const onSave = vi.fn().mockRejectedValue(new Error("Network error"));
@@ -107,8 +197,8 @@ describe("WorkerSettingsPanel", () => {
         onSave={onSave}
       />,
     );
-    const select = screen.getByDisplayValue("Solid");
-    fireEvent.change(select, { target: { value: "fast" } });
+    const modelSelect = await waitFor(() => screen.getByLabelText("Model"));
+    fireEvent.change(modelSelect, { target: { value: "claude-haiku-4-5-20251001" } });
     // First call: optimistic update with new value
     expect(onChange).toHaveBeenNthCalledWith(1, { model_tier: "fast" });
     // After save fails, revert call fires

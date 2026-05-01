@@ -119,22 +119,17 @@ hr { border: none; border-top: 1px solid #e2e8f0; margin: 16px 0; }
 .run-layout {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  /* Four named rows: header (auto) → pipeline (auto, optional) →
-     board+side (1fr, fills) → comments (auto, pinned at bottom).
-     Explicit grid-template-areas keeps comments anchored even when
-     run-pipeline isn't rendered. */
   grid-template-areas:
     "header header"
     "pipeline pipeline"
-    "board side"
-    "comments comments";
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+    "board side";
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 16px;
   height: calc(100vh - 90px);
 }
 .run-header { grid-area: header; }
 .run-pipeline { grid-area: pipeline; }
-.run-board { grid-area: board; overflow-y: auto; min-height: 0; }
+.run-board { grid-area: board; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; }
 /* Side rail scrolls independently so Review points / git tags don't
    get cut off when the QuipFeed gets long. */
 .run-side {
@@ -142,7 +137,6 @@ hr { border: none; border-top: 1px solid #e2e8f0; margin: 16px 0; }
   display: flex; flex-direction: column; gap: 12px;
   min-height: 0; overflow-y: auto;
 }
-.run-comments { grid-area: comments; }
 
 .feed { display: flex; flex-direction: column; gap: 6px; }
 .signal {

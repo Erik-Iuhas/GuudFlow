@@ -135,6 +135,17 @@ export const runsApi = {
       job_id: string;
       project_id: string;
     }>("POST", `/api/runs/${encodeURIComponent(id)}/resume`, undefined, true),
+  /** Soft-cancel an active run: sets workspace.pending_human so the
+   *  scheduler stops dispatching new agents. In-flight agents finish
+   *  their current iteration naturally. The run can be resumed via
+   *  /resume. 404 if the run isn't active. */
+  stop: (id: string) =>
+    request<{ ok: boolean; run_id: string }>(
+      "POST",
+      `/api/runs/${encodeURIComponent(id)}/stop`,
+      undefined,
+      true,
+    ),
   /** Phase G.5 — list review-point tags created by the runner at
    *  every APPROVED merge. Used by the Run view's tag panel. */
   tags: (id: string) =>
@@ -144,6 +155,14 @@ export const runsApi = {
     request<{ desks: Record<string, unknown[]>; tasks_by_id: Record<string, unknown> }>(
       "GET",
       `/api/runs/${encodeURIComponent(id)}/desks`,
+    ),
+  /** Hot-reload an agent's config for the live run. 404 if run isn't active
+   *  (changes still applied to the project by the caller). */
+  patchAgentConfig: (runId: string, role: string, partial: Record<string, unknown>) =>
+    request<{ ok: boolean }>(
+      "PATCH",
+      `/api/runs/${encodeURIComponent(runId)}/agent_config/${encodeURIComponent(role)}`,
+      partial,
     ),
 };
 
@@ -304,7 +323,46 @@ export const personasApi = {
       body,
       true,
     ),
+  /** M6.C5 — persona desk file CRUD. */
+  listDeskFiles: (id: string) =>
+    request<{ files: DeskFileSummary[] }>(
+      "GET",
+      `/api/personas/${encodeURIComponent(id)}/desk`,
+      undefined,
+      true,
+    ),
+  createDeskFile: (id: string, body: DeskFileWrite) =>
+    request<DeskFileSummary>(
+      "POST",
+      `/api/personas/${encodeURIComponent(id)}/desk`,
+      body,
+      true,
+    ),
+  deleteDeskFile: (id: string, filename: string) =>
+    request<void>(
+      "DELETE",
+      `/api/personas/${encodeURIComponent(id)}/desk/${encodeURIComponent(filename)}`,
+      undefined,
+      true,
+    ),
 };
+
+export interface DeskFileSummary {
+  filename: string;
+  triggers: string[];
+  agents: string[];
+  kind: string;
+  body_excerpt: string;
+  bytes: number;
+}
+
+export interface DeskFileWrite {
+  filename: string;
+  content: string;
+  triggers: string[];
+  agents: string[];
+  kind: string;
+}
 
 // ── Inputs (D-prime §33) ───────────────────────────────────────────────────
 
@@ -574,6 +632,21 @@ export const toolsApi = {
   list: () =>
     request<{ tools: ToolEntry[] }>("GET", "/api/tools", undefined, true).then(
       (r) => r.tools,
+    ),
+};
+
+export interface ModelEntry {
+  id: string;
+  provider: string;
+  tier: "heavy" | "solid" | "fast";
+  supports_tools: boolean;
+  deprecated: boolean;
+}
+
+export const modelsApi = {
+  list: () =>
+    request<{ models: ModelEntry[] }>("GET", "/api/models").then(
+      (r) => r.models.filter((m) => !m.deprecated && m.supports_tools),
     ),
 };
 

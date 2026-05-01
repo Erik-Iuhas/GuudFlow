@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { AgentConfig, ModelTier } from "../types";
 import { avatarFor } from "../lib/avatar";
-import { ToolsMultiSelect } from "./ToolsMultiSelect";
 import { ActiveTaskChip } from "./ActiveTaskChip";
 
 export type WorkerCardMode = "config" | "preview" | "live" | "roster";
@@ -86,21 +85,30 @@ export function WorkerCard({
         {onRemove && (
           <button className="remove" onClick={onRemove} title="remove">×</button>
         )}
-        {header}
+        <div className="worker-card-header" style={{ position: "relative" }}>
+          <Avatar seed={avatarSeed} />
+          <div className="worker-card-identity">
+            <span className="worker-card-name">{agent.role}</span>
+            <div className="row" style={{ gap: 4, marginTop: 2 }}>
+              <span className={`tag ${agent.model_tier ?? "solid"}`}>
+                {agent.model_tier ?? "solid"}
+              </span>
+              {agent.is_reviewer && <span className="tag">reviewer</span>}
+            </div>
+          </div>
+          {onOpenSettings && (
+            <button
+              className="settings-gear"
+              onClick={onOpenSettings}
+              title="Open agent settings"
+              style={{ marginLeft: "auto" }}
+            >
+              ⚙
+            </button>
+          )}
+        </div>
 
-        <label className="small">Description</label>
-        <input
-          value={agent.description ?? ""}
-          onChange={(e) => onChange?.({ description: e.target.value })}
-        />
-
-        <label className="small" style={{ marginTop: 8 }}>System prompt</label>
-        <textarea
-          rows={3}
-          value={agent.system_prompt ?? ""}
-          onChange={(e) => onChange?.({ system_prompt: e.target.value })}
-        />
-
+        {/* Inline model-tier picker — most frequently changed field stays on card */}
         <div style={{ marginTop: 8 }}>
           <label className="small">Model</label>
           <select
@@ -115,81 +123,6 @@ export function WorkerCard({
             ))}
           </select>
         </div>
-
-        <label className="small" style={{ marginTop: 8 }}>Tools</label>
-        <div style={{ position: "relative" }}>
-          <ToolsMultiSelect
-            selected={agent.declared_local_tools ?? []}
-            onChange={(next) => onChange?.({ declared_local_tools: next })}
-            archetypeRoleType={agent.agent_class_role_type ?? null}
-            projectRbacScopes={projectRbacScopes}
-          />
-        </div>
-
-        <label className="small" style={{ marginTop: 8 }}>Depends on</label>
-        <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-          {allRoles
-            .filter((r) => r !== agent.role)
-            .map((r) => {
-              const checked = (agent.depends_on ?? []).includes(r);
-              return (
-                <label key={r} className="small" style={{ marginBottom: 0 }}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    style={{ width: "auto", marginRight: 4 }}
-                    onChange={() => {
-                      const next = checked
-                        ? (agent.depends_on ?? []).filter((x) => x !== r)
-                        : [...(agent.depends_on ?? []), r];
-                      onChange?.({ depends_on: next });
-                    }}
-                  />
-                  {r}
-                </label>
-              );
-            })}
-        </div>
-
-        <div className="row" style={{ marginTop: 8 }}>
-          <label className="small" style={{ margin: 0 }}>
-            <input
-              type="checkbox"
-              checked={agent.is_reviewer ?? false}
-              style={{ width: "auto", marginRight: 4 }}
-              onChange={(e) => onChange?.({ is_reviewer: e.target.checked })}
-            />
-            Reviewer (merges branches on APPROVED)
-          </label>
-        </div>
-
-        <div className="row" style={{ marginTop: 8, gap: 12 }}>
-          <div style={{ flex: 1 }}>
-            <label className="small">Max tool iterations</label>
-            <input
-              type="number"
-              min={1}
-              max={50}
-              value={agent.max_tool_iterations ?? 6}
-              onChange={(e) =>
-                onChange?.({
-                  max_tool_iterations: parseInt(e.target.value || "6", 10),
-                })
-              }
-            />
-          </div>
-        </div>
-
-        {onOpenSettings && (
-          <button
-            className="settings-gear"
-            onClick={onOpenSettings}
-            title="Agent settings"
-            style={{ marginTop: 8 }}
-          >
-            ⚙ Settings
-          </button>
-        )}
       </div>
     );
   }
@@ -230,11 +163,16 @@ export function WorkerCard({
           </div>
         )}
         {(agent.declared_local_tools ?? []).length > 0 && (
-          <div className="chip-row" style={{ marginTop: 6, flexWrap: "wrap", gap: 4 }}>
-            {(agent.declared_local_tools ?? []).map((t) => (
-              <span key={t} className="tag small">{t}</span>
-            ))}
-          </div>
+          <details style={{ marginTop: 6 }}>
+            <summary className="small muted" style={{ cursor: "pointer", userSelect: "none" }}>
+              {agent.declared_local_tools!.length} tool{agent.declared_local_tools!.length !== 1 ? "s" : ""}
+            </summary>
+            <div className="chip-row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
+              {(agent.declared_local_tools ?? []).map((t) => (
+                <span key={t} className="tag small">{t}</span>
+              ))}
+            </div>
+          </details>
         )}
         {onOpenSettings && (
           <button
