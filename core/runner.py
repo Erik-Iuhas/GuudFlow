@@ -396,6 +396,11 @@ class AgentRunner:
         self._current_agent_messages: list[LLMMessage] = []
         self.agent_factory = agent_factory or default_agent_factory
         self.max_wall_seconds = max_wall_seconds
+        # Track 1d — repo_map dirty flag. Set on GIT_COMMIT, consumed at
+        # agent-transition boundaries. Defers full PageRank rebuilds out of
+        # the agent's hot path so within-iteration commits don't bust the
+        # system-prompt cache for the active agent.
+        self._repo_map_dirty: bool = False
         self.docker_manager = docker_manager
         # Training Camp (DESIGN §35, Phase F.1.1). The rubric_scorer is
         # optional even in training mode — runs without one will simply
@@ -865,12 +870,12 @@ class AgentRunner:
             from_agent="git",
         )
         self.workspace.post_signal(sig)
-        # Update repo_map after a commit.
+        # Track 1d — defer repo_map rebuild to next agent-transition.
+        # Within an iteration, multiple commits do NOT each rebuild the map;
+        # the system-prompt cache stays byte-stable for the active agent.
+        # The deferred rebuild fires inside _drive_agent_run pre-spawn.
         if signal_type is SignalType.GIT_COMMIT:
-            try:
-                self.workspace.repo_map = build_repo_map(self.files.working)
-            except Exception:
-                pass
+            self._repo_map_dirty = True
 
     # ── Agent setup ─────────────────────────────────────────────────────────
 
@@ -2425,6 +2430,21 @@ class AgentRunner:
             return agent.persona.profile.name or role.capitalize()
         return role.capitalize()
 
+    def _rebuild_repo_map_if_dirty(self) -> None:
+        """Track 1d — consume the dirty flag and rebuild repo_map before the
+        next agent runs. Called at agent-transition boundaries so within-
+        iteration commits don't bust the system-prompt cache for the active
+        agent (commits set the flag; the next spawn pays for the rebuild).
+        """
+        if not self._repo_map_dirty:
+            return
+        try:
+            self.workspace.repo_map = build_repo_map(self.files.working)
+        except Exception:
+            pass
+        finally:
+            self._repo_map_dirty = False
+
     async def _drive_agent_run(
         self,
         agent: BaseAgent,
@@ -2436,6 +2456,9 @@ class AgentRunner:
         string — the override owns its output format). Otherwise, drive
         a generic LLM tool-use loop and return a parsed CompactBlock.
         """
+        # Track 1d — pre-spawn: rebuild repo_map if any prior commits dirtied it.
+        self._rebuild_repo_map_if_dirty()
+
         cls_run = type(agent).run
         if cls_run is not BaseAgent.run:
             return await agent.run(self.workspace)
