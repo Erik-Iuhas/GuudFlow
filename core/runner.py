@@ -496,6 +496,13 @@ class AgentRunner:
         self.workspace.set_artifact_persister(
             self._build_artifact_persister()
         )
+        # Track 1 — iteration metrics and context log persisters.
+        self.workspace._iteration_metrics_persister = (
+            self._build_iteration_metrics_persister()
+        )
+        self.workspace._context_log_persister = (
+            self._build_context_log_persister()
+        )
         # Run-level deadline — checked by the scheduler.
         if max_wall_seconds is not None:
             import time as _time
@@ -763,6 +770,44 @@ class AgentRunner:
                     json.dumps(payload, indent=2, default=str),
                     encoding="utf-8",
                 )
+            except OSError:
+                pass
+
+        return _persist
+
+    def _build_iteration_metrics_persister(self):
+        """Return a callable that appends each IterationMetrics row to
+        iteration_metrics.jsonl. One append per row = crash-safe."""
+        from dataclasses import asdict
+        try:
+            self.run_root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None
+        path = self.run_root / "iteration_metrics.jsonl"
+
+        def _persist(m) -> None:
+            try:
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(asdict(m), default=str) + "\n")
+            except OSError:
+                pass
+
+        return _persist
+
+    def _build_context_log_persister(self):
+        """Return a callable that appends each ContextSnapshot row to
+        context_log.jsonl. One append per row = crash-safe."""
+        from dataclasses import asdict
+        try:
+            self.run_root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None
+        path = self.run_root / "context_log.jsonl"
+
+        def _persist(s) -> None:
+            try:
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(asdict(s), default=str) + "\n")
             except OSError:
                 pass
 
