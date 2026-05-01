@@ -86,6 +86,69 @@ class CommitRecord:
 
 
 @dataclass
+class IterationMetrics:
+    """One row per completed agent iteration (one full BaseAgent.run() invocation).
+
+    Multiple LLM calls within one run() are summed into the *_tokens fields.
+    """
+
+    run_id: str
+    role: str
+    iteration: int
+    model: str = ""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    llm_calls: int = 0
+
+    # token count of the final assistant message (useful for "did the agent ramble?")
+    final_message_tokens: int = 0
+
+    started_at: float = 0.0
+    ended_at: float = 0.0
+    elapsed_seconds: float = 0.0
+
+    recall_episodes_count: int = 0
+    recall_patterns_count: int = 0
+    repo_map_tokens: int = 0
+    relevant_files_tokens: int = 0
+    git_diff_tokens: int = 0
+    context_tokens_total: int = 0
+
+    tools_called: list[str] = field(default_factory=list)
+
+    completed: bool = False
+    failed: bool = False
+    no_op: bool = False
+
+
+@dataclass
+class ContextSnapshot:
+    """One row per get_context() call. Records what was injected, not why."""
+
+    run_id: str
+    role: str
+    iteration: int
+    task: str
+
+    tier: str = "solid"
+    max_tokens: int = 0
+    used_tokens: int = 0
+
+    repo_map_tokens: int = 0
+    git_diff_tokens: int = 0
+    relevant_files: list[tuple[str, int]] = field(default_factory=list)
+    recent_signals_count: int = 0
+
+    recalled_episodes: list[str] = field(default_factory=list)
+    recalled_patterns: list[str] = field(default_factory=list)
+
+    timestamp: float = 0.0
+
+
+@dataclass
 class StoryState:
     """A live story (M1 §7b). Tracks open/closed status + which agents own it.
 
@@ -322,6 +385,20 @@ class Workspace:
     # crashed run leaves a complete task mutation log on disk for resume.
     # Mirrors `_board_persister`. Callback receives the mutated Task.
     _task_persister: Callable[["Task"], None] | None = field(default=None, repr=False)
+    # Iteration metrics persister (Track 1) — fires after each completed
+    # BaseAgent.run() invocation with an IterationMetrics row.
+    _iteration_metrics_persister: Callable[["IterationMetrics"], None] | None = field(
+        default=None, repr=False,
+    )
+    # Context log persister (Track 1) — fires after each get_context() call
+    # with a ContextSnapshot row.
+    _context_log_persister: Callable[["ContextSnapshot"], None] | None = field(
+        default=None, repr=False,
+    )
+
+    # In-memory log lists (always populated; persister is optional).
+    iteration_metrics: list["IterationMetrics"] = field(default_factory=list)
+    context_log: list["ContextSnapshot"] = field(default_factory=list)
 
     # ── Board management ────────────────────────────────────────────────────
 
@@ -556,3 +633,25 @@ class Workspace:
             t for t in self.tasks.values()
             if t.parent_task_id == parent_id
         ]
+
+    # ── Track 1: iteration metrics + context log ────────────────────────────
+
+    def add_iteration_metrics(self, m: "IterationMetrics") -> None:
+        """Record one completed agent iteration. Fires the persister if set."""
+        self.iteration_metrics.append(m)
+        persister = self._iteration_metrics_persister
+        if persister is not None:
+            try:
+                persister(m)
+            except Exception:
+                pass
+
+    def record_context_snapshot(self, s: "ContextSnapshot") -> None:
+        """Record one get_context() call. Fires the persister if set."""
+        self.context_log.append(s)
+        persister = self._context_log_persister
+        if persister is not None:
+            try:
+                persister(s)
+            except Exception:
+                pass
