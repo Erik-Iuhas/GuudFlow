@@ -12,6 +12,7 @@ import { ApprovalCard } from "../components/ApprovalCard";
 import { BoardFeed } from "../components/BoardFeed";
 import { CommentBox } from "../components/CommentBox";
 import { FileTreeTab } from "../components/FileTreeTab";
+import { RunAnalytics } from "../components/RunAnalytics";
 import { FilePreviewPanel } from "../components/FilePreviewPanel";
 import { GitGraph } from "../components/GitGraph";
 import { GitDiffSideOver } from "../components/GitDiffSideOver";
@@ -77,7 +78,7 @@ export function Run() {
   const [agentDetailRole, setAgentDetailRole] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
   const [stopping, setStopping] = useState(false);
-  const [boardTab, setBoardTab] = useState<"signals" | "kanban" | "git" | "files">("signals");
+  const [boardTab, setBoardTab] = useState<"signals" | "kanban" | "git" | "files" | "analytics">("signals");
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
   const [diffSha, setDiffSha] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -352,17 +353,20 @@ export function Run() {
 
         <div className="run-board">
           <div className="tabs" style={{ marginBottom: 0, borderBottom: "1px solid #e2e8f0" }}>
-            {(["signals", "kanban", "git", "files"] as const).map((tab) => (
+            {(["signals", "kanban", "git", "files", "analytics"] as const).map((tab) => (
               <button
                 key={tab}
                 className={`tab ${boardTab === tab ? "tab-active" : ""}`}
                 onClick={() => setBoardTab(tab)}
               >
-                {tab === "signals" ? "Board" : tab === "kanban" ? "Kanban" : tab === "git" ? "Git" : "Files"}
+                {tab === "signals" ? "Board" : tab === "kanban" ? "Kanban" : tab === "git" ? "Git" : tab === "files" ? "Files" : "Analytics"}
               </button>
             ))}
           </div>
           {boardTab === "signals" && <BoardFeed signals={signals} />}
+          {boardTab === "analytics" && runId && (
+            <RunAnalytics runId={runId} isActive={!isTerminal(meta?.status)} />
+          )}
           {boardTab === "kanban" && runId && (
             <>
               <KanbanBoard

@@ -164,6 +164,12 @@ export const runsApi = {
       `/api/runs/${encodeURIComponent(runId)}/agent_config/${encodeURIComponent(role)}`,
       partial,
     ),
+  /** Track 1: per-iteration token + timing metrics. */
+  iterationMetrics: (id: string) =>
+    request<IterationMetrics[]>("GET", `/api/runs/${encodeURIComponent(id)}/iteration_metrics`),
+  /** Track 1: per-get_context() call composition snapshots. */
+  contextLog: (id: string) =>
+    request<ContextSnapshot[]>("GET", `/api/runs/${encodeURIComponent(id)}/context_log`),
 };
 
 export interface RunTag {
@@ -173,6 +179,51 @@ export interface RunTag {
   message: string;
   commit_message: string;
   tagged_at: number;
+}
+
+// ── Track 1: analytics types ──────────────────────────────────────────────
+
+export interface IterationMetrics {
+  run_id: string;
+  role: string;
+  iteration: number;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  llm_calls: number;
+  final_message_tokens: number;
+  started_at: number;
+  ended_at: number;
+  elapsed_seconds: number;
+  recall_episodes_count: number;
+  recall_patterns_count: number;
+  repo_map_tokens: number;
+  relevant_files_tokens: number;
+  git_diff_tokens: number;
+  context_tokens_total: number;
+  tools_called: string[];
+  completed: boolean;
+  failed: boolean;
+  no_op: boolean;
+}
+
+export interface ContextSnapshot {
+  run_id: string;
+  role: string;
+  iteration: number;
+  task: string;
+  tier: string;
+  max_tokens: number;
+  used_tokens: number;
+  repo_map_tokens: number;
+  git_diff_tokens: number;
+  relevant_files: [string, number][];
+  recent_signals_count: number;
+  recalled_episodes: string[];
+  recalled_patterns: string[];
+  timestamp: number;
 }
 
 // ── Personas ───────────────────────────────────────────────────────────────
