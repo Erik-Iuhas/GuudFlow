@@ -37,6 +37,8 @@ from agents.base import BaseAgent, ToolNotAvailable
 from agents.tools.base import BaseTool
 from agents.tools.board import AssignTask, BoardMessage
 from agents.tools.code import CodeExec, CodeOutline
+from agents.tools.code_batch import CodeOutlineBatch
+from agents.tools.fs_batch import FsEditBatch, FsWriteBatch
 from agents.tools.data import DataCsv, DataJson, DataXml, DataYaml
 from agents.tools.desk_push import DeskPushTool
 from agents.tools.desk_search import DeskSearchTool
@@ -309,9 +311,10 @@ def _extract_field(detail: str | None, key: str) -> str | None:
 LOCAL_TOOL_CLASSES: tuple[type[BaseTool], ...] = (
     FsRead, FsList, FsExists, FsReadRange, FsGrep,
     FsCreate, FsWrite, FsEdit, FsDelete, FsRename,
+    FsWriteBatch, FsEditBatch,                # Track 3e — batch variants
     GitDiff, GitChangedFiles, GitLog, GitRead, GitStatus,
     BoardMessage, AssignTask,
-    CodeExec, CodeOutline,
+    CodeExec, CodeOutline, CodeOutlineBatch,  # Track 3e — batch variant
     DataCsv, DataJson, DataXml, DataYaml,
     DocHtml, DocMarkdown,
     MathEval,
@@ -650,6 +653,9 @@ class AgentRunner:
             FsEdit.name: FsEdit(self.files, claim_emitter, release_emitter),
             FsDelete.name: FsDelete(self.files, claim_emitter, release_emitter),
             FsRename.name: FsRename(self.files, claim_emitter, release_emitter),
+            # Track 3e — batch variants share scope/safety with their singular counterparts.
+            FsWriteBatch.name: FsWriteBatch(self.files, claim_emitter, release_emitter),
+            FsEditBatch.name: FsEditBatch(self.files, claim_emitter, release_emitter),
             BoardMessage.name: BoardMessage(role, self.workspace),
             AssignTask.name: AssignTask(role, self.workspace, runner=self),
             # Story lifecycle — available to all agents (no RBAC gate).
@@ -663,6 +669,7 @@ class AgentRunner:
             GitStatus.name: GitStatus(self.git),
             CodeExec.name: code_exec_tool,
             CodeOutline.name: CodeOutline(self.files),
+            CodeOutlineBatch.name: CodeOutlineBatch(self.files),  # Track 3e
             DataCsv.name: DataCsv(self.files),
             DataJson.name: DataJson(self.files),
             DataXml.name: DataXml(self.files),
