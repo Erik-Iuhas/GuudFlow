@@ -95,6 +95,7 @@ class SchedulerStatus(str, Enum):
     MAX_ITERATIONS = "max_iterations"           # an agent was respawned past the cap
     STUCK = "stuck"                             # nothing spawnable, nothing running, not complete
     DEADLINE_EXCEEDED = "deadline_exceeded"     # workspace.deadline_at passed
+    STOPPED = "stopped"                         # force_cancel() — user pressed Stop
 
 
 @dataclass
@@ -141,6 +142,7 @@ class Scheduler:
         self._failed: set[str] = set()
         self._sat_out: set[str] = set()   # roles that got SAT_OUT — count as done
         self._wake = asyncio.Event()
+        self._force_stopped: bool = False  # set by force_cancel(); main loop exits via STOPPED
 
         # interrupt/resume state
         self._interrupt_payloads: dict[str, InterruptPayload] = {}
@@ -244,6 +246,12 @@ class Scheduler:
         MAX_ITERATIONS triggers, or the run is STUCK."""
         try:
             while True:
+                # 0a. User pressed Stop → exit cleanly. Without this, a stop
+                # that lands while pending_human is set would have the loop
+                # park forever in _any_waiting() instead of returning.
+                if self._force_stopped:
+                    return self._result(SchedulerStatus.STOPPED)
+
                 # 0. Wall-clock deadline check — runs before anything else.
                 if self._deadline_exceeded():
                     return self._result(SchedulerStatus.DEADLINE_EXCEEDED)
@@ -568,6 +576,16 @@ class Scheduler:
             except (asyncio.CancelledError, Exception):
                 pass
         self._tasks.clear()
+
+    async def force_cancel(self) -> None:
+        """Externally-triggered hard stop. Cancels all in-flight tasks and
+        wakes the main loop so it exits through the finally → _cancel_remaining
+        path. Safe to call from any coroutine while the scheduler is running."""
+        self._force_stopped = True
+        for task in self._tasks.values():
+            if not task.done():
+                task.cancel()
+        self._wake.set()
 
     # ── Predicates ──────────────────────────────────────────────────────────
 

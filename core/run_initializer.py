@@ -31,6 +31,20 @@ _logger = logging.getLogger(__name__)
 _AUTHOR = git.Actor("agentflow", "bot@agentflow.local")
 
 
+def _force_rw(func, path, _exc_info):
+    """rmtree onerror — strip read-only and retry. Required on Windows
+    because `.git/objects/*` files are marked read-only and would
+    otherwise raise PermissionError mid-rmtree."""
+    import os
+    import stat
+
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+    func(path)
+
+
 def seed_run(project_dir: Path, run_root: Path) -> None:
     """Copy `project_dir/inputs/*` into `run_root/workspace/inputs/`.
 
@@ -41,7 +55,7 @@ def seed_run(project_dir: Path, run_root: Path) -> None:
     run_inputs = run_root / "workspace" / "inputs"
 
     if run_inputs.exists():
-        shutil.rmtree(run_inputs)
+        shutil.rmtree(run_inputs, onerror=_force_rw)
     run_inputs.mkdir(parents=True, exist_ok=True)
 
     if not project_inputs.is_dir():
@@ -144,7 +158,7 @@ def seed_working_from_source(working_dir: Path, source_repo_dir: Path) -> None:
         return
 
     if working_dir.exists():
-        shutil.rmtree(working_dir)
+        shutil.rmtree(working_dir, onerror=_force_rw)
     shutil.copytree(
         source_repo_dir,
         working_dir,

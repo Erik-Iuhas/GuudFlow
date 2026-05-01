@@ -12,7 +12,7 @@ from api.auth import require_bearer
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
-_COMPLETION_STATUSES = frozenset({"complete", "failed", "max_iterations", "stuck"})
+_COMPLETION_STATUSES = frozenset({"complete", "failed", "max_iterations", "stuck", "stopped"})
 _APPROVAL_ID_RE = re.compile(r"approval_id=([^;]+)")
 
 

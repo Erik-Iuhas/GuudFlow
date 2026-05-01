@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from core.llm import MockLLMClient
 from core.run_loader import (
     _rebuild_tasks_from_board,
@@ -192,7 +194,8 @@ def test_rebuild_tasks_from_board_handles_complete_with_commit() -> None:
     assert tasks["t1"].completed_at_iter == 2
 
 
-def test_subtask_cascade_survives_resume(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_subtask_cascade_survives_resume(tmp_path: Path) -> None:
     """Parent task closes after resume when remaining child closes —
     the runner rebuilds desk state, then a fresh _handle_task_closures
     on the last child cascades the parent. Per chunks.md §7 tests."""
@@ -230,7 +233,7 @@ def test_subtask_cascade_survives_resume(tmp_path: Path) -> None:
     block = protocol.CompactBlock(
         kind="COMMIT", fields={"summary": "verifier done", "closes": "task:c2"},
     )
-    r2._handle_task_closures("dev", block, commit_hash="h2")
+    await r2._handle_task_closures("dev", block, commit_hash="h2")
     assert r2.workspace.tasks["c2"].status == "COMPLETE"
     assert r2.workspace.tasks["parent"].status == "COMPLETE"
 

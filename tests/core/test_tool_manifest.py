@@ -243,6 +243,33 @@ def test_role_with_no_rbac_entry_only_gets_baseline(builder: ToolManifestBuilder
     assert all(not n.startswith("mcp-") for n in m.names())
 
 
+def test_baseline_auto_included_when_not_declared(builder: ToolManifestBuilder):
+    """Baseline tools are auto-granted even when declared_local_tools is empty."""
+    m = builder.build_for_agent(
+        role="developer",
+        declared_local_tools=[],
+        declared_mcp_servers=[],
+    )
+    names = m.names()
+    # These are in BASELINE_LOCAL_SCOPES and in the builder's local_registry
+    assert "fs-read" in names
+    assert "fs-list" in names
+    assert "git-diff" in names
+    # Non-baseline write tools must NOT be auto-included
+    assert "fs-write" not in names
+    assert "code-exec" not in names
+
+
+def test_baseline_not_duplicated_when_declared(builder: ToolManifestBuilder):
+    """Baseline tool declared explicitly does not appear twice."""
+    m = builder.build_for_agent(
+        role="developer",
+        declared_local_tools=["fs-read"],
+        declared_mcp_servers=[],
+    )
+    assert m.names().count("fs-read") == 1
+
+
 def test_baseline_set_membership():
     assert "fs-read" in BASELINE_LOCAL_SCOPES
     assert "git-diff" in BASELINE_LOCAL_SCOPES

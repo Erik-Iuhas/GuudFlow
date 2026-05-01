@@ -16,6 +16,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from core import protocol
 from core.llm import MockLLMClient
 from core.runner import AgentConfig, AgentRunner, ProjectConfig
@@ -41,7 +43,8 @@ def _commit_block(closes: str | None = None) -> protocol.CompactBlock:
 # ── closes: bookkeeping ─────────────────────────────────────────────────────
 
 
-def test_closes_marks_task_complete_and_emits_signal(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_closes_marks_task_complete_and_emits_signal(tmp_path: Path) -> None:
     r = _runner(tmp_path)
     r.workspace.add_task(Task(
         task_id="t1", story_id="s", assigned_to="developer",
@@ -51,7 +54,7 @@ def test_closes_marks_task_complete_and_emits_signal(tmp_path: Path) -> None:
     # Drain prior signals.
     starting_count = sum(1 for s in r.workspace.board if s.type == SignalType.TASK_COMPLETED)
 
-    r._handle_task_closures(
+    await r._handle_task_closures(
         "developer", _commit_block(closes="task:t1"), commit_hash="abc1234",
     )
 
@@ -63,17 +66,19 @@ def test_closes_marks_task_complete_and_emits_signal(tmp_path: Path) -> None:
     assert len(completed) == starting_count + 1
 
 
-def test_closes_accepts_bare_id_as_well_as_prefixed(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_closes_accepts_bare_id_as_well_as_prefixed(tmp_path: Path) -> None:
     r = _runner(tmp_path)
     r.workspace.add_task(Task(
         task_id="t1", story_id="s", assigned_to="dev", goal="x",
     ))
     r.workspace.mutate_task("t1", "IN_PROGRESS")
-    r._handle_task_closures("dev", _commit_block(closes="t1"), commit_hash="hash")
+    await r._handle_task_closures("dev", _commit_block(closes="t1"), commit_hash="hash")
     assert r.workspace.tasks["t1"].status == "COMPLETE"
 
 
-def test_closing_other_roles_task_emits_warning_does_not_block(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_closing_other_roles_task_emits_warning_does_not_block(tmp_path: Path) -> None:
     """§4.3 — runner-side check is bookkeeping, not gating. The COMMIT
     is not blocked; the warning surfaces alongside it for the reviewer."""
     r = _runner(tmp_path)
@@ -82,7 +87,7 @@ def test_closing_other_roles_task_emits_warning_does_not_block(tmp_path: Path) -
     ))
     r.workspace.mutate_task("t1", "IN_PROGRESS")
 
-    r._handle_task_closures(
+    await r._handle_task_closures(
         "wrong_role", _commit_block(closes="task:t1"), commit_hash="h",
     )
     # Task untouched.
@@ -94,9 +99,10 @@ def test_closing_other_roles_task_emits_warning_does_not_block(tmp_path: Path) -
     assert "developer" in warnings[0].summary
 
 
-def test_closing_unknown_task_emits_warning(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_closing_unknown_task_emits_warning(tmp_path: Path) -> None:
     r = _runner(tmp_path)
-    r._handle_task_closures(
+    await r._handle_task_closures(
         "dev", _commit_block(closes="task:does_not_exist"), commit_hash="h",
     )
     warnings = [s for s in r.workspace.board if s.type == SignalType.TASK_OUT_OF_SCOPE]
@@ -104,7 +110,8 @@ def test_closing_unknown_task_emits_warning(tmp_path: Path) -> None:
     assert "unknown" in warnings[0].summary
 
 
-def test_closing_already_complete_emits_warning(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_closing_already_complete_emits_warning(tmp_path: Path) -> None:
     r = _runner(tmp_path)
     r.workspace.add_task(Task(
         task_id="t1", story_id="s", assigned_to="dev", goal="x",
@@ -112,13 +119,14 @@ def test_closing_already_complete_emits_warning(tmp_path: Path) -> None:
     r.workspace.mutate_task("t1", "IN_PROGRESS")
     r.workspace.mutate_task("t1", "COMPLETE", closed_by_commit="prior")
 
-    r._handle_task_closures("dev", _commit_block(closes="task:t1"), commit_hash="new")
+    await r._handle_task_closures("dev", _commit_block(closes="task:t1"), commit_hash="new")
     warnings = [s for s in r.workspace.board if s.type == SignalType.TASK_OUT_OF_SCOPE]
     assert len(warnings) == 1
     assert "COMPLETE" in warnings[0].detail
 
 
-def test_closes_with_no_commit_hash_emits_warning(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_closes_with_no_commit_hash_emits_warning(tmp_path: Path) -> None:
     """When _auto_commit returned None (clean working tree) but the
     agent emits closes: anyway, surface a TASK_OUT_OF_SCOPE warning so
     the reviewer knows nothing actually shipped against the named task.
@@ -129,7 +137,7 @@ def test_closes_with_no_commit_hash_emits_warning(tmp_path: Path) -> None:
     ))
     r.workspace.mutate_task("t1", "IN_PROGRESS")
 
-    r._handle_task_closures(
+    await r._handle_task_closures(
         "dev", _commit_block(closes="task:t1"), commit_hash=None,
     )
 
@@ -141,7 +149,8 @@ def test_closes_with_no_commit_hash_emits_warning(tmp_path: Path) -> None:
     assert r.workspace.tasks["t1"].closed_by_commit == ""
 
 
-def test_commit_without_closes_no_op(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_commit_without_closes_no_op(tmp_path: Path) -> None:
     """Regression guard: M1 COMMIT flow unchanged when closes: absent."""
     r = _runner(tmp_path)
     r.workspace.add_task(Task(
@@ -150,13 +159,14 @@ def test_commit_without_closes_no_op(tmp_path: Path) -> None:
     r.workspace.mutate_task("t1", "IN_PROGRESS")
     snapshot = list(r.workspace.board)
 
-    r._handle_task_closures("dev", _commit_block(closes=None), commit_hash="h")
+    await r._handle_task_closures("dev", _commit_block(closes=None), commit_hash="h")
 
     assert r.workspace.tasks["t1"].status == "IN_PROGRESS"
     assert r.workspace.board == snapshot
 
 
-def test_handle_task_closures_ignores_non_commit_blocks(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_handle_task_closures_ignores_non_commit_blocks(tmp_path: Path) -> None:
     r = _runner(tmp_path)
     r.workspace.add_task(Task(
         task_id="t1", story_id="s", assigned_to="dev", goal="x",
@@ -164,14 +174,15 @@ def test_handle_task_closures_ignores_non_commit_blocks(tmp_path: Path) -> None:
     verify_block = protocol.CompactBlock(
         kind="VERIFY", fields={"result": "PASS"},
     )
-    r._handle_task_closures("dev", verify_block, commit_hash="h")
+    await r._handle_task_closures("dev", verify_block, commit_hash="h")
     assert r.workspace.tasks["t1"].status == "PENDING"
 
 
 # ── subtask cascade ────────────────────────────────────────────────────────
 
 
-def test_closing_last_child_auto_closes_parent(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_closing_last_child_auto_closes_parent(tmp_path: Path) -> None:
     r = _runner(tmp_path)
     r.workspace.add_task(Task(
         task_id="parent", story_id="s", assigned_to="lead", goal="auth",
@@ -189,19 +200,20 @@ def test_closing_last_child_auto_closes_parent(tmp_path: Path) -> None:
     r.workspace.mutate_task("c2", "IN_PROGRESS")
 
     # Close the first child — parent should NOT cascade yet.
-    r._handle_task_closures("dev", _commit_block(closes="task:c1"), commit_hash="h1")
+    await r._handle_task_closures("dev", _commit_block(closes="task:c1"), commit_hash="h1")
     assert r.workspace.tasks["c1"].status == "COMPLETE"
     assert r.workspace.tasks["parent"].status == "IN_PROGRESS"
 
     # Close the last child — parent cascades.
-    r._handle_task_closures("dev", _commit_block(closes="task:c2"), commit_hash="h2")
+    await r._handle_task_closures("dev", _commit_block(closes="task:c2"), commit_hash="h2")
     assert r.workspace.tasks["c2"].status == "COMPLETE"
     parent = r.workspace.tasks["parent"]
     assert parent.status == "COMPLETE"
     assert parent.closed_by_commit == "h2"
 
 
-def test_parent_does_not_cascade_when_child_blocked(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_parent_does_not_cascade_when_child_blocked(tmp_path: Path) -> None:
     r = _runner(tmp_path)
     r.workspace.add_task(Task(
         task_id="parent", story_id="s", assigned_to="lead", goal="p",
@@ -218,7 +230,7 @@ def test_parent_does_not_cascade_when_child_blocked(tmp_path: Path) -> None:
     r.workspace.mutate_task("c1", "IN_PROGRESS")
     r.workspace.mutate_task("c2", "BLOCKED", blocked_on=["external"])
 
-    r._handle_task_closures("dev", _commit_block(closes="task:c1"), commit_hash="h")
+    await r._handle_task_closures("dev", _commit_block(closes="task:c1"), commit_hash="h")
     assert r.workspace.tasks["parent"].status == "IN_PROGRESS"
 
 
@@ -274,7 +286,8 @@ def test_auto_start_ignores_unknown_task_id_falls_back_to_fifo(tmp_path: Path) -
 # ── End-to-end mini flow: assign → start → close → cascade ──────────────────
 
 
-def test_end_to_end_assign_start_close_cascade(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_end_to_end_assign_start_close_cascade(tmp_path: Path) -> None:
     """Architect assigns parent + 2 children to developer; developer
     closes both children via COMMIT closes:; parent auto-cascades."""
     r = _runner(tmp_path)
@@ -302,14 +315,14 @@ def test_end_to_end_assign_start_close_cascade(tmp_path: Path) -> None:
     assert ws.tasks["parent"].status == "IN_PROGRESS"
 
     # Developer closes c1.
-    r._handle_task_closures(
+    await r._handle_task_closures(
         "developer", _commit_block(closes="task:c1"), commit_hash="hash1",
     )
     assert ws.tasks["c1"].status == "COMPLETE"
     assert ws.tasks["parent"].status == "IN_PROGRESS"
 
     # Developer closes c2 — parent cascades.
-    r._handle_task_closures(
+    await r._handle_task_closures(
         "developer", _commit_block(closes="task:c2"), commit_hash="hash2",
     )
     assert ws.tasks["c2"].status == "COMPLETE"

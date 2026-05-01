@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -23,26 +23,42 @@ from core.quip_engine import Quip, QuipEngine
 from core.signals import Signal
 from core.workspace import Workspace
 
+if TYPE_CHECKING:
+    from core.runner import AgentRunner
+
 
 @dataclass
 class RunRegistry:
-    """Maps active run_id → Workspace. The runner registers its workspace
-    at run start so the WebSocket can subscribe."""
+    """Maps active run_id → (Workspace, runner). The runner registers at run
+    start so the WebSocket can subscribe and the stop endpoint can force-cancel."""
 
     runs: dict[str, Workspace] = field(default_factory=dict)
+    runners: "dict[str, AgentRunner]" = field(default_factory=dict)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
-    async def register(self, run_id: str, workspace: Workspace) -> None:
+    async def register(
+        self,
+        run_id: str,
+        workspace: Workspace,
+        runner: "AgentRunner | None" = None,
+    ) -> None:
         async with self._lock:
             self.runs[run_id] = workspace
+            if runner is not None:
+                self.runners[run_id] = runner
 
     async def unregister(self, run_id: str) -> None:
         async with self._lock:
             self.runs.pop(run_id, None)
+            self.runners.pop(run_id, None)
 
     async def get(self, run_id: str) -> Workspace | None:
         async with self._lock:
             return self.runs.get(run_id)
+
+    async def get_runner(self, run_id: str) -> "AgentRunner | None":
+        async with self._lock:
+            return self.runners.get(run_id)
 
 
 @dataclass

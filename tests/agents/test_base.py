@@ -139,7 +139,7 @@ async def test_emit_verify_and_action(workspace: Workspace):
         commit_hash="abc",
         results=[
             VerifyResult("auth_flow", "PASS"),
-            VerifyResult("token_expiry", "FAIL", "exp claim missing"),
+            VerifyResult("token_expiry", "FAIL", "exp claim is missing from the JWT payload"),
         ],
         action=("developer", "FIX", "token_expiry"),
     )

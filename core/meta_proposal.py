@@ -279,6 +279,21 @@ def render_user_message(
     roster: list[dict[str, Any]],
 ) -> str:
     """Build the full user message the LLM sees."""
+    is_continuation = inputs.continuation is not None
+    if is_continuation and inputs.continuation and inputs.continuation.feedback:
+        story_instruction = (
+            "Also populate `stories` in the tool call: extract one story per "
+            "distinct theme from the user feedback above (e.g. 'auth-flow', "
+            "'dashboard-ui', 'bug-fixes'). Each story gets a slug `name` and a "
+            "one-sentence `goal`. Assign `owner_role` when a story belongs to a "
+            "specific role; omit for shared work. 2-4 stories maximum."
+        )
+    else:
+        story_instruction = (
+            "If the goal has 2+ natural phases (e.g. backend + frontend, or "
+            "design + implementation), populate `stories` with one slug per phase "
+            "(e.g. 'backend-api', 'frontend-ui'). Omit for single-phase goals."
+        )
     return "\n\n".join([
         render_inputs(inputs),
         render_archetype_catalog(archetypes),
@@ -290,7 +305,7 @@ def render_user_message(
             "role, recommend either `hire_existing` (referencing a "
             "persona_id from the roster above) or `create_new` (with a "
             "name_hint like 'Mike' or 'Sarah' that fits the persona's "
-            "character)."
+            f"character). {story_instruction}"
         ),
     ])
 
@@ -341,6 +356,16 @@ PROPOSE_TEAM_TOOL = {
                         },
                         "is_reviewer": {"type": "boolean"},
                         "is_final_reviewer": {"type": "boolean"},
+                        "manages": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Roles this agent supervises (can assign tasks to). Leave empty to derive from RBAC.",
+                        },
+                        "escalates_to": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Roles this agent escalates to when blocked. Leave empty to default to tech_lead.",
+                        },
                         "persona": {
                             "type": "object",
                             "properties": {
@@ -389,6 +414,44 @@ PROPOSE_TEAM_TOOL = {
 
 # M2: add desk_seeds to the proposal schema (cannot inline in the dict literal
 # above without restructuring the whole block).
+PROPOSE_TEAM_TOOL["input_schema"]["properties"]["stories"] = {
+    "type": "array",
+    "description": (
+        "Story seeds for this run. Each story becomes a scoped work unit — "
+        "agents filter their doc reads to their assigned story so tokens stay "
+        "focused. For continuation runs, extract one story per distinct theme "
+        "from the user feedback. For greenfield runs, propose 1-3 stories that "
+        "map to the natural phases of the goal (e.g. 'backend-api', 'frontend-ui'). "
+        "Omit for tiny single-phase goals."
+    ),
+    "items": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": (
+                    "Slug for the story — lowercase, hyphens, max 40 chars. "
+                    "Matches the `story:` frontmatter key in doc files. "
+                    "Example: 'auth-flow', 'dashboard-ui', 'bug-fixes'."
+                ),
+            },
+            "goal": {
+                "type": "string",
+                "description": "One sentence describing what done looks like for this story.",
+            },
+            "owner_role": {
+                "type": "string",
+                "description": (
+                    "Role name that owns this story (sets it as their active story). "
+                    "Omit for team-wide stories (all roles without a more-specific "
+                    "assignment will adopt this story)."
+                ),
+            },
+        },
+        "required": ["name", "goal"],
+    },
+}
+
 PROPOSE_TEAM_TOOL["input_schema"]["properties"]["desk_seeds"] = {
     "type": "object",
     "description": (
@@ -435,6 +498,8 @@ class ParseResult:
     # M2: project-overlay desk seeds. dict[persona_id → list[DeskFileSeed dict]].
     # Runner materializes these into the project overlay before the run starts.
     desk_seeds: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # M1 §7b: story seeds for this run. Shape matches ProjectConfig.stories.
+    stories: list[dict[str, Any]] = field(default_factory=list)
 
 
 def parse_proposal_args(
@@ -585,8 +650,29 @@ def parse_proposal_args(
             is_reviewer=bool(raw.get("is_reviewer", False)),
             is_final_reviewer=bool(raw.get("is_final_reviewer", False)),
             persona_goal=hire_goal if persona_block is not None else "",
+            manages=[str(r) for r in (raw.get("manages") or [])],
+            escalates_to=[str(r) for r in (raw.get("escalates_to") or [])],
         ))
         rbac[role] = RoleRBAC(role=role, allowed_scopes=default_rbac)
+
+    # Sanity: an agent flagged is_final_reviewer must actually run last.
+    # If something else depends on it (directly or transitively), the meta
+    # mis-tagged it — strip the flag so the runner doesn't gate the run on
+    # tick 0 awaiting approval for "validating finished work" that hasn't
+    # happened. See core/runner.py:1173 for the gate.
+    role_to_agent = {a.role: a for a in agents}
+    has_dependent: dict[str, bool] = {a.role: False for a in agents}
+    for a in agents:
+        for dep in a.depends_on:
+            if dep in has_dependent:
+                has_dependent[dep] = True
+    for a in agents:
+        if a.is_final_reviewer and has_dependent.get(a.role, False):
+            warnings.append(
+                f"agent {a.role!r} was marked is_final_reviewer=true but "
+                f"other agents depend on it; clearing the flag"
+            )
+            a.is_final_reviewer = False
 
     # M2: extract desk_seeds — dict[persona_id → list[DeskFileSeed dicts]]
     raw_desk_seeds = args.get("desk_seeds") or {}
@@ -612,6 +698,34 @@ def parse_proposal_args(
             if valid_seeds:
                 desk_seeds[str(persona_id_key)] = valid_seeds
 
+    # M1 §7b: extract story seeds.
+    raw_stories = args.get("stories") or []
+    stories: list[dict[str, Any]] = []
+    valid_role_names = {a.role for a in agents}
+    if isinstance(raw_stories, list):
+        for s in raw_stories:
+            if not isinstance(s, dict):
+                continue
+            name = str(s.get("name") or "").strip().lower().replace(" ", "-")
+            goal = str(s.get("goal") or "").strip()
+            if not name or not goal:
+                warnings.append("story seed missing name or goal — skipped")
+                continue
+            owner = s.get("owner_role")
+            if owner is not None:
+                owner = str(owner).strip()
+                if owner not in valid_role_names:
+                    warnings.append(
+                        f"story {name!r} owner_role {owner!r} not in proposed team — cleared"
+                    )
+                    owner = None
+            stories.append({
+                "name": name,
+                "goal": goal,
+                "owner_role": owner or None,
+                "parent_story_id": None,
+            })
+
     return ParseResult(
         rationale=rationale or "(meta-agent did not provide a rationale)",
         agents=agents,
@@ -619,6 +733,7 @@ def parse_proposal_args(
         persona_hires=hires,
         warnings=warnings,
         desk_seeds=desk_seeds,
+        stories=stories,
     )
 
 

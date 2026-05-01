@@ -100,6 +100,11 @@ class SignalType(str, Enum):
 
     PROTOCOL = "PROTOCOL"
 
+    # Protocol parse failure — posted by the runner each time an agent's
+    # response lacks a valid trailing protocol block. Visible in the Run view
+    # so users can see retry progress before the budget is exhausted.
+    PROTOCOL_PARSE_FAIL = "PROTOCOL_PARSE_FAIL"
+
     # Agent-to-agent messaging (non-blocking). An agent posts AGENT_MESSAGE
     # directed at another role; the recipient reads it at the start of their
     # next turn. Replies are also AGENT_MESSAGE signals.

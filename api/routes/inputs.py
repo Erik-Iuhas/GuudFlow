@@ -32,6 +32,7 @@ from fastapi.responses import JSONResponse
 from api.auth import require_bearer
 from core import source_repo as source_repo_lib
 from core.secret_scan import scan_directory, strip_secrets
+from core.source_repo import _force_rw  # Windows .git read-only handler
 
 
 router = APIRouter(prefix="/api/projects/{project_id}/inputs", tags=["inputs"])
@@ -280,7 +281,7 @@ async def attach_prior_run(
     meta_path = store.from_run_meta_path(project_id, run_id)
 
     if target.exists():
-        shutil.rmtree(target)
+        shutil.rmtree(target, onerror=_force_rw)
     target.mkdir(parents=True, exist_ok=True)
 
     target_deliverables = target / "deliverables"
@@ -319,7 +320,7 @@ async def detach_prior_run(request: Request, project_id: str, run_id: str):
             detail=f"prior run {run_id!r} not attached to this project",
         )
     if target.exists():
-        shutil.rmtree(target)
+        shutil.rmtree(target, onerror=_force_rw)
     if meta_path.exists():
         meta_path.unlink()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -19,9 +19,13 @@ escalation handlers with the same metadata shape.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    from core.protocol import RejectedFeedback
 
 from agents.abstract import EscalationHandler
+from agents.builtin._shared_prompts import DELEGATION_TILT
 from core.signals import SignalType
 
 
@@ -32,9 +36,9 @@ specific ACTION recommendation that breaks the loop.
 
 Process:
   1. Read the rejection signals on the board (read_protocol with
-     types={'VERIFY_RESULT'}).
-  2. Use git:diff to see the agent's most recent attempt.
-  3. If the failure is novel, use web:search to research.
+     types={{'VERIFY_RESULT'}}).
+  2. Use git-diff to see the agent's most recent attempt.
+  3. If the failure is novel, use web-search to research.
   4. End with the [ACTION] block per the protocol layer:
      `target:` the role to act, `verb:` FIX|REVISIT|CLARIFY,
      `subject:` a concrete one-line direction (name the file, the
@@ -42,17 +46,29 @@ Process:
 
 You are the senior here. The team is stuck. Make the call.
 
+LEAD-AT-THE-TOP MODE — DO IT YOURSELF FIRST.
+When you have no upstream (depends_on=[]) and reports below you:
+  1. Read inputs/README.md and the project goal.
+  2. PRODUCE YOUR OWN DELIVERABLE FIRST. As the lead, you author the
+     design — write docs/design/<topic>.md files yourself with fs-write.
+     Write the implementation plan and interface sketches yourself.
+  3. COMMIT your artifacts ([COMMIT] block) before any assign-task.
+  4. Only THEN decompose implementation into tasks for your reports.
+     Never delegate authorship of work the user gave to YOUR role.
+
 TASK ASSIGNMENT: When you produce work that another agent should
 implement, decompose it into one or more tasks via the `assign-task`
 tool. Always populate acceptance criteria. Reference your own
 artifacts (files, commits, parent stories) so the assignee has the
 source of truth. Do not assign work outside the team's roster.
 
+{delegation_tilt}
+
 USER COMMENTS: User comments arriving on your desk (task ids prefixed
 with `comment_`) are the team's interface to the user. Decide: answer
 directly, decompose into tasks for downstream agents, or post
 HUMAN_NEEDED if you can't proceed.
-"""
+""".format(delegation_tilt=DELEGATION_TILT)
 
 TECH_LEAD_RESPOND_PROMPT = """\
 You are a senior tech lead. A teammate has asked you a question and needs
@@ -69,6 +85,22 @@ Process:
        answer: <your answer — ≤ 12 words, specific and actionable>
 
 You are the authority here. Give a decision, not a list of options.
+"""
+
+TECH_LEAD_ESCALATION_REVIEW_PROMPT = """\
+You are a senior tech lead. An agent has failed review {count} time(s) in a row.
+Your job is to break the loop by either:
+  a) Re-assigning the task with tightened acceptance criteria via `assign-task`, OR
+  b) Posting HUMAN_NEEDED if the work is genuinely impossible given current constraints.
+
+Context below shows each rejection. Read them carefully and act decisively.
+Do not hedge. Make the call.
+
+If you reassign: use `assign-task` targeting {rejected_role}, specify concrete
+acceptance_criteria that address the rejection reasons, and note what the agent
+should do differently. Keep acceptance criteria ≤ 5 bullets.
+
+If you post HUMAN_NEEDED: include a one-sentence summary of why in the `reason` field.
 """
 
 TECH_LEAD_CONFIRM_SKIP_PROMPT = """\
@@ -102,14 +134,18 @@ class TechLead(EscalationHandler):
     # signal type for catalog/meta-agent reasoning.
     wake_on_signal_type: ClassVar[SignalType | None] = SignalType.REJECTED
 
-    # M3.5 — tech_lead is the senior planner. It can rebalance work
-    # via the assign-task tool when escalations or user comments
-    # arrive (DESIGN §38.12 D2).
+    # M3.5 — tech_lead is the senior planner. It can write files and
+    # rebalance work via the assign-task tool when escalations or user
+    # comments arrive (DESIGN §38.12 D2).
     default_tools: ClassVar[tuple[str, ...]] = (
-        *EscalationHandler.default_tools, "assign-task",
+        *EscalationHandler.default_tools,
+        "fs-write", "fs-edit",
+        "assign-task",
     )
     default_rbac_scopes: ClassVar[tuple[str, ...]] = (
-        *EscalationHandler.default_rbac_scopes, "assign-task",
+        *EscalationHandler.default_rbac_scopes,
+        "fs-write", "fs-edit",
+        "assign-task",
     )
 
     archetype_description: ClassVar[str] = (
@@ -210,5 +246,60 @@ class TechLead(EscalationHandler):
         try:
             response = await self.llm(messages)
             return response.text or "(no decision)"
+        finally:
+            self.system_prompt = original_prompt
+
+    async def run_escalation_review(
+        self,
+        workspace: Any,
+        rejected_role: str,
+        history: "list[RejectedFeedback]",
+    ) -> None:
+        """Handle a consecutive-fail escalation (M5.C2).
+
+        Called by the runner when a role has been rejected >= consecutive_fail_threshold
+        times in a row. Makes one LLM call then either re-assigns via assign-task or
+        posts HUMAN_NEEDED to the workspace.
+        """
+        from core.llm import LLMMessage
+        from core.protocol import render_rejected_feedback
+
+        rendered_history = "\n\n".join(
+            render_rejected_feedback(
+                fb.reviewer_name, fb.reviewer_role, fb.detail, fb.attempt_number
+            )
+            for fb in history
+        )
+
+        prompt = TECH_LEAD_ESCALATION_REVIEW_PROMPT.format(
+            count=len(history),
+            rejected_role=rejected_role,
+        )
+        original_prompt = self.system_prompt
+        self.system_prompt = prompt
+
+        messages = [
+            LLMMessage(
+                role="user",
+                content=(
+                    f"Role that failed consecutively: {rejected_role}\n\n"
+                    f"Rejection history ({len(history)} attempt(s)):\n\n"
+                    f"{rendered_history}\n\n"
+                    f"Decide: use assign-task to retry with tighter criteria, "
+                    f"or post HUMAN_NEEDED."
+                ),
+            )
+        ]
+
+        try:
+            response = await self.llm(messages)
+            response_text = response.text or ""
+            # Run through the normal tool-execution path so assign-task actually fires.
+            if response.tool_calls:
+                for tc in response.tool_calls:
+                    try:
+                        await self.call_tool(tc.name, tc.arguments, workspace=workspace)
+                    except Exception:
+                        pass
         finally:
             self.system_prompt = original_prompt

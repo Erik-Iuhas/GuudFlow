@@ -49,9 +49,26 @@ async def clone_git_repo(
         raise SourceCloneError(msg or f"git clone exited with code {proc.returncode}")
 
 
+def _force_rw(func, path, _exc_info):
+    """rmtree onerror handler — strips read-only and retries.
+
+    Windows marks files inside `.git/objects/` as read-only, which
+    breaks `shutil.rmtree` with PermissionError. Clearing the bit
+    and retrying is the standard fix.
+    """
+    import os
+    import stat
+
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        pass
+    func(path)
+
+
 def copy_local_dir(src: Path, dest: Path) -> None:
     """Mirror `src` directory tree into `dest`, replacing if it exists."""
     if dest.exists():
-        shutil.rmtree(dest)
+        shutil.rmtree(dest, onerror=_force_rw)
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src, dest)

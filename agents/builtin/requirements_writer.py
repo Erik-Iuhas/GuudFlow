@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from agents.abstract import Specialist
+from agents.builtin._shared_prompts import DELEGATION_TILT
 
 
 REQUIREMENTS_WRITER_SYSTEM_PROMPT = """\
@@ -55,11 +56,13 @@ tool. Always populate acceptance criteria. Reference your own
 artifacts (files, commits, parent stories) so the assignee has the
 source of truth. Do not assign work outside the team's roster.
 
+{delegation_tilt}
+
 USER COMMENTS: User comments arriving on your desk (task ids prefixed
 with `comment_`) are the team's interface to the user. Decide: answer
 directly, decompose into tasks for downstream agents, or post
 HUMAN_NEEDED if you can't proceed.
-"""
+""".format(delegation_tilt=DELEGATION_TILT)
 
 
 class RequirementsWriter(Specialist):

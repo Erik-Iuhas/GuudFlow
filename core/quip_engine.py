@@ -125,7 +125,7 @@ class QuipEngine:
             f"{n_done} of ~{n_total} agents have completed so far. "
             "React briefly to being handed the baton — in character."
         )
-        quip = await self._generate(voice, context, event="agent_started")
+        quip = await self._generate(voice, context, workspace=workspace, event="agent_started")
         self._save(quip)
 
     async def on_agent_complete(self, role: str, workspace: Workspace) -> None:
@@ -140,7 +140,7 @@ class QuipEngine:
             f"You just finished your work. "
             f"{n_done} of ~{n_total or n_done} agents complete so far."
         )
-        quip = await self._generate(voice, context, event="agent_complete")
+        quip = await self._generate(voice, context, workspace=workspace, event="agent_complete")
         self._save(quip)
 
     async def on_review_verdict(
@@ -148,12 +148,14 @@ class QuipEngine:
     ) -> None:
         """The reviewer reacts to their own APPROVED / REJECTED verdict."""
         voice = self._voice_for(role)
-        reviewed = ", ".join(workspace.completed_agents[:-1]) or "the work"
+        reviewed_names = ", ".join(
+            self._persona_name_for_role(r) for r in workspace.completed_agents[:-1]
+        ) or "the work"
         if verdict == "APPROVED":
-            context = f"You just approved {reviewed}. It passed your review."
+            context = f"You just approved {reviewed_names}. It passed your review."
         else:
-            context = f"You just rejected {reviewed}. It did not meet your standard."
-        quip = await self._generate(voice, context, event=verdict.lower())
+            context = f"You just rejected {reviewed_names}. It did not meet your standard."
+        quip = await self._generate(voice, context, workspace=workspace, event=verdict.lower())
         self._save(quip)
 
     async def on_run_complete(self, workspace: Workspace, result: SchedulerResult) -> None:
@@ -177,12 +179,13 @@ class QuipEngine:
         ]
 
         if rejected_signals:
-            rejecting_agents = ", ".join(
-                s.from_agent for s in rejected_signals if s.from_agent
+            rejecting_names = ", ".join(
+                self._persona_name_for_role(s.from_agent)
+                for s in rejected_signals if s.from_agent
             ) or "a reviewer"
             context = (
                 f"The run just finished with status: {status}, but "
-                f"the work was REJECTED by {rejecting_agents}. "
+                f"the work was REJECTED by {rejecting_names}. "
                 f"The deliverables did NOT pass review — this is a failure, not a success."
             )
         elif approved_signals:
@@ -195,7 +198,7 @@ class QuipEngine:
                 f"The run just finished with status: {status}. "
                 f"Completed agents: {done}. Failed: {failed}."
             )
-        quip = await self._generate(voice, context, event="run_complete")
+        quip = await self._generate(voice, context, workspace=workspace, event="run_complete")
         self._save(quip)
 
     async def on_iteration_complete(self, workspace: Workspace, iteration: int) -> None:
@@ -205,7 +208,7 @@ class QuipEngine:
             f"Iteration {iteration} just finished. "
             f"{len(workspace.completed_agents)} agents complete so far."
         )
-        quip = await self._generate(voice, context, event="iteration_complete")
+        quip = await self._generate(voice, context, workspace=workspace, event="iteration_complete")
         self._save(quip)
 
     async def on_event(self, summary: str, event: str = "system") -> None:
@@ -253,6 +256,25 @@ class QuipEngine:
         except Exception:
             return None
 
+    def _persona_name_for_role(self, role: str) -> str:
+        """Return the persona's display name for a role, falling back to the role string."""
+        for v in self._voices:
+            if v.role == role:
+                return v.name
+        if self._workspace is not None:
+            persona_id = self._workspace.hired_personas.get(role)
+            if persona_id:
+                return persona_id
+        return role
+
+    def _roster_block(self, workspace: Workspace | None = None) -> str:
+        """Build a 'Your coworkers on this run' block from known voices."""
+        ws = workspace or self._workspace
+        if not self._voices:
+            return ""
+        entries = [f"{v.name} ({v.role})" for v in self._voices]
+        return "Your coworkers on this run: " + ", ".join(entries) + ". Use their names, not their roles."
+
     def _random_voice(self) -> AgentVoice:
         if self._voices:
             return random.choice(self._voices)
@@ -266,10 +288,15 @@ class QuipEngine:
             character="You are a focused engineer on a software team.",
         )
 
-    async def _generate(self, voice: AgentVoice, context: str, event: str) -> Quip:
+    async def _generate(
+        self, voice: AgentVoice, context: str, event: str,
+        workspace: Workspace | None = None,
+    ) -> Quip:
+        roster = self._roster_block(workspace)
         system = (
             f"{voice.character}\n\n"
-            "React to what just happened in ONE punchy sentence — in character, "
+            + (f"{roster}\n\n" if roster else "")
+            + "React to what just happened in ONE punchy sentence — in character, "
             "no quotation marks, no preamble. Speak as yourself."
         )
         try:

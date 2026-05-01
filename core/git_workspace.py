@@ -81,6 +81,20 @@ class GitStatusResult:
     clean: bool
 
 
+def _persona_slug(name: str) -> str:
+    """Convert a persona display name to a git-safe slug.
+
+    "Diana Park" → "diana_park", "Mike O'Brien" → "mike_o_brien".
+    Non-alphanumeric runs collapse to a single underscore; leading/
+    trailing underscores are stripped.
+    """
+    import re
+    slug = name.lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", slug)
+    slug = slug.strip("_")
+    return slug or "agent"
+
+
 class GitWorkspace:
     """Wraps the git repo for a single run's `working/` directory.
 
@@ -94,6 +108,9 @@ class GitWorkspace:
         None disables signal emission (useful for tests).
     author_name, author_email : str
         Local-only git identity for this run. Never global.
+    hired_personas : dict[str, str] | None
+        Mapping of role → persona display name. When present, branches are
+        named ``{persona_slug}/{role}`` instead of ``agent/{role}``.
     """
 
     AGENT_BRANCH_PREFIX = "agent/"
@@ -105,11 +122,13 @@ class GitWorkspace:
         emit: SignalEmitter | None = None,
         author_name: str = DEFAULT_AUTHOR[0],
         author_email: str = DEFAULT_AUTHOR[1],
+        hired_personas: dict[str, str] | None = None,
     ):
         self.working_dir = Path(working_dir).resolve()
         self.emit = emit
         self.author_name = author_name
         self.author_email = author_email
+        self._hired_personas: dict[str, str] = hired_personas or {}
         self._repo: Repo | None = None
 
     # ── Init ────────────────────────────────────────────────────────────────
@@ -147,13 +166,38 @@ class GitWorkspace:
 
     # ── Branches ────────────────────────────────────────────────────────────
 
-    def agent_branch(self, role: str) -> str:
-        """Return the branch name for an agent role, creating it from main
-        if it doesn't exist yet. Idempotent."""
-        branch_name = f"{self.AGENT_BRANCH_PREFIX}{role}"
+    def agent_branch(self, role: str, parent_branches: list[str] | None = None) -> str:
+        """Return the branch name for an agent role, creating it if needed.
+
+        Branch is ``{persona_slug}/{role}`` when a persona display name is
+        known for the role (via ``hired_personas``), otherwise ``agent/{role}``.
+
+        When ``parent_branches`` is provided the new branch forks from the tip
+        of the first parent rather than from ``main``. This keeps the git graph
+        mirroring the pipeline DAG: each agent's branch visually descends from
+        the agent(s) it depends on, not from the empty initialisation commit.
+
+        For fan-in roles (multiple parents) the caller is still responsible for
+        merging the remaining parents after this returns — only the *first*
+        parent determines the fork point so the branch is created cleanly.
+
+        Idempotent: if the branch already exists the parent list is ignored.
+        """
+        persona = self._hired_personas.get(role)
+        prefix = _persona_slug(persona) if persona else "agent"
+        branch_name = f"{prefix}/{role}"
         if branch_name not in [h.name for h in self.repo.heads]:
-            main = self.repo.heads["main"]
-            self.repo.create_head(branch_name, main.commit)
+            # Fork from first parent's tip so history follows the pipeline.
+            # Falls back to main when the parent hasn't committed yet (the
+            # runner's _premerge_upstream_deps will merge it in later).
+            start_commit = self.repo.heads["main"].commit
+            if parent_branches:
+                for pb in parent_branches:
+                    heads_by_name = {h.name: h for h in self.repo.heads}
+                    if pb in heads_by_name:
+                        start_commit = heads_by_name[pb].commit
+                        break
+            self.repo.create_head(branch_name, start_commit)
         return branch_name
 
     # ── Commit ──────────────────────────────────────────────────────────────
@@ -197,7 +241,8 @@ class GitWorkspace:
                 f"nothing staged for commit on {branch} — check that files were written"
             )
 
-        actor = git.Actor(self.author_name, self.author_email)
+        persona_name = self._hired_personas.get(role, role)
+        actor = git.Actor(f"{persona_name} ({role})", f"{role}@agentflow.local")
         new_commit = self.repo.index.commit(message, author=actor, committer=actor)
         info = GitCommitInfo(
             hash=new_commit.hexsha,
@@ -236,6 +281,32 @@ class GitWorkspace:
     def changed_files(self, branch_a: str, branch_b: str = "main") -> list[str]:
         """Return the list of file paths changed in `branch_a` vs `branch_b`."""
         output: str = self.repo.git.diff("--name-only", f"{branch_b}...{branch_a}")
+        return [p for p in output.splitlines() if p.strip()]
+
+    def head_sha(self) -> str | None:
+        """Current HEAD commit SHA, or None if the repo has no commits yet."""
+        try:
+            return self.repo.head.commit.hexsha
+        except (ValueError, Exception):
+            return None
+
+    def diff_against_ref(self, ref: str, path: str | None = None) -> str:
+        """Unified diff of the working tree vs `ref`. Restrict to `path` if given.
+
+        Used for story-scoped diffs: `ref` is the story's `base_ref`, captured
+        when the story opened. Includes uncommitted changes in the working
+        tree so agents see in-flight edits, not just committed ones.
+        """
+        if path:
+            return self.repo.git.diff(ref, "--", path)
+        return self.repo.git.diff(ref)
+
+    def changed_files_against_ref(self, ref: str) -> list[str]:
+        """Paths changed in the working tree vs `ref`. Working-tree-inclusive."""
+        try:
+            output: str = self.repo.git.diff("--name-only", ref)
+        except GitCommandError:
+            return []
         return [p for p in output.splitlines() if p.strip()]
 
     def status(self) -> GitStatusResult:
@@ -300,9 +371,11 @@ class GitWorkspace:
         on conflict (in which case the merge is aborted to leave the repo
         in a clean state and GIT_CONFLICT is emitted).
 
-        On clean merge, GIT_MERGE is emitted.
+        Only emits GIT_MERGE when HEAD actually advances. No-op merges
+        ("Already up to date") return True silently.
         """
         self.repo.git.checkout(into)
+        pre_sha = self.repo.heads[into].commit.hexsha if into in [h.name for h in self.repo.heads] else None
         try:
             self.repo.git.merge(branch, "--no-ff", "-m", f"merge: {branch} into {into}")
         except GitCommandError as e:
@@ -319,7 +392,8 @@ class GitWorkspace:
                 )
             return False
 
-        if self.emit is not None:
+        post_sha = self.repo.heads[into].commit.hexsha if into in [h.name for h in self.repo.heads] else None
+        if self.emit is not None and post_sha != pre_sha:
             self.emit(
                 SignalType.GIT_MERGE,
                 f"merged {branch} into {into}",

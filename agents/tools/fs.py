@@ -47,10 +47,12 @@ def _ok(**kwargs: Any) -> dict[str, Any]:
 
 class FsRead(BaseTool):
     name = "fs-read"
-    description = "Read the full contents of a file under working/ as text (UTF-8)."
+    description = "Read a file under working/ as UTF-8 text."
     input_schema = {
         "type": "object",
-        "properties": {"path": {"type": "string", "description": "path relative to working/"}},
+        "properties": {
+            "path": {"type": "string", "description": "path relative to working/"},
+        },
         "required": ["path"],
     }
 
@@ -64,7 +66,7 @@ class FsRead(BaseTool):
             "emits": "{ok:true, path, content, size}",
             "errors": "not found | path safety | read failed",
             "example": 'fs-read({"path": "src/auth.py"})',
-            "notes": "Use fs-read-range for partial reads on huge files.",
+            "notes": "Use fs-read-range for partial reads. Use fs-diff to see what changed in a doc since your story opened.",
         }
 
     async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -79,12 +81,18 @@ class FsRead(BaseTool):
             return _err(f"not found: {path}")
         except OSError as e:
             return _err(f"read failed: {e}")
+
         return _ok(path=path, content=content, size=len(content))
 
 
 class FsList(BaseTool):
     name = "fs-list"
-    description = "List files under a working/ subpath. Optional recursive flag."
+    description = (
+        "List files under a working/ subpath. Optional recursive flag. "
+        "Markdown files include their `story:` frontmatter tag when present, "
+        "and a `changed_in_story` flag when the file has changed since the "
+        "agent's active story opened (use fs-diff to see the delta)."
+    )
     input_schema = {
         "type": "object",
         "properties": {
@@ -93,10 +101,37 @@ class FsList(BaseTool):
         },
     }
 
-    def __init__(self, files: FileWorkspace):
+    def __init__(
+        self,
+        files: FileWorkspace,
+        workspace: Any = None,
+        role: str = "",
+        git: Any = None,
+    ):
         self.files = files
+        self.workspace = workspace
+        self.role = role
+        self.git = git
+
+    def _active_story_base_ref(self) -> str | None:
+        """Return the active story's base_ref for this role, or None."""
+        if self.workspace is None or not self.role:
+            return None
+        story_id = (
+            getattr(self.workspace, "active_story", {}) or {}
+        ).get(self.role)
+        if not story_id:
+            return None
+        story = (
+            getattr(self.workspace, "stories", {}) or {}
+        ).get(story_id)
+        if story is None or getattr(story, "closed", False):
+            return None
+        return getattr(story, "base_ref", None)
 
     async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        from core.story_tags import read_story_tag
+
         path = arguments.get("path") or ""
         recursive = bool(arguments.get("recursive", False))
         try:
@@ -105,7 +140,44 @@ class FsList(BaseTool):
             return _err(f"path safety: {e}")
         except OSError as e:
             return _err(f"list failed: {e}")
-        return _ok(path=path, recursive=recursive, files=paths, count=len(paths))
+
+        # One git diff to find all paths changed since the active story's
+        # baseline ref — far cheaper than per-file reads. Empty set when
+        # there's no active story, no base_ref, or no git workspace.
+        changed_set: set[str] = set()
+        base_ref = self._active_story_base_ref()
+        if base_ref and self.git is not None:
+            try:
+                changed_set = set(self.git.changed_files_against_ref(base_ref))
+            except Exception:
+                changed_set = set()
+
+        enriched: list[Any] = []
+        for p in paths:
+            tag: str | None = None
+            if p.lower().endswith((".md", ".markdown")):
+                try:
+                    abs_path = self.files._safe_path(p, self.files.working)
+                    tag = read_story_tag(abs_path)
+                except Exception:
+                    tag = None
+            changed = p in changed_set if base_ref else False
+            if tag or changed:
+                entry: dict[str, Any] = {"path": p}
+                if tag:
+                    entry["story"] = tag
+                if base_ref:
+                    entry["changed_in_story"] = changed
+                enriched.append(entry)
+            else:
+                enriched.append(p)
+
+        return _ok(
+            path=path,
+            recursive=recursive,
+            files=enriched,
+            count=len(enriched),
+        )
 
 
 class FsExists(BaseTool):
@@ -534,6 +606,118 @@ class FsDelete(_ClaimingTool):
             return _err(f"delete failed: {e}")
         await self._release(path, "written")
         return _ok(path=path, deleted=True)
+
+
+class FsDiff(BaseTool):
+    """Story-scoped diff of a file vs a baseline ref.
+
+    Default `against = "story-base"` resolves to the active story's `base_ref`
+    captured at `story-open` time. Pass an explicit ref or branch to compare
+    against something else. Falls back to full file content with a `note`
+    when no baseline is available (e.g. story has no base_ref, or git is
+    not provisioned).
+    """
+
+    name = "fs-diff"
+    description = (
+        "Show a unified diff of a file against the active story's baseline ref "
+        "(or an explicit ref/branch). Use this to see what's new for your story "
+        "in a shared doc without re-reading the whole file."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "path relative to working/"},
+            "against": {
+                "type": "string",
+                "description": (
+                    "ref to diff against. 'story-base' (default) uses the "
+                    "active story's base_ref; otherwise pass a SHA, branch, or tag."
+                ),
+            },
+        },
+        "required": ["path"],
+    }
+
+    def __init__(
+        self,
+        files: FileWorkspace,
+        workspace: Any = None,
+        role: str = "",
+        git: Any = None,
+    ):
+        self.files = files
+        self.workspace = workspace
+        self.role = role
+        self.git = git
+
+    def aci_doc(self) -> dict[str, str]:
+        return {
+            "purpose": "Diff a file against the active story's baseline (or any ref).",
+            "args": "{path:string, against?:string}",
+            "emits": "{ok:true, path, against, base_ref, diff} | {ok:true, path, content, note}",
+            "errors": "not found | path safety | diff failed",
+            "example": 'fs-diff({"path": "docs/spec.md"})',
+            "notes": "If no baseline ref is available, returns the full file content with a note.",
+        }
+
+    def _active_story_base_ref(self) -> str | None:
+        if self.workspace is None or not self.role:
+            return None
+        story_id = (
+            getattr(self.workspace, "active_story", {}) or {}
+        ).get(self.role)
+        if not story_id:
+            return None
+        story = (
+            getattr(self.workspace, "stories", {}) or {}
+        ).get(story_id)
+        if story is None or getattr(story, "closed", False):
+            return None
+        return getattr(story, "base_ref", None)
+
+    async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        path = arguments.get("path")
+        if not path or not isinstance(path, str):
+            return _err("missing required argument: path")
+        against = (arguments.get("against") or "story-base").strip()
+
+        # Path-safety check via FileWorkspace before invoking git.
+        try:
+            self.files._safe_path(path, self.files.working)
+        except PathSafetyError as e:
+            return _err(f"path safety: {e}")
+
+        if against == "story-base":
+            base_ref = self._active_story_base_ref()
+        else:
+            base_ref = against
+
+        if not base_ref or self.git is None:
+            # Fallback: return the full file with a note so callers still
+            # get something useful when the baseline is missing.
+            try:
+                content = await self.files.read(path)
+            except FileNotFoundError:
+                return _err(f"not found: {path}")
+            except OSError as e:
+                return _err(f"read failed: {e}")
+            return _ok(
+                path=path,
+                content=content,
+                note="no baseline ref available — returning full content",
+            )
+
+        try:
+            diff = self.git.diff_against_ref(base_ref, path=path)
+        except Exception as e:
+            return _err(f"diff failed: {e}")
+        return _ok(
+            path=path,
+            against=against,
+            base_ref=base_ref,
+            diff=diff,
+        )
 
 
 class FsRename(_ClaimingTool):

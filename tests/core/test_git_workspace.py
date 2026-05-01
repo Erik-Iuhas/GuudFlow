@@ -258,6 +258,45 @@ def test_tag_duplicate_returns_false(gw: GitWorkspace):
     assert gw.tag("review/1/reviewer", message="y") is False
 
 
+def test_per_agent_author_name_on_commit(tmp_path: Path):
+    """Commits carry the persona name, not the shared 'agentflow' author."""
+    g = GitWorkspace(
+        tmp_path / "working",
+        hired_personas={"developer": "Sarah", "reviewer": "Mike"},
+    )
+    g.init()
+    (g.working_dir / "dev.py").write_text("x")
+    g.commit("developer", "feat: dev commit")
+    (g.working_dir / "rev.py").write_text("y")
+    g.commit("reviewer", "feat: reviewer commit")
+
+    # With hired_personas set, branches use persona slug as prefix.
+    dev_branch = g.repo.heads["sarah/developer"]
+    rev_branch = g.repo.heads["mike/reviewer"]
+    assert "Sarah" in dev_branch.commit.author.name
+    assert "Mike" in rev_branch.commit.author.name
+    # Emails are role-based, not shared
+    assert dev_branch.commit.author.email == "developer@agentflow.local"
+    assert rev_branch.commit.author.email == "reviewer@agentflow.local"
+
+
+def test_commits_different_agents_have_distinct_authors(tmp_path: Path):
+    """Two agents on separate branches have distinct author.name values."""
+    g = GitWorkspace(
+        tmp_path / "working",
+        hired_personas={"agent_a": "Alice", "agent_b": "Bob"},
+    )
+    g.init()
+    (g.working_dir / "a.txt").write_text("a")
+    g.commit("agent_a", "feat: alice")
+    (g.working_dir / "b.txt").write_text("b")
+    g.commit("agent_b", "feat: bob")
+
+    a_commit = g.repo.heads["alice/agent_a"].commit
+    b_commit = g.repo.heads["bob/agent_b"].commit
+    assert a_commit.author.name != b_commit.author.name
+
+
 def test_list_tags_returns_in_chronological_order(gw: GitWorkspace):
     import time
     (gw.working_dir / "a.py").write_text("a")

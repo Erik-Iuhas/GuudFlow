@@ -44,6 +44,7 @@ from agents.tools.doc import DocHtml, DocMarkdown
 from agents.tools.fs import (
     FsCreate,
     FsDelete,
+    FsDiff,
     FsEdit,
     FsExists,
     FsGrep,
@@ -54,6 +55,7 @@ from agents.tools.fs import (
     FsWrite,
 )
 from agents.tools.git import GitChangedFiles, GitDiff, GitLog, GitRead, GitStatus
+from agents.tools.story import StoryComplete, StoryOpen
 from agents.tools.math_tool import MathEval
 from agents.tools.text import TextDiff, TextEstimateTokens
 from agents.tools.time_tool import TimeDiff, TimeNow
@@ -64,6 +66,7 @@ from core.credentials_broker import CredentialsBroker
 from core.file_workspace import FileWorkspace
 from core.git_workspace import GitWorkspace
 from core.llm import LLMClient, LLMMessage, ToolCall
+from core.task_summarizer import TaskSummarizer
 from core.llm.registry import ModelRegistry
 from core.loop_guard import LoopGuard, LoopGuardConfig
 from core.repo_map import build as build_repo_map, update_incremental
@@ -123,13 +126,20 @@ class AgentConfig:
     # project. Distinct from is_reviewer (which is one of N peer
     # reviewers); a final reviewer sees the whole merged result.
     is_final_reviewer: bool = False
-    max_tool_iterations: int = 10  # cap on tool-use loop iterations within one run() call
+    max_tool_iterations: int = 30  # cap on tool-use loop iterations within one run() call (extendable on user approval)
     # LoopGuard config — per-attempt wall-clock + repetition detection.
     # None means use LoopGuardConfig defaults.
     loop_guard: LoopGuardConfig | None = None
+    # How many times to re-prompt on a protocol parse failure before giving up.
+    # On exhaustion the runner emits a synthetic [VERIFY] FAIL instead of crashing.
+    max_protocol_retries: int = 3
     # M2 — one-sentence goal for the persona filling this slot. Written to
     # profile.json on create_new bootstrap; used in teammate brief (Layer 3.5).
     persona_goal: str = ""
+    # Explicit hierarchy. Empty lists fall back to today's derived behavior:
+    # manages → RBAC-derived can_assign_to; escalates_to → tech_lead if present.
+    manages: list[str] = field(default_factory=list)
+    escalates_to: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -180,6 +190,11 @@ class ProjectConfig:
     # bundle from disk to score the run. Stored on the project at
     # invoke time by the training launcher.
     training_scenario_id: str | None = None
+    # M5: consecutive-fail threshold for the redispatch loop. After this many
+    # consecutive REJECTED on the same role (without an intervening APPROVED),
+    # tech_lead is escalated instead of bouncing the work back again.
+    # Separate from escalation_thresholds (which is cumulative across the run).
+    consecutive_fail_threshold: int = 2
 
 
 # Default model id per tier. The runner may override via project config.
@@ -306,6 +321,39 @@ LOCAL_TOOL_CLASSES: tuple[type[BaseTool], ...] = (
 )
 
 
+def _detect_dependency_cycle(agents: list["AgentConfig"]) -> list[str] | None:
+    """Return one cycle (as a role list, no repeated tail) or None if acyclic."""
+    deps = {a.role: list(a.depends_on or []) for a in agents}
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = {r: WHITE for r in deps}
+    stack: list[str] = []
+
+    def visit(role: str) -> list[str] | None:
+        if color.get(role, BLACK) == GRAY:
+            i = stack.index(role)
+            return stack[i:]
+        if color.get(role, BLACK) == BLACK:
+            return None
+        color[role] = GRAY
+        stack.append(role)
+        for dep in deps.get(role, []):
+            if dep not in deps:
+                continue
+            cyc = visit(dep)
+            if cyc is not None:
+                return cyc
+        stack.pop()
+        color[role] = BLACK
+        return None
+
+    for r in deps:
+        if color[r] == WHITE:
+            cyc = visit(r)
+            if cyc is not None:
+                return cyc
+    return None
+
+
 class AgentRunner:
     """One run. Owns the workspace, scheduler, agents, broker, LLM."""
 
@@ -318,6 +366,7 @@ class AgentRunner:
         broker: CredentialsBroker | None = None,
         screenshot_callback: ScreenshotCallback | None = None,
         memory_writer: BaseAgent | None = None,
+        task_summarizer: TaskSummarizer | None = None,
         quip_engine: "QuipEngine | None" = None,
         agent_factory: "AgentFactory | None" = None,
         max_wall_seconds: float | None = 1800.0,  # 30 min run-level budget
@@ -338,7 +387,12 @@ class AgentRunner:
                                                   audit_log_path=self.run_root / "access_log.jsonl")
         self.screenshot_callback = screenshot_callback
         self.memory_writer = memory_writer
+        self.task_summarizer = task_summarizer
         self.quip_engine = quip_engine
+        # M5.5: messages list for the currently-running agent invocation.
+        # Set at the start of _generic_tool_use_loop so compaction can
+        # access it from _handle_task_closures.
+        self._current_agent_messages: list[LLMMessage] = []
         self.agent_factory = agent_factory or default_agent_factory
         self.max_wall_seconds = max_wall_seconds
         self.docker_manager = docker_manager
@@ -381,6 +435,11 @@ class AgentRunner:
         self._rejection_counts: dict[str, int] = {}
         self._escalations_fired: dict[str, set[str]] = {}
         self._escalation_tasks: list[asyncio.Task] = []
+        # M5: consecutive-fail redispatch (D1–D4 in m5-backend-pass.md).
+        # _consecutive_fails resets on APPROVED; _pending_feedback carries
+        # the reviewer's reason into the next iteration's context.
+        self._consecutive_fails: dict[str, int] = {}
+        self._pending_feedback: "dict[str, RejectedFeedback]" = {}
         self._scheduler: Scheduler | None = None  # set in run() after creation
         # M1: track outstanding interrupts so signal subscribers can resume.
         # Maps role → InterruptToken. Cleared by _resume_token_for_role().
@@ -398,6 +457,9 @@ class AgentRunner:
         # those are runner-bound, not persisted.
         if restored_workspace is not None:
             self.workspace = restored_workspace
+            # M5 D4: rebuild consecutive_fails from the board so resume
+            # picks up where the previous run left off.
+            self._rebuild_consecutive_fails_from_board()
         else:
             self.workspace = Workspace(
                 run_id=run_id,
@@ -407,6 +469,10 @@ class AgentRunner:
         # Subscribe to the board so we can count REJECTED signals and
         # fire escalations when thresholds are crossed.
         self.workspace.subscribe(self._on_signal_for_escalation)
+        # M5: consecutive-fail redispatch. Parallel to _on_signal_for_escalation;
+        # handles the "bounce back to author once, then escalate" pattern.
+        self.workspace.subscribe(self._on_signal_for_rejection_redispatch)
+        self.workspace.subscribe(self._on_signal_for_approval)
         # M1: subscribe so ANSWER / SKIP_GRANTED / SKIP_DENIED / HUMAN_RESPONDED
         # routes back to scheduler.resume() and unparks the asker.
         self.workspace.subscribe(self._on_signal_for_resume)
@@ -552,10 +618,11 @@ class AgentRunner:
 
         return {
             FsRead.name: FsRead(self.files),
-            FsList.name: FsList(self.files),
+            FsList.name: FsList(self.files, workspace=self.workspace, role=role, git=self.git),
             FsExists.name: FsExists(self.files),
             FsReadRange.name: FsReadRange(self.files),
             FsGrep.name: FsGrep(self.files),
+            FsDiff.name: FsDiff(self.files, workspace=self.workspace, role=role, git=self.git),
             FsCreate.name: FsCreate(self.files, claim_emitter, release_emitter),
             FsWrite.name: FsWrite(self.files, claim_emitter, release_emitter),
             FsEdit.name: FsEdit(self.files, claim_emitter, release_emitter),
@@ -563,6 +630,10 @@ class AgentRunner:
             FsRename.name: FsRename(self.files, claim_emitter, release_emitter),
             BoardMessage.name: BoardMessage(role, self.workspace),
             AssignTask.name: AssignTask(role, self.workspace, runner=self),
+            # Story lifecycle — available to all agents (no RBAC gate).
+            # Any agent that writes .md files may open or close a story.
+            StoryComplete.name: StoryComplete(role, self.workspace, runner=self),
+            StoryOpen.name: StoryOpen(role, self.workspace, runner=self),
             GitDiff.name: GitDiff(self.git),
             GitChangedFiles.name: GitChangedFiles(self.git),
             GitLog.name: GitLog(self.git),
@@ -734,11 +805,50 @@ class AgentRunner:
         non_final_roles = [
             c.role for c in self.project.agents if not c.is_final_reviewer
         ]
+        # Build reverse adjacency once: role -> set of roles that directly
+        # depend on it. Used to compute transitive blockers below.
+        reverse_deps: dict[str, set[str]] = {c.role: set() for c in self.project.agents}
+        for c in self.project.agents:
+            for dep in c.depends_on or []:
+                if dep in reverse_deps:
+                    reverse_deps[dep].add(c.role)
+
+        def _transitive_dependents(role: str) -> set[str]:
+            seen: set[str] = set()
+            stack = [role]
+            while stack:
+                cur = stack.pop()
+                for nxt in reverse_deps.get(cur, ()):
+                    if nxt not in seen:
+                        seen.add(nxt)
+                        stack.append(nxt)
+            return seen
+
         for cfg in self.project.agents:
             if cfg.is_final_reviewer and not cfg.depends_on:
+                # Skip auto-fill for any role that transitively depends on us —
+                # filling in the reverse direction would create a cycle and
+                # the scheduler would hit STUCK on tick 1. Direct + transitive
+                # both matter: a → b → us means depending on a still cycles.
+                blockers = _transitive_dependents(cfg.role)
                 cfg.depends_on = [
-                    r for r in non_final_roles if r != cfg.role
+                    r for r in non_final_roles
+                    if r != cfg.role and r not in blockers
                 ]
+
+        cycle = _detect_dependency_cycle(self.project.agents)
+        if cycle:
+            chain = " → ".join(cycle + [cycle[0]])
+            self.workspace.post_signal(Signal(
+                type=SignalType.FAILED,
+                summary=f"dependency cycle detected: {chain}",
+                detail=(
+                    "Run cannot start because the agent dependency graph "
+                    "contains a cycle. Edit depends_on on the listed roles."
+                ),
+                from_agent="scheduler",
+            ))
+            raise RuntimeError(f"dependency cycle detected: {chain}")
 
         for cfg in self.project.agents:
             agent = self.agent_factory(cfg)
@@ -759,7 +869,14 @@ class AgentRunner:
                 declared_mcp_servers=cfg.declared_mcp_servers,
             )
             agent._local_tools = self._instantiate_local_tools(cfg.role)
-            agent._current_task = self.project.goal
+            # On a continuation run, the agent's "task" used for context
+            # retrieval (token-overlap scoring against repo files, persona
+            # memory recall) is the USER FEEDBACK — not the original goal.
+            # Without this, every continuation re-loads files matching the
+            # whole project description and re-does prior work.
+            agent._current_task = (
+                self._continuation_task_hint() or self.project.goal
+            )
             # Phase K.1 — project context (roadmap.md). Empty when the
             # project has no roadmap; layer is then omitted from the
             # effective prompt.
@@ -787,10 +904,213 @@ class AgentRunner:
                     persona_id = cfg.persona_id or None
                     agent._project_rules = _BA.load_project_rules(project_id, persona_id)
 
+            # Continuation brief — surfaces prior-run feedback to agents
+            # at runtime (not just at proposal time). Without this, devs
+            # rebuild from scratch instead of addressing review comments.
+            agent._continuation_brief = self._build_continuation_brief()
+
             # M2: build DeskIndex (persona-default + project-overlay) and inject.
             agent._desk_index = self._build_desk_index(cfg)
 
             self.agents[cfg.role] = agent
+
+    def _continuation_task_hint(self) -> str:
+        """Concatenate every prior-run feedback.md into a short task hint.
+
+        Returned string is what gets used as `agent._current_task` so
+        relevance scoring (file retrieval, memory recall) targets the
+        actual feedback this run is supposed to address rather than the
+        full original project goal.
+        """
+        inputs_dir = self.run_root / "workspace" / "inputs"
+        if not inputs_dir.is_dir():
+            return ""
+        chunks: list[str] = []
+        for entry in sorted(inputs_dir.iterdir()):
+            if not entry.is_dir() or not entry.name.startswith("from_run_"):
+                continue
+            fb_path = entry / "feedback.md"
+            if not fb_path.is_file():
+                continue
+            try:
+                text = fb_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                continue
+            if text:
+                chunks.append(text)
+        return "\n".join(chunks).strip()
+
+    def _build_continuation_brief(self) -> str:
+        """Read inputs/from_run_*/feedback.md across all attached prior
+        runs and assemble a runtime brief. Empty string when no prior
+        runs are attached — the layer is skipped in that case.
+
+        The brief is injected into every agent's effective system prompt
+        so devs (not just the meta-agent at proposal time) know they are
+        on a continuation and what feedback to address.
+        """
+        inputs_dir = self.run_root / "workspace" / "inputs"
+        if not inputs_dir.is_dir():
+            return ""
+
+        feedbacks: list[tuple[str, str]] = []  # (run_id, feedback_text)
+        prior_run_ids: list[str] = []
+        for entry in sorted(inputs_dir.iterdir()):
+            if not entry.is_dir() or not entry.name.startswith("from_run_"):
+                continue
+            prior_run_id = entry.name[len("from_run_"):]
+            prior_run_ids.append(prior_run_id)
+            fb_path = entry / "feedback.md"
+            if fb_path.is_file():
+                try:
+                    text = fb_path.read_text(encoding="utf-8").strip()
+                except OSError:
+                    text = ""
+                if text:
+                    feedbacks.append((prior_run_id, text))
+
+        if not prior_run_ids:
+            return ""
+
+        lines: list[str] = [
+            "## CONTINUATION RUN — read this before any other work",
+            "",
+            "This is NOT a fresh start. A prior run produced deliverables "
+            "that were seeded into `working/`. Your job is to extend / "
+            "fix that work, NOT redo it from scratch.",
+            "",
+            "Prior run(s) attached:",
+        ]
+        for pid in prior_run_ids:
+            lines.append(
+                f"- `inputs/from_run_{pid}/deliverables/` — what shipped last time"
+            )
+
+        if feedbacks:
+            lines.append("")
+            lines.append("USER FEEDBACK (must be addressed this run):")
+            lines.append("")
+            for pid, text in feedbacks:
+                lines.append(f"From review of `{pid}`:")
+                lines.append(f"> {text}")
+                lines.append("")
+
+        lines.append(
+            "Before you write code: `fs-list` and `fs-read` what's already "
+            "in `working/`. Identify the deltas the feedback asks for. "
+            "Edit existing files where possible — only add new files when "
+            "the change genuinely needs a new module."
+        )
+        lines.append("")
+        lines.append("STORY-SCOPED DOCS (agile workflow):")
+        lines.append(
+            "- `fs-list` shows `.md` files with their `story:` frontmatter "
+            "(whole-file ownership) AND a `changed_in_story` flag when the "
+            "file has changed since your active story opened."
+        )
+        lines.append(
+            "- `fs-diff` returns a unified diff of a doc against your "
+            "story's baseline ref — the cheapest way to see what's new for "
+            "your story in a shared doc without re-reading the whole file."
+        )
+        lines.append(
+            "- `fs-read` returns the full file content; pair it with `fs-diff` "
+            "when you need both the prose and the delta."
+        )
+        lines.append("")
+        lines.append("AUTHORING PATTERN — for architects / tech leads:")
+        lines.append(
+            "When a doc is wholly about one story, add `story: <name>` "
+            "frontmatter so `fs-list` advertises ownership. For shared "
+            "docs that grow over time, just write — git history attributes "
+            "the changes to the active story automatically."
+        )
+        lines.append("")
+        lines.append("    ---")
+        lines.append("    story: ghost-ai")
+        lines.append("    ---")
+        lines.append("")
+        lines.append("    # Ghost AI design")
+        lines.append("    ...")
+        lines.append("")
+        lines.append(
+            "Story names are short kebab-case nouns drawn from feedback "
+            "or the run goal."
+        )
+        lines.append("")
+        lines.append("FOLLOWER PATTERN — for specialists / devs:")
+        lines.append(
+            "Use `fs-list` to find docs flagged `changed_in_story: true`, "
+            "then `fs-diff` on those to read just the new context. Use "
+            "`fs-read` when you need the full doc."
+        )
+        return "\n".join(lines).strip()
+
+    # ── Force-stop ──────────────────────────────────────────────────────────
+
+    async def force_stop(self) -> None:
+        """Cancel all in-flight agent tasks immediately.
+
+        Called by the stop endpoint when the user wants an instant halt rather
+        than waiting for the current LLM calls to finish. Sets pending_human
+        first so no new agents are spawned, then cancels the scheduler's tasks.
+        """
+        from core.workspace import HumanRequest
+
+        if self.workspace.pending_human is None:
+            self.workspace.pending_human = HumanRequest(
+                from_agent="system",
+                question="Run stopped by user.",
+                iteration=self.workspace.iteration,
+            )
+
+        if self._scheduler is not None:
+            await self._scheduler.force_cancel()
+
+    # ── Live agent config hot-reload ─────────────────────────────────────────
+
+    def update_agent_config(self, role: str, partial: dict[str, Any]) -> None:
+        """Apply `partial` to the live agent for `role` so changes take effect
+        on the next iteration.
+
+        Handles `declared_local_tools` and any other AgentConfig field that
+        the settings panel may send. Tool changes rebuild the agent's manifest.
+        """
+        cfg = next((c for c in self.project.agents if c.role == role), None)
+        if cfg is None:
+            raise KeyError(f"unknown role {role!r}")
+
+        agent = self.agents.get(role)
+        if agent is None:
+            raise KeyError(f"agent {role!r} not yet instantiated")
+
+        # Apply supported fields.
+        allowed = {
+            "declared_local_tools",
+            "model_tier",
+            "description",
+            "max_tool_iterations",
+            "max_protocol_retries",
+        }
+        for key, value in partial.items():
+            if key not in allowed:
+                continue
+            if hasattr(cfg, key):
+                setattr(cfg, key, value)
+
+        # Rebuild tool manifest if tools changed.
+        if "declared_local_tools" in partial:
+            from core.tool_manifest import ToolManifestBuilder, RoleRBAC
+            rbac_entry = self.project.rbac.get(role)
+            if rbac_entry is None:
+                from core.tool_manifest import RoleRBAC as _RoleRBAC
+                rbac_entry = _RoleRBAC(allowed_scopes=cfg.declared_local_tools or [])
+            builder = ToolManifestBuilder(
+                declared_local_tools=cfg.declared_local_tools or [],
+                role_rbac=rbac_entry,
+                credentials_broker=None,
+            )
+            agent._manifest = builder.build()
 
     # ── Main run loop ───────────────────────────────────────────────────────
 
@@ -832,6 +1152,15 @@ class AgentRunner:
             # works for escalation side-tasks and peer-respond tasks.
             self.quip_engine.set_workspace(self.workspace, self.personas_root)
 
+        # Give GitWorkspace the persona display names so each commit carries
+        # the right author (e.g. "Sarah (developer)" not "agentflow").
+        git_personas: dict[str, str] = {}
+        for role, agent in self.agents.items():
+            git_personas[role] = (
+                agent.persona.profile.name if agent.persona is not None else role
+            ) or role
+        self.git._hired_personas = git_personas
+
         # Build AgentSpecs for the scheduler. Each spec's runner wraps
         # the agent's run() and handles iteration tracking + commit
         # finalisation.
@@ -859,9 +1188,26 @@ class AgentRunner:
 
         result = await scheduler.run()
 
+        # User-initiated Stop: skip post-run hooks (memory writer, land-on-
+        # main, quip flourish) so the run terminates promptly. Without this
+        # the FE keeps showing "running" while we burn LLM tokens on a run
+        # the user already abandoned.
+        if result.status is SchedulerStatus.STOPPED:
+            self._close_remaining_stories()
+            return result
+
         # Wait for any in-flight escalation handlers (Phase C.3) so
         # their signals land before memory_writer / quip_engine fire.
         await self._await_escalation_tasks()
+
+        # Land-on-main pass: ensure the leaf agent's branch is on main.
+        # With the pre-merge chain fixed, reviewer→APPROVED usually handles
+        # this already. This is a safety net for reviewer-less pipelines and
+        # any race where APPROVED fired before all upstream commits landed.
+        # TODO(remote-mode): for runs against an upstream remote, push a
+        # feature branch and open a PR here instead of merging locally.
+        if self.git is not None:
+            await self._land_leaf_on_main()
 
         # M1 §7b: close any stories still open at run end as `deferred`.
         self._close_remaining_stories()
@@ -913,6 +1259,50 @@ class AgentRunner:
 
         return result
 
+    def _ensure_synthetic_task(self, role: str, cfg: "AgentConfig") -> None:
+        """Create an implicit IN_PROGRESS task for `role` if its desk is empty.
+
+        Called at agent dispatch time so the Kanban always shows a card even
+        when no planner called assign-task. Marked created_by="scheduler" so
+        it's distinguishable from human/planner tasks. The caller is
+        responsible for closing it on agent completion.
+        """
+        from core.workspace import Task
+
+        desk = self.workspace.desk_for(role)
+        if desk:
+            return  # agent already has explicit tasks — don't synthesise
+
+        goal = cfg.description or self.project.goal
+        story_id = self.workspace.active_story.get(role, "")
+        task = Task(
+            task_id=_uuid.uuid4().hex,
+            story_id=story_id,
+            assigned_to=role,
+            created_by="scheduler",
+            created_at_iter=self.workspace.iteration,
+            goal=goal,
+            status="IN_PROGRESS",
+            started_at_iter=self.workspace.iteration,
+        )
+        # Bypass add_task so we don't emit TASK_ASSIGNED for a synthetic task;
+        # append directly.
+        self.workspace.tasks[task.task_id] = task
+        self.workspace.task_queues.setdefault(role, []).append(task.task_id)
+
+    def _close_synthetic_task(self, role: str) -> None:
+        """Mark any open synthetic task for `role` as COMPLETE.
+
+        Called when the agent completes so the Kanban card moves to Done.
+        Only closes tasks with created_by="scheduler" to avoid interfering
+        with real planner-assigned tasks.
+        """
+        for task in self.workspace.desk_for(role):
+            if task.created_by == "scheduler" and task.status == "IN_PROGRESS":
+                task.status = "COMPLETE"
+                task.completed_at_iter = self.workspace.iteration
+                break
+
     def _make_scheduler_runner(
         self,
         agent: BaseAgent,
@@ -939,7 +1329,15 @@ class AgentRunner:
             # architect" confirmation: the team's work is done, the
             # per-step reviewers have approved, but before the architect
             # runs its HEAVY-tier design check we ask the user.
-            if cfg.is_final_reviewer and self._is_gate_enabled("heavy_tier_mid_run_dispatch"):
+            # Skip the gate if no upstream agent has completed yet — a
+            # final-reviewer that runs first (e.g. an architect with empty
+            # depends_on) would otherwise hang the run on tick 0 awaiting
+            # approval for "validating finished work" that hasn't happened.
+            if (
+                cfg.is_final_reviewer
+                and self._is_gate_enabled("heavy_tier_mid_run_dispatch")
+                and len(workspace.completed_agents) > 0
+            ):
                 granted = await self._request_approval(
                     kind="heavy_tier_mid_run_dispatch",
                     summary=f"Run final-stage architect {cfg.role}",
@@ -964,12 +1362,37 @@ class AgentRunner:
 
             await agent.signal(workspace, SignalType.STARTED, summary=f"started ({cfg.role})")
 
+            # Synthesise an implicit IN_PROGRESS task so the Kanban always
+            # shows a card even when no planner called assign-task.
+            self._ensure_synthetic_task(cfg.role, cfg)
+
             # Quip: agent reacts to receiving the baton (handoff moment).
             if self.quip_engine is not None:
                 try:
                     await self.quip_engine.on_agent_started(cfg.role, workspace)
                 except Exception:
                     pass
+
+            # Pre-merge upstream branches into this agent's own branch so
+            # its working tree contains all upstream work before it runs.
+            # Applies to every agent with depends_on (not only reviewers):
+            # integration_dev needs dev branches merged in before it can
+            # integrate files; reviewers need them for git-diff context.
+            # Agents with no depends_on are a no-op. Conflicts post a
+            # GIT_CONFLICT signal and fail the iteration cleanly.
+            all_clean, conflicted = await self._premerge_upstream_deps(cfg)
+            if not all_clean:
+                workspace.agent_states[cfg.role] = AgentState.FAILED
+                await agent.signal(
+                    workspace, SignalType.FAILED,
+                    summary=f"{cfg.role}: pre-run merge conflict",
+                    detail=(
+                        f"Could not auto-merge {', '.join(conflicted)} into "
+                        f"agent/{cfg.role}. Resolve manually or split the "
+                        f"upstream work."
+                    ),
+                )
+                return
 
             try:
                 drive_result = await self._drive_agent_run(agent, cfg)
@@ -1100,7 +1523,7 @@ class AgentRunner:
             # mutates each closed task to COMPLETE, cascades parent
             # closure, and posts TASK_OUT_OF_SCOPE warnings on
             # invariant violations. The COMMIT itself is not blocked.
-            self._handle_task_closures(cfg.role, drive_result, commit_hash)
+            await self._handle_task_closures(cfg.role, drive_result, commit_hash)
 
             # `drive_result` is either a parsed CompactBlock (the runner
             # extracted a trailing protocol block from the LLM response)
@@ -1116,6 +1539,9 @@ class AgentRunner:
                 content=artifact_text,
                 iteration=workspace.iteration,
             ))
+            # Close any synthetic task so the Kanban card moves to Done.
+            self._close_synthetic_task(cfg.role)
+
             workspace.completed_agents.append(cfg.role)
             workspace.agent_states[cfg.role] = AgentState.COMPLETE
 
@@ -1158,17 +1584,20 @@ class AgentRunner:
                 except Exception:
                     pass
 
-            # On APPROVED only: merge upstream agent branches into main.
+            # On APPROVED: merge the reviewer's branch (which already
+            # carries all upstream work via _premerge_upstream_for_reviewer)
+            # into main. One merge commit per APPROVED, not one per dep.
             # REJECTED leaves the branches alone for the next iteration.
             if cfg.is_reviewer and final_signal is SignalType.APPROVED:
+                reviewer_branch = workspace.git.agent_branches.get(cfg.role)
+                if reviewer_branch:
+                    ok = self.git.merge(reviewer_branch, into="main")
+                    if ok:
+                        workspace.git.merged.append(reviewer_branch)
+                # M1 §7b: auto-close each dep's active story if its
+                # latest commit summary matches the story goal. Story
+                # closure is per-dep regardless of how branches merged.
                 for dep_role in cfg.depends_on:
-                    branch = workspace.git.agent_branches.get(dep_role)
-                    if branch:
-                        ok = self.git.merge(branch, into="main")
-                        if ok:
-                            workspace.git.merged.append(branch)
-                    # M1 §7b: auto-close the dep's active story if its
-                    # latest commit summary matches the story goal.
                     latest = next(
                         (c for c in reversed(workspace.git.commits)
                          if c.agent == dep_role),
@@ -1258,7 +1687,7 @@ class AgentRunner:
 
         return render_teammate_brief(role, entries)
 
-    def _handle_task_closures(
+    async def _handle_task_closures(
         self,
         role: str,
         drive_result: "protocol.CompactBlock | str",
@@ -1273,6 +1702,9 @@ class AgentRunner:
         violations post TASK_OUT_OF_SCOPE warnings; the COMMIT itself
         is never blocked. Cascades parent task closure when the last
         child of a parent closes (§4.4).
+
+        M5.5: synthesizes a TaskCompletionRecord for each closed task
+        and compacts the agent's current message history in-place.
         """
         if not isinstance(drive_result, protocol.CompactBlock):
             return
@@ -1298,6 +1730,10 @@ class AgentRunner:
 
         ws = self.workspace
         iteration = ws.iteration
+
+        # M5.5: extract commit metadata for the summarizer.
+        commit_subject = drive_result.fields.get("summary", "").strip()
+        diff_stat = drive_result.fields.get("diff_stat", "").strip()
 
         def _warn(summary: str, detail: str) -> None:
             ws.post_signal(Signal(
@@ -1340,10 +1776,36 @@ class AgentRunner:
                 )
                 continue
 
+            # M5.5 C1: synthesize completion record before mutating task.
+            completion_record_dict: dict | None = None
+            if self.task_summarizer is not None and commit_hash:
+                try:
+                    task_refs = [r.value for r in (task.references or [])]
+                    record = await self.task_summarizer.summarize(
+                        task_id=tid,
+                        task_goal=task.goal,
+                        task_acceptance_criteria=task.acceptance_criteria or [],
+                        task_references=task_refs,
+                        messages=self._current_agent_messages,
+                        commit_sha=commit_hash,
+                        commit_subject=commit_subject,
+                        diff_stat=diff_stat,
+                    )
+                    completion_record_dict = record.to_dict()
+                    # M5.5 C2: compact agent messages after synthesis.
+                    self._compact_messages_after_close(
+                        self._current_agent_messages, tid, commit_hash, record
+                    )
+                except Exception as exc:
+                    logging.getLogger(__name__).warning(
+                        "TaskSummarizer failed for task %s: %s", tid, exc
+                    )
+
             ws.mutate_task(
                 tid, "COMPLETE",
                 iteration=iteration,
                 closed_by_commit=commit_hash or "",
+                completion_summary=completion_record_dict,
             )
             if task.parent_task_id:
                 closed_parent_ids.add(task.parent_task_id)
@@ -1369,6 +1831,65 @@ class AgentRunner:
                     iteration=iteration,
                     closed_by_commit=last_commit,
                 )
+
+    def _compact_messages_after_close(
+        self,
+        messages: list[LLMMessage],
+        task_id: str,
+        sha: str,
+        record: "TaskSummarizer | Any",
+    ) -> None:
+        """M5.5 C2: replace task's verbose message history with a single marker.
+
+        Heuristic: walk backwards from the end to find where this task's work
+        began (the message after the most recent prior `closes: task:*` marker,
+        or the first message mentioning task_id, or fallback to last 2 messages).
+        Mutates ``messages`` in-place.
+        """
+        from core.task_summarizer import TaskCompletionRecord
+
+        summary = record.summary if hasattr(record, "summary") else str(record)
+        degraded = summary == "(summary unavailable)"
+        # Use the task goal as fallback text on degraded records.
+        marker_text = summary if not degraded else f"[task {task_id}] work completed"
+
+        marker = LLMMessage(
+            role="user",
+            content=f"[runner] Task {task_id} closed at {sha[:7]}. Summary: {marker_text}",
+        )
+
+        if not messages:
+            return
+
+        found_start = False
+        i_start = 0
+
+        # Search for the start of this task's work: the first message after
+        # the most recent prior "[runner] Task ... closed at" marker.
+        for i in range(len(messages) - 1, -1, -1):
+            content = messages[i].content
+            text = content if isinstance(content, str) else ""
+            if "[runner] Task" in text and "closed at" in text:
+                i_start = i + 1
+                found_start = True
+                break
+
+        # Fallback: if no prior marker found, look for first mention of task_id.
+        if not found_start:
+            for i, msg in enumerate(messages):
+                content = msg.content
+                text = content if isinstance(content, str) else str(content)
+                if task_id in text:
+                    i_start = i
+                    found_start = True
+                    break
+
+        # Safety fallback: task_id never mentioned and no prior marker.
+        if not found_start:
+            i_start = max(0, len(messages) - 2)
+
+        # Replace everything from i_start to end with the marker.
+        messages[i_start:] = [marker]
 
     def _maybe_auto_start_task(
         self,
@@ -1414,16 +1935,22 @@ class AgentRunner:
         the planner-driven task flow. Subtasks render indented under
         their parent (depth cap = 2 levels, enforced at add_task time).
         """
+        from core.protocol import render_task_completion_summary
+
         desk = self.workspace.desk_for(role)
         if not desk:
             return ""
 
-        # Group: top-level tasks first (parent_task_id is None), each
-        # followed by its still-open children. BLOCKED/CANCELLED render
-        # at the bottom with a divider.
-        top_level = [t for t in desk if t.parent_task_id is None]
+        # M5.5 C3: split desk into active/completed; completed tasks with
+        # completion_summary render as compact summary lines.
+        completed_tasks = [t for t in desk if t.status == "COMPLETE"]
+        active_desk = [t for t in desk if t.status != "COMPLETE"]
+
+        # Group active tasks: top-level first, each followed by its children.
+        # BLOCKED/CANCELLED tasks render at the bottom with a divider.
+        top_level = [t for t in active_desk if t.parent_task_id is None]
         children_by_parent: dict[str, list] = {}
-        for t in desk:
+        for t in active_desk:
             if t.parent_task_id is not None:
                 children_by_parent.setdefault(t.parent_task_id, []).append(t)
 
@@ -1464,10 +1991,10 @@ class AgentRunner:
              else active_lines).extend(block)
             active_lines.append("") if parent.status not in ("BLOCKED", "CANCELLED") else blocked_lines.append("")
 
-        # Children whose parent is no longer on the desk (e.g. completed
+        # Children whose parent is no longer on the active desk (e.g. completed
         # parents whose children are still open) render under "Other".
         orphans = [
-            t for t in desk
+            t for t in active_desk
             if t.parent_task_id is not None
             and not any(p.task_id == t.parent_task_id for p in top_level)
         ]
@@ -1482,6 +2009,21 @@ class AgentRunner:
         if blocked_lines:
             out.append("--- blocked / cancelled ---")
             out.extend(blocked_lines)
+
+        # M5.5 C3: render completed tasks with summaries in a sub-section.
+        if completed_tasks:
+            out.append("")
+            out.append("--- previously completed ---")
+            for t in completed_tasks:
+                if t.completion_summary:
+                    out.append(render_task_completion_summary(t.completion_summary))
+                else:
+                    # Fallback: M3.5-style header for tasks closed pre-M5.5.
+                    sha = t.closed_by_commit[:7] if t.closed_by_commit else ""
+                    out.append(f"[task:{t.task_id}] COMPLETE — {t.goal}" +
+                               (f" (commit {sha})" if sha else ""))
+                out.append("")
+
         out.append("=== END DESK ===")
         return "\n".join(out).rstrip() + "\n"
 
@@ -1827,13 +2369,26 @@ class AgentRunner:
         # M1: build the INCOMING WORK block for this agent's upstream deps.
         incoming_work_block, upstream_incomplete = self._build_incoming_work(cfg)
 
+        if cfg.is_reviewer:
+            start_directive = (
+                "START REVIEWING NOW. Your FIRST tool call MUST be `git-changed-files` "
+                "to see what changed. Then call `git-diff` on each changed path before "
+                "forming a verdict. A FAIL result must cite the file and the specific "
+                "defect — at least one full sentence naming what is wrong and why. "
+                "Do not describe what you will do — do it. "
+                "End with the required VERIFY_RESULT protocol block once your review is complete."
+            )
+        else:
+            start_directive = (
+                "START WORKING NOW. Call `fs-list` or `git-changed-files` as your very "
+                "first tool call to understand what already exists on disk. Then read, "
+                "build, or review as your role requires. Do not describe what you will do — "
+                "do it. End with the required protocol block once your work is complete."
+            )
         task_prompt = (
             f"Project goal: {self.project.goal}\n\n"
             f"Your role: {cfg.role}. {cfg.description}{upstream_ctx}{messages_ctx}\n\n"
-            f"START WORKING NOW. Call `fs-list` or `git-changed-files` as your very "
-            f"first tool call to understand what already exists on disk. Then read, "
-            f"build, or review as your role requires. Do not describe what you will do — "
-            f"do it. End with the required protocol block once your work is complete."
+            f"{start_directive}"
         )
         if incoming_work_block:
             task_prompt = incoming_work_block + "\n\n" + task_prompt
@@ -1862,16 +2417,67 @@ class AgentRunner:
         if desk_block:
             task_prompt = desk_block + "\n\n" + task_prompt
 
+        # M5: prepend reviewer rejection feedback if this is a re-dispatch.
+        # Feedback is the absolute first thing the agent reads each re-run.
+        pending_fb = self._pending_feedback.pop(cfg.role, None)
+        if pending_fb is not None:
+            from core.protocol import render_rejected_feedback
+            fb_block = render_rejected_feedback(
+                pending_fb.reviewer_name,
+                pending_fb.reviewer_role,
+                pending_fb.detail,
+                pending_fb.attempt_number,
+            )
+            task_prompt = fb_block + "\n\n" + task_prompt
+
         messages: list[LLMMessage] = [LLMMessage(role="user", content=task_prompt)]
+        # M5.5: expose messages to _handle_task_closures (compaction).
+        self._current_agent_messages = messages
         guard = LoopGuard(cfg.loop_guard)
         nudges: list[str] = []  # accumulated for the next user turn
         protocol_retries_used = 0
         ask_enforcement_failures = 0  # track how many times we've caught non-ASK on empty upstream
 
-        for iteration in range(cfg.max_tool_iterations):
+        # Tool-iteration cap is extendable: when the agent hits the cap we
+        # ask the user "keep going?" rather than silently returning a string
+        # that the upstream code mistakes for a successful artifact.
+        iteration = 0
+        cap = cfg.max_tool_iterations
+        TOOL_ITER_EXTENSION_BUMP = 15
+        while True:
+            if iteration >= cap:
+                granted = await self._request_approval(
+                    kind="tool_iteration_extension",
+                    summary=(
+                        f"{cfg.role} hit tool-call cap ({cap}) — grant +"
+                        f"{TOOL_ITER_EXTENSION_BUMP} more?"
+                    ),
+                    triggered_by=cfg.role,
+                    context={
+                        "role": cfg.role,
+                        "cap": cap,
+                        "iterations_used": iteration,
+                        "bump": TOOL_ITER_EXTENSION_BUMP,
+                    },
+                )
+                if granted:
+                    cap += TOOL_ITER_EXTENSION_BUMP
+                    continue
+                return protocol.CompactBlock(
+                    kind="VERIFY",
+                    fields={
+                        "result": "FAIL",
+                        "detail": (
+                            f"agent {cfg.role!r} hit tool-iteration cap of "
+                            f"{cap} and the user denied an extension"
+                        ),
+                    },
+                )
+
             if guard.deadline_exceeded():
                 return f"(loop guard: wall-clock budget exhausted after {guard.elapsed_seconds:.0f}s)"
 
+            iteration += 1
             response = await self._llm_with_backoff(agent, messages)
 
             if response.stop_reason == "tool_use" and response.tool_calls:
@@ -1968,28 +2574,195 @@ class AgentRunner:
                     continue
                 return block
 
-            if protocol_retries_used >= 1:
-                detail = parse_error or "no [COMMIT]/[VERIFY]/[ACTION]/[STATUS] block found at end of response"
-                raise RuntimeError(
-                    f"agent {cfg.role!r} failed to emit a valid protocol block "
-                    f"after retry: {detail}"
+            # Protocol parse failure. On exhaustion, emit a synthetic VERIFY
+            # FAIL rather than crashing — "the loop is the error handler"
+            # (DESIGN rule #8). Otherwise post a PROTOCOL_PARSE_FAIL signal
+            # and nudge with increasing specificity.
+            if protocol_retries_used >= cfg.max_protocol_retries:
+                detail = parse_error or "no [COMMIT]/[VERIFY]/[ACTION]/[STATUS] block found"
+                return protocol.CompactBlock(
+                    kind="VERIFY",
+                    fields={
+                        "result": "FAIL",
+                        "detail": (
+                            f"agent {cfg.role!r} failed to emit a valid protocol block "
+                            f"after {cfg.max_protocol_retries} retries: {detail}"
+                        ),
+                    },
                 )
+
+            retry_num = protocol_retries_used + 1  # 1-indexed for display
+            self.workspace.post_signal(Signal(
+                type=SignalType.PROTOCOL_PARSE_FAIL,
+                summary=f"{cfg.role} protocol retry ({retry_num}/{cfg.max_protocol_retries})",
+                detail=parse_error or "no valid protocol block found at end of response",
+                from_agent=cfg.role,
+                iteration=self.workspace.iteration,
+            ))
             protocol_retries_used += 1
 
             messages.append(LLMMessage(role="assistant", content=text))
-            nudge_msg = (
-                "[PROTOCOL] Your last response did not end with a valid "
-                "compact protocol block. Re-emit your final answer ending "
-                "with one of [COMMIT] / [VERIFY] / [ACTION] / [ASK] / [STATUS] as "
-                "specified in the system prompt. Block must be the last "
-                "thing in your response, with required fields filled in."
-            )
-            if parse_error:
-                nudge_msg += f"\nParse error: {parse_error}"
+
+            if protocol_retries_used == 1:
+                # Tier 1: basic reminder.
+                nudge_msg = (
+                    "[PROTOCOL] Your last response did not end with a valid "
+                    "compact protocol block. Re-emit your final answer ending "
+                    "with one of [COMMIT] / [VERIFY] / [ACTION] / [ASK] / [STATUS] as "
+                    "specified in the system prompt. Block must be the last "
+                    "thing in your response, with required fields filled in."
+                )
+                if parse_error:
+                    nudge_msg += f"\nParse error: {parse_error}"
+            elif protocol_retries_used == 2:
+                # Tier 2: show a concrete example block.
+                example = (
+                    "[VERIFY]\n  result: PASS"
+                    if cfg.is_reviewer else
+                    "[COMMIT]\n  summary: <one-line description of what you did>"
+                )
+                nudge_msg = (
+                    "[PROTOCOL] Still no valid protocol block. "
+                    f"End your response with EXACTLY this pattern (fill in the fields):\n\n{example}"
+                )
+                if parse_error:
+                    nudge_msg += f"\n\nParse error from last attempt: {parse_error}"
+            else:
+                # Tier 3: minimal directive.
+                minimal = (
+                    "[VERIFY]\n  result: PASS"
+                    if cfg.is_reviewer else
+                    "[COMMIT]\n  summary: done"
+                )
+                nudge_msg = (
+                    f"End your response with EXACTLY this text and nothing after it:\n\n{minimal}"
+                )
+
             messages.append(LLMMessage(role="user", content=nudge_msg))
             continue
 
-        return "(max tool iterations reached)"
+    async def _land_leaf_on_main(self) -> None:
+        """Merge the leaf agent's branch into main if main hasn't already
+        received that work.
+
+        The leaf is the agent with is_final_reviewer=True, or — if none —
+        the agent that no other agent depends on (a sink in the dep graph)
+        with the most commits ahead of main.  Skips silently if main already
+        contains the leaf's tip as an ancestor.
+        """
+        if self.git is None:
+            return
+
+        agents = self.project.agents
+
+        # Prefer the designated final reviewer.
+        leaf_cfg = next((c for c in agents if getattr(c, "is_final_reviewer", False)), None)
+
+        if leaf_cfg is None:
+            # Fall back: find sinks (no other agent depends_on them).
+            depended_on = {r for c in agents for r in (c.depends_on or [])}
+            sinks = [c for c in agents if c.role not in depended_on]
+            if not sinks:
+                return
+            # Pick the sink whose branch is furthest ahead of main.
+            from git import InvalidGitRepositoryError, NoSuchPathError, Repo
+            try:
+                repo = Repo(self.git.working_dir)
+                main_sha = repo.heads["main"].commit.hexsha
+
+                def commits_ahead(role: str) -> int:
+                    branch = self.workspace.git.agent_branches.get(role, f"agent/{role}")
+                    try:
+                        return sum(1 for _ in repo.iter_commits(f"main..{branch}"))
+                    except Exception:
+                        return 0
+
+                leaf_cfg = max(sinks, key=lambda c: commits_ahead(c.role))
+            except (InvalidGitRepositoryError, NoSuchPathError, KeyError):
+                return
+
+        leaf_branch = self.workspace.git.agent_branches.get(
+            leaf_cfg.role, f"agent/{leaf_cfg.role}"
+        )
+
+        # Check whether main already contains the leaf's tip.
+        try:
+            from git import InvalidGitRepositoryError, NoSuchPathError, Repo
+            repo = Repo(self.git.working_dir)
+            main_commit = repo.heads["main"].commit
+            leaf_commit = repo.commit(leaf_branch)
+            # If main is an ancestor-or-equal of leaf, the work is already there.
+            if repo.is_ancestor(leaf_commit, main_commit) or main_commit == leaf_commit:
+                return
+        except Exception:
+            return
+
+        async with self._git_lock:
+            ok = self.git.merge(leaf_branch, into="main")
+            if not ok:
+                self.workspace.post_signal(Signal(
+                    type=SignalType.GIT_CONFLICT,
+                    summary=f"end-of-run merge conflict: {leaf_branch} → main",
+                    detail=(
+                        "The final branch could not be merged into main automatically. "
+                        "Resolve conflicts manually in the run workspace."
+                    ),
+                    from_agent="runner",
+                ))
+
+    async def _premerge_upstream_deps(
+        self, cfg: AgentConfig,
+    ) -> tuple[bool, list[str]]:
+        """Before an agent runs, merge each upstream depends_on branch into
+        the agent's own branch so its working tree contains all upstream work.
+
+        This applies to all agents with depends_on, not just reviewers. A
+        non-reviewer like integration_dev needs the dev branches merged in
+        before it can see and integrate the files.
+
+        Returns (all_clean, conflicted_branches). When a conflict happens the
+        merge is already aborted by GitWorkspace.merge(); we just collect the
+        names so the caller can decide what to do.
+
+        Skips silently for agents with no depends_on and upstream deps that
+        haven't produced a branch yet (e.g., they haven't committed).
+        Serialized via _git_lock so concurrent agents don't race on checkout.
+        """
+        if not cfg.depends_on:
+            return True, []
+
+        conflicted: list[str] = []
+        async with self._git_lock:
+            # Ensure the agent's own branch exists (may not yet on iter 1
+            # before the agent has done any work of their own).
+            # Resolve which parent branches exist so we can fork from the
+            # first one's tip (pipeline-as-git-history). Branches not yet
+            # created (upstream hasn't committed) are excluded here and will
+            # be merged in later once they land.
+            resolved_parent_branches = [
+                b for dep in cfg.depends_on
+                if (b := self.workspace.git.agent_branches.get(dep))
+            ]
+            try:
+                agent_branch = self.git.agent_branch(
+                    cfg.role, parent_branches=resolved_parent_branches
+                )
+                self.workspace.git.agent_branches[cfg.role] = agent_branch
+            except Exception:
+                return True, []
+
+            for dep_role in cfg.depends_on:
+                dep_branch = self.workspace.git.agent_branches.get(dep_role)
+                if not dep_branch:
+                    continue  # upstream hasn't committed yet
+                # Skip self-merges and already-merged tips.
+                if dep_branch == agent_branch:
+                    continue
+                ok = self.git.merge(dep_branch, into=agent_branch)
+                if not ok:
+                    conflicted.append(dep_branch)
+
+        return (len(conflicted) == 0), conflicted
 
     async def _auto_commit(self, role: str, workspace: Workspace) -> str | None:
         """Stage and commit any uncommitted changes on the agent's branch.
@@ -2280,6 +3053,262 @@ class AgentRunner:
             self._rejection_counts[target] = self._rejection_counts.get(target, 0) + 1
             self._maybe_escalate(target)
 
+    def _on_signal_for_rejection_redispatch(self, sig: Signal) -> None:
+        """Workspace subscriber (M5.C1/C2). On REJECTED, either re-dispatch
+        the original author with reviewer feedback (consecutive < threshold)
+        or escalate to tech_lead (consecutive >= threshold).
+
+        Runs in parallel with _on_signal_for_escalation — they handle
+        different patterns (consecutive vs. cumulative).
+        """
+        from core.protocol import RejectedFeedback, render_rejected_feedback  # noqa: F401 (used by type alias)
+
+        if sig.type is not SignalType.REJECTED:
+            return
+        if not sig.from_agent:
+            return
+        reviewer_cfg = next(
+            (c for c in self.project.agents if c.role == sig.from_agent),
+            None,
+        )
+        if reviewer_cfg is None:
+            return
+
+        threshold = self.project.consecutive_fail_threshold
+        for target in reviewer_cfg.depends_on:
+            attempt = self._consecutive_fails.get(target, 0) + 1
+            self._consecutive_fails[target] = attempt
+
+            if attempt < threshold:
+                # Bounce back to author with reviewer context.
+                reviewer_name = self._persona_name(sig.from_agent)
+                detail = sig.detail or sig.summary or ""
+                feedback = RejectedFeedback(
+                    reviewer_role=sig.from_agent,
+                    reviewer_name=reviewer_name,
+                    detail=detail,
+                    attempt_number=attempt,
+                )
+                self._pending_feedback[target] = feedback
+
+                # Reset target state so scheduler re-spawns it.
+                if target in self.workspace.completed_agents:
+                    self.workspace.completed_agents.remove(target)
+                self.workspace.agent_states[target] = AgentState.READY
+
+                # Reset the reviewer back to PENDING so it re-runs once the
+                # author finishes its second pass. PENDING (not READY) keeps
+                # the depends_on gate in place — scheduler won't spawn the
+                # reviewer until the author's re-COMPLETE lands.
+                reviewer_role = sig.from_agent
+                if reviewer_role in self.workspace.completed_agents:
+                    self.workspace.completed_agents.remove(reviewer_role)
+                self.workspace.agent_states[reviewer_role] = AgentState.PENDING
+
+                # Cascade: any agent downstream of the author or the reviewer
+                # that already completed against the first-pass output is now
+                # stale — reset it to PENDING so it re-runs after the chain
+                # catches up. Without this the run deadlocks at the point
+                # where the first downstream completed agent sits terminal.
+                self._reset_downstream_completed(target)
+                self._reset_downstream_completed(reviewer_role)
+
+                # Wake the scheduler loop.
+                if self._scheduler is not None:
+                    self._scheduler.notify()
+            else:
+                # Two-strike (or more): escalate and reset counter.
+                history = self._build_rejection_history(target)
+                self._consecutive_fails[target] = 0
+                self._dispatch_consecutive_fail_escalation(target, history)
+
+    def _on_signal_for_approval(self, sig: Signal) -> None:
+        """Workspace subscriber (M5.C1). Resets the consecutive-fail counter
+        for the reviewed role(s) when a reviewer emits APPROVED."""
+        if sig.type is not SignalType.APPROVED:
+            return
+        if not sig.from_agent:
+            return
+        reviewer_cfg = next(
+            (c for c in self.project.agents if c.role == sig.from_agent),
+            None,
+        )
+        if reviewer_cfg is None:
+            return
+        for target in reviewer_cfg.depends_on:
+            self._consecutive_fails.pop(target, None)
+
+    def _reset_downstream_completed(self, root_role: str) -> None:
+        """Walk forward through depends_on edges from root_role; for every
+        agent transitively downstream that is in completed_agents, remove it
+        and set its state to PENDING.
+
+        Called by the reject-loop redispatch (M5.C1) so that when an author is
+        bounced back for a second pass, the reviewer and any docs/final agents
+        that already completed against the first-pass output get re-queued.
+        Idempotent; does not notify the scheduler (caller is responsible).
+        """
+        visited: set[str] = set()
+        queue: list[str] = [root_role]
+        while queue:
+            current = queue.pop(0)
+            if current in visited:
+                continue
+            visited.add(current)
+            for cfg in self.project.agents:
+                if current not in cfg.depends_on:
+                    continue
+                if cfg.role in self.workspace.completed_agents:
+                    self.workspace.completed_agents.remove(cfg.role)
+                    self.workspace.agent_states[cfg.role] = AgentState.PENDING
+                queue.append(cfg.role)
+
+    def _build_rejection_history(self, target_role: str) -> "list[RejectedFeedback]":
+        """Reconstruct the REJECTED history for target_role from the board.
+        Used to give tech_lead full context when escalating after threshold."""
+        from core.protocol import RejectedFeedback
+
+        history: list[RejectedFeedback] = []
+        attempt = 0
+        for sig in self.workspace.board:
+            if sig.type is not SignalType.REJECTED:
+                continue
+            reviewer_cfg = next(
+                (c for c in self.project.agents if c.role == sig.from_agent),
+                None,
+            )
+            if reviewer_cfg is None or target_role not in reviewer_cfg.depends_on:
+                continue
+            attempt += 1
+            name = self._persona_name(sig.from_agent)
+            detail = sig.detail or sig.summary or ""
+            from core.protocol import _REJECTED_FEEDBACK_MAX_DETAIL
+            if len(detail) > _REJECTED_FEEDBACK_MAX_DETAIL:
+                detail = detail[:_REJECTED_FEEDBACK_MAX_DETAIL] + "…(truncated)"
+            history.append(RejectedFeedback(
+                reviewer_role=sig.from_agent,
+                reviewer_name=name,
+                detail=detail,
+                attempt_number=attempt,
+            ))
+        return history
+
+    def _dispatch_consecutive_fail_escalation(
+        self,
+        rejected_role: str,
+        history: "list[RejectedFeedback]",
+    ) -> None:
+        """Dispatch the escalation target (or HUMAN_NEEDED if absent) after
+        consecutive failures on rejected_role exceed the project threshold (M5.C2).
+        Prefers cfg.escalates_to[0] on the rejected role; falls back to tech_lead."""
+        rejected_cfg = next(
+            (c for c in self.project.agents if c.role == rejected_role), None,
+        )
+        escalate_to_role = (
+            rejected_cfg.escalates_to[0]
+            if rejected_cfg and rejected_cfg.escalates_to
+            else "tech_lead"
+        )
+        tech_cfg = next(
+            (c for c in self.project.agents if c.role == escalate_to_role),
+            None,
+        )
+
+        if tech_cfg is None:
+            # No tech_lead on team — pause for human.
+            rendered_history = "\n\n".join(
+                f"Attempt {fb.attempt_number} — {fb.reviewer_name} ({fb.reviewer_role}):\n{fb.detail}"
+                for fb in history
+            )
+            question = (
+                f"{rejected_role} has been rejected {len(history)} time(s) in a row.\n\n"
+                f"{rendered_history}\n\nPlease provide guidance or resolve the blocker."
+            )
+            from core.workspace import HumanRequest
+            self.workspace.pending_human = HumanRequest(
+                from_agent="runner",
+                question=question,
+                context=f"consecutive_failures on {rejected_role}",
+                iteration=self.workspace.iteration,
+            )
+            self.workspace.post_signal(Signal(
+                type=SignalType.HUMAN_NEEDED,
+                summary=f"consecutive_failures on {rejected_role}",
+                detail=rendered_history[:500],
+                from_agent="runner",
+                iteration=self.workspace.iteration,
+            ))
+            return
+
+        # Guard: if the cumulative-threshold handler already claimed and dispatched
+        # this escalation target for this role, be a no-op.
+        if rejected_role in self._escalations_fired.get(escalate_to_role, set()):
+            return
+        self._escalations_fired.setdefault(escalate_to_role, set()).add(rejected_role)
+
+        async def _run_escalation_review() -> None:
+            try:
+                if escalate_to_role not in self.agents:
+                    self._build_handler_agent(tech_cfg)
+                tl_agent = self.agents[escalate_to_role]
+                tl_agent.iteration = self.workspace.iteration
+
+                if hasattr(tl_agent, "run_escalation_review"):
+                    await tl_agent.run_escalation_review(
+                        workspace=self.workspace,
+                        rejected_role=rejected_role,
+                        history=history,
+                    )
+                else:
+                    self._dispatch_escalation(escalate_to_role, rejected_role, len(history))
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "consecutive-fail escalation for %s crashed", rejected_role,
+                )
+
+        self.workspace.post_signal(Signal(
+            type=SignalType.ESCALATION,
+            summary=f"consecutive_failures: escalating {rejected_role} to {escalate_to_role}",
+            detail=f"target_role={rejected_role}; consecutive_fail_count={len(history)}",
+            from_agent="runner",
+            iteration=self.workspace.iteration,
+        ))
+        try:
+            task = asyncio.create_task(
+                _run_escalation_review(),
+                name=f"consec-fail-escalation:{rejected_role}",
+            )
+            self._escalation_tasks.append(task)
+        except RuntimeError:
+            pass
+
+    def _rebuild_consecutive_fails_from_board(self) -> None:
+        """Replay REJECTED and APPROVED from the board to restore _consecutive_fails.
+
+        Called once when a restored_workspace is injected (M5 D4). Walks in
+        chronological order applying the same increment/reset semantics as the
+        live subscriber, so resumed runs have the correct consecutive count.
+        """
+        for sig in self.workspace.board:
+            if sig.type is SignalType.REJECTED and sig.from_agent:
+                reviewer_cfg = next(
+                    (c for c in self.project.agents if c.role == sig.from_agent),
+                    None,
+                )
+                if reviewer_cfg is None:
+                    continue
+                for target in reviewer_cfg.depends_on:
+                    self._consecutive_fails[target] = self._consecutive_fails.get(target, 0) + 1
+            elif sig.type is SignalType.APPROVED and sig.from_agent:
+                reviewer_cfg = next(
+                    (c for c in self.project.agents if c.role == sig.from_agent),
+                    None,
+                )
+                if reviewer_cfg is None:
+                    continue
+                for target in reviewer_cfg.depends_on:
+                    self._consecutive_fails.pop(target, None)
+
     def _on_signal_for_resume(self, sig: Signal) -> None:
         """Workspace subscriber. Resolves outstanding interrupts on receipt of
         ANSWER, SKIP_GRANTED, SKIP_DENIED, or HUMAN_RESPONDED.
@@ -2410,6 +3439,8 @@ class AgentRunner:
             owner = seed.get("owner_role")
             parent = seed.get("parent_story_id")
 
+            base_ref = self._story_base_ref()
+
             self.workspace.stories[story_id] = StoryState(
                 story_id=story_id,
                 name=name,
@@ -2417,6 +3448,7 @@ class AgentRunner:
                 owner_role=owner,
                 parent_story_id=parent,
                 opened_at_iteration=self.workspace.iteration,
+                base_ref=base_ref,
             )
             # Per-agent active-story pointer: owner gets it directly; team-wide
             # stories (owner=None) become the active story for any role with
@@ -2472,6 +3504,21 @@ class AgentRunner:
                 from_agent="runner",
                 detail=rendered,
             ))
+
+    def _story_base_ref(self) -> str | None:
+        """Capture the current HEAD SHA in the run's git workspace.
+
+        Used as the diff baseline for a newly-opened story so agents can
+        ask "what's new for my story in this doc?" via `fs-diff` without
+        any in-file markup.
+        """
+        gw = getattr(self, "git", None)
+        if gw is None:
+            return None
+        try:
+            return gw.head_sha()
+        except Exception:
+            return None
 
     def _maybe_auto_close_story(self, role: str, commit_summary: str) -> None:
         """M1 §7b: auto-close the role's active story if a COMMIT summary
@@ -2886,7 +3933,10 @@ class AgentRunner:
             declared_mcp_servers=cfg.declared_mcp_servers,
         )
         agent._local_tools = self._instantiate_local_tools(cfg.role)
-        agent._current_task = self.project.goal
+        agent._current_task = (
+            self._continuation_task_hint() or self.project.goal
+        )
+        agent._continuation_brief = self._build_continuation_brief()
         self.agents[cfg.role] = agent
 
     async def _await_escalation_tasks(self) -> None:

@@ -37,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 
 from agents.builtin import register_builtins
 from api.routes import agents as agents_router
+from api.routes import fs as fs_router
 from api.routes import inputs as inputs_router
 from api.routes import invoke as invoke_router
 from api.routes import meta as meta_router
@@ -131,6 +132,7 @@ def create_app() -> FastAPI:
 
     app.include_router(projects_router.router)
     app.include_router(inputs_router.router)
+    app.include_router(fs_router.router)
     app.include_router(agents_router.router)
     app.include_router(runs_router.router)
     app.include_router(personas_router.router)

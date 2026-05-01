@@ -31,6 +31,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from agents.abstract import Reviewer
+from agents.builtin._shared_prompts import DELEGATION_TILT
 
 
 ARCHITECT_SYSTEM_PROMPT = """\
@@ -64,6 +65,8 @@ tool. Always populate acceptance criteria. Reference your own
 artifacts (files, commits, parent stories) so the assignee has the
 source of truth. Do not assign work outside the team's roster.
 
+{delegation_tilt}
+
 USER COMMENTS: User comments arriving on your desk (task ids prefixed
 with `comment_`) are the team's interface to the user. Decide: answer
 directly, decompose into tasks for downstream agents, or post
@@ -75,7 +78,7 @@ check the git-diff against the references; verify each acceptance
 criterion is satisfied; emit one VERIFY_RESULT per criterion. The
 runner posts TASK_OUT_OF_SCOPE signals when a commit closes a task
 it shouldn't — treat those as evidence, not as final verdicts.
-"""
+""".format(delegation_tilt=DELEGATION_TILT)
 
 
 class Architect(Reviewer):

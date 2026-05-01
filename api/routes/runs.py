@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -11,6 +12,82 @@ from fastapi.responses import FileResponse
 from api.auth import require_bearer
 from core.signals import Signal, SignalType
 from worker.queue import JOB_QUEUED, JOB_RUNNING, Job
+
+
+# ── Graph helpers (M5.C4) ──────────────────────────────────────────────────
+
+
+_ESCALATION_HANDLER_ROLE_TYPES = {"tech_lead"}
+
+
+def _get_archetype_kind(cfg: dict, all_roles: set[str] | None = None) -> str:
+    """Derive the visual pipeline band from stored AgentConfig fields.
+
+    Uses pipeline position, not the class hierarchy (Architect extends Reviewer
+    in the abstract layer, but sits at the *top* of the pipeline visually).
+
+    Band order (top → bottom in the graph):
+      planner           — root nodes: no depends_on, not a reviewer
+      specialist        — middle workers: has depends_on, not a reviewer
+      reviewer          — is_reviewer / is_final_reviewer
+      escalation_handler— tech_lead and equivalents
+    """
+    role_type = cfg.get("agent_class_role_type") or ""
+
+    if role_type in _ESCALATION_HANDLER_ROLE_TYPES:
+        return "escalation_handler"
+    if cfg.get("is_reviewer") or cfg.get("is_final_reviewer"):
+        return "reviewer"
+    if not cfg.get("depends_on"):
+        return "planner"
+    return "specialist"
+
+
+def _depends_on_edges(agents: list[dict]) -> list[tuple[str, str, str]]:
+    edges = []
+    for cfg in agents:
+        role = cfg.get("role", "")
+        for dep in (cfg.get("depends_on") or []):
+            if dep != role:
+                edges.append((dep, role, "depends_on"))
+    return edges
+
+
+def _can_assign_to_edges(
+    agents: list[dict], rbac: dict[str, Any]
+) -> list[tuple[str, str, str]]:
+    all_roles = {cfg.get("role") for cfg in agents if cfg.get("role")}
+    edges = []
+    for cfg in agents:
+        role = cfg.get("role", "")
+        explicit_manages = cfg.get("manages") or []
+        if explicit_manages:
+            for target in explicit_manages:
+                if target != role and target in all_roles:
+                    edges.append((role, target, "can_assign_to"))
+        else:
+            scopes = (rbac.get(role) or {}).get("allowed_scopes") or []
+            if "assign-task" in scopes:
+                for target in sorted(all_roles):
+                    if target != role:
+                        edges.append((role, target, "can_assign_to"))
+    return edges
+
+
+def _escalates_to_edges(agents: list[dict]) -> list[tuple[str, str, str]]:
+    all_role_set = {cfg.get("role") for cfg in agents if cfg.get("role")}
+    edges = []
+    for cfg in agents:
+        role = cfg.get("role", "")
+        explicit_esc = cfg.get("escalates_to") or []
+        if explicit_esc:
+            for target in explicit_esc:
+                if target != role and target in all_role_set:
+                    edges.append((role, target, "escalates_to"))
+        else:
+            if "tech_lead" in all_role_set and role != "tech_lead":
+                edges.append((role, "tech_lead", "escalates_to"))
+    return edges
 
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -90,6 +167,199 @@ async def get_run_desks(request: Request, run_id: str) -> dict:
             status_code=404, detail=f"run {run_id!r} not found",
         )
     return payload
+
+
+@router.get("/{run_id}/graph", dependencies=[Depends(require_bearer)])
+async def get_run_graph(request: Request, run_id: str) -> dict:
+    """Return the agent hierarchy graph for a run (M5.C4).
+
+    Derives nodes from the project's agents list and three edge kinds:
+      - depends_on: from AgentConfig.depends_on links
+      - can_assign_to: roles with RBAC assign-task scope → all other roles
+      - escalates_to: all non-tech_lead roles → tech_lead (if present)
+
+    Returns 404 if the run or its project doesn't exist.
+    """
+    run_meta = await _store(request).get(run_id)
+    if run_meta is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+
+    project_id = run_meta.get("project_id")
+    if not project_id:
+        raise HTTPException(status_code=500, detail="run has no project_id")
+
+    project = await request.app.state.project_store.get(project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=404, detail=f"project {project_id!r} not found"
+        )
+
+    agents: list[dict] = project.get("agents") or []
+    rbac: dict[str, Any] = project.get("rbac") or {}
+
+    persona_store = getattr(request.app.state, "persona_store", None)
+    nodes = []
+    for cfg in agents:
+        role = cfg.get("role", "")
+        persona_id = cfg.get("persona_id") or None
+        persona_name = role
+        if persona_id and persona_store is not None:
+            persona_data = await persona_store.get(persona_id)
+            if persona_data:
+                persona_name = persona_data.get("name") or persona_id
+        nodes.append({
+            "role": role,
+            "archetype": _get_archetype_kind(cfg),
+            "persona_name": persona_name,
+            "persona_id": persona_id,
+            "model_tier": cfg.get("model_tier") or "solid",
+            "is_final_reviewer": bool(cfg.get("is_final_reviewer")),
+        })
+
+    raw_edges: list[tuple[str, str, str]] = []
+    raw_edges.extend(_depends_on_edges(agents))
+    raw_edges.extend(_can_assign_to_edges(agents, rbac))
+    raw_edges.extend(_escalates_to_edges(agents))
+
+    seen: set[tuple[str, str, str]] = set()
+    edges = []
+    for from_role, to_role, kind in raw_edges:
+        key = (from_role, to_role, kind)
+        if key not in seen:
+            seen.add(key)
+            edges.append({"from_role": from_role, "to_role": to_role, "kind": kind})
+
+    return {"nodes": nodes, "edges": edges}
+
+
+@router.get("/{run_id}/git/commits")
+async def list_git_commits(request: Request, run_id: str) -> list[dict]:
+    """Return commits for a run's git workspace, one entry per commit.
+
+    Each entry: {sha, short_sha, subject, author_role, branch, committed_at,
+                 stats: {files: N, insertions: N, deletions: N}}.
+    Author_role is derived from the branch name (agent/backend → backend;
+    main → runner). Returns 404 if no git workspace exists.
+    """
+    from git import InvalidGitRepositoryError, NoSuchPathError, Repo
+
+    data_root = Path(request.app.state.data_root)
+    working_dir = data_root / "runs" / run_id / "workspace" / "working"
+    try:
+        repo = Repo(working_dir)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        raise HTTPException(
+            status_code=404,
+            detail=f"run {run_id!r} has no git workspace",
+        )
+
+    # Build a sha → branch map. Agent branches claim FIRST so that commits
+    # they authored stay attributed to them even after the runner's
+    # land-on-main pass merged them into main. Commits only reachable from
+    # main (e.g. the initial workspace commit) fall through to a second
+    # pass that attributes them to main. Without this the graph collapses
+    # to "main" the moment any agent branch lands.
+    sha_to_branch: dict[str, str] = {}
+    all_refs = [r for r in repo.references if hasattr(r, "commit")]
+    non_main_refs = sorted(
+        [r for r in all_refs if r.name not in ("main", "master")],
+        key=lambda r: r.name,
+    )
+    main_refs = [r for r in all_refs if r.name in ("main", "master")]
+    for ref in non_main_refs + main_refs:
+        try:
+            for commit in repo.iter_commits(ref):
+                if commit.hexsha not in sha_to_branch:
+                    sha_to_branch[commit.hexsha] = ref.name
+        except Exception:
+            pass
+
+    out: list[dict] = []
+    seen: set[str] = set()
+    try:
+        commits = list(repo.iter_commits("--all", max_count=200))
+    except Exception:
+        commits = []
+
+    for commit in commits:
+        sha = commit.hexsha
+        if sha in seen:
+            continue
+        seen.add(sha)
+
+        branch = sha_to_branch.get(sha, "")
+        # Prefer author name parsed back from "Name (role)" format;
+        # fall back to deriving role from branch name for old runs.
+        author_name_str = str(commit.author) if commit.author else ""
+        import re as _re
+        _role_match = _re.search(r"\(([^)]+)\)$", author_name_str)
+        if _role_match:
+            author_role = _role_match.group(1)
+        elif branch.startswith("agent/"):
+            author_role = branch[len("agent/"):]
+        elif branch in ("main", "master"):
+            author_role = "runner"
+        else:
+            author_role = branch or "unknown"
+
+        try:
+            stats = commit.stats.total
+            commit_stats = {
+                "files": stats.get("files", 0),
+                "insertions": stats.get("insertions", 0),
+                "deletions": stats.get("deletions", 0),
+            }
+        except Exception:
+            commit_stats = {"files": 0, "insertions": 0, "deletions": 0}
+
+        out.append({
+            "sha": sha,
+            "short_sha": sha[:7],
+            "subject": commit.message.strip().splitlines()[0] if commit.message else "",
+            "author_role": author_role,
+            "branch": branch,
+            "committed_at": commit.committed_date,
+            "stats": commit_stats,
+            "parent_shas": [p.hexsha for p in commit.parents],
+        })
+
+    out.sort(key=lambda c: c["committed_at"])
+    return out
+
+
+@router.get("/{run_id}/git/diff")
+async def get_git_diff(
+    request: Request,
+    run_id: str,
+    ref: str = Query(..., description="commit SHA"),
+) -> dict:
+    """Return the unified diff for a single commit.
+
+    Returns {sha, diff: str}. 404 if workspace missing or sha unknown.
+    """
+    from git import InvalidGitRepositoryError, NoSuchPathError, Repo
+
+    data_root = Path(request.app.state.data_root)
+    working_dir = data_root / "runs" / run_id / "workspace" / "working"
+    try:
+        repo = Repo(working_dir)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} has no git workspace")
+
+    try:
+        commit = repo.commit(ref)
+    except Exception:
+        raise HTTPException(status_code=404, detail=f"sha {ref!r} not found")
+
+    try:
+        if commit.parents:
+            diff_text = repo.git.diff(commit.parents[0].hexsha, commit.hexsha)
+        else:
+            diff_text = repo.git.show(commit.hexsha, "--format=", "--patch")
+    except Exception as e:
+        diff_text = f"(could not render diff: {e})"
+
+    return {"sha": commit.hexsha, "diff": diff_text}
 
 
 @router.post("/{run_id}/approval/{approval_id}", dependencies=[Depends(require_bearer)])
@@ -326,3 +596,270 @@ async def resume_run(request: Request, run_id: str) -> dict:
         "job_id": job_id,
         "project_id": project_id,
     }
+
+
+@router.post("/{run_id}/stop", dependencies=[Depends(require_bearer)])
+async def stop_run(request: Request, run_id: str) -> dict:
+    """Hard-cancel an active run.
+
+    Sets workspace.pending_human (so the scheduler stops new spawns) and
+    cancels all in-flight agent tasks immediately via runner.force_stop().
+    Idempotent — a second call is a no-op.
+
+    Returns 404 if the run isn't currently active in the registry.
+    """
+    from core.workspace import HumanRequest
+
+    registry = request.app.state.run_registry
+    workspace = await registry.get(run_id)
+    if workspace is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"run {run_id!r} is not active",
+        )
+
+    if workspace.pending_human is None:
+        workspace.pending_human = HumanRequest(
+            from_agent="system",
+            question="Run stopped by user.",
+            iteration=workspace.iteration,
+        )
+        workspace.post_signal(Signal(
+            type=SignalType.HUMAN_NEEDED,
+            summary="Run stopped by user",
+            detail="A user pressed Stop. All in-flight agents are being cancelled.",
+            from_agent="system",
+            iteration=workspace.iteration,
+        ))
+
+        runner = await registry.get_runner(run_id)
+        if runner is not None:
+            await runner.force_stop()
+
+    return {"ok": True, "run_id": run_id}
+
+
+@router.patch("/{run_id}/agent_config/{role}", dependencies=[Depends(require_bearer)])
+async def patch_agent_config(
+    request: Request,
+    run_id: str,
+    role: str,
+    body: dict[str, Any] = Body(...),
+) -> dict:
+    """Hot-reload an agent's config for the live run.
+
+    Applies supported fields (declared_local_tools, model_tier, etc.) to the
+    in-memory agent so the next iteration picks them up. Returns 404 if the
+    run isn't active or the role doesn't exist.
+    """
+    registry = request.app.state.run_registry
+    runner = await registry.get_runner(run_id)
+    if runner is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"run {run_id!r} is not active — changes will apply to future runs only",
+        )
+    try:
+        runner.update_agent_config(role, body)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return {"ok": True, "run_id": run_id, "role": role}
+
+
+# ── File content endpoints (M6.C4) ────────────────────────────────────────────
+
+_BINARY_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
+    ".pdf", ".zip", ".tar", ".gz", ".whl", ".exe", ".bin",
+    ".pyc", ".pyd", ".so", ".dll",
+}
+_MAX_FILE_BYTES = 500 * 1024  # 500 KB
+
+
+def _safe_workspace_path(run_id: str, rel_path: str, data_root: str) -> Path:
+    """Resolve rel_path under the run's working/ dir with path-escape check."""
+    working = (Path(data_root) / "runs" / run_id / "workspace" / "working").resolve()
+    target = (working / rel_path).resolve()
+    try:
+        target.relative_to(working)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="path escapes workspace")
+    return target
+
+
+def _is_binary(path: Path, sample: bytes) -> bool:
+    if path.suffix.lower() in _BINARY_EXTENSIONS:
+        return True
+    return b"\x00" in sample[:8192]
+
+
+@router.get("/{run_id}/files", dependencies=[Depends(require_bearer)])
+async def get_file_content(
+    request: Request,
+    run_id: str,
+    path: str = Query(..., description="relative path within workspace/working/"),
+    ref: str | None = Query(None, description="git SHA to read from; absent = working tree"),
+) -> dict:
+    """Return the content of a workspace file (M6.C4).
+
+    Response: {path, content, encoding: "utf-8"|"base64"}
+    Binary or unreadable files: {path, error: "binary or too large"}
+    """
+    import base64
+
+    data_root = request.app.state.data_root
+    target = _safe_workspace_path(run_id, path, data_root)
+
+    if ref:
+        # Read via git show
+        from git import InvalidGitRepositoryError, NoSuchPathError, Repo
+        working = (Path(data_root) / "runs" / run_id / "workspace" / "working").resolve()
+        try:
+            repo = Repo(working)
+            content_bytes = repo.git.show(f"{ref}:{path}").encode("utf-8", errors="replace")
+        except (InvalidGitRepositoryError, NoSuchPathError):
+            raise HTTPException(status_code=404, detail="no git workspace")
+        except Exception:
+            raise HTTPException(status_code=404, detail=f"path {path!r} not found at ref {ref!r}")
+    else:
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail=f"file {path!r} not found")
+        size = target.stat().st_size
+        if size > _MAX_FILE_BYTES:
+            raise HTTPException(status_code=413, detail="file exceeds 500 KB limit")
+        content_bytes = target.read_bytes()
+
+    if _is_binary(target, content_bytes):
+        return {"path": path, "error": "binary or too large"}
+
+    try:
+        text = content_bytes.decode("utf-8")
+        return {"path": path, "content": text, "encoding": "utf-8"}
+    except UnicodeDecodeError:
+        return {"path": path, "content": base64.b64encode(content_bytes).decode(), "encoding": "base64"}
+
+
+@router.get("/{run_id}/files/history", dependencies=[Depends(require_bearer)])
+async def get_file_history(
+    request: Request,
+    run_id: str,
+    path: str = Query(..., description="relative path within workspace/working/"),
+) -> list[dict]:
+    """Return commits that touched a file (M6.C4).
+
+    Response: [{sha, subject, author_role, committed_at}, ...] descending time.
+    Capped at 50 entries.
+    """
+    from git import InvalidGitRepositoryError, NoSuchPathError, Repo
+
+    data_root = request.app.state.data_root
+    working = (Path(data_root) / "runs" / run_id / "workspace" / "working").resolve()
+    try:
+        repo = Repo(working)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        raise HTTPException(status_code=404, detail="no git workspace")
+
+    try:
+        commits = list(repo.iter_commits("--all", paths=path, max_count=50))
+    except Exception:
+        return []
+
+    # Build sha → branch map
+    sha_to_branch: dict[str, str] = {}
+    for ref in repo.references:
+        if hasattr(ref, "commit"):
+            try:
+                for c in repo.iter_commits(ref, max_count=200):
+                    if c.hexsha not in sha_to_branch:
+                        sha_to_branch[c.hexsha] = ref.name
+            except Exception:
+                pass
+
+    out: list[dict] = []
+    for commit in commits:
+        branch = sha_to_branch.get(commit.hexsha, "")
+        if branch.startswith("agent/"):
+            author_role = branch[len("agent/"):]
+        elif branch in ("main", "master"):
+            author_role = "runner"
+        else:
+            author_role = branch or "unknown"
+
+        out.append({
+            "sha": commit.hexsha,
+            "subject": commit.message.strip().splitlines()[0] if commit.message else "",
+            "author_role": author_role,
+            "committed_at": commit.committed_date,
+        })
+
+    return out
+
+
+@router.get("/{run_id}/git/branches", dependencies=[Depends(require_bearer)])
+async def get_git_branches(request: Request, run_id: str) -> list[str]:
+    """Return all branches in the run's git workspace.
+
+    Includes ``main`` first (seed commit + landed work) and then every
+    ``agent/{role}`` / ``{persona}/{role}`` branch. Without main in the
+    list, users can't see the imported seed state until an agent commits.
+
+    Response: ["main", "diana/game_architect", ...]
+    """
+    from git import InvalidGitRepositoryError, NoSuchPathError, Repo
+
+    data_root = request.app.state.data_root
+    working = (Path(data_root) / "runs" / run_id / "workspace" / "working").resolve()
+    try:
+        repo = Repo(working)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        raise HTTPException(status_code=404, detail="no git workspace")
+
+    main_branches = [
+        h.name for h in repo.heads if h.name in ("main", "master")
+    ]
+    other_branches = sorted(
+        h.name for h in repo.heads if h.name not in ("main", "master")
+    )
+    return main_branches + other_branches
+
+
+@router.get("/{run_id}/git/tree", dependencies=[Depends(require_bearer)])
+async def get_git_tree(
+    request: Request,
+    run_id: str,
+    branch: str = Query(..., description="branch name, e.g. agent/developer"),
+) -> list[dict]:
+    """Return the full file tree of a branch via git ls-tree.
+
+    Response: [{path, type: "blob"|"tree", size: int|null}, ...]
+    Only blobs at any depth are returned (trees are omitted from the list).
+    """
+    from git import InvalidGitRepositoryError, NoSuchPathError, Repo
+
+    data_root = request.app.state.data_root
+    working = (Path(data_root) / "runs" / run_id / "workspace" / "working").resolve()
+    try:
+        repo = Repo(working)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        raise HTTPException(status_code=404, detail="no git workspace")
+
+    if branch not in [h.name for h in repo.heads]:
+        raise HTTPException(status_code=404, detail=f"branch {branch!r} not found")
+
+    try:
+        tree = repo.heads[branch].commit.tree
+    except Exception:
+        raise HTTPException(status_code=404, detail="could not read tree")
+
+    out: list[dict] = []
+    def _walk(t, prefix: str = "") -> None:
+        for blob in t.blobs:
+            out.append({"path": f"{prefix}{blob.name}", "type": "blob", "size": blob.size})
+        for sub in t.trees:
+            _walk(sub, f"{prefix}{sub.name}/")
+
+    _walk(tree)
+    out.sort(key=lambda f: f["path"])
+    return out
+

@@ -416,3 +416,51 @@ async def test_post_approval_idempotent_returns_404_after_decided(client, app, a
         headers=auth_header,
     )
     assert r.status_code == 404
+
+
+# ── POST /api/runs/{id}/stop (soft-cancel) ───────────────────────────────────
+
+
+async def test_stop_unknown_run_404(client, auth_header):
+    r = await client.post("/api/runs/run_ghost/stop", headers=auth_header)
+    assert r.status_code == 404
+
+
+async def test_stop_active_run_sets_pending_human_and_posts_signal(
+    client, app, auth_header,
+):
+    ws = _register_workspace(app, "run_stop")
+    assert ws.pending_human is None
+
+    r = await client.post("/api/runs/run_stop/stop", headers=auth_header)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body == {"ok": True, "run_id": "run_stop"}
+
+    # pending_human is set so the scheduler stops dispatching new agents
+    assert ws.pending_human is not None
+    assert ws.pending_human.from_agent == "system"
+
+    # A HUMAN_NEEDED signal landed on the board
+    from core.signals import SignalType
+    human_needed = [s for s in ws.board if s.type is SignalType.HUMAN_NEEDED]
+    assert len(human_needed) == 1
+    assert human_needed[0].summary == "Run stopped by user"
+    assert human_needed[0].from_agent == "system"
+
+
+async def test_stop_idempotent_does_not_double_post(client, app, auth_header):
+    """Calling /stop twice should not stack two HUMAN_NEEDED signals."""
+    ws = _register_workspace(app, "run_stop2")
+    await client.post("/api/runs/run_stop2/stop", headers=auth_header)
+    await client.post("/api/runs/run_stop2/stop", headers=auth_header)
+
+    from core.signals import SignalType
+    human_needed = [s for s in ws.board if s.type is SignalType.HUMAN_NEEDED]
+    assert len(human_needed) == 1
+
+
+async def test_stop_requires_auth(client, app):
+    _register_workspace(app, "run_stop_auth")
+    r = await client.post("/api/runs/run_stop_auth/stop")
+    assert r.status_code == 401

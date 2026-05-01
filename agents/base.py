@@ -125,6 +125,11 @@ class BaseAgent:
     # owns). Empty / unset = layer is omitted from the effective
     # prompt; same observable behaviour as today's runs.
     _project_context: str = ""
+    # Continuation brief — set by the runner when the run has prior-run
+    # attachments (inputs/from_run_*/) with optional feedback.md. Surfaces
+    # the user's review comments and the existence of prior deliverables
+    # to every agent so devs don't redo work the prior run already shipped.
+    _continuation_brief: str = ""
     _current_task: str = ""
     # M1 — teammate brief (Layer 3.5). Set by runner before each LLM call.
     _teammate_brief: str = ""
@@ -780,6 +785,8 @@ class BaseAgent:
                 "it, don't repeat what's already done):\n\n"
                 + self._project_context
             )
+        if self._continuation_brief:
+            parts.append(self._continuation_brief)
 
         if self.persona is not None and self.persona.has_memory() and self._current_task:
             recall = await self.persona.recall(self._current_task)

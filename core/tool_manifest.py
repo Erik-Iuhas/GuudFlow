@@ -270,6 +270,22 @@ class ToolManifestBuilder:
                 scope=scope,
             ))
 
+        # 1b. Auto-include baseline tools not already added via declared_local_tools
+        already = {d.scope for d in descriptors}
+        for scope in BASELINE_LOCAL_SCOPES:
+            if scope in already:
+                continue
+            entry = self.local_registry.get(scope)
+            if entry is None:
+                continue
+            descriptors.append(ToolDescriptor(
+                name=entry.name,
+                description=entry.description,
+                input_schema=entry.input_schema,
+                invocation="local",
+                scope=scope,
+            ))
+
         # 2. MCP tools
         for server in declared_mcp_servers:
             server_prefix = f"mcp-{server}"
@@ -298,7 +314,7 @@ class ToolManifestBuilder:
 # Read tools that every agent gets without explicit RBAC grant.
 # DESIGN §31 rule 74 — read tools are baseline; write tools require scope.
 BASELINE_LOCAL_SCOPES: frozenset[str] = frozenset({
-    "fs-read", "fs-list", "fs-exists", "fs-read_range", "fs-grep",
+    "fs-read", "fs-list", "fs-exists", "fs-read_range", "fs-grep", "fs-diff",
     "board-message",
     "git-diff", "git-changed-files", "git-log", "git-read", "git-status",
     "code-outline",
@@ -308,6 +324,9 @@ BASELINE_LOCAL_SCOPES: frozenset[str] = frozenset({
     "data-json", "data-csv", "data-yaml", "data-xml",
     "time-now", "time-diff",
     "math-eval",
+    # Story lifecycle — no RBAC gate, same as board-message.
+    # Any agent that writes docs may open or close a story.
+    "story-open", "story-complete",
 })
 
 

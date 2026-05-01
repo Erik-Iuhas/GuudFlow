@@ -180,3 +180,33 @@ def test_quips_returns_a_copy(tmp_path: Path):
     snapshot = engine.quips()
     snapshot.append(Quip(ts="x", persona="x", role="x", text="x", event="x"))
     assert engine.quips() == []
+
+
+# ── Persona name in system prompt ─────────────────────────────────────────────
+
+
+async def test_system_prompt_contains_persona_name_not_role(tmp_path: Path, workspace: Workspace):
+    """When voices have distinct names, the system prompt should reference
+    the persona name, not the bare role string."""
+    captured_calls: list[dict] = []
+
+    class CapturingLLM:
+        async def complete(self, **kwargs):
+            captured_calls.append(kwargs)
+            from core.llm import LLMResponse
+            return LLMResponse(text="done", tool_calls=[], stop_reason="end_turn")
+
+    engine = QuipEngine(llm=CapturingLLM(), log_path=tmp_path / "q.json")
+    engine.set_voices([
+        AgentVoice(role="developer", name="Sarah", character="Builds clean code."),
+        AgentVoice(role="reviewer", name="Mike", character="Thorough code reviewer."),
+    ])
+    result = SchedulerResult(SchedulerStatus.COMPLETE, ["developer"], ["reviewer"], {})
+    await engine.on_agent_complete("developer", workspace)
+
+    assert captured_calls, "LLM was not called"
+    system = captured_calls[0]["system"]
+    # Roster block must mention names, not bare role strings
+    assert "Sarah" in system
+    assert "Mike" in system
+    assert "Your coworkers on this run" in system

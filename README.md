@@ -6,7 +6,7 @@ workspace, a shared git repo, structured inter-agent communication, and a
 sandboxed code-execution surface.
 
 **Status: phases A, B, C, D-prime, D, F, G-prime, G, K and milestones
-M0–M4 shipped — backend tests + studio typecheck/build green.**
+M0–M6 shipped — backend tests + studio typecheck/build green.**
 M4 (Studio UI Pass 1): `/api/tools`, `/api/dashboard`, `meta_model` on
 propose, `WorkerCard` (all 4 modes), `ToolsMultiSelect` (RBAC-aware),
 `WorkerSettingsPanel`, `Dashboard` view (5s poll), `RunWsContext` +
@@ -240,6 +240,11 @@ Shipped:
 - ✅ M1 — handshake protocol (ASK/ANSWER/SKIP/STORY) + roster awareness + edit-block parser
 - ✅ M2 — persona desk + manifesto layer + history tracking
 - ✅ M3 — multi-model abstraction + error taxonomy + prompt caching
+- ✅ M3.5 — per-agent task desks + scope envelopes
+- ✅ M4 — Studio UI pass 1 (dashboard, pipeline graph, roster, WorkerCard, QuipFeed)
+- ✅ M5 — backend pass (reject loop, escalation, desk API, hierarchy graph endpoint)
+- ✅ M5.5 — task completion records + in-flight compaction
+- ✅ M6 — Studio UI pass 2 (hierarchy graph edges, GitGraph, KanbanBoard, file preview, desk files UI, WorkerCard refactor, quip avatars)
 
 Future:
 - Phase F.5 — persona author depth (publish, scaffolding, curated reference URLs, sandboxed pytest checks)

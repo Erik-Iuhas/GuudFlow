@@ -1,16 +1,124 @@
-"""/api/personas — read-only persona roster + memory inspection + chat."""
+"""/api/personas — persona roster, memory inspection, chat, and desk CRUD."""
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 
 from agents.persona import Persona
 from agents.persona_chat import chat_with_persona
 from api.auth import require_bearer
 from core.llm import AnthropicClient, LLMClient
+
+
+# ── Desk endpoint models (M5.C3 / D6) ─────────────────────────────────────
+
+# Filename must be alphanumeric/hyphens/underscores, end with .md.
+_DESK_FILENAME_RE = re.compile(r"^[a-zA-Z0-9_-]+\.md$")
+_DESK_CONTENT_MAX = 100_000  # 100 KB
+
+
+class DeskFileSummary(BaseModel):
+    filename: str
+    triggers: list[str]
+    agents: list[str]
+    kind: str
+    body_excerpt: str   # first 200 chars of body (no frontmatter)
+    bytes: int          # raw file size
+
+
+class DeskFileWrite(BaseModel):
+    filename: str
+    content: str
+    triggers: list[str] = []
+    agents: list[str] = []
+    kind: str = ""
+
+
+def _validate_desk_filename(filename: str) -> None:
+    if not _DESK_FILENAME_RE.match(filename):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "filename must match ^[a-zA-Z0-9_-]+\\.md$ "
+                "(no path separators, no leading dots, must end .md)"
+            ),
+        )
+
+
+def _persona_desk_dir(store, persona_id: str) -> Path:
+    return store.root / persona_id / "desk"
+
+
+def _parse_desk_file_summary(path: Path) -> DeskFileSummary:
+    """Parse a single desk file into a DeskFileSummary. Never raises."""
+    from agents.persona_desk import _parse_yaml_frontmatter
+
+    try:
+        raw = path.read_text(encoding="utf-8")
+        size = path.stat().st_size
+    except OSError:
+        return DeskFileSummary(
+            filename=path.name, triggers=[], agents=[], kind="",
+            body_excerpt="(unreadable)", bytes=0,
+        )
+
+    fm, body = _parse_yaml_frontmatter(raw)
+
+    def _as_list(v) -> list[str]:
+        if not v:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip() for x in v]
+        return [str(v).strip()]
+
+    return DeskFileSummary(
+        filename=path.name,
+        triggers=_as_list(fm.get("triggers")),
+        agents=_as_list(fm.get("agents")),
+        kind=str(fm.get("kind", "")),
+        body_excerpt=body.strip()[:200],
+        bytes=size,
+    )
+
+
+def _build_desk_content(body: DeskFileWrite) -> str:
+    """Construct the on-disk markdown content from a DeskFileWrite."""
+
+    def _normalize(items: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for s in items:
+            s = s.strip().lower()
+            if s and s not in seen:
+                seen.add(s)
+                out.append(s)
+        return out
+
+    triggers = _normalize(body.triggers)
+    agents = _normalize(body.agents)
+    kind = body.kind.strip()
+
+    fm_lines = ["---"]
+    if triggers:
+        trigger_str = ", ".join(f'"{t}"' for t in triggers)
+        fm_lines.append(f"triggers: [{trigger_str}]")
+    else:
+        fm_lines.append("triggers: []")
+    if agents:
+        agent_str = ", ".join(f'"{a}"' for a in agents)
+        fm_lines.append(f"agents: [{agent_str}]")
+    else:
+        fm_lines.append("agents: []")
+    if kind:
+        fm_lines.append(f'kind: "{kind}"')
+    fm_lines.append("---")
+
+    return "\n".join(fm_lines) + "\n" + body.content
 
 
 router = APIRouter(prefix="/api/personas", tags=["personas"])
@@ -206,3 +314,101 @@ async def chat(
             "episodes_used": result.recall.episodes_used,
         },
     }
+
+
+# ── Desk CRUD endpoints (M5.C3) ─────────────────────────────────────────────
+
+
+@router.get("/{persona_id}/desk", dependencies=[Depends(require_bearer)])
+async def list_desk_files(request: Request, persona_id: str) -> dict:
+    """List all desk files for a persona (persona-level only, not project overlay)."""
+    store = _store(request)
+    persona_dir = store.root / persona_id
+    if not persona_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"persona {persona_id!r} not found")
+
+    desk_dir = _persona_desk_dir(store, persona_id)
+    if not desk_dir.is_dir():
+        return {"files": []}
+
+    files = sorted(
+        [_parse_desk_file_summary(p) for p in desk_dir.glob("*.md")],
+        key=lambda f: f.filename,
+    )
+    return {"files": [f.model_dump() for f in files]}
+
+
+@router.post("/{persona_id}/desk", dependencies=[Depends(require_bearer)], status_code=201)
+async def create_desk_file(
+    request: Request,
+    persona_id: str,
+    body: DeskFileWrite,
+) -> dict:
+    """Create a new desk file for a persona.
+
+    Returns 409 if the file already exists (no upsert — use DELETE then POST).
+    Returns 413 if content exceeds 100 KB.
+    Returns 422 if filename is invalid.
+    """
+    store = _store(request)
+    persona_dir = store.root / persona_id
+    if not persona_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"persona {persona_id!r} not found")
+
+    _validate_desk_filename(body.filename)
+
+    if len(body.content.encode("utf-8")) > _DESK_CONTENT_MAX:
+        raise HTTPException(status_code=413, detail="content exceeds 100 KB limit")
+
+    desk_dir = _persona_desk_dir(store, persona_id)
+    desk_dir.mkdir(parents=True, exist_ok=True)
+
+    target = desk_dir / body.filename
+    # Path-traversal defence: confirm the resolved path is inside desk_dir.
+    try:
+        target.resolve().relative_to(desk_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=422, detail="invalid filename")
+
+    if target.exists():
+        raise HTTPException(
+            status_code=409,
+            detail="file exists; DELETE first or pick a different name",
+        )
+
+    target.write_text(_build_desk_content(body), encoding="utf-8")
+    return {"filename": body.filename}
+
+
+@router.delete(
+    "/{persona_id}/desk/{filename}",
+    dependencies=[Depends(require_bearer)],
+    status_code=204,
+    response_model=None,
+)
+async def delete_desk_file(
+    request: Request,
+    persona_id: str,
+    filename: str,
+) -> None:
+    """Delete a desk file. Returns 204 on success, 404 if not found."""
+    store = _store(request)
+    persona_dir = store.root / persona_id
+    if not persona_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"persona {persona_id!r} not found")
+
+    _validate_desk_filename(filename)
+
+    desk_dir = _persona_desk_dir(store, persona_id)
+    target = desk_dir / filename
+    # Path-traversal defence.
+    try:
+        target.resolve().relative_to(desk_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=422, detail="invalid filename")
+
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"desk file {filename!r} not found")
+
+    target.unlink()
+    return None

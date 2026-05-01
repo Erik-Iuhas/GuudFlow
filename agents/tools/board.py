@@ -181,6 +181,14 @@ class AssignTask(BaseTool):
         if not goal or not isinstance(goal, str):
             return _err("missing required argument: goal")
 
+        roster = set(getattr(self._workspace, "agent_roles", None) or set())
+        if roster and assignee not in roster:
+            return _err(
+                f"unknown role {assignee!r}. The team is {sorted(roster)}. "
+                f"Reassign to one of these — or do the work yourself with "
+                f"fs-write instead of delegating."
+            )
+
         acceptance_raw = arguments.get("acceptance") or []
         if not isinstance(acceptance_raw, list):
             return _err("acceptance must be a list of strings")

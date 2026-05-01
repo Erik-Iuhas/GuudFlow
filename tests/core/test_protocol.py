@@ -23,12 +23,12 @@ from core.protocol import (
 
 
 def test_verify_fail_requires_detail():
-    with pytest.raises(ValueError, match="requires a specific detail"):
+    with pytest.raises(ValueError, match="at least 20 characters"):
         VerifyResult(checkpoint="token_expiry", status="FAIL")
 
 
 def test_verify_fail_rejects_blank_detail():
-    with pytest.raises(ValueError, match="requires a specific detail"):
+    with pytest.raises(ValueError, match="at least 20 characters"):
         VerifyResult(checkpoint="x", status="FAIL", detail="   ")
 
 

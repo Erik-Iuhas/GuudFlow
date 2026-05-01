@@ -225,3 +225,108 @@ async def test_fs_rename_file(fw: FileWorkspace, emitters, claim_log):
 async def test_fs_rename_missing_source(fw: FileWorkspace):
     res = await FsRename(fw).run({"from": "ghost.py", "to": "new.py"})
     assert "error" in res
+
+
+# ── Story-scoped diff (replaces inline-fence filter) ────────────────────────
+
+
+class _StubStory:
+    def __init__(self, base_ref: str | None) -> None:
+        self.base_ref = base_ref
+        self.closed = False
+        self.name = "ghost-ai"
+
+
+class _StubWorkspace:
+    def __init__(self, base_ref: str | None, role: str = "dev") -> None:
+        self.active_story = {role: "story_xyz"}
+        self.stories = {"story_xyz": _StubStory(base_ref)}
+
+
+@pytest.fixture
+def git_fw(tmp_path: Path):
+    """A FileWorkspace whose `working/` is a real git repo."""
+    from core.git_workspace import GitWorkspace
+
+    ws_root = tmp_path / "ws"
+    fw = FileWorkspace(ws_root)
+    gw = GitWorkspace(working_dir=fw.working, emit=None)
+    gw.init()
+    return fw, gw
+
+
+async def test_fs_diff_returns_unified_diff_against_story_base(git_fw):
+    from agents.tools.fs import FsDiff
+
+    fw, gw = git_fw
+    # Initial commit so base_ref is meaningful.
+    await fw.write("docs/spec.md", "# Spec\n\noriginal line\n")
+    gw.repo.git.add(A=True)
+    gw.repo.index.commit("seed")
+    base_ref = gw.head_sha()
+
+    # Now mutate the doc — this is "what's new for the story".
+    await fw.write("docs/spec.md", "# Spec\n\noriginal line\nnew story line\n")
+
+    workspace = _StubWorkspace(base_ref)
+    res = await FsDiff(fw, workspace=workspace, role="dev", git=gw).run(
+        {"path": "docs/spec.md"}
+    )
+    assert res["ok"] is True
+    assert res["base_ref"] == base_ref
+    assert "new story line" in res["diff"]
+    assert "+new story line" in res["diff"]
+
+
+async def test_fs_diff_falls_back_to_full_content_without_base_ref(git_fw):
+    from agents.tools.fs import FsDiff
+
+    fw, gw = git_fw
+    await fw.write("docs/spec.md", "hello\n")
+
+    workspace = _StubWorkspace(base_ref=None)
+    res = await FsDiff(fw, workspace=workspace, role="dev", git=gw).run(
+        {"path": "docs/spec.md"}
+    )
+    assert res["ok"] is True
+    assert res["content"] == "hello\n"
+    assert "note" in res
+    assert "diff" not in res
+
+
+async def test_fs_list_marks_changed_in_story(git_fw):
+    fw, gw = git_fw
+    await fw.write("docs/a.md", "original\n")
+    await fw.write("docs/b.md", "untouched\n")
+    gw.repo.git.add(A=True)
+    gw.repo.index.commit("seed")
+    base_ref = gw.head_sha()
+
+    # Modify only a.md.
+    await fw.write("docs/a.md", "original\nnew line\n")
+
+    workspace = _StubWorkspace(base_ref)
+    res = await FsList(fw, workspace=workspace, role="dev", git=gw).run(
+        {"path": "docs", "recursive": False}
+    )
+    assert res["ok"] is True
+    by_path = {
+        e["path"] if isinstance(e, dict) else e: e for e in res["files"]
+    }
+    a = by_path["docs/a.md"]
+    b = by_path.get("docs/b.md")
+    assert isinstance(a, dict)
+    assert a["changed_in_story"] is True
+    # b is untouched; either appears as a plain string or dict with False.
+    if isinstance(b, dict):
+        assert b.get("changed_in_story") is False
+
+
+async def test_fs_list_no_active_story_omits_changed_flag(fw: FileWorkspace):
+    await fw.write("docs/spec.md", "hello\n")
+    res = await FsList(fw).run({"path": "docs"})
+    assert res["ok"] is True
+    # No story context → entries are plain strings (no changed_in_story).
+    for entry in res["files"]:
+        if isinstance(entry, dict):
+            assert "changed_in_story" not in entry

@@ -34,6 +34,7 @@ from core.llm import AnthropicClient, LLMClient
 from core.llm.registry import ModelRegistry
 from core.quip_engine import QuipEngine
 from core.runner import AgentConfig, AgentRunner, ProjectConfig
+from core.task_summarizer import TaskSummarizer
 from core.tool_manifest import RoleRBAC
 from worker.docker_manager import DockerManager, DockerManagerError
 from worker.queue import (
@@ -114,6 +115,13 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             if isinstance(seeds, list):
                 desk_seeds[str(persona_id_key)] = seeds
 
+    raw_stories = data.get("stories") or []
+    stories: list[dict] = []
+    if isinstance(raw_stories, list):
+        for s in raw_stories:
+            if isinstance(s, dict) and s.get("name") and s.get("goal"):
+                stories.append(s)
+
     return ProjectConfig(
         project_id=data.get("project_id", ""),
         goal=data.get("goal", ""),
@@ -126,6 +134,7 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         mode=str(data.get("mode") or "production"),
         training_scenario_id=data.get("training_scenario_id"),
         desk_seeds=desk_seeds,
+        stories=stories,
     )
 
 
@@ -392,12 +401,26 @@ def default_runner_factory(
     else:
         mw_llm = _build_default_llm()
 
+    # TaskSummarizer uses FAST tier. Fall back to the same client as
+    # MemoryWriter if FAST resolution fails (mirrors quip_engine pattern).
+    if llm is not None:
+        ts_llm: LLMClient = llm
+    elif model_registry is not None:
+        try:
+            ts_model = model_registry.resolve("fast")
+            ts_llm = model_registry.get_client(ts_model)
+        except Exception:
+            ts_llm = _build_default_llm()
+    else:
+        ts_llm = _build_default_llm()
+
     return AgentRunner(
         project=project,
         run_id=run_id,
         run_root=run_root,
         llm=llm,
         memory_writer=MemoryWriter(llm=mw_llm),
+        task_summarizer=TaskSummarizer(llm=ts_llm),
         docker_manager=docker_manager,
         rubric_scorer=RubricScorer(),
         training_scenarios_root=scenarios_root,
@@ -587,10 +610,11 @@ class JobRunner:
             **factory_kwargs,
         )
 
-        # 5. Register live workspace for the WebSocket bridge.
+        # 5. Register live workspace (and runner) for the WebSocket bridge
+        #    and the stop endpoint.
         if self.run_registry is not None:
             try:
-                await self.run_registry.register(job.run_id, runner.workspace)
+                await self.run_registry.register(job.run_id, runner.workspace, runner)
             except Exception:
                 pass
 

@@ -100,6 +100,7 @@ class StoryState:
     owner_role: str | None = None
     parent_story_id: str | None = None
     opened_at_iteration: int = 0
+    base_ref: str | None = None  # git SHA at story-open; baseline for story-scoped diffs
     closed: bool = False
     closed_outcome: str | None = None  # "shipped" | "abandoned" | "deferred"
     closed_summary: str = ""
@@ -155,6 +156,9 @@ class Task:
     closed_by_commit: str = ""
     blocked_on: list[str] = field(default_factory=list)
     cancelled_reason: str = ""
+
+    # M5.5: set by TaskSummarizer on close; persisted via tasks.jsonl mutation.
+    completion_summary: dict | None = None
 
 
 # Map a TaskStatus transition to the SignalType the runner posts when

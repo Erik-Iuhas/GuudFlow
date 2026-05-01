@@ -56,6 +56,10 @@ Rules:
     developers they review. The architect (if any) is set with
     `is_final_reviewer=true` and the runner auto-fills its deps —
     don't list them yourself.
+  - Use `manages` to express direct reports — who this role can assign
+    tasks to. Use `escalates_to` when you want a non-default escalation
+    target (default is tech_lead). Leave both empty if the role has no
+    hierarchy responsibilities.
   - For each role, recommend a persona: either `hire_existing` with
     a `persona_id` from the roster, or `create_new` with an optional
     `name_hint` like 'Mike' or 'Sarah' (the meta-agent's
@@ -65,6 +69,21 @@ Rules:
 
 Be conservative. Smaller teams ship faster. A 2-3 agent team is
 usually right for greenfield projects; 4-5 for mixed front+back+ops.
+
+Story seeds in `stories`: if the goal has 2+ natural phases, add one
+story slug per phase (e.g. "backend-api", "frontend-ui"). Single-phase
+goals need no stories. Stories let agents filter docs to their scope
+so each agent reads only the tokens relevant to their work.
+
+Archetype selection — authoring vs. coordination:
+  - For roles whose responsibility is to AUTHOR an artifact (design
+    docs, requirements, specs, READMEs), prefer `requirements_writer`
+    (or `architect` for final design-coherence checks). The `tech_lead`
+    archetype is for escalation and coordination; assigning it an
+    "author X" responsibility produces a role that delegates instead
+    of writing.
+  - Use `tech_lead` only when the primary job is: breaking stuck
+    rejection cycles, routing peer ASK/ANSWER, or triaging escalations.
 """
 
 
@@ -92,6 +111,13 @@ Rules (in addition to the standard meta-agent rules):
 Use the `propose_team` tool. Your rationale should open with a
 one-sentence summary of what's CHANGING between the prior team and
 the proposed team.
+
+Story seeds in `stories`: extract one story per distinct theme from
+the user feedback (e.g. "auth-flow", "dashboard-ui", "bug-fixes").
+Each story needs a slug `name` and a one-sentence `goal`. Assign
+`owner_role` when a story belongs to a specific role. 2-4 stories
+maximum. Stories scope doc reads so agents only consume tokens relevant
+to their current theme.
 """
 
 
@@ -117,6 +143,8 @@ class TeamProposal:
     deltas: list[dict[str, Any]] = field(default_factory=list)
     # M2: project-overlay desk seeds. dict[persona_id → list[DeskFileSeed dicts]].
     desk_seeds: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # M1 §7b: story seeds proposed for this run.
+    stories: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise for the API response. AgentConfig dataclass →
@@ -143,6 +171,7 @@ class TeamProposal:
             "warnings": list(self.warnings),
             "deltas": list(self.deltas),
             "desk_seeds": dict(self.desk_seeds),
+            "stories": list(self.stories),
         }
 
 
@@ -259,6 +288,7 @@ class MetaAgent(BaseAgent):
             warnings=result.warnings,
             deltas=deltas,
             desk_seeds=result.desk_seeds,
+            stories=result.stories,
         )
 
     @staticmethod

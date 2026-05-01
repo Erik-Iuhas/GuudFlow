@@ -53,10 +53,13 @@ class VerifyResult:
     def __post_init__(self) -> None:
         if self.status not in ("PASS", "FAIL"):
             raise ValueError(f"status must be PASS|FAIL, got {self.status!r}")
-        if self.status == "FAIL" and not (self.detail and self.detail.strip()):
-            raise ValueError(
-                f"VerifyResult FAIL on {self.checkpoint!r} requires a specific detail"
-            )
+        if self.status == "FAIL":
+            stripped = (self.detail or "").strip()
+            if len(stripped) < 20:
+                raise ValueError(
+                    f"VerifyResult FAIL on {self.checkpoint!r} requires a detail of "
+                    f"at least 20 characters (got {len(stripped)})"
+                )
 
 
 @dataclass
@@ -313,6 +316,31 @@ def render_task_cancelled(task_id: str, by_role: str, reason: str = "") -> str:
     lines = [f"TASK_CANCELLED task:{task_id} by:{by_role}"]
     if reason:
         lines.append(f"  reason: {reason}")
+    return "\n".join(lines)
+
+
+def render_task_completion_summary(record: dict) -> str:
+    """M5.5 C3: render a TaskCompletionRecord dict as a compact desk line.
+
+    Format (D3):
+        [task {id} done · commit {sha[:7]}] {summary}
+        deliverables:
+          - {item}
+        refs: {paths}
+    """
+    task_id = record.get("task_id", "?")
+    sha = record.get("closed_by_commit", "")[:7] or "?"
+    summary = record.get("summary", "(summary unavailable)")
+    deliverables: list[str] = record.get("deliverables", [])
+    references: list[str] = record.get("references", [])
+
+    lines = [f"[task {task_id} done · commit {sha}] {summary}"]
+    if deliverables:
+        lines.append("deliverables:")
+        for item in deliverables:
+            lines.append(f"  - {item}")
+    if references:
+        lines.append("refs: " + ", ".join(references[:6]))
     return "\n".join(lines)
 
 
@@ -1164,3 +1192,45 @@ def render_compact(block: CompactBlock) -> str:
     body_keys = [k for k in block.fields if not (block.kind == "VERIFY" and k == "result")]
     body = "\n".join(f"  {k}: {block.fields[k]}" for k in body_keys)
     return head if not body else f"{head}\n{body}"
+
+
+# ── M5: Rejected-feedback context block ───────────────────────────────────
+
+
+@dataclass(slots=True)
+class RejectedFeedback:
+    """In-memory record of a reviewer's rejection; injected into the next
+    iteration context for the rejected author. Not persisted — rebuilt from
+    board signals on resume."""
+
+    reviewer_role: str
+    reviewer_name: str    # persona display name, or role.capitalize()
+    detail: str           # truncated to 1000 chars
+    attempt_number: int   # 1-indexed
+
+
+_REJECTED_FEEDBACK_MAX_DETAIL = 1000
+
+
+def render_rejected_feedback(
+    reviewer_name: str,
+    reviewer_role: str,
+    detail: str,
+    attempt_number: int,
+) -> str:
+    """Render the RejectedFeedback context block prepended to the next
+    iteration's task prompt so the author sees exactly what to fix.
+
+    Format is fixed (D5 in M5 spec) — do not alter the delimiters.
+    """
+    if len(detail) > _REJECTED_FEEDBACK_MAX_DETAIL:
+        detail = detail[:_REJECTED_FEEDBACK_MAX_DETAIL] + "…(truncated)"
+    return (
+        f"=== REVIEWER REJECTED YOUR WORK (attempt {attempt_number}) ===\n"
+        f"Reviewer: {reviewer_name} ({reviewer_role})\n"
+        f"\n"
+        f"Reason:\n"
+        f"{detail}\n"
+        f"\n"
+        f"--- Address each point above. Re-emit COMMIT when fixed. ---"
+    )
