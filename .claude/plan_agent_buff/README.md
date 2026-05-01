@@ -4,7 +4,7 @@ Detailed plans for the GuudFlow multi-track roadmap. Parent strategy doc: `~/.cl
 
 Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance criteria and a commit plan. Treat the parent roadmap as "why," and these as "how."
 
-**Progress: 3 / 10 tracks shipped.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c.
+**Progress: 4 / 13 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d.
 
 ## Files
 
@@ -13,6 +13,7 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 | `track_1_iteration_metrics.md` | 1 | Foundation | ✅ **Shipped** (with logging gap — fixed by 1b) | — | 200–300k |
 | `track_1b_logging_fix.md` | 1b | Logging truth-telling (Sprint 1.5) | ✅ **Shipped** | Track 1 | 80–150k |
 | `track_1c_wire_repomap.md` | 1c | Wire repo_map into prompt (Sprint 1.6) | ✅ **Shipped** | Track 1b | 80–150k |
+| `track_1d_repo_map_stability.md` | 1d | Repo_map cache stability + task-aware relevance (Sprint 1.7) | ✅ **Shipped** | Track 1c | 120–200k |
 | `track_2a_orphan_question.md` | 2a | Bug fix | ⬜ Not started | — | 100–200k |
 | `track_2b_no_op_rationale.md` | 2b | Bug fix | ⬜ Not started | — (pairs with 2a) | 100–200k |
 | `track_3a_outline_funnel.md` | 3 (code-side) | Architecture | ⬜ Not started (partially adopted in personas) | Track 1 | 250–400k |
@@ -29,6 +30,9 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 | 3b — Doc-diff over `.flow/docs/` | Depends on Track 4 landing the doc directory |
 | 5 — Doc Manager (memory_writer extension) | Depends on Track 4 |
 | 7 — Subtask decomposition | Composes on Tracks 1 + 3 + 4 |
+| 8 — Subtask context hot-swap | Composes on Track 7. When an agent finishes a subtask, stash that subtask's read context (file bodies, tool results) so it's not re-fed into every later LLM call. Picks back up only if a later subtask references it. Long-term context economy lever. |
+| 9 — Protocol cleaner sidecar | Bigger architectural pass. A small, fast model translates the heavy model's prose output into protocol blocks (`[COMMIT]`, `[VERIFY]`, etc.) so the heavy model focuses on work, not formatting. Addresses the persistent `PROTOCOL_PARSE_FAIL` retries seen across runs. |
+| 10 — Operator settings UI | Settings page exposing: per-role default model (small-model defaults for low-stakes roles), per-run wall-clock deadlines, per-agent max-iterations, max-protocol-retries, max-tool-calls. Plus visible read of the same values during a live run so users can see what's enforcing them. |
 | Test-writer/implementer split | Explicitly deferred per Erik |
 
 ## Recommended order
@@ -41,6 +45,12 @@ Sprint 1.5 (gates measurement) — SHIPPED:
 Sprint 1.6 (gates token efficiency) — SHIPPED:
   Track 1c  ✅ wire workspace.repo_map into effective_system_prompt as
             Layer 4.5. CLAUDE.md §28 compliance restored.
+
+Sprint 1.7 (cache stability + task-aware relevance) — SHIPPED:
+  Track 1d  ✅ repo_map dirty-flag rebuilds (one per agent transition,
+            not per commit) + new task-aware relevance section in the
+            prompt (aider-style: PageRank structure + task-keyword
+            relevance). Closes the architectural gap from run_ff1e92d43c.
 
 Sprint 2 (parallel-safe):
   Track 2a  ←── bug, highest user value
