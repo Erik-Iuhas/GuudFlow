@@ -621,7 +621,7 @@ class AgentRunner:
         # a docker_manager) uses the hardened host runner. The host
         # runner refuses production+host_runner combos via its own mode
         # check, so a misconfigured production deploy fails loudly.
-        in_production = os.environ.get("AGENTFLOW_MODE") == "production"
+        in_production = os.environ.get("GUUDFLOW_MODE") == "production"
         if in_production and self.docker_manager is not None:
             code_runner = make_container_runner(self.docker_manager, self.run_id)
             code_exec_tool = CodeExec(runner=code_runner, is_dev_host_runner=False)
@@ -1231,7 +1231,7 @@ class AgentRunner:
             self.quip_engine.set_workspace(self.workspace, self.personas_root)
 
         # Give GitWorkspace the persona display names so each commit carries
-        # the right author (e.g. "Sarah (developer)" not "agentflow").
+        # the right author (e.g. "Sarah (developer)" not "guudflow").
         git_personas: dict[str, str] = {}
         for role, agent in self.agents.items():
             git_personas[role] = (

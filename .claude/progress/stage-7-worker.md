@@ -11,7 +11,7 @@ DESIGN sections: §16, §29.
 - [x] `worker/docker_manager.py` ✅ — `DockerManager` with dev stub + production path; `CONTAINER_LIMITS` from §29 (network_mode none, mem 512m, pids 50, read_only, no-new-privileges, sized tmpfs); refuses to start in production without Docker; lazy SDK import
 - [x] `worker/job_runner.py` ✅ — `serialise_project(dict→ProjectConfig)`; `JobRunner.run_one(job)` and `run_forever()`; persists `meta.json` + `board.json` per run; registers/unregisters live workspace with `RunRegistry` for the WebSocket bridge
 - [x] `worker/README.md` ✅ — mode notes + dev/prod usage
-- [x] `api/main.py` updated — lifespan spawns `JobRunner.run_forever()` task in dev, cancels on shutdown; `AGENTFLOW_DISABLE_INPROC_WORKER=1` opts out
+- [x] `api/main.py` updated — lifespan spawns `JobRunner.run_forever()` task in dev, cancels on shutdown; `GUUDFLOW_DISABLE_INPROC_WORKER=1` opts out
 
 ## Tests
 - `tests/worker/test_queue.py` (9 — Stage 6)
@@ -24,7 +24,7 @@ Total Stage 7 new tests: **18**. Full suite: **530 passed, 2 skipped**.
 - E2E worker test: enqueue Job → JobRunner.run_one() → drives AgentRunner with MockLLMClient → developer writes file via fs:write → auto-commit on agent/developer → reviewer git:diffs → APPROVED → branch merged → memory_writer creates episode → meta.json + board.json persisted → job status COMPLETE
 - DockerManager dev stub returns ContainerHandle(is_stub=True), exec returns ExecResult(is_stub=True)
 - DockerManager production with broken client raises DockerManagerError on construction
-- API lifespan starts worker in dev, opts out via AGENTFLOW_DISABLE_INPROC_WORKER=1
+- API lifespan starts worker in dev, opts out via GUUDFLOW_DISABLE_INPROC_WORKER=1
 
 ## Notes
 - The standalone `python -m worker.job_runner` entry point exists but currently has its own InMemoryJobQueue, which doesn't share work with the API process. Real cross-process coordination requires the Redis-backed queue (follow-on). For dev MVP the in-process worker in the API's lifespan is the supported path.

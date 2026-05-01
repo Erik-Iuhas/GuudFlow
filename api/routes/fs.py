@@ -1,6 +1,6 @@
 """/api/fs — server-side directory browser for "Local path" pickers.
 
-Read-only. Honours AGENTFLOW_LOCAL_PATH_ALLOWLIST when set; otherwise
+Read-only. Honours GUUDFLOW_LOCAL_PATH_ALLOWLIST when set; otherwise
 single-user dev posture (no restriction). Bearer-gated.
 """
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/fs", tags=["fs"])
 
 
 def _allowlist_permits(path: Path) -> bool:
-    raw = os.environ.get("AGENTFLOW_LOCAL_PATH_ALLOWLIST", "").strip()
+    raw = os.environ.get("GUUDFLOW_LOCAL_PATH_ALLOWLIST", "").strip()
     if not raw:
         return True
     resolved = path.resolve()
@@ -81,7 +81,7 @@ def list_directory(path: str = Query("")) -> dict:
         raise HTTPException(
             status_code=403,
             detail=(
-                f"path {p} is outside AGENTFLOW_LOCAL_PATH_ALLOWLIST"
+                f"path {p} is outside GUUDFLOW_LOCAL_PATH_ALLOWLIST"
             ),
         )
 

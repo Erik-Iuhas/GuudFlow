@@ -1,4 +1,4 @@
-# AgentFlow — Architecture Overview
+# GuudFlow — Architecture Overview
 
 > This is the **current-state** map of the system. It is meant to be read
 > first, before `DESIGN.md`. The design doc is still the canonical
@@ -12,7 +12,7 @@ the original design, see the [refactor log](#refactor-log) below.
 
 ---
 
-## How AgentFlow runs
+## How GuudFlow runs
 
 A run goes through six big phases. Each phase has at least one diagram.
 
@@ -41,7 +41,7 @@ All diagrams use Mermaid and render natively on GitHub.
 
 | # | Title | What it answers |
 |---|-------|-----------------|
-| 01 | [System Context](diagrams/01-system-context.md) | What is AgentFlow as a black box? Who talks to it? |
+| 01 | [System Context](diagrams/01-system-context.md) | What is GuudFlow as a black box? Who talks to it? |
 | 02 | [Component Architecture](diagrams/02-component-architecture.md) | What are the layers and the legal arrows between them? |
 | 03 | [Class — `core/`](diagrams/03-class-core.md) | The orchestration kernel. `Workspace`, `Scheduler`, `AgentRunner`, signals, protocol. |
 | 04 | [Class — `agents/`](diagrams/04-class-agents.md) | `BaseAgent`, archetypes, builtin agents, `Persona`. |

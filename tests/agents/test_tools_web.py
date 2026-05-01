@@ -17,9 +17,9 @@ async def test_web_search_no_handler_returns_no_handler_flag():
 async def test_web_search_with_handler():
     async def handler(query: str, limit: int) -> list[dict]:
         return [{"title": "result", "url": "https://x", "snippet": query}]
-    res = await WebSearch(handler=handler).run({"query": "agentflow", "limit": 3})
+    res = await WebSearch(handler=handler).run({"query": "guudflow", "limit": 3})
     assert res["ok"] is True
-    assert res["results"][0]["snippet"] == "agentflow"
+    assert res["results"][0]["snippet"] == "guudflow"
 
 
 async def test_web_search_missing_query():

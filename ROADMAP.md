@@ -1,4 +1,4 @@
-# AgentFlow Roadmap
+# GuudFlow Roadmap
 
 Sequenced next steps after the initial build. Each phase has a clear
 "what it unblocks" so you can prioritize based on what you want to do
@@ -24,7 +24,7 @@ file groups them into shippable phases.
 ## Phase B — Close the dev→prod gap ✅ DONE (2026-04-26)
 
 `core/runner.py:_instantiate_local_tools` now branches on
-`AGENTFLOW_MODE` + a threaded `DockerManager`: production mode wires
+`GUUDFLOW_MODE` + a threaded `DockerManager`: production mode wires
 `make_container_runner()` (new in `agents/tools/code.py`) which routes
 every `code-exec` call through `DockerManager.exec_in()`. Defence in
 depth: misconfigured production (no DockerManager) falls back to the
@@ -48,32 +48,32 @@ comments land mid-run. Quips stream live. The tech lead auto-fires on
 escalation. The architect runs as a final design check. Cost gates
 confirm before HEAVY-tier mid-run dispatch.
 
-- [x] **C.0** ([`095365f`](https://github.com/Erik-Iuhas/AgentFlow/commit/095365f))
+- [x] **C.0** ([`095365f`](https://github.com/Erik-Iuhas/GuudFlow/commit/095365f))
       Abstract bases (Reviewer / EscalationHandler / Specialist) +
       `agents/catalog.py` + `GET /api/agents/catalog`. Refactored
       CodeReviewer + TechLead onto the new bases; added
       RequirementsWriter as the proof-of-pattern Specialist.
-- [x] **C.0.5** ([`d7b09ca`](https://github.com/Erik-Iuhas/AgentFlow/commit/d7b09ca))
+- [x] **C.0.5** ([`d7b09ca`](https://github.com/Erik-Iuhas/GuudFlow/commit/d7b09ca))
       Approval gates + cost preview. New SignalTypes
       (APPROVAL_NEEDED/GRANTED/DENIED), Workspace.pending_approvals,
       runner._request_approval, ProjectConfig.approval_gates with
       opinionated baselines (pre-run cost preview ON, HEAVY-tier
       mid-run dispatch ON, iteration breach at 2). Studio cost-preview
       modal + ApprovalCard + Settings tab.
-- [x] **C.1** ([`e4ae1e3`](https://github.com/Erik-Iuhas/AgentFlow/commit/e4ae1e3))
+- [x] **C.1** ([`e4ae1e3`](https://github.com/Erik-Iuhas/GuudFlow/commit/e4ae1e3))
       `POST /api/runs/{id}/comment` posts USER_COMMENT live. Studio
       CommentBox wired with optimistic UX.
-- [x] **C.2** ([`19de77d`](https://github.com/Erik-Iuhas/AgentFlow/commit/19de77d))
+- [x] **C.2** ([`19de77d`](https://github.com/Erik-Iuhas/GuudFlow/commit/19de77d))
       `/ws/runs/{id}/quips` streams quips live (parallel to the board
       WS). QuipEngine grew subscribe/unsubscribe/_notify; JobRunner
       builds + registers a per-run engine when a quip_registry is set.
       Studio QuipFeed switched from synthesised to real subscription.
-- [x] **C.3** ([`84c8d93`](https://github.com/Erik-Iuhas/AgentFlow/commit/84c8d93))
+- [x] **C.3** ([`84c8d93`](https://github.com/Erik-Iuhas/GuudFlow/commit/84c8d93))
       tech_lead auto-spawn on REJECTED threshold + reviewer-text
       detection (REJECTED in artifact → REJECTED signal, no merge).
       C.0.5 gate threaded into _dispatch_escalation: granted → handler
       proceeds, denied → side-task returns cleanly.
-- [x] **C.4** ([`5943a1a`](https://github.com/Erik-Iuhas/AgentFlow/commit/5943a1a))
+- [x] **C.4** ([`5943a1a`](https://github.com/Erik-Iuhas/GuudFlow/commit/5943a1a))
       Final-stage architect review pattern. AgentConfig.is_final_reviewer
       auto-fills depends_on at runtime so the architect runs LAST. Same
       C.0.5 gate fires before the architect's HEAVY-tier loop. Architect
@@ -145,23 +145,23 @@ catalog and YAML archetype catalog, and the persona roster; then calls
 the LLM with a structured `propose_team` tool. Defensive fallback to
 the deterministic skeleton on any LLM failure so the route never 500s.
 
-- [x] **D.0** ([`b3fee5a`](https://github.com/Erik-Iuhas/AgentFlow/commit/b3fee5a))
+- [x] **D.0** ([`b3fee5a`](https://github.com/Erik-Iuhas/GuudFlow/commit/b3fee5a))
       Worker archetype YAML (`docs/worker-archetypes.yaml`, canonical) +
       markdown derivative + `core/archetype_doc.py` parser.
       `agents/catalog.list_all_archetypes()` unions runtime ∪ YAML.
       `dedupe_role_names` + `suggest_persona_id` (curated human first
       names, dedup across team).
-- [x] **D.1** ([`cbbfe68`](https://github.com/Erik-Iuhas/AgentFlow/commit/cbbfe68))
+- [x] **D.1** ([`cbbfe68`](https://github.com/Erik-Iuhas/GuudFlow/commit/cbbfe68))
       `core/meta_proposal.py` (input reading + prompt rendering +
       tool-use schema + parser); `agents/builtin/meta.MetaAgent.propose`
       with greenfield + continuation paths and skeleton fallback.
-- [x] **D.2** ([`9c92388`](https://github.com/Erik-Iuhas/AgentFlow/commit/9c92388))
+- [x] **D.2** ([`9c92388`](https://github.com/Erik-Iuhas/GuudFlow/commit/9c92388))
       `/api/meta/propose` instantiates MetaAgent when `project_id`
       given (404 unknown project), back-compat skeleton otherwise.
-- [x] **D.3** ([`f33e713`](https://github.com/Erik-Iuhas/AgentFlow/commit/f33e713))
+- [x] **D.3** ([`f33e713`](https://github.com/Erik-Iuhas/GuudFlow/commit/f33e713))
       Continuation deltas (`compute_deltas`): keep / drop / add /
       swap_tier / replace_persona, per-role rationale.
-- [x] **D.4** ([`171dbe6`](https://github.com/Erik-Iuhas/AgentFlow/commit/171dbe6))
+- [x] **D.4** ([`171dbe6`](https://github.com/Erik-Iuhas/GuudFlow/commit/171dbe6))
       Studio rationale rendering with file-path highlighting + delta
       table + per-role persona-hire badges; continuation entry via
       `?project_id=&prior_run_id=` query string.
@@ -186,7 +186,7 @@ until you have somewhere to actually deploy.
 **Infrastructure (the original E scope):**
 
 - [ ] **Redis-backed `JobQueue`** — `worker/redis_queue.py` implementing
-      the `JobQueue` Protocol. Toggle via `AGENTFLOW_QUEUE_BACKEND=redis`.
+      the `JobQueue` Protocol. Toggle via `GUUDFLOW_QUEUE_BACKEND=redis`.
 - [ ] **`KubeJobManager`** — k8s-native equivalent of `DockerManager`
       that creates ephemeral Pods (with NetworkPolicy denyAll, read-only
       rootfs, resource limits, runAsNonRoot) instead of Docker
@@ -231,12 +231,12 @@ reputation persist) but `board.json` was only written at end-of-run,
 so a crashed run lost its signal trail. G-prime closed that gap and
 shipped the resume API surface so G's resume UI is pure frontend.
 
-- [x] **G-prime.0** ([`44c40b6`](https://github.com/Erik-Iuhas/AgentFlow/commit/44c40b6))
+- [x] **G-prime.0** ([`44c40b6`](https://github.com/Erik-Iuhas/GuudFlow/commit/44c40b6))
       Incremental board persistence — workspace persister hook +
       `board.jsonl` JSONL trail (atomic per-line append, O(1) per
       signal). End-of-run consolidated `board.json` unchanged for
       backward compat.
-- [x] **G-prime.1** ([`fef6f1a`](https://github.com/Erik-Iuhas/AgentFlow/commit/fef6f1a))
+- [x] **G-prime.1** ([`fef6f1a`](https://github.com/Erik-Iuhas/GuudFlow/commit/fef6f1a))
       State restoration loader — `core/run_loader.py:restore_workspace`
       reads `board.jsonl` (or `board.json` fallback) +
       `artifacts.json` + `meta.json` and reconstructs ws.board,
@@ -244,7 +244,7 @@ shipped the resume API surface so G's resume UI is pure frontend.
       ws.iteration, ws.artifacts. `Workspace.set_artifact` routes
       through a persister so completed agents' outputs survive
       a crash.
-- [x] **G-prime.2** ([`4818135`](https://github.com/Erik-Iuhas/AgentFlow/commit/4818135))
+- [x] **G-prime.2** ([`4818135`](https://github.com/Erik-Iuhas/GuudFlow/commit/4818135))
       `POST /api/runs/{id}/resume` — re-enqueues a Job with
       `payload.resume = True`. 404 unknown run, 400 already
       complete, 409 if a job for this run is queued/running.
@@ -388,13 +388,13 @@ them up when real users tell you which one matters.
       now surfaces the data that informs the decision.
 - [x] **F.3 Real `memory_writer` LLM synthesis** ✅ SHIPPED 2026-04-26
       (DESIGN §34) — three sub-chunks landed:
-      - F.3.1 ([`b0bfd23`](https://github.com/Erik-Iuhas/AgentFlow/commit/b0bfd23))
+      - F.3.1 ([`b0bfd23`](https://github.com/Erik-Iuhas/GuudFlow/commit/b0bfd23))
         LLM-driven pattern distillation from episode clusters; bounded
         per-run, defensive fallbacks, two structured tools.
-      - F.3.2 ([`761de9c`](https://github.com/Erik-Iuhas/AgentFlow/commit/761de9c))
+      - F.3.2 ([`761de9c`](https://github.com/Erik-Iuhas/GuudFlow/commit/761de9c))
         pattern→anti-pattern flip detection. Reordered reconciliation
         so flip wins over archive when LLM names an alternative.
-      - F.3.3 ([`dc5709a`](https://github.com/Erik-Iuhas/AgentFlow/commit/dc5709a))
+      - F.3.3 ([`dc5709a`](https://github.com/Erik-Iuhas/GuudFlow/commit/dc5709a))
         deterministic style drift on three observations
         (incremental_commits, iterates_on_feedback, tests_referenced).
         style.json now persists alongside patterns.json.
@@ -454,7 +454,7 @@ Scope:
       projects, markdown bundle for doc projects. The runner emits
       a typed envelope rather than "go read the working/ tree."
 - [ ] **API keys per consumer** with per-key rate limits and
-      per-key scopes. Today's single `AGENTFLOW_API_TOKEN` is fine
+      per-key scopes. Today's single `GUUDFLOW_API_TOKEN` is fine
       for one developer; not fine for "GitHub Action + internal
       tools + an SDK consumer all sharing the same key."
 - [ ] **Trusted-token gate bypass** — when an authenticated CI key
@@ -583,7 +583,7 @@ for the full framing.
 | ...let a project iterate across many runs with team continuity | **Phase K** (future, ~half day) |
 | ...grow persona authoring depth | Phase F.5 (future, 5 sub-areas) |
 | ...ship a deep-wiki / codebase-doc product | Phase J (future) |
-| ...wire AgentFlow into CI / webhooks / scheduled runs | Phase I (future, Mode B tack-on) |
+| ...wire GuudFlow into CI / webhooks / scheduled runs | Phase I (future, Mode B tack-on) |
 | ...deploy to production for an org | Phase E (infra + multi-tenant) |
 | ...demo a real interactive run | Already shipped (C + D + F + G) |
 

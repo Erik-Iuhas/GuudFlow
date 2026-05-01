@@ -15,7 +15,7 @@ top-level only) and `fs:read` (full content).
 
 These guards apply when `code-exec` runs on the host:
 
-  1. **Mode enforcement.** If `AGENTFLOW_MODE=production`, the host
+  1. **Mode enforcement.** If `GUUDFLOW_MODE=production`, the host
      runner refuses to run and returns an error directing the runner to
      use the container-routed runner. The default mode is `dev`.
   2. **Audit log.** Every call records timestamp, language, code preview,
@@ -310,7 +310,7 @@ class CodeExec(BaseTool):
     runaway loops. Exceeding the quota returns an error and does not
     invoke the runner.
 
-    Mode enforcement: if `AGENTFLOW_MODE=production` is set in the
+    Mode enforcement: if `GUUDFLOW_MODE=production` is set in the
     environment AND the runner is the dev host runner, calls fail with
     a clear error. Custom runners (e.g. the container runner from
     Stage 7) are unaffected — they should not be used in dev mode either,
@@ -357,7 +357,7 @@ class CodeExec(BaseTool):
             return {"error": "missing required argument: code"}
 
         # Mode enforcement (DESIGN §29 rule 61).
-        if self._is_dev_host_runner and os.environ.get("AGENTFLOW_MODE") == "production":
+        if self._is_dev_host_runner and os.environ.get("GUUDFLOW_MODE") == "production":
             return {
                 "error": (
                     "code-exec refuses to run on the host in production mode. "

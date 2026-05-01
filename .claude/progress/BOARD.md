@@ -1,4 +1,4 @@
-# AgentFlow Build Board
+# GuudFlow Build Board
 
 **Current stage:** ✅ Initial build + Phase A + D-prime + B + C + D + F + G-prime + G + K shipped.
 **Last updated:** 2026-04-26
@@ -48,7 +48,7 @@ button gives first-timers a known-good run on day one.
   there's a deploy target.
 
 - ✅ **D-prime** — shipped 2026-04-26
-- ✅ **B** — shipped 2026-04-26 ([`56f3523`](https://github.com/Erik-Iuhas/AgentFlow/commit/56f3523))
+- ✅ **B** — shipped 2026-04-26 ([`56f3523`](https://github.com/Erik-Iuhas/GuudFlow/commit/56f3523))
 - ✅ **C** — shipped 2026-04-26 (C.0 → C.0.5 → C.1 → C.2 → C.3 → C.4)
 - ✅ **D** — shipped 2026-04-26 (D.0 → D.1 → D.2 → D.3 → D.4 → D.5)
 - ✅ **F** — shipped 2026-04-26. F.3 (memory_writer LLM synthesis),

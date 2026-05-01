@@ -14,7 +14,7 @@ Goal: a user can attach a PDF, paste a git URL, or pick a prior run; the
 runner makes those visible to agents under `inputs/`. **All eight chunks
 shipped on `main`** — see commit hashes below.
 
-### Chunk 1 — Project input storage + upload route — [`2bcba3f`](https://github.com/Erik-Iuhas/AgentFlow/commit/2bcba3f)
+### Chunk 1 — Project input storage + upload route — [`2bcba3f`](https://github.com/Erik-Iuhas/GuudFlow/commit/2bcba3f)
 - [x] `ProjectStore.project_dir/inputs_dir/uploads_dir` helpers; `create()`
       materialises uploads dir, `delete()` removes the project tree
 - [x] `POST /api/projects/{id}/inputs/upload` (multipart, multi-file, streamed)
@@ -22,24 +22,24 @@ shipped on `main`** — see commit hashes below.
 - [x] `DELETE /api/projects/{id}/inputs/uploads/{filename}`
 - [x] 16 tests; path-traversal hardening; auth on writes
 
-### Chunk 2 — Source-repo ingestion (git URL + local path) + secret scan — [`0206868`](https://github.com/Erik-Iuhas/AgentFlow/commit/0206868)
+### Chunk 2 — Source-repo ingestion (git URL + local path) + secret scan — [`0206868`](https://github.com/Erik-Iuhas/GuudFlow/commit/0206868)
 - [x] `POST /api/projects/{id}/inputs/git` — clone via mockable
       `core/source_repo.clone_git_repo`
 - [x] `POST /api/projects/{id}/inputs/local_path` with
-      `AGENTFLOW_LOCAL_PATH_ALLOWLIST` gate
+      `GUUDFLOW_LOCAL_PATH_ALLOWLIST` gate
 - [x] `core/secret_scan.py` — `.env`, key extensions, SSH key names,
       private-key blocks, AWS access keys; skips `.git/`
 - [x] 409 on findings; `force=true` strips + warns
 - [x] 43 new tests; `inputs/source_repo.meta.json` sidecar surfaces in `GET`
 
-### Chunk 3 — Continuation route — [`967d416`](https://github.com/Erik-Iuhas/AgentFlow/commit/967d416)
+### Chunk 3 — Continuation route — [`967d416`](https://github.com/Erik-Iuhas/GuudFlow/commit/967d416)
 - [x] `POST /api/projects/{id}/inputs/from_run/{run_id}` — copies prior run's
       `deliverables/`, optional `feedback` body lands as `feedback.md`
 - [x] `DELETE /api/projects/{id}/inputs/from_run/{run_id}`
 - [x] `iter_from_runs()` helper populates `prior_runs` array on `GET /inputs`
 - [x] 11 new tests
 
-### Chunk 4 — Run initializer — [`39defa4`](https://github.com/Erik-Iuhas/AgentFlow/commit/39defa4)
+### Chunk 4 — Run initializer — [`39defa4`](https://github.com/Erik-Iuhas/GuudFlow/commit/39defa4)
 - [x] `core/run_initializer.py`:
   - `seed_run(project_dir, run_root)` — copies project inputs to run inputs
   - `generate_inputs_readme(inputs_dir)` — DESIGN §33 README index
@@ -48,14 +48,14 @@ shipped on `main`** — see commit hashes below.
   - `bundle_prior_history(prior_run_working_dir, bundle_path)`
 - [x] 18 new tests
 
-### Chunk 5 — Wire initializer into the worker — [`7991343`](https://github.com/Erik-Iuhas/AgentFlow/commit/7991343)
+### Chunk 5 — Wire initializer into the worker — [`7991343`](https://github.com/Erik-Iuhas/GuudFlow/commit/7991343)
 - [x] `JobRunner._initialize_run()` orchestrates seed_run →
       seed_working_from_source → bundle_prior_history per attached run →
       generate_inputs_readme; runs after `run_root.mkdir`, before runner
 - [x] Init failures fail the job cleanly with a descriptive error
 - [x] 6 new tests; e2e covered
 
-### Chunk 6 — Studio Inputs tab — [`1afae0e`](https://github.com/Erik-Iuhas/AgentFlow/commit/1afae0e)
+### Chunk 6 — Studio Inputs tab — [`1afae0e`](https://github.com/Erik-Iuhas/GuudFlow/commit/1afae0e)
 - [x] `inputsApi` in `studio/src/api.ts` (list, upload, delete, importGit,
       importLocalPath, attachPriorRun, detachPriorRun)
 - [x] Tab system in `Studio.tsx`: Team / Inputs
@@ -65,13 +65,13 @@ shipped on `main`** — see commit hashes below.
 - [x] `PriorRunPicker` — pulls runs for project, optional feedback textarea
 - [x] CSS for tabs, dropzone, warn block, source tags, danger button
 
-### Chunk 7 — Create blank project escape hatch — [`b80ff06`](https://github.com/Erik-Iuhas/AgentFlow/commit/b80ff06)
+### Chunk 7 — Create blank project escape hatch — [`b80ff06`](https://github.com/Erik-Iuhas/GuudFlow/commit/b80ff06)
 - [x] Projects view dropdown next to "+ New project": "Propose with goal"
       vs "Create blank project"
 - [x] Blank flow modal asks for project_id (required) + goal (optional),
       creates with empty agents array, routes to Studio
 
-### Chunk 8 — Continue from run entry point — [`5627e6d`](https://github.com/Erik-Iuhas/AgentFlow/commit/5627e6d)
+### Chunk 8 — Continue from run entry point — [`5627e6d`](https://github.com/Erik-Iuhas/GuudFlow/commit/5627e6d)
 - [x] Run.tsx shows "Continue from this run" only when run is terminal
       (complete / max_iterations / stuck / deadline_exceeded / errored / failed)
 - [x] Click → modal with feedback textarea

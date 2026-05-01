@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AgentFlow local setup — Linux / macOS / WSL.
+# GuudFlow local setup — Linux / macOS / WSL.
 #
 # Creates a Python venv, installs deps, installs playwright chromium,
 # copies .env.example → .env if not present, and prints next steps.
@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${ROOT}"
 
-echo "AgentFlow setup"
+echo "GuudFlow setup"
 echo "==============="
 echo "Repo: ${ROOT}"
 echo
@@ -41,15 +41,15 @@ pip install --quiet --upgrade pip
 pip install --quiet -r requirements.txt
 
 # Optional embeddings (heavy — pulls PyTorch). Off by default; opt in with
-# AGENTFLOW_WITH_EMBEDDINGS=1.
-if [ "${AGENTFLOW_WITH_EMBEDDINGS:-0}" = "1" ]; then
+# GUUDFLOW_WITH_EMBEDDINGS=1.
+if [ "${GUUDFLOW_WITH_EMBEDDINGS:-0}" = "1" ]; then
     echo "Installing optional embedding dependencies (this is heavy)..."
     pip install --quiet -r requirements-optional.txt
 fi
 
 # 4. Playwright browsers (skippable)
-if [ "${AGENTFLOW_SKIP_PLAYWRIGHT:-0}" != "1" ]; then
-    echo "Installing Playwright chromium (set AGENTFLOW_SKIP_PLAYWRIGHT=1 to skip)..."
+if [ "${GUUDFLOW_SKIP_PLAYWRIGHT:-0}" != "1" ]; then
+    echo "Installing Playwright chromium (set GUUDFLOW_SKIP_PLAYWRIGHT=1 to skip)..."
     python -m playwright install chromium || {
         echo "WARN: playwright install failed — you can re-run later if you need visual_checker"
     }
@@ -57,7 +57,7 @@ fi
 
 # 5. Studio (optional)
 if command -v npm >/dev/null 2>&1; then
-    if [ "${AGENTFLOW_SKIP_NPM:-0}" != "1" ]; then
+    if [ "${GUUDFLOW_SKIP_NPM:-0}" != "1" ]; then
         echo "Installing studio dependencies..."
         (cd studio && npm install --silent --no-audit --no-fund)
     fi
@@ -75,8 +75,8 @@ if [ ! -f ".env" ]; then
     else
         cat > .env <<'EOF'
 ANTHROPIC_API_KEY=
-AGENTFLOW_API_TOKEN=
-AGENTFLOW_MODE=dev
+GUUDFLOW_API_TOKEN=
+GUUDFLOW_MODE=dev
 EOF
         echo "Created .env (no .env.example found)"
     fi
@@ -86,7 +86,7 @@ fi
 
 # 7. Seed default personas on first install (idempotent — won't
 # overwrite existing personas; safe to skip on re-run).
-if [ "${FRESH_INSTALL}" = "1" ] || [ "${AGENTFLOW_FORCE_SEED:-0}" = "1" ]; then
+if [ "${FRESH_INSTALL}" = "1" ] || [ "${GUUDFLOW_FORCE_SEED:-0}" = "1" ]; then
     echo "Seeding default personas..."
     python scripts/seed_data.py || echo "WARN: seed_data.py failed — you can re-run manually"
 fi

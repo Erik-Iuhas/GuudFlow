@@ -78,7 +78,7 @@ DESIGN sections: §3.4, §18, §20, §26, §30, §31, §32, §34, §36.
 - `math:eval(expression)` — AST-allowlist arithmetic, no names/calls/attrs
 
 ### Round 3: Dev-mode `code:exec` hardening (DESIGN §29 extension)
-- Mode enforcement (AGENTFLOW_MODE=production refuses host runner)
+- Mode enforcement (GUUDFLOW_MODE=production refuses host runner)
 - Per-run quota (default 50 calls per CodeExec instance)
 - Audit log to disk (timestamp / lang / code preview / exit / duration / error)
 - Env scrubbing (curated allowlist + secret-name double-check)

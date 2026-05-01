@@ -28,7 +28,7 @@ from git import GitCommandError, Repo
 
 _logger = logging.getLogger(__name__)
 
-_AUTHOR = git.Actor("agentflow", "bot@agentflow.local")
+_AUTHOR = git.Actor("guudflow", "bot@guudflow.local")
 
 
 def _force_rw(func, path, _exc_info):

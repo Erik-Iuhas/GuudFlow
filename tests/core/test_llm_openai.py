@@ -290,10 +290,10 @@ async def test_complete_extra_headers_passed_through():
     client = OpenAIClient(
         base_url="http://x/v1", api_key="k",
         http_client=transport,
-        extra_headers={"http-referer": "https://agentflow.dev"},
+        extra_headers={"http-referer": "https://guudflow.dev"},
     )
     await client.complete(system="s", messages=[LLMMessage(role="user", content="x")])
-    assert captured["headers"]["http-referer"] == "https://agentflow.dev"
+    assert captured["headers"]["http-referer"] == "https://guudflow.dev"
 
 
 async def test_complete_round_trips_tool_use():
@@ -371,8 +371,8 @@ def test_ollama_factory_custom_url():
 def test_openai_compatible_factory():
     client = openai_compatible(
         "http://localhost:1234/v1", "lm-studio",
-        extra_headers={"X-Source": "agentflow"},
+        extra_headers={"X-Source": "guudflow"},
     )
     assert client._base_url == "http://localhost:1234/v1"
     assert client._api_key == "lm-studio"
-    assert client._extra_headers == {"X-Source": "agentflow"}
+    assert client._extra_headers == {"X-Source": "guudflow"}

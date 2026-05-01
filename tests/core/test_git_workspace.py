@@ -259,7 +259,7 @@ def test_tag_duplicate_returns_false(gw: GitWorkspace):
 
 
 def test_per_agent_author_name_on_commit(tmp_path: Path):
-    """Commits carry the persona name, not the shared 'agentflow' author."""
+    """Commits carry the persona name, not the shared 'guudflow' author."""
     g = GitWorkspace(
         tmp_path / "working",
         hired_personas={"developer": "Sarah", "reviewer": "Mike"},
@@ -276,8 +276,8 @@ def test_per_agent_author_name_on_commit(tmp_path: Path):
     assert "Sarah" in dev_branch.commit.author.name
     assert "Mike" in rev_branch.commit.author.name
     # Emails are role-based, not shared
-    assert dev_branch.commit.author.email == "developer@agentflow.local"
-    assert rev_branch.commit.author.email == "reviewer@agentflow.local"
+    assert dev_branch.commit.author.email == "developer@guudflow.local"
+    assert rev_branch.commit.author.email == "reviewer@guudflow.local"
 
 
 def test_commits_different_agents_have_distinct_authors(tmp_path: Path):

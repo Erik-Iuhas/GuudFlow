@@ -126,7 +126,7 @@ read DESIGN.md to know what to do.
   + an `inputs/` README + a sample task. Available at first
   studio load via a "Try demo" button on the empty Projects view.
 - **Empty-state copy** — instead of "no projects yet," show
-  "Welcome to AgentFlow. Try the demo project, or describe a goal
+  "Welcome to GuudFlow. Try the demo project, or describe a goal
   to propose a team."
 - **Catalog status surface** — small panel on the empty-Roster
   state showing "X archetypes available; Y trained" using

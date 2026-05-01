@@ -156,7 +156,7 @@ async def test_job_runner_runs_one_job_to_completion(tmp_path: Path, monkeypatch
     """The smoking exit criterion: enqueue a job, run_one() drives it
     through queued → running → complete; meta.json + board.json land
     on disk."""
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
 
     # Project: developer writes a file, reviewer approves.
     project = {
@@ -282,7 +282,7 @@ async def test_job_runner_loader_exception_fails_job(tmp_path: Path):
 async def test_job_runner_registers_with_run_registry(tmp_path: Path, monkeypatch):
     """When a RunRegistry is provided, the worker registers the workspace
     while the run is active and unregisters at the end."""
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
     from api.websocket import RunRegistry
 
     project = {
@@ -319,7 +319,7 @@ async def test_job_runner_registers_with_run_registry(tmp_path: Path, monkeypatc
 async def test_run_forever_drains_then_stops(tmp_path: Path, monkeypatch):
     """The long loop processes a job and respects stop()."""
     import asyncio
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
 
     project = {
         "project_id": "p1", "goal": "x",
@@ -497,7 +497,7 @@ async def test_default_runner_factory_threads_docker_manager(tmp_path: Path):
 async def test_production_mode_wires_container_runner_for_code_exec(
     tmp_path: Path, monkeypatch
 ):
-    """Phase B integration: with AGENTFLOW_MODE=production and a
+    """Phase B integration: with GUUDFLOW_MODE=production and a
     docker_manager threaded into AgentRunner, the runner's instantiated
     code:exec tool routes through DockerManager.exec_in. Tests the seam
     that connects JobRunner → AgentRunner._instantiate_local_tools →
@@ -506,7 +506,7 @@ async def test_production_mode_wires_container_runner_for_code_exec(
     Goes via the runner's tool-instantiation path directly rather than
     the full agent-loop e2e, to keep the assertion focused on the
     routing seam itself."""
-    monkeypatch.setenv("AGENTFLOW_MODE", "production")
+    monkeypatch.setenv("GUUDFLOW_MODE", "production")
 
     project = serialise_project({
         "project_id": "p_prod",
@@ -564,9 +564,9 @@ async def test_production_mode_wires_container_runner_for_code_exec(
 async def test_dev_mode_keeps_host_runner_even_with_docker_manager(
     tmp_path: Path, monkeypatch
 ):
-    """Inverse seam: AGENTFLOW_MODE=dev keeps the hardened host runner
+    """Inverse seam: GUUDFLOW_MODE=dev keeps the hardened host runner
     even when a docker_manager is available. exec_in is never reached."""
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
 
     project = serialise_project({
         "project_id": "p_dev",
@@ -614,7 +614,7 @@ async def test_production_without_docker_manager_falls_back_to_host(
     docker_manager (misconfiguration), it falls back to the host runner —
     which itself refuses to run via CodeExec.run()'s mode check
     (DESIGN §29 rule 61). Defence in depth: wrong wiring fails closed."""
-    monkeypatch.setenv("AGENTFLOW_MODE", "production")
+    monkeypatch.setenv("GUUDFLOW_MODE", "production")
 
     project = serialise_project({
         "project_id": "p_misconfig",
@@ -651,7 +651,7 @@ async def test_run_one_initializes_inputs_for_real_run(tmp_path: Path, monkeypat
     """End-to-end: a project with uploads + source_repo runs through the
     worker; the run's workspace shows the seeded inputs and a working/
     with the source_repo content + a fresh git history."""
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
     _stage_project_inputs(tmp_path, "p_seeded")
 
     project = {

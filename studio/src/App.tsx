@@ -37,7 +37,7 @@ function AppShell({
   return (
     <div className="shell">
       <header className="topbar">
-        <Link to="/" className="brand">AgentFlow</Link>
+        <Link to="/" className="brand">GuudFlow</Link>
         <nav className="nav">
           <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
             Dashboard

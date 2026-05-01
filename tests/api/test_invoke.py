@@ -127,6 +127,6 @@ async def test_mcp_manifest_lists_projects(client, auth_header):
     assert body["version"] == 1
     assert len(body["tools"]) == 1
     tool = body["tools"][0]
-    assert tool["name"] == "agentflow:p1"
+    assert tool["name"] == "guudflow:p1"
     assert "build a thing" in tool["description"]
     assert tool["input_schema"]["type"] == "object"

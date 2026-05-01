@@ -714,7 +714,7 @@ async def _amain() -> None:
     from api.storage import ProjectStore
     from worker.queue import InMemoryJobQueue
 
-    data_root = Path(os.environ.get("AGENTFLOW_DATA_DIR", "./data")).resolve()
+    data_root = Path(os.environ.get("GUUDFLOW_DATA_DIR", "./data")).resolve()
     queue = InMemoryJobQueue()
     store = ProjectStore(data_root)
 

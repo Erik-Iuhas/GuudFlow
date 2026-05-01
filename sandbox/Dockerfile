@@ -1,4 +1,4 @@
-# AgentFlow sandbox — DESIGN §29.
+# GuudFlow sandbox — DESIGN §29.
 #
 # This is the per-run ephemeral container that worker/docker_manager.py
 # spins up at run start and tears down at run end. The runner mounts the

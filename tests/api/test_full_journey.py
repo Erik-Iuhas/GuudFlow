@@ -152,7 +152,7 @@ async def test_full_user_journey(
     assert r.status_code == 200, r.text
 
     # ── 4. User invokes a run ──────────────────────────────────────────
-    monkeypatch.setenv("AGENTFLOW_MODE", "dev")
+    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
     # Phase C.0.5: pre_run_cost_preview is on by default — pass
     # confirm=true to skip the cost-preview leg in this e2e test.
     r = await client.post(

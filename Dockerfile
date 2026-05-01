@@ -1,4 +1,4 @@
-# AgentFlow host image (API + in-process worker).
+# GuudFlow host image (API + in-process worker).
 #
 # Multi-stage build:
 #   Stage 1: build the studio bundle with Node
@@ -60,14 +60,14 @@ COPY . .
 COPY --from=studio-build /studio/dist /app/studio/dist
 
 # Default config — override in docker-compose.yml or `docker run -e ...`.
-ENV AGENTFLOW_DATA_DIR=/app/data \
-    AGENTFLOW_MODE=dev \
-    AGENTFLOW_STUDIO_DIST=/app/studio/dist \
-    AGENTFLOW_CORS_ORIGINS=*
+ENV GUUDFLOW_DATA_DIR=/app/data \
+    GUUDFLOW_MODE=dev \
+    GUUDFLOW_STUDIO_DIST=/app/studio/dist \
+    GUUDFLOW_CORS_ORIGINS=*
 
 EXPOSE 8000
 
 # In-process worker is enabled by default. To run the worker as a separate
-# process, set AGENTFLOW_DISABLE_INPROC_WORKER=1 on this container and run a
+# process, set GUUDFLOW_DISABLE_INPROC_WORKER=1 on this container and run a
 # second container with command: ["python", "-m", "worker.job_runner"].
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]

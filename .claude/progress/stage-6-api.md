@@ -12,7 +12,7 @@ DESIGN sections: §7, §10, §16, §29 (auth), §35 (smaller-model story drove O
 - [x] `worker/queue.py` ✅ — `Job`, `JobQueue` Protocol, `InMemoryJobQueue` (asyncio.Queue + lock), status lifecycle (queued→running→complete/failed) with timestamps and error capture
 
 ### API
-- [x] `api/auth.py` ✅ — `require_bearer` dependency. Reads `AGENTFLOW_API_TOKEN`; permissive in dev when unset; refused in production mode. Uses `Depends(_bearer_scheme)` (CRITICAL — without `Depends` FastAPI mis-parses the dep function as a route signature, broke every protected POST until fixed)
+- [x] `api/auth.py` ✅ — `require_bearer` dependency. Reads `GUUDFLOW_API_TOKEN`; permissive in dev when unset; refused in production mode. Uses `Depends(_bearer_scheme)` (CRITICAL — without `Depends` FastAPI mis-parses the dep function as a route signature, broke every protected POST until fixed)
 - [x] `api/storage.py` ✅ — `ProjectStore` (atomic JSON via tempfile/shutil.move), `RunStore` (reads run dirs), `PersonaStore` (reads persona dirs, summarises with episode count + reputation)
 - [x] `api/main.py` ✅ — FastAPI app + lifespan + CORS + `/health`
 - [x] `api/websocket.py` ✅ — `RunRegistry` (active runs by id), `/ws/runs/{run_id}` endpoint that races queue.get() against websocket.receive() so disconnect breaks the loop. Falls back to disk snapshot for finished runs

@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 
 // Dev server proxies /api and /ws to the FastAPI backend so we can run
 // `npm run dev` and `uvicorn api.main:app` side by side without CORS pain.
-const API_TARGET = process.env.AGENTFLOW_API_URL || "http://localhost:8000";
+const API_TARGET = process.env.GUUDFLOW_API_URL || "http://localhost:8000";
 
 export default defineConfig({
   plugins: [react()],

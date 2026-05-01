@@ -26,9 +26,9 @@ def data_root(tmp_path: Path) -> Path:
 @pytest.fixture
 def app(data_root: Path, monkeypatch):
     """Build a fresh app with state pointed at a temp data root."""
-    monkeypatch.setenv("AGENTFLOW_DATA_DIR", str(data_root))
-    monkeypatch.setenv("AGENTFLOW_API_TOKEN", "test-token")
-    monkeypatch.delenv("AGENTFLOW_MODE", raising=False)
+    monkeypatch.setenv("GUUDFLOW_DATA_DIR", str(data_root))
+    monkeypatch.setenv("GUUDFLOW_API_TOKEN", "test-token")
+    monkeypatch.delenv("GUUDFLOW_MODE", raising=False)
 
     a = create_app()
     # Manually wire state since lifespan only fires under uvicorn/TestClient.

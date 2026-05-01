@@ -47,11 +47,11 @@ flowchart LR
 
 Key points:
 
-- `AGENTFLOW_MODE=dev` (default) — `code-exec` runs on the host with
+- `GUUDFLOW_MODE=dev` (default) — `code-exec` runs on the host with
   hardening (audit log, env scrub, cwd pin, POSIX rlimits, mode
   enforcement). Logs a warning every invocation per CLAUDE.md.
 - Worker runs **in-process** so a single `uvicorn` command boots the
-  whole backend. Set `AGENTFLOW_DISABLE_INPROC_WORKER=1` to split.
+  whole backend. Set `GUUDFLOW_DISABLE_INPROC_WORKER=1` to split.
 
 ## 10b · Docker compose (host + per-run sandbox)
 

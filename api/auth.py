@@ -1,9 +1,9 @@
 """Bearer token auth for API routes.
 
-DESIGN §29 rule 63 + §10 invoke spec. A single shared `AGENTFLOW_API_TOKEN`
+DESIGN §29 rule 63 + §10 invoke spec. A single shared `GUUDFLOW_API_TOKEN`
 gates all credentialed routes (invoke, project mutations, etc.). Read-only
 routes (list runs, list personas) can be auth-optional in dev mode but
-require the token in production (`AGENTFLOW_MODE=production`).
+require the token in production (`GUUDFLOW_MODE=production`).
 
 Stage 6 ships single-token auth. Per-user accounts are explicitly out of
 scope (CLAUDE.md "Don't build yet": Auth / user accounts).
@@ -23,11 +23,11 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 def _expected_token() -> str | None:
     """The shared bearer token. Empty/unset means auth is OPEN in dev mode
     and ALWAYS required in production."""
-    return os.environ.get("AGENTFLOW_API_TOKEN") or None
+    return os.environ.get("GUUDFLOW_API_TOKEN") or None
 
 
 def _is_production() -> bool:
-    return os.environ.get("AGENTFLOW_MODE") == "production"
+    return os.environ.get("GUUDFLOW_MODE") == "production"
 
 
 async def require_bearer(
@@ -36,9 +36,9 @@ async def require_bearer(
     """FastAPI dependency. Use on routes that mutate state or invoke runs.
 
     Behaviour:
-      - If `AGENTFLOW_API_TOKEN` is set, the request must present a
+      - If `GUUDFLOW_API_TOKEN` is set, the request must present a
         matching bearer token.
-      - If unset and `AGENTFLOW_MODE=production`, requests are refused
+      - If unset and `GUUDFLOW_MODE=production`, requests are refused
         outright (no token configured = nothing valid to send).
       - If unset and dev mode, requests pass through.
     """
@@ -47,7 +47,7 @@ async def require_bearer(
         if _is_production():
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="AGENTFLOW_API_TOKEN is unset in production mode",
+                detail="GUUDFLOW_API_TOKEN is unset in production mode",
             )
         # Dev permissive
         return

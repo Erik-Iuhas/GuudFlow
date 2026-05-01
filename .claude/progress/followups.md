@@ -8,27 +8,27 @@ new contributors, scaling).
 
 ### Tier 1 — Onboarding docs ✅ DONE (2026-04-25, Phase A)
 - [x] `README.md` at repo root — quickstart, configuration table, link to DESIGN.md
-- [x] `scripts/setup.sh` + `scripts/setup.ps1` — one-command env + deps + playwright + studio install + .env scaffold; `AGENTFLOW_WITH_EMBEDDINGS=1` opts into the heavy embeddings deps
+- [x] `scripts/setup.sh` + `scripts/setup.ps1` — one-command env + deps + playwright + studio install + .env scaffold; `GUUDFLOW_WITH_EMBEDDINGS=1` opts into the heavy embeddings deps
 - [x] `requirements-optional.txt` — embeddings (PyTorch + sentence-transformers) split out so default install stays light (~60s)
 
 ### Tier 2 — Local Docker ✅ DONE (2026-04-25, Phase A)
 - [x] `Dockerfile` — multi-stage (build studio bundle → Python runtime); `--build-arg WITH_EMBEDDINGS=0/1`; `docker-cli` (NOT `docker.io`) for talking to the host's mounted socket
 - [x] `.dockerignore`
 - [x] `docker-compose.yml` — host stack with `/var/run/docker.sock` mount for sibling-container sandbox spawning; persistent `./data` volume
-- [x] `api/main.py` serves studio bundle at `/` when `AGENTFLOW_STUDIO_DIST` is set
+- [x] `api/main.py` serves studio bundle at `/` when `GUUDFLOW_STUDIO_DIST` is set
 
 ### Tier 3 — Production k8s (substantial; do when there's a real deploy target)
 Now lives in **ROADMAP Phase E.**
 - [ ] `worker/redis_queue.py` — Redis-backed `JobQueue` impl
-- [ ] `AGENTFLOW_QUEUE_BACKEND=redis` env flag flips it on
+- [ ] `GUUDFLOW_QUEUE_BACKEND=redis` env flag flips it on
 - [ ] `KubeJobManager` — k8s-native equivalent of `DockerManager` (spawns ephemeral Pods with NetworkPolicy denyAll, securityContext, resource limits) since the docker-socket sibling-container pattern doesn't translate cleanly to multi-node clusters
-- [ ] Separate API + worker deployments (set `AGENTFLOW_DISABLE_INPROC_WORKER=1` on API pods)
+- [ ] Separate API + worker deployments (set `GUUDFLOW_DISABLE_INPROC_WORKER=1` on API pods)
 - [ ] `deploy/helm/` Helm chart with Service, Deployments, optional Redis dep, persistent volume
 - [ ] Update README with k8s deploy walkthrough
 
 ## Stage 7 follow-ons
 
-- [ ] **`code:exec` → container routing** (now ROADMAP Phase B) — when `AGENTFLOW_MODE=production`, the runner should swap the dev host runner for a container-routed runner that calls `DockerManager.exec_in()`. ~30 lines in `agents/tools/code.py` + `core/runner.py`.
+- [ ] **`code:exec` → container routing** (now ROADMAP Phase B) — when `GUUDFLOW_MODE=production`, the runner should swap the dev host runner for a container-routed runner that calls `DockerManager.exec_in()`. ~30 lines in `agents/tools/code.py` + `core/runner.py`.
 - [ ] **Standalone worker shared-queue** — `python -m worker.job_runner` currently has its own InMemoryJobQueue, doesn't share with the API process. Tier 3 Redis queue resolves this.
 
 ## Stage 5 follow-ons (from earlier sessions)

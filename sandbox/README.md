@@ -2,7 +2,7 @@
 
 The minimal image used as the per-run execution sandbox in production.
 
-`worker/docker_manager.py` calls `containers.run(image="agentflow-sandbox:latest", ...)`
+`worker/docker_manager.py` calls `containers.run(image="guudflow-sandbox:latest", ...)`
 at run start. Each run gets its own ephemeral container with the workspace
 mounted, the persona roster read-only, and §29's resource caps applied.
 
@@ -26,7 +26,7 @@ mounts (`/workspace/.venv` or `/tmp`).
 - Node / Java / Ruby / Go — out of scope for the initial build; if a
   project needs them, build a project-specific sandbox image and point
   `worker/docker_manager.DEFAULT_IMAGE` at it
-- The AgentFlow application code — the runner runs on the host
+- The GuudFlow application code — the runner runs on the host
 
 ## Runtime constraints (set by docker_manager, NOT by this Dockerfile)
 
@@ -52,7 +52,7 @@ Mounts:
 ## Build
 
 ```bash
-docker build -t agentflow-sandbox:latest sandbox/
+docker build -t guudflow-sandbox:latest sandbox/
 ```
 
 The build context is just this directory (see `.dockerignore`). The build
@@ -61,8 +61,8 @@ should take < 60s on a warm cache.
 ## Smoke test
 
 ```bash
-docker run --rm agentflow-sandbox:latest python -c "print('hi')"
-docker run --rm agentflow-sandbox:latest bash -lc "echo hi"
+docker run --rm guudflow-sandbox:latest python -c "print('hi')"
+docker run --rm guudflow-sandbox:latest bash -lc "echo hi"
 ```
 
 Both should print `hi`.
@@ -83,6 +83,6 @@ runtime venv is the right pattern.
 - The image must exist on the host where the worker runs
 - For k8s / multi-node deploys, push to a registry and update
   `DEFAULT_IMAGE` in `worker/docker_manager.py` (or set it via env)
-- Pinning to a SHA digest (e.g. `agentflow-sandbox@sha256:...`) is
+- Pinning to a SHA digest (e.g. `guudflow-sandbox@sha256:...`) is
   recommended in production so a tag drift doesn't silently change
   the runtime

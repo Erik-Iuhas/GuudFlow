@@ -105,9 +105,9 @@ async def mcp_manifest(request: Request) -> dict:
     tools = []
     for p in projects:
         tools.append({
-            "name": f"agentflow:{p.get('project_id', 'unknown')}",
+            "name": f"guudflow:{p.get('project_id', 'unknown')}",
             "description": (
-                f"Trigger an AgentFlow run of project '{p.get('project_id')}': "
+                f"Trigger an GuudFlow run of project '{p.get('project_id')}': "
                 f"{p.get('goal', '')}"
             ),
             "input_schema": {

@@ -14,7 +14,7 @@ import type {
   SourceRepoMeta,
 } from "./types";
 
-const TOKEN_KEY = "agentflow.token";
+const TOKEN_KEY = "guudflow.token";
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);

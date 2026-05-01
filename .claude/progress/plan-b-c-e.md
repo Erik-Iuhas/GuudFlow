@@ -8,13 +8,13 @@ real deploy target).
 
 | Chunk | Status | Commit |
 |---|---|---|
-| Phase B (production code:exec routing) | ✅ shipped | [`56f3523`](https://github.com/Erik-Iuhas/AgentFlow/commit/56f3523) |
-| C.0 (abstract bases + catalog) | ✅ shipped | [`095365f`](https://github.com/Erik-Iuhas/AgentFlow/commit/095365f) |
-| C.0.5 (approval gates + cost preview) | ✅ shipped | [`d7b09ca`](https://github.com/Erik-Iuhas/AgentFlow/commit/d7b09ca) |
-| C.1 (USER_COMMENT POST) | ✅ shipped | [`e4ae1e3`](https://github.com/Erik-Iuhas/AgentFlow/commit/e4ae1e3) |
-| C.2 (quip WebSocket stream) | ✅ shipped | [`19de77d`](https://github.com/Erik-Iuhas/AgentFlow/commit/19de77d) |
-| C.3 (tech_lead escalation + gate) | ✅ shipped | [`84c8d93`](https://github.com/Erik-Iuhas/AgentFlow/commit/84c8d93) |
-| C.4 (architect final-stage review + gate) | ✅ shipped | [`5943a1a`](https://github.com/Erik-Iuhas/AgentFlow/commit/5943a1a) |
+| Phase B (production code:exec routing) | ✅ shipped | [`56f3523`](https://github.com/Erik-Iuhas/GuudFlow/commit/56f3523) |
+| C.0 (abstract bases + catalog) | ✅ shipped | [`095365f`](https://github.com/Erik-Iuhas/GuudFlow/commit/095365f) |
+| C.0.5 (approval gates + cost preview) | ✅ shipped | [`d7b09ca`](https://github.com/Erik-Iuhas/GuudFlow/commit/d7b09ca) |
+| C.1 (USER_COMMENT POST) | ✅ shipped | [`e4ae1e3`](https://github.com/Erik-Iuhas/GuudFlow/commit/e4ae1e3) |
+| C.2 (quip WebSocket stream) | ✅ shipped | [`19de77d`](https://github.com/Erik-Iuhas/GuudFlow/commit/19de77d) |
+| C.3 (tech_lead escalation + gate) | ✅ shipped | [`84c8d93`](https://github.com/Erik-Iuhas/GuudFlow/commit/84c8d93) |
+| C.4 (architect final-stage review + gate) | ✅ shipped | [`5943a1a`](https://github.com/Erik-Iuhas/GuudFlow/commit/5943a1a) |
 | Phase E | paused | — |
 
 **Suite at end of C:** 726 passed, 2 skipped. Studio typecheck + prod
@@ -69,7 +69,7 @@ Tasks:
       `AgentRunner.__init__` ([core/runner.py:119](core/runner.py:119)).
       Store on self.
 - [ ] In `_instantiate_local_tools`, branch on
-      `AGENTFLOW_MODE == "production"`:
+      `GUUDFLOW_MODE == "production"`:
       - production + docker_manager present → `make_container_runner(...)`,
         pass `is_dev_host_runner=False` to `CodeExec`.
       - otherwise → existing `make_dev_host_runner(...)` (with mode
@@ -85,10 +85,10 @@ Tasks:
       gains a small e2e: a project that calls `code:exec`, monkey-patch
       `DockerManager.exec_in` to a fake, verify it was hit.
 - [ ] Update README "Mode" / "Production" section to note that
-      `AGENTFLOW_MODE=production` now actually routes `code:exec` through
+      `GUUDFLOW_MODE=production` now actually routes `code:exec` through
       the sandbox.
 
-**Phase B exit:** `AGENTFLOW_MODE=production` actually sandboxes
+**Phase B exit:** `GUUDFLOW_MODE=production` actually sandboxes
 `code:exec`. The dev→prod gap noted in followups.md and ROADMAP §B
 closes.
 
@@ -201,8 +201,8 @@ no auth required (it's purely informational). Used by:
 
 Commit: `feat(agents): abstract bases (Reviewer/EscalationHandler/Specialist) + catalog (Phase C.0)`
 
-### Chunk 1 — Live `USER_COMMENT` POST endpoint — **SHIPPED [`e4ae1e3`](https://github.com/Erik-Iuhas/AgentFlow/commit/e4ae1e3)**
-### Chunk 2 — Real quip stream over WebSocket — **SHIPPED [`19de77d`](https://github.com/Erik-Iuhas/AgentFlow/commit/19de77d)**
+### Chunk 1 — Live `USER_COMMENT` POST endpoint — **SHIPPED [`e4ae1e3`](https://github.com/Erik-Iuhas/GuudFlow/commit/e4ae1e3)**
+### Chunk 2 — Real quip stream over WebSocket — **SHIPPED [`19de77d`](https://github.com/Erik-Iuhas/GuudFlow/commit/19de77d)**
 
 (Original positions in the chunk numbering kept for the commit
 references; C.0 lands as a prerequisite for C.3 + C.4.)
@@ -502,7 +502,7 @@ done. The team has both a *rescue* path (tech_lead) and a *gate* path
 
 ## Phase E — Production-grade deployment (~3 days, 5 chunks)
 
-Goal: ship a Helm chart and the production primitives so AgentFlow can
+Goal: ship a Helm chart and the production primitives so GuudFlow can
 run on a real k8s cluster — Redis-backed shared queue, separate API and
 worker deployments, k8s pods instead of docker containers for the
 sandbox.
@@ -519,14 +519,14 @@ Tasks:
 - [ ] Add `redis>=5.0.0` to `requirements-optional.txt` (lazy-loaded
       so default install stays light, same posture as embeddings).
 - [ ] `worker/redis_queue.py:RedisJobQueue` implements the Protocol:
-      - `LPUSH`/`BRPOP` on `agentflow:queue` for the FIFO queue.
-      - Hash `agentflow:jobs:{job_id}` stores serialised `Job`.
+      - `LPUSH`/`BRPOP` on `guudflow:queue` for the FIFO queue.
+      - Hash `guudflow:jobs:{job_id}` stores serialised `Job`.
       - `update_status` updates the hash and `PUBLISH`es to
-        `agentflow:status:{job_id}`.
+        `guudflow:status:{job_id}`.
       - JSON serialisation for `Job` (dataclass → dict).
-- [ ] `api/main.py` reads `AGENTFLOW_QUEUE_BACKEND` (default
+- [ ] `api/main.py` reads `GUUDFLOW_QUEUE_BACKEND` (default
       `in_memory`); when set to `redis`, builds `RedisJobQueue` from
-      `AGENTFLOW_REDIS_URL`. Same instance is what worker drains.
+      `GUUDFLOW_REDIS_URL`. Same instance is what worker drains.
 - [ ] Tests using `fakeredis` (add to `requirements-optional`):
       - Round-trip enqueue → dequeue → status updates.
       - Multi-consumer: two workers, only one gets each job.
@@ -542,11 +542,11 @@ What's there today:
 - [worker/job_runner.py:285](worker/job_runner.py:285) `_amain` already
   exists as a CLI entry but constructs its own InMemoryJobQueue —
   doesn't share with the API.
-- `AGENTFLOW_DISABLE_INPROC_WORKER=1` already wires through
+- `GUUDFLOW_DISABLE_INPROC_WORKER=1` already wires through
   [api/main.py:57](api/main.py:57).
 
 Tasks:
-- [ ] `_amain` reads `AGENTFLOW_QUEUE_BACKEND`/`AGENTFLOW_REDIS_URL`
+- [ ] `_amain` reads `GUUDFLOW_QUEUE_BACKEND`/`GUUDFLOW_REDIS_URL`
       and constructs the matching backend. With the redis backend, API
       and worker share the queue across processes.
 - [ ] `python -m worker.job_runner` with redis env vars must drain a
@@ -588,7 +588,7 @@ Tasks:
       - NetworkPolicy `denyAll` applied at the namespace level
         (chart-managed, not per-pod).
 - [ ] Backend selection in [worker/job_runner.py](worker/job_runner.py)
-      via `AGENTFLOW_SANDBOX_BACKEND=docker|kubernetes` (default
+      via `GUUDFLOW_SANDBOX_BACKEND=docker|kubernetes` (default
       `docker` to match today's behaviour).
 - [ ] Tests using a mocked `kubernetes.client` API:
       - Pod created with the right spec.
@@ -602,13 +602,13 @@ Commit: `feat(worker): KubeJobManager for k8s sandbox pods (Phase E.3)`
 ### Chunk 4 — Helm chart (~3-4 hrs)
 
 Tasks:
-- [ ] `deploy/helm/agentflow/Chart.yaml` (apiVersion: v2; deps:
+- [ ] `deploy/helm/guudflow/Chart.yaml` (apiVersion: v2; deps:
       bitnami/redis as optional subchart with `enabled: true|false`).
 - [ ] `templates/api-deployment.yaml`:
-      - `AGENTFLOW_DISABLE_INPROC_WORKER=1`,
-        `AGENTFLOW_QUEUE_BACKEND=redis`,
-        `AGENTFLOW_MODE=production`,
-        `AGENTFLOW_SANDBOX_BACKEND=kubernetes`.
+      - `GUUDFLOW_DISABLE_INPROC_WORKER=1`,
+        `GUUDFLOW_QUEUE_BACKEND=redis`,
+        `GUUDFLOW_MODE=production`,
+        `GUUDFLOW_SANDBOX_BACKEND=kubernetes`.
       - Mounts `/data` PVC.
       - Service for the API (ClusterIP + optional Ingress).
 - [ ] `templates/worker-deployment.yaml`:
@@ -626,7 +626,7 @@ Tasks:
       ConfigMap pointing at an external Redis URL.
 - [ ] `values.yaml` covers: image refs, replica counts, anthropic key
       secret name, redis URL, namespace, PVC size, ingress host.
-- [ ] CI verification: `helm lint deploy/helm/agentflow` and
+- [ ] CI verification: `helm lint deploy/helm/guudflow` and
       `helm template ...` must succeed (add to CI or document the
       one-liner in README).
 
@@ -641,7 +641,7 @@ Tasks:
         [sandbox/Dockerfile](sandbox/Dockerfile)).
       - Provision a cluster with RWX storage (note that hostPath/EBS
         won't work for multi-node; document NFS / EFS / Filestore).
-      - `helm install agentflow deploy/helm/agentflow -f values.yaml`.
+      - `helm install guudflow deploy/helm/guudflow -f values.yaml`.
       - Smoke test: create project via Ingress → invoke run → check
         worker pod logs and sandbox pod created.
       - Common config values table.
@@ -653,7 +653,7 @@ Tasks:
 Commit: `docs: production k8s deployment walkthrough (Phase E.5)`
 
 **Phase E exit:** A reasonably-skilled k8s operator can `helm install`
-AgentFlow against a real cluster, and runs are sandboxed in ephemeral
+GuudFlow against a real cluster, and runs are sandboxed in ephemeral
 pods with locked-down NetworkPolicies. Multiple worker replicas drain
 the same Redis queue.
 
