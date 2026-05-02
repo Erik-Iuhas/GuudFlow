@@ -396,6 +396,13 @@ BASELINE_LOCAL_SCOPES: frozenset[str] = frozenset({
     # subtask can reach back into earlier closed work without
     # explicit RBAC plumbing.
     "recall-subtask",
+    # Track 9 — protocol-cleanup is baseline so the runner's
+    # PROTOCOL_PARSE_FAIL sidecar always has it available. Cost is
+    # bounded (cheap model, fires only on parse-fail) and the win
+    # is huge: 25K-token Sonnet retry → ~500-token Haiku dispatch.
+    # Agents can technically also call it manually, but the sidecar
+    # is the primary consumer.
+    "protocol-cleanup",
 })
 
 

@@ -252,12 +252,16 @@ async def test_use_case_drives_resolver():
 # ── Tool surface (RBAC / manifest) ─────────────────────────────────────────
 
 
-def test_tools_are_not_baseline_scopes():
-    """Sub-LLM tools spend tokens — must require explicit RBAC grant."""
+def test_baseline_scopes_for_sub_llm_tools():
+    """Most sub-LLM tools require explicit RBAC grant (token-spending,
+    agent-callable). Track 9 promoted `protocol-cleanup` to baseline so
+    the runner's parse-fail sidecar always has it available without
+    project config — the cost is gated by the parse-fail trigger."""
     from core.tool_manifest import BASELINE_LOCAL_SCOPES
     assert "llm-dispatch" not in BASELINE_LOCAL_SCOPES
     assert "summarise-subtask" not in BASELINE_LOCAL_SCOPES
-    assert "protocol-cleanup" not in BASELINE_LOCAL_SCOPES
+    # Track 9 — protocol-cleanup is baseline (sidecar consumer).
+    assert "protocol-cleanup" in BASELINE_LOCAL_SCOPES
 
 
 def test_tools_registered_in_local_tool_classes():

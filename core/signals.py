@@ -119,6 +119,12 @@ class SignalType(str, Enum):
     # name and a paste-ready `gh pr create` command.
     PR_READY = "PR_READY"
 
+    # Track 9 — sidecar rescued a parse-fail. Posted when the agent emitted
+    # prose without a valid trailing protocol block AND the runner-side
+    # `protocol-cleanup` dispatch returned a parseable replacement, so the
+    # heavy retry was skipped. Detail names the recovered block kind.
+    PROTOCOL_CLEANUP_AUTO = "PROTOCOL_CLEANUP_AUTO"
+
 
 Priority = Literal["normal", "high"]
 

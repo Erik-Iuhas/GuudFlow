@@ -94,7 +94,14 @@ async def test_four_bad_returns_synthetic_fail(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_each_bad_attempt_posts_protocol_parse_fail_signal(tmp_path: Path):
-    """Each failed parse attempt posts a PROTOCOL_PARSE_FAIL signal."""
+    """Each failed parse attempt posts a PROTOCOL_PARSE_FAIL signal.
+
+    Track 9 — the sidecar (`protocol-cleanup`) now fires before the
+    nudge. To preserve the original test intent ("when an agent's
+    own retries are needed, each one posts a signal") we disable the
+    sidecar by removing the tool from the agent's local_tools. The
+    sidecar's own happy/sad paths are covered in
+    test_protocol_cleanup_sidecar.py."""
     cfg = _reviewer_cfg()
     llm = MockLLMClient([_bad_turn(), _bad_turn(), _good_verify_turn()])
     runner = AgentRunner(
@@ -105,6 +112,11 @@ async def test_each_bad_attempt_posts_protocol_parse_fail_signal(tmp_path: Path)
     )
     runner._build_agents()
     agent = runner.agents[cfg.role]
+    # Track 9 — disable sidecar for this test so the legacy retry math
+    # holds. With sidecar enabled, the second bad turn would be consumed
+    # by the cleanup attempt, dropping the parse-fail count to 1.
+    if "protocol-cleanup" in (agent._local_tools or {}):
+        del agent._local_tools["protocol-cleanup"]
     await runner._generic_tool_use_loop(agent, cfg)
 
     fail_signals = [s for s in runner.workspace.board if s.type is SignalType.PROTOCOL_PARSE_FAIL]

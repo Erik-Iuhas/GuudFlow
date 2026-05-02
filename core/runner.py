@@ -2366,6 +2366,55 @@ class AgentRunner:
         # Replace everything from i_start to end with the marker.
         messages[i_start:] = [marker]
 
+    async def _try_auto_protocol_cleanup(
+        self, role: str, text: str, is_reviewer: bool,
+    ) -> "tuple[protocol.CompactBlock | None, str]":
+        """Track 9 — sidecar that tries to rescue a parse-fail by
+        dispatching the agent's raw response through `protocol-cleanup`
+        (Track 12 wrapper, fires against the project's cheap model).
+
+        Returns `(block, summary_text)` on success — caller short-
+        circuits the heavy retry. On any failure (tool not granted,
+        dispatch error, returned text doesn't parse) returns
+        `(None, error_text)` and caller falls through to the existing
+        nudge logic. Strictly additive: never raises, never blocks.
+
+        Capped at one attempt per call site by virtue of being called
+        once per parse-fail in `_generic_tool_use_loop`.
+        """
+        agent = self.agents.get(role)
+        if agent is None:
+            return None, "agent not yet instantiated"
+        local_tools = getattr(agent, "_local_tools", None) or {}
+        cleanup_tool = local_tools.get("protocol-cleanup")
+        if cleanup_tool is None:
+            return None, "protocol-cleanup tool not granted"
+
+        expected_kind = "VERIFY" if is_reviewer else "COMMIT"
+        try:
+            result = await cleanup_tool.run({
+                "raw_response": text,
+                "expected_kind": expected_kind,
+            })
+        except Exception as e:
+            return None, f"cleanup dispatch raised: {e}"
+
+        if "error" in result:
+            return None, f"cleanup returned error: {result['error']}"
+
+        cleaned_block_text = result.get("protocol_block") or ""
+        if not cleaned_block_text.strip():
+            return None, "cleanup returned empty block"
+
+        try:
+            block = protocol.extract_trailing(cleaned_block_text)
+        except Exception as e:
+            return None, f"cleanup output unparseable: {e}"
+        if block is None:
+            return None, "cleanup output had no trailing protocol block"
+
+        return block, f"recovered {block.kind} via protocol-cleanup"
+
     def _maybe_auto_start_task(
         self,
         role: str,
@@ -3077,6 +3126,25 @@ class AgentRunner:
                     ))
                     continue
                 return block
+
+            # Track 9 — sidecar rescue. Before posting PROTOCOL_PARSE_FAIL
+            # and burning a heavy retry, try `protocol-cleanup` (Track 12
+            # wrapper, runs on a cheap model). If it returns a parseable
+            # block, return it directly — the agent already produced the
+            # answer in prose, we just translated the format. Failure
+            # falls through to the existing nudge path; never blocks.
+            cleaned_block, cleanup_note = await self._try_auto_protocol_cleanup(
+                cfg.role, text, cfg.is_reviewer,
+            )
+            if cleaned_block is not None:
+                self.workspace.post_signal(Signal(
+                    type=SignalType.PROTOCOL_CLEANUP_AUTO,
+                    summary=f"{cfg.role}: {cleanup_note}",
+                    detail=cleanup_note,
+                    from_agent=cfg.role,
+                    iteration=self.workspace.iteration,
+                ))
+                return cleaned_block
 
             # Protocol parse failure. On exhaustion, emit a synthetic VERIFY
             # FAIL rather than crashing — "the loop is the error handler"
