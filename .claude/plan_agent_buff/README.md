@@ -2,6 +2,8 @@
 
 Detailed plans for the GuudFlow multi-track roadmap. Parent strategy doc: `~/.claude/plans/i-think-right-now-linked-rabin.md`.
 
+**Sister folder:** `.claude/future_buff/` — strategic items not on the immediate execution queue (cost ceiling, runner refactor, production sandbox, functional verification gate, recalibration notes). Pull from there when active queue is clear or when one becomes blocking.
+
 Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance criteria and a commit plan. Treat the parent roadmap as "why," and these as "how."
 
 **Progress: 6 / 16 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d, ✅ Track 3e, ✅ Track 3d.4.
