@@ -106,6 +106,17 @@ export function Inputs({ projectId }: InputsProps) {
     }
   }
 
+  async function handleImportLocalPathInPlace(body: {
+    path: string;
+  }): Promise<{ findings: SecretFinding[] | null; ok: boolean }> {
+    const res = await inputsApi.importLocalPathInPlace(projectId, body);
+    await load();
+    return {
+      findings: res.warnings.length > 0 ? res.warnings : null,
+      ok: true,
+    };
+  }
+
   async function handleDetachSourceRepo() {
     try {
       await inputsApi.detachSourceRepo(projectId);
@@ -185,14 +196,16 @@ export function Inputs({ projectId }: InputsProps) {
 
       <h3 style={{ marginTop: 24 }}>Source repo</h3>
       <p className="muted small">
-        A source tree seeds <span className="mono">workspace/working/</span>{" "}
-        with a fresh git history. Choose git URL or local path; only one
-        source is active at a time.
+        Choose how agents see the code for this project. Git URL clones into a
+        fresh <span className="mono">workspace/working/</span>; Local path
+        either copies in (Isolated) or has agents work directly in your
+        directory (In-place).
       </p>
       <SourceRepoField
         current={state.source_repo}
         onImportGit={handleImportGit}
         onImportLocalPath={handleImportLocalPath}
+        onImportLocalPathInPlace={handleImportLocalPathInPlace}
         onDetach={handleDetachSourceRepo}
       />
 

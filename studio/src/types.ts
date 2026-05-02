@@ -169,6 +169,11 @@ export type SourceRepoMeta =
       kind: "local_path";
       path: string;
       imported_at: string;
+    }
+  | {
+      kind: "local_path_in_place";
+      path: string;
+      imported_at: string;
     };
 
 export interface PriorRunAttachment {

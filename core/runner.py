@@ -530,14 +530,13 @@ class AgentRunner:
         if max_wall_seconds is not None:
             import time as _time
             self.workspace.deadline_at = _time.time() + max_wall_seconds
-        # Track 4.3 — in `in-place` mode, agents work directly in the user's
-        # chosen directory instead of a copy under `<run>/workspace/working`.
-        # Inputs/deliverables stay under run_root for run isolation.
-        from core import storage as _storage
-        _cfg = _storage.get_storage_config()
-        working_override: Path | None = None
-        if _cfg.working_tree_mode == "in-place" and _cfg.storage_base is not None:
-            working_override = _cfg.storage_base
+        # Track 4.3 — per-project `local_path_in_place` source repo: agents
+        # work directly in the user's directory instead of a fresh copy under
+        # `<run>/workspace/working/`. Inputs/deliverables stay under run_root
+        # for run isolation. Resolved here from `<project_dir>/inputs/source_repo.meta.json`
+        # so the choice is per-project (the Source repo selection on the
+        # Inputs tab), not a global setting.
+        working_override = self._resolve_in_place_working_dir()
         self.files = FileWorkspace(
             self.run_root / "workspace", working_override=working_override,
         )
@@ -570,6 +569,33 @@ class AgentRunner:
         self.agents: dict[str, BaseAgent] = {}
 
     # ── Local tool registry ─────────────────────────────────────────────────
+
+    def _resolve_in_place_working_dir(self) -> Path | None:
+        """Track 4.3 — return the user's directory if this project's source
+        repo is `local_path_in_place`, else None (fall back to the run's
+        own `workspace/working/`).
+
+        Reads `<project_dir>/inputs/source_repo.meta.json`. Missing meta or
+        any other kind returns None silently — there is nothing to override.
+        """
+        if self.project_dir is None:
+            return None
+        meta_path = self.project_dir / "inputs" / "source_repo.meta.json"
+        if not meta_path.is_file():
+            return None
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if meta.get("kind") != "local_path_in_place":
+            return None
+        raw = meta.get("path")
+        if not raw:
+            return None
+        candidate = Path(str(raw))
+        if not candidate.is_dir():
+            return None
+        return candidate
 
     def _build_local_registry(self) -> None:
         """Catalogue every built-in tool we know how to instantiate.

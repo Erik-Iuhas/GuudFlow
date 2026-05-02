@@ -14,19 +14,25 @@ export interface SourceRepoFieldProps {
     path: string;
     force?: boolean;
   }) => Promise<{ findings: SecretFinding[] | null; ok: boolean }>;
+  onImportLocalPathInPlace: (body: {
+    path: string;
+  }) => Promise<{ findings: SecretFinding[] | null; ok: boolean }>;
   onDetach?: () => Promise<void>;
 }
 
 type Mode = "git" | "local";
+type LocalSubMode = "isolated" | "in-place";
 
 export function SourceRepoField({
   current,
   onImportGit,
   onImportLocalPath,
+  onImportLocalPathInPlace,
   onDetach,
 }: SourceRepoFieldProps) {
   const [editing, setEditing] = useState(current === null);
   const [mode, setMode] = useState<Mode>("git");
+  const [localSubMode, setLocalSubMode] = useState<LocalSubMode>("isolated");
   const [gitUrl, setGitUrl] = useState("");
   const [branch, setBranch] = useState("main");
   const [shallow, setShallow] = useState(true);
@@ -41,15 +47,19 @@ export function SourceRepoField({
     setFindings(null);
     setBusy(true);
     try {
-      const res =
-        mode === "git"
-          ? await onImportGit({
-              git_url: gitUrl.trim(),
-              branch: branch.trim() || "main",
-              shallow,
-              force,
-            })
-          : await onImportLocalPath({ path: localPath.trim(), force });
+      let res: { findings: SecretFinding[] | null; ok: boolean };
+      if (mode === "git") {
+        res = await onImportGit({
+          git_url: gitUrl.trim(),
+          branch: branch.trim() || "main",
+          shallow,
+          force,
+        });
+      } else if (localSubMode === "in-place") {
+        res = await onImportLocalPathInPlace({ path: localPath.trim() });
+      } else {
+        res = await onImportLocalPath({ path: localPath.trim(), force });
+      }
       if (res.ok) {
         setEditing(false);
         setGitUrl("");
@@ -70,7 +80,11 @@ export function SourceRepoField({
         <div className="row" style={{ justifyContent: "space-between" }}>
           <div>
             <span className={`tag tag-source-${current.kind}`}>
-              {current.kind === "git_url" ? "git" : "local"}
+              {current.kind === "git_url"
+                ? "git"
+                : current.kind === "local_path_in_place"
+                  ? "local · in-place"
+                  : "local · copy"}
             </span>{" "}
             {current.kind === "git_url" ? (
               <span className="mono small">
@@ -149,7 +163,43 @@ export function SourceRepoField({
         </div>
       ) : (
         <div style={{ marginTop: 8 }}>
-          <label>Absolute path on the API host</label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {[
+              { value: "isolated" as const, title: "Isolated", hint: "Copy this directory into the run's workspace. Original is untouched." },
+              { value: "in-place" as const, title: "In-place", hint: "Agents work directly in this directory. Pair with PR mode = manual." },
+            ].map((o) => {
+              const selected = localSubMode === o.value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => setLocalSubMode(o.value)}
+                  style={{
+                    textAlign: "left",
+                    padding: "10px 12px",
+                    borderRadius: 6,
+                    border: selected ? "1.5px solid #16a34a" : "1px solid #e2e8f0",
+                    background: selected ? "#f0fdf4" : "#fff",
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2,
+                  }}
+                >
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>
+                    {selected ? "● " : "○ "}{o.title}
+                  </span>
+                  <span className="muted small" style={{ lineHeight: 1.3 }}>
+                    {o.hint}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <label style={{ display: "block", marginTop: 12 }}>
+            Absolute path on the API host
+          </label>
           <div className="row" style={{ gap: 6 }}>
             <input
               type="text"
@@ -170,9 +220,19 @@ export function SourceRepoField({
             />
           )}
           <p className="muted small" style={{ marginTop: 4 }}>
-            The API process must have read access to this path. Multi-tenant
-            deployments restrict this via{" "}
-            <span className="mono">GUUDFLOW_LOCAL_PATH_ALLOWLIST</span>.
+            {localSubMode === "in-place" ? (
+              <>
+                ⚠ Agents will modify files in this directory directly. Strongly
+                recommended: keep PR mode = manual on every project so main is
+                never auto-merged.
+              </>
+            ) : (
+              <>
+                The API process must have read access to this path. Multi-tenant
+                deployments restrict this via{" "}
+                <span className="mono">GUUDFLOW_LOCAL_PATH_ALLOWLIST</span>.
+              </>
+            )}
           </p>
         </div>
       )}

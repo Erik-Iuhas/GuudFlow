@@ -34,7 +34,6 @@ from typing import Literal
 
 
 StorageMode = Literal["global", "in-directory"]
-WorkingTreeMode = Literal["isolated", "in-place"]
 
 
 _USER_SETTINGS_PATH = Path.home() / ".guudflow" / "settings.json"
@@ -59,16 +58,6 @@ class StorageConfig:
     mode: StorageMode
     storage_root: Path
     personas_root: Path
-    # Track 4.3 — when mode == "in-directory", `in-place` makes the runner
-    # use the chosen directory itself as the agents' working tree (instead
-    # of copying files into the run's `workspace/working/`). Forced to
-    # "isolated" in global mode (no chosen directory to point at).
-    working_tree_mode: WorkingTreeMode = "isolated"
-    # Resolved base directory the user picked. Same as `storage_root.parent`
-    # when mode is "in-directory" (since `.flow/` is created underneath);
-    # equal to `storage_root` in global mode. Convenience: agents and the
-    # runner reference this when wiring `in-place`.
-    storage_base: Path | None = None
 
     @classmethod
     def from_env(cls) -> "StorageConfig":
@@ -88,7 +77,6 @@ class StorageConfig:
         mode: StorageMode = mode_raw  # type: ignore[assignment]
 
         # Storage-root resolution.
-        storage_base: Path | None = None
         if mode == "global":
             root_raw = (
                 os.environ.get("GUUDFLOW_DATA_ROOT")
@@ -102,7 +90,6 @@ class StorageConfig:
                 or settings.get("storage_root")
             )
             base = Path(root_raw) if root_raw else Path.cwd()
-            storage_base = base
             root = base / ".flow"
 
         # Personas root: always global. Independent env var for advanced users
@@ -115,29 +102,7 @@ class StorageConfig:
         )
         personas = Path(personas_raw)
 
-        # Working-tree mode resolution. Only meaningful when mode is
-        # "in-directory" — global mode forces "isolated" (no chosen
-        # directory to point the working tree at).
-        wt_raw = (
-            os.environ.get("GUUDFLOW_WORKING_TREE_MODE")
-            or settings.get("working_tree_mode")
-            or "isolated"
-        ).lower().strip()
-        if wt_raw not in ("isolated", "in-place"):
-            raise ValueError(
-                f"working_tree_mode must be 'isolated' or 'in-place', got {wt_raw!r}"
-            )
-        working_tree_mode: WorkingTreeMode = wt_raw  # type: ignore[assignment]
-        if mode == "global" and working_tree_mode == "in-place":
-            working_tree_mode = "isolated"
-
-        return cls(
-            mode=mode,
-            storage_root=root,
-            personas_root=personas,
-            working_tree_mode=working_tree_mode,
-            storage_base=storage_base,
-        )
+        return cls(mode=mode, storage_root=root, personas_root=personas)
 
 
 _cached: StorageConfig | None = None
@@ -205,18 +170,6 @@ def personas_root() -> Path:
 def persona_dir(persona_id: str) -> Path:
     """Per-persona directory (profile.json, episodes.jsonl, patterns.json, …)."""
     return personas_root() / persona_id
-
-
-def working_tree_mode() -> WorkingTreeMode:
-    """Resolved working-tree mode. `in-place` only takes effect in
-    in-directory storage mode; in global mode this is always `isolated`."""
-    return get_storage_config().working_tree_mode
-
-
-def storage_base_dir() -> Path | None:
-    """The user-chosen base directory in in-directory mode (parent of
-    `.flow/`). None in global mode."""
-    return get_storage_config().storage_base
 
 
 def user_settings_path() -> Path:

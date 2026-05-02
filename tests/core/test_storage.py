@@ -60,49 +60,6 @@ def test_in_directory_mode_via_env(monkeypatch, tmp_path):
     cfg = storage.get_storage_config()
     assert cfg.mode == "in-directory"
     assert cfg.storage_root == tmp_path / ".flow"
-    assert cfg.storage_base == tmp_path
-    # Default working-tree mode is isolated.
-    assert cfg.working_tree_mode == "isolated"
-
-
-# ── Track 4.3 — working_tree_mode ──────────────────────────────────────────
-
-
-def test_working_tree_mode_default_is_isolated(monkeypatch):
-    monkeypatch.delenv("GUUDFLOW_STORAGE_MODE", raising=False)
-    monkeypatch.delenv("GUUDFLOW_WORKING_TREE_MODE", raising=False)
-    monkeypatch.setattr(storage, "_USER_SETTINGS_PATH", Path("/nonexistent/settings.json"))
-    cfg = storage.get_storage_config()
-    assert cfg.working_tree_mode == "isolated"
-
-
-def test_working_tree_mode_in_place_via_env(monkeypatch, tmp_path):
-    monkeypatch.setenv("GUUDFLOW_STORAGE_MODE", "in-directory")
-    monkeypatch.setenv("GUUDFLOW_STORAGE_ROOT", str(tmp_path))
-    monkeypatch.setenv("GUUDFLOW_WORKING_TREE_MODE", "in-place")
-    monkeypatch.setattr(storage, "_USER_SETTINGS_PATH", Path("/nonexistent/settings.json"))
-    cfg = storage.get_storage_config()
-    assert cfg.working_tree_mode == "in-place"
-    assert cfg.storage_base == tmp_path
-    assert storage.working_tree_mode() == "in-place"
-
-
-def test_working_tree_mode_forced_isolated_in_global_mode(monkeypatch):
-    """Global mode has no chosen base directory, so in-place is meaningless
-    and must be forced back to isolated."""
-    monkeypatch.delenv("GUUDFLOW_STORAGE_MODE", raising=False)
-    monkeypatch.setenv("GUUDFLOW_WORKING_TREE_MODE", "in-place")
-    monkeypatch.setattr(storage, "_USER_SETTINGS_PATH", Path("/nonexistent/settings.json"))
-    cfg = storage.get_storage_config()
-    assert cfg.mode == "global"
-    assert cfg.working_tree_mode == "isolated"
-
-
-def test_working_tree_mode_invalid_value_raises(monkeypatch):
-    monkeypatch.setenv("GUUDFLOW_WORKING_TREE_MODE", "weird")
-    monkeypatch.setattr(storage, "_USER_SETTINGS_PATH", Path("/nonexistent/settings.json"))
-    with pytest.raises(ValueError, match="working_tree_mode"):
-        storage.get_storage_config()
 
 
 def test_in_directory_mode_defaults_storage_root_to_cwd(monkeypatch, tmp_path):

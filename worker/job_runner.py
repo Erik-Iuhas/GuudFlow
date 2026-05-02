@@ -52,6 +52,20 @@ _logger = logging.getLogger(__name__)
 # ── Project config (de)serialisation ───────────────────────────────────────
 
 
+def _is_in_place_source(project_dir: Path) -> bool:
+    """Track 4.3 — true if the project's source_repo.meta.json declares
+    `kind: "local_path_in_place"`. Used by the worker to skip
+    `seed_working_from_source` so we never clobber the user's repo."""
+    meta_path = project_dir / "inputs" / "source_repo.meta.json"
+    if not meta_path.is_file():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return meta.get("kind") == "local_path_in_place"
+
+
 def serialise_project(data: dict[str, Any]) -> ProjectConfig:
     """Turn a stored project dict into a ProjectConfig dataclass.
 
@@ -508,10 +522,9 @@ class JobRunner:
         run_inputs = run_root / "workspace" / "inputs"
         working_dir = run_root / "workspace" / "working"
 
-        # Track 4.3 — in `in-place` working-tree mode the runner uses the
-        # user's chosen directory directly; do not wipe and re-seed it.
-        from core import storage as _storage
-        if _storage.working_tree_mode() != "in-place":
+        # Track 4.3 — when this project's source repo is `local_path_in_place`,
+        # agents work directly in the user's directory; do not seed/clobber it.
+        if not _is_in_place_source(project_dir):
             run_initializer.seed_working_from_source(
                 working_dir, run_inputs / "source_repo"
             )

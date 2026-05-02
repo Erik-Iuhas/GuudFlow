@@ -443,6 +443,96 @@ async def test_local_path_unknown_project(client, auth_header, local_src):
     assert r.status_code == 404
 
 
+# ── Track 4.3 — local_path_in_place ────────────────────────────────────────
+
+
+async def test_local_path_in_place_records_meta_without_copy(
+    client, auth_header, data_root, project, local_src,
+):
+    """The endpoint writes a meta sidecar with the recorded path and does NOT
+    copy any files into the project's source_repo dir."""
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path_in_place",
+        json={"path": str(local_src)},
+        headers=auth_header,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["source_repo"]["kind"] == "local_path_in_place"
+    assert body["source_repo"]["path"] == str(local_src)
+
+    dest = data_root / "projects" / project / "inputs" / "source_repo"
+    assert not dest.exists(), "in-place mode must not copy files"
+    meta_path = data_root / "projects" / project / "inputs" / "source_repo.meta.json"
+    assert meta_path.is_file()
+
+
+async def test_local_path_in_place_listed_via_get_inputs(
+    client, auth_header, project, local_src,
+):
+    """list_inputs surfaces the in-place source even though source_repo/
+    doesn't exist on disk (meta-only)."""
+    await client.post(
+        f"/api/projects/{project}/inputs/local_path_in_place",
+        json={"path": str(local_src)},
+        headers=auth_header,
+    )
+    r = await client.get(
+        f"/api/projects/{project}/inputs",
+        headers=auth_header,
+    )
+    body = r.json()
+    assert body["source_repo"]["kind"] == "local_path_in_place"
+    assert body["source_repo"]["path"] == str(local_src)
+
+
+async def test_local_path_in_place_replaces_prior_copy(
+    client, auth_header, data_root, project, local_src,
+):
+    """Switching from `local_path` (copy) to `local_path_in_place` removes the
+    previously copied tree — only one source is active at a time."""
+    await client.post(
+        f"/api/projects/{project}/inputs/local_path",
+        json={"path": str(local_src)},
+        headers=auth_header,
+    )
+    dest = data_root / "projects" / project / "inputs" / "source_repo"
+    assert dest.exists()
+
+    await client.post(
+        f"/api/projects/{project}/inputs/local_path_in_place",
+        json={"path": str(local_src)},
+        headers=auth_header,
+    )
+    assert not dest.exists()
+
+
+async def test_local_path_in_place_requires_path(client, auth_header, project):
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path_in_place",
+        json={},
+        headers=auth_header,
+    )
+    assert r.status_code == 400
+
+
+async def test_local_path_in_place_rejects_relative(client, auth_header, project):
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path_in_place",
+        json={"path": "./relative/dir"},
+        headers=auth_header,
+    )
+    assert r.status_code == 400
+
+
+async def test_local_path_in_place_requires_auth(client, project, local_src):
+    r = await client.post(
+        f"/api/projects/{project}/inputs/local_path_in_place",
+        json={"path": str(local_src)},
+    )
+    assert r.status_code == 401
+
+
 async def test_local_path_secrets_refused(client, auth_header, data_root, project, local_src):
     (local_src / ".env").write_text("DB=hunter2", encoding="utf-8")
     r = await client.post(

@@ -38,8 +38,6 @@ async def get_settings() -> dict[str, Any]:
         "storage_mode": cfg.mode,
         "storage_root": str(cfg.storage_root),
         "personas_root": str(cfg.personas_root),
-        "working_tree_mode": cfg.working_tree_mode,
-        "storage_base": str(cfg.storage_base) if cfg.storage_base else None,
     }
 
     return {
@@ -61,7 +59,6 @@ def _env_overrides_active() -> bool:
             "GUUDFLOW_DATA_ROOT",
             "GUUDFLOW_DATA_DIR",  # legacy
             "GUUDFLOW_PERSONAS_ROOT",
-            "GUUDFLOW_WORKING_TREE_MODE",
         )
     )
 
@@ -74,10 +71,6 @@ class SettingsUpdate(BaseModel):
     storage_root: str | None = Field(default=None, description="path; required for in-directory mode")
     personas_root: str | None = None
     data_root: str | None = None
-    working_tree_mode: str | None = Field(
-        default=None,
-        description="'isolated' (default; copy to workspace/working) or 'in-place' (agents work in storage_root directly; in-directory mode only)",
-    )
 
 
 @router.put("/api/settings")
@@ -100,16 +93,6 @@ async def update_settings(update: SettingsUpdate) -> dict[str, Any]:
             )
         update_dict["storage_mode"] = mode
 
-    # Validate working_tree_mode if provided.
-    if "working_tree_mode" in update_dict:
-        wt = update_dict["working_tree_mode"].lower()
-        if wt not in ("isolated", "in-place"):
-            raise HTTPException(
-                status_code=400,
-                detail="working_tree_mode must be 'isolated' or 'in-place'",
-            )
-        update_dict["working_tree_mode"] = wt
-
     # Validate storage_root path is usable, but only if mode is (or will be)
     # in-directory. Checking in global mode would block users from saving a
     # placeholder root they intend to use later.
@@ -131,15 +114,10 @@ async def update_settings(update: SettingsUpdate) -> dict[str, Any]:
         "storage_mode" in update_dict
         and current_effective_mode != update_dict["storage_mode"]
     )
-    current_effective_wt = storage.get_storage_config().working_tree_mode
-    wt_changed = (
-        "working_tree_mode" in update_dict
-        and current_effective_wt != update_dict["working_tree_mode"]
-    )
 
     return {
         "persisted": persisted,
-        "restart_required": mode_changed or wt_changed,
+        "restart_required": mode_changed,
     }
 
 

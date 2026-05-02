@@ -126,10 +126,18 @@ async def list_inputs(request: Request, project_id: str) -> dict:
 
     source_repo: dict | None = None
     meta_path = store.source_repo_meta_path(project_id)
-    if meta_path.exists() and store.source_repo_dir(project_id).exists():
+    if meta_path.exists():
+        # Track 4.3 — `local_path_in_place` records only a meta sidecar (no
+        # copied tree). All other kinds also require source_repo/ on disk.
         try:
             source_repo = json.loads(meta_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
+            source_repo = None
+        if (
+            source_repo is not None
+            and source_repo.get("kind") != "local_path_in_place"
+            and not store.source_repo_dir(project_id).exists()
+        ):
             source_repo = None
 
     return {
@@ -251,6 +259,50 @@ async def import_local_path(
         "imported_at": _now_iso(),
     }
     return _finalize_source_repo(target, meta_path, meta, force)
+
+
+@router.post("/local_path_in_place", dependencies=[Depends(require_bearer)])
+async def import_local_path_in_place(
+    request: Request,
+    project_id: str,
+    body: dict = Body(...),
+):
+    """Track 4.3 — record a local path WITHOUT copying. Agents will work
+    directly in this directory at run time (the runner points its working
+    tree there). No secret scan because the user's repo never leaves their
+    machine — they already own it."""
+    await _require_project(request, project_id)
+    raw_path = (body.get("path") or "").strip()
+    if not raw_path:
+        raise HTTPException(status_code=400, detail="path is required")
+    src = Path(raw_path)
+    if not src.is_absolute():
+        raise HTTPException(status_code=400, detail="path must be absolute")
+    if not _allowlist_permits(src):
+        raise HTTPException(
+            status_code=403,
+            detail="path is not under GUUDFLOW_LOCAL_PATH_ALLOWLIST",
+        )
+    if not src.is_dir():
+        raise HTTPException(status_code=400, detail=f"path is not a directory: {src}")
+
+    store = _store(request)
+    target = store.source_repo_dir(project_id)
+    meta_path = store.source_repo_meta_path(project_id)
+
+    # Replace any existing source_repo (clone or copy) — only one source is
+    # active at a time. In-place mode owns no copied tree; remove the dir.
+    if target.exists():
+        shutil.rmtree(target, onerror=_force_rw)
+
+    meta = {
+        "kind": "local_path_in_place",
+        "path": str(src),
+        "imported_at": _now_iso(),
+    }
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return {"source_repo": meta, "warnings": []}
 
 
 # ── Continuation: attach a prior run's deliverables ────────────────────────

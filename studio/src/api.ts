@@ -508,6 +508,16 @@ export const inputsApi = {
       body,
       true,
     ),
+  importLocalPathInPlace: (
+    projectId: string,
+    body: { path: string },
+  ) =>
+    request<SourceRepoImportSuccess>(
+      "POST",
+      `/api/projects/${encodeURIComponent(projectId)}/inputs/local_path_in_place`,
+      body,
+      true,
+    ),
   attachPriorRun: (projectId: string, runId: string, feedback?: string) =>
     request<PriorRunAttachResponse>(
       "POST",
@@ -731,8 +741,6 @@ export interface SettingsState {
     storage_mode: "global" | "in-directory";
     storage_root: string;
     personas_root: string;
-    working_tree_mode: "isolated" | "in-place";
-    storage_base: string | null;
   };
   persisted: Record<string, string>;
   env_overrides_active: boolean;
@@ -757,7 +765,6 @@ export const settingsApi = {
     storage_root: string;
     personas_root: string;
     data_root: string;
-    working_tree_mode: "isolated" | "in-place";
   }>) =>
     request<SettingsUpdateResponse>("PUT", "/api/settings", updates),
   // Tighter timeout (8s) — path validation hits the filesystem and can
