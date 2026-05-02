@@ -882,48 +882,56 @@ class BaseAgent:
 
     # ── Effective system prompt (§20 + §31 + §36) ──────────────────────────
 
-    def _render_repo_map_layer(self, workspace: Any) -> str:
+    def _render_repo_map_layer(self, workspace: Any) -> tuple[str, int]:
         """Track 1c/1d — codebase structure section (CLAUDE.md §28, always-on).
 
         PageRank top-N entries, signatures only. Task-blind by design — paired
         with _render_task_relevance_layer for the task-aware half.
+
+        Returns `(text, approx_tokens)` so the caller can record what actually
+        landed in the prompt (Track 3d.2 — IterationMetrics.repo_map_tokens).
+        Returns ("", 0) when no map / empty map.
         """
         if workspace is None:
-            return ""
+            return "", 0
         rmap = getattr(workspace, "repo_map", None)
         if rmap is None or not getattr(rmap, "entries", None):
-            return ""
+            return "", 0
         from core.repo_map import render_compact
         # Track 1d: 400 tokens (down from 1500). The remaining budget moves to
         # the task-relevance layer below, so the agent sees both structural
         # importance AND task-specific relevance without bloating the prompt.
         body = render_compact(rmap, max_tokens=400)
         if not body.strip():
-            return ""
-        return (
+            return "", 0
+        text = (
             "CODEBASE STRUCTURE (top files by structural importance — "
             "PageRank over imports; consult before fs-list / fs-grep / fs-read):\n\n"
             + body
         )
+        return text, _approx_tokens(text)
 
-    def _render_task_relevance_layer(self, workspace: Any) -> str:
+    def _render_task_relevance_layer(self, workspace: Any) -> tuple[str, int]:
         """Track 1d — files scored relevant to this agent's current task.
 
         Mixes PageRank with symbol/path keyword overlap (aider-style). Suppressed
         cleanly when there's no current task, no entries, or zero overlap.
+
+        Returns `(text, approx_tokens)` so the caller can record what landed
+        in the prompt (Track 3d.2 — IterationMetrics.relevant_files_tokens).
         """
         if workspace is None:
-            return ""
+            return "", 0
         rmap = getattr(workspace, "repo_map", None)
         if rmap is None or not getattr(rmap, "entries", None):
-            return ""
+            return "", 0
         task = (self._current_task or "").strip()
         if not task:
-            return ""
+            return "", 0
         from core.repo_map import score_entries_for_task, _approx_tokens
         scored = score_entries_for_task(rmap, task)
         if not scored:
-            return ""
+            return "", 0
 
         BUDGET = 300
         lines: list[str] = []
@@ -942,14 +950,15 @@ class BaseAgent:
             lines.append(line)
             used += cost
         if not lines:
-            return ""
+            return "", 0
 
         # Truncate the task echo so a verbose goal doesn't dominate the header.
         task_echo = task if len(task) <= 120 else task[:117] + "..."
-        return (
+        text = (
             f"RELEVANT TO YOUR CURRENT TASK ({task_echo!r}):\n\n"
             + "\n".join(lines)
         )
+        return text, _approx_tokens(text)
 
     async def effective_system_prompt(
         self,
@@ -1029,12 +1038,23 @@ class BaseAgent:
         # (Track 1d). Both always-on per CLAUDE.md §28; relevance suppresses
         # cleanly when no _current_task is set or no entries match.
         ws = workspace if workspace is not None else self._workspace
-        structure_text = self._render_repo_map_layer(ws)
+        structure_text, structure_tokens = self._render_repo_map_layer(ws)
         if structure_text:
             parts.append(structure_text)
-        relevance_text = self._render_task_relevance_layer(ws)
+        relevance_text, relevance_tokens = self._render_task_relevance_layer(ws)
         if relevance_text:
             parts.append(relevance_text)
+        # Track 3d.2 — record what actually landed in the prompt. Without
+        # this, IterationMetrics.repo_map_tokens / relevant_files_tokens /
+        # context_tokens_total stayed 0 forever (the dead ContextManager
+        # path that the runner used to aggregate from never fires; agents
+        # don't call get_context()). Counted once per LLM call into the
+        # cumulative iteration row.
+        m = self._current_metrics
+        if m is not None:
+            m.repo_map_tokens += structure_tokens
+            m.relevant_files_tokens += relevance_tokens
+            m.context_tokens_total += structure_tokens + relevance_tokens
 
         if self.system_prompt:
             parts.append(self.system_prompt)

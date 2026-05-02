@@ -56,6 +56,73 @@ async def test_repo_map_content_reaches_effective_system_prompt(tmp_path: Path):
     assert prompt.index("CODEBASE STRUCTURE") < prompt.index("MARKER_BASE_PROMPT")
 
 
+async def test_repo_map_layer_populates_iteration_metrics(tmp_path: Path):
+    """Track 3d.2 — when effective_system_prompt is called, the repo_map
+    and (when a current task is set) task-relevance token counts must
+    land on _current_metrics. Without this they stay 0 forever — the
+    runner's old aggregation path read from a ContextSnapshot list that
+    nobody writes to."""
+    from core.workspace import IterationMetrics
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "auth.py").write_text(
+        "def login():\n    pass\n\ndef logout():\n    pass\n"
+    )
+    (tmp_path / "src" / "db.py").write_text(
+        "class Connection:\n    def query(self, sql):\n        return []\n"
+    )
+
+    workspace = Workspace(run_id="run-3d2", goal="metric-population")
+    workspace.repo_map = build_repo_map(tmp_path)
+
+    agent = BaseAgent(role="developer", system_prompt="MARKER")
+    agent._workspace = workspace
+    # Simulate the runner setting up the metrics row before the LLM call.
+    agent._current_metrics = IterationMetrics(
+        run_id="run-3d2", role="developer", iteration=0,
+    )
+    agent._current_task = "implement login flow against the auth module"
+
+    prompt = await agent.effective_system_prompt()
+
+    m = agent._current_metrics
+    assert m is not None
+    assert m.repo_map_tokens > 0, (
+        "repo_map_tokens should reflect the rendered CODEBASE STRUCTURE layer"
+    )
+    assert m.relevant_files_tokens > 0, (
+        "relevant_files_tokens should reflect the task-relevance layer"
+    )
+    assert m.context_tokens_total >= m.repo_map_tokens + m.relevant_files_tokens
+    # Sanity: counts should roughly match what's in the prompt body.
+    assert "CODEBASE STRUCTURE" in prompt
+
+
+async def test_repo_map_layer_metrics_accumulate_across_calls(tmp_path: Path):
+    """Each effective_system_prompt() call (one per LLM round-trip in a
+    real run) bumps the cumulative iteration row — runner finalizes after
+    all calls land."""
+    from core.workspace import IterationMetrics
+
+    (tmp_path / "app.py").write_text("def f():\n    pass\n")
+    workspace = Workspace(run_id="r", goal="g")
+    workspace.repo_map = build_repo_map(tmp_path)
+
+    agent = BaseAgent(role="dev", system_prompt="X")
+    agent._workspace = workspace
+    agent._current_metrics = IterationMetrics(run_id="r", role="dev", iteration=0)
+
+    await agent.effective_system_prompt()
+    after_one = agent._current_metrics.repo_map_tokens
+    await agent.effective_system_prompt()
+    after_two = agent._current_metrics.repo_map_tokens
+
+    assert after_one > 0
+    assert after_two == after_one * 2, (
+        "two LLM calls should double the cumulative repo_map_tokens row"
+    )
+
+
 async def test_repo_map_byte_stable_within_iteration(tmp_path):
     """Track 1d — within an iteration, repeated prompt renders are byte-identical
     so the system-prompt cache holds across LLM calls.
