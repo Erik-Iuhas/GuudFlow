@@ -1719,6 +1719,11 @@ class AgentRunner:
                                 t for _, t in snap.relevant_files
                             )
                             _m.context_tokens_total += snap.used_tokens
+                    # Track 3d.5 — estimate USD cost of this iteration.
+                    # Pulls per-1k pricing from the registry; degrades
+                    # silently to 0 if registry is missing or the
+                    # model isn't recognized.
+                    _m.estimated_cost_usd = self._estimate_iteration_cost(_m)
                     workspace.add_iteration_metrics(_m)
                     agent._current_metrics = None
                 # Log the full turn — messages + output — to agent_turns.jsonl.
@@ -2365,6 +2370,73 @@ class AgentRunner:
 
         # Replace everything from i_start to end with the marker.
         messages[i_start:] = [marker]
+
+    def _estimate_iteration_cost(self, m: "IterationMetrics") -> float:
+        """Track 3d.5 — total estimated USD spend for one iteration row.
+
+        Combines:
+          - Main agent LLM call cost — input + output + cache_read +
+            cache_creation tokens × the per-1k pricing the registry
+            has for `m.model`.
+          - Per-use-case sub-LLM dispatch cost from
+            `m.sub_llm_breakdown`. Each entry was billed against its
+            own resolver-picked model; we look that up on the project
+            map (`sub_llm_models[use_case]`) when present, else fall
+            back to the cheapest tool-capable price.
+
+        Returns 0.0 silently when no registry is wired (single-LLM
+        dev mode) or when a referenced model isn't in the registry.
+        Cost computation is best-effort observability — must never
+        raise from inside the iteration finalize path.
+        """
+        registry = getattr(self, "_model_registry", None)
+        if registry is None:
+            return 0.0
+
+        def _per_1k(model_id: str) -> tuple[float, float, float]:
+            """Returns (in_per_1k, out_per_1k, cache_read_per_1k). Zeros
+            on lookup miss."""
+            if not model_id:
+                return 0.0, 0.0, 0.0
+            mi = registry.get(model_id)
+            if mi is None:
+                return 0.0, 0.0, 0.0
+            return (
+                float(mi.cost_per_1k_input or 0.0),
+                float(mi.cost_per_1k_output or 0.0),
+                float(getattr(mi, "cache_read_per_1k", 0.0) or 0.0),
+            )
+
+        total = 0.0
+
+        # 1. Main agent LLM cost.
+        try:
+            in_p, out_p, cache_p = _per_1k(m.model)
+            total += (m.input_tokens / 1000.0) * in_p
+            total += (m.output_tokens / 1000.0) * out_p
+            total += (m.cache_read_tokens / 1000.0) * cache_p
+            # Cache creation usually billed at input rate (Anthropic).
+            total += (m.cache_creation_tokens / 1000.0) * in_p
+        except Exception:
+            # Never fail the run on pricing arithmetic.
+            pass
+
+        # 2. Sub-LLM dispatch costs (Track 12 attribution).
+        sub_models = getattr(self.project, "sub_llm_models", None) or {}
+        for use_case, bucket in (m.sub_llm_breakdown or {}).items():
+            try:
+                model_id = sub_models.get(use_case)
+                if not model_id:
+                    # Fallback: cheapest tool-capable.
+                    cheapest = registry.cheapest_tool_capable()
+                    model_id = cheapest.id if cheapest else ""
+                in_p, out_p, _ = _per_1k(model_id)
+                total += (int(bucket.get("input_tokens", 0)) / 1000.0) * in_p
+                total += (int(bucket.get("output_tokens", 0)) / 1000.0) * out_p
+            except Exception:
+                continue
+
+        return round(total, 6)  # six decimals = sub-cent fidelity
 
     async def _try_auto_protocol_cleanup(
         self, role: str, text: str, is_reviewer: bool,

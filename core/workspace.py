@@ -146,6 +146,14 @@ class IterationMetrics:
     # stashed count + low restored count = working as intended.
     subtask_messages_stashed: int = 0
     subtask_messages_restored: int = 0
+    # Track 3d.5: total estimated USD cost for this iteration row.
+    # Computed by the runner at finalization time from input/output/
+    # cache token counts × the model's per-1k pricing in the registry,
+    # PLUS sub_llm_breakdown contributions (each use_case priced
+    # against its own resolved model). Lets dashboards show per-run /
+    # per-iteration spend without re-deriving from raw tokens. 0.0
+    # when no registry / unknown model — degrades silently to "free".
+    estimated_cost_usd: float = 0.0
 
     completed: bool = False
     failed: bool = False

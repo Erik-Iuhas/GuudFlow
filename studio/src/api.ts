@@ -223,6 +223,17 @@ export interface IterationMetrics {
   completed: boolean;
   failed: boolean;
   no_op: boolean;
+  /** Track 12 — per-use-case sub-LLM dispatch breakdown. Keyed by
+   *  use_case (e.g. "summarise-subtask", "protocol-cleanup"); each
+   *  entry has {calls, input_tokens, output_tokens}. */
+  sub_llm_breakdown?: Record<string, { calls: number; input_tokens: number; output_tokens: number }>;
+  /** Track 8 — subtask context hot-swap counters. */
+  subtask_messages_stashed?: number;
+  subtask_messages_restored?: number;
+  /** Track 3d.5 — total estimated USD cost for this iteration row.
+   *  Computed runner-side from per-1k pricing in data/models.json
+   *  PLUS sub_llm_breakdown contributions. 0.0 when no registry. */
+  estimated_cost_usd?: number;
 }
 
 export interface ContextSnapshot {

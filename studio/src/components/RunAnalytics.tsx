@@ -65,16 +65,26 @@ function BarLegend() {
 
 // ── Totals by role ─────────────────────────────────────────────────────────
 
+// Track 3d.5 — format cost compactly. Sub-cent shows as "<$0.01".
+function fmtCost(usd: number): string {
+  if (!usd || usd <= 0) return "—";
+  if (usd < 0.01) return "<$0.01";
+  if (usd < 1) return `$${usd.toFixed(3)}`;
+  return `$${usd.toFixed(2)}`;
+}
+
 function RoleTotals({ rows }: { rows: IterationMetrics[] }) {
-  const byRole: Record<string, { input: number; output: number; cache: number; iters: number }> = {};
+  const byRole: Record<string, { input: number; output: number; cache: number; iters: number; cost: number }> = {};
   for (const r of rows) {
-    if (!byRole[r.role]) byRole[r.role] = { input: 0, output: 0, cache: 0, iters: 0 };
+    if (!byRole[r.role]) byRole[r.role] = { input: 0, output: 0, cache: 0, iters: 0, cost: 0 };
     byRole[r.role].input += r.input_tokens;
     byRole[r.role].output += r.output_tokens;
     byRole[r.role].cache += r.cache_read_tokens;
     byRole[r.role].iters += 1;
+    byRole[r.role].cost += r.estimated_cost_usd ?? 0;
   }
   const roles = Object.keys(byRole).sort();
+  const grandTotal = roles.reduce((s, r) => s + byRole[r].cost, 0);
 
   return (
     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -85,6 +95,7 @@ function RoleTotals({ rows }: { rows: IterationMetrics[] }) {
           <th style={TH}>input</th>
           <th style={TH}>output</th>
           <th style={TH}>cache_read</th>
+          <th style={TH} title="Estimated USD cost — Track 3d.5">cost</th>
         </tr>
       </thead>
       <tbody>
@@ -97,9 +108,20 @@ function RoleTotals({ rows }: { rows: IterationMetrics[] }) {
               <td style={TD}>{t.input.toLocaleString()}</td>
               <td style={TD}>{t.output.toLocaleString()}</td>
               <td style={TD}>{t.cache.toLocaleString()}</td>
+              <td style={TD}>{fmtCost(t.cost)}</td>
             </tr>
           );
         })}
+        {grandTotal > 0 && (
+          <tr style={{ borderTop: "2px solid #e2e8f0", background: "#f8fafc" }}>
+            <td style={{ ...TD_LEFT, fontWeight: 600 }}>total</td>
+            <td style={TD}>—</td>
+            <td style={TD}>—</td>
+            <td style={TD}>—</td>
+            <td style={TD}>—</td>
+            <td style={{ ...TD, fontWeight: 600 }}>{fmtCost(grandTotal)}</td>
+          </tr>
+        )}
       </tbody>
     </table>
   );
@@ -189,24 +211,39 @@ export function RunAnalytics({ runId, isActive }: Props) {
                   <th style={TH}>output</th>
                   <th style={TH}>cache_read</th>
                   <th style={TH}>elapsed (s)</th>
+                  <th style={TH} title="Track 3d.5 — estimated USD cost">cost</th>
                   <th style={TH_LEFT}>tools</th>
                   <th style={TH}>no_op</th>
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((r, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid #f1f5f9", background: r.failed ? "#fff1f2" : undefined }}>
-                    <td style={TD_LEFT}><code style={{ fontSize: 11 }}>{r.role}</code></td>
-                    <td style={TD}>{r.iteration}</td>
-                    <td style={{ ...TD, fontSize: 11, color: "#64748b" }}>{r.model.split("-").slice(-2).join("-")}</td>
-                    <td style={TD}>{r.input_tokens.toLocaleString()}</td>
-                    <td style={TD}>{r.output_tokens.toLocaleString()}</td>
-                    <td style={TD}>{r.cache_read_tokens.toLocaleString()}</td>
-                    <td style={TD}>{r.elapsed_seconds.toFixed(1)}</td>
-                    <td style={{ ...TD_LEFT, fontSize: 11, color: "#64748b" }}>{r.tools_called.slice(-4).join(", ")}</td>
-                    <td style={TD}>{r.no_op ? "✓" : ""}</td>
-                  </tr>
-                ))}
+                {sorted.map((r, i) => {
+                  // Track 12 — surface sub-LLM dispatch tooltip if present.
+                  const subBd = r.sub_llm_breakdown ?? {};
+                  const subUseCases = Object.keys(subBd);
+                  const costTitle = subUseCases.length > 0
+                    ? `Includes sub-LLM: ${subUseCases.map((uc) => `${uc} (${subBd[uc].calls})`).join(", ")}`
+                    : undefined;
+                  return (
+                    <tr key={i} style={{ borderBottom: "1px solid #f1f5f9", background: r.failed ? "#fff1f2" : undefined }}>
+                      <td style={TD_LEFT}><code style={{ fontSize: 11 }}>{r.role}</code></td>
+                      <td style={TD}>{r.iteration}</td>
+                      <td style={{ ...TD, fontSize: 11, color: "#64748b" }}>{r.model.split("-").slice(-2).join("-")}</td>
+                      <td style={TD}>{r.input_tokens.toLocaleString()}</td>
+                      <td style={TD}>{r.output_tokens.toLocaleString()}</td>
+                      <td style={TD}>{r.cache_read_tokens.toLocaleString()}</td>
+                      <td style={TD}>{r.elapsed_seconds.toFixed(1)}</td>
+                      <td style={TD} title={costTitle}>
+                        {fmtCost(r.estimated_cost_usd ?? 0)}
+                        {subUseCases.length > 0 && (
+                          <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 4 }}>+sub</span>
+                        )}
+                      </td>
+                      <td style={{ ...TD_LEFT, fontSize: 11, color: "#64748b" }}>{r.tools_called.slice(-4).join(", ")}</td>
+                      <td style={TD}>{r.no_op ? "✓" : ""}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
