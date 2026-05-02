@@ -213,35 +213,50 @@ export function Studio() {
                 />
               </div>
             </div>
-            <fieldset style={{ marginTop: 12, border: "1px solid var(--border, #ccc)", padding: 8 }}>
-              <legend className="small">PR mode (when run completes)</legend>
-              <label className="row" style={{ gap: 6, alignItems: "flex-start" }}>
-                <input
-                  type="radio"
-                  name="pr_mode"
-                  value="manual"
-                  checked={(project.pr_mode ?? "manual") === "manual"}
-                  onChange={() => setProject({ ...project, pr_mode: "manual" })}
-                />
-                <span>
-                  <strong>Manual</strong> — stop at an integration branch; you open the PR yourself
-                  <span className="muted small"> (recommended for real repos)</span>
-                </span>
-              </label>
-              <label className="row" style={{ gap: 6, alignItems: "flex-start", marginTop: 4 }}>
-                <input
-                  type="radio"
-                  name="pr_mode"
-                  value="auto"
-                  checked={project.pr_mode === "auto"}
-                  onChange={() => setProject({ ...project, pr_mode: "auto" })}
-                />
-                <span>
-                  <strong>Auto</strong> — merge into main directly
-                  <span className="muted small"> (sandbox / throwaway projects only)</span>
-                </span>
-              </label>
-            </fieldset>
+            {(() => {
+              const prMode = project.pr_mode ?? "manual";
+              const opts: { value: "manual" | "auto"; title: string; hint: string }[] = [
+                { value: "manual", title: "Manual", hint: "Stop at an integration branch; you open the PR. Recommended for real repos." },
+                { value: "auto",   title: "Auto",   hint: "Merge straight into main. Sandbox / throwaway projects only." },
+              ];
+              return (
+                <div style={{ marginTop: 16 }}>
+                  <label style={{ display: "block", marginBottom: 6 }}>PR mode</label>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {opts.map((o) => {
+                      const selected = prMode === o.value;
+                      return (
+                        <button
+                          key={o.value}
+                          type="button"
+                          onClick={() => setProject({ ...project, pr_mode: o.value })}
+                          style={{
+                            textAlign: "left",
+                            padding: "10px 12px",
+                            borderRadius: 6,
+                            border: selected
+                              ? "1.5px solid #16a34a"
+                              : "1px solid #e2e8f0",
+                            background: selected ? "#f0fdf4" : "#fff",
+                            cursor: "pointer",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 2,
+                          }}
+                        >
+                          <span style={{ fontWeight: 600, fontSize: 13 }}>
+                            {selected ? "● " : "○ "}{o.title}
+                          </span>
+                          <span className="muted small" style={{ lineHeight: 1.3 }}>
+                            {o.hint}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           <CostStrip project={project} />
