@@ -34,7 +34,7 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 | `master_subtasks_dispatch_t7_t8_t12.md` | 7 + 8 + 12 | **Master plan** spanning sub-LLM dispatch (T12), subtask decomposition (T7), and context hot-swap (T8). Read this first before the per-track buff files. | 🟨 **In progress** (T12 shipped, dormant) | Track 1, registry | 800k–1.2M total |
 | `track_12_sub_llm_dispatch.md` | 12 | **Phase 1 detail** — `llm-dispatch` primitive + `summarise-subtask` / `protocol-cleanup` wrappers + per-use-case + per-agent model picker | ✅ **Shipped** as dormant primitive (`cb3422e`, `6905348`, `1148bf1`); consumers in T8 / T9 | Master | 250–400k |
 | `track_7_subtask_decomposition.md` | 7 | **Phase 2 detail** — synthetic root + `decompose-task` tool + `assign-task` extension + active subtask layer | ✅ **Shipped** (`4e8cc09` `0ef8ed3` `fce079a` `89a3bff` `6050e34` `7af5fab`) | Master | ~300k actual |
-| `track_8_subtask_context_hotswap.md` | 8 | **Phase 3 detail** — stash + summary marker + `recall-subtask` tool. Primary consumer of T12's `summarise-subtask`. | ⬜ Not started — **ready to start** (T7 shipped) | T7, T12 | 200–350k |
+| `track_8_subtask_context_hotswap.md` | 8 | **Phase 3 detail** — stash + summary marker + `recall-subtask` tool. Primary consumer of T12's `summarise-subtask`. | ✅ **Shipped** (`dfa8958`) | T7, T12 | ~200k actual |
 
 ### Deferred (intentionally not specced as files)
 
