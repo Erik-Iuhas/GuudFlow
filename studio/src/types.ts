@@ -32,6 +32,11 @@ export interface ProjectConfig {
   max_iterations?: number;
   approval_gates?: Partial<ApprovalGates>;
   pr_mode?: "manual" | "auto";
+  /** Track 12 — per-use-case sub-LLM model picks. Maps use_case name
+   *  (e.g. "summarise-subtask", "protocol-cleanup", "llm-dispatch")
+   *  to a registered model id from /api/models. Empty / missing
+   *  entries fall back to the cheapest tool-capable model server-side. */
+  sub_llm_models?: Record<string, string>;
 }
 
 export interface PrReadyInfo {

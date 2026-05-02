@@ -725,6 +725,10 @@ export interface ModelEntry {
   tier: "heavy" | "solid" | "fast";
   supports_tools: boolean;
   deprecated: boolean;
+  /** Track 12 — surfaced in the sub-LLM model picker so the user
+   *  picks honestly. Numbers come straight from data/models.json. */
+  cost_per_1k_input?: number;
+  cost_per_1k_output?: number;
 }
 
 export const modelsApi = {

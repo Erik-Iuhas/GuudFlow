@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ApiError, invokeApi, projectsApi, runsApi } from "../api";
+import { ApiError, invokeApi, modelsApi, projectsApi, runsApi, type ModelEntry } from "../api";
 import { PersonaSlideOver } from "../components/PersonaSlideOver";
 import { WorkerSettingsPanel } from "../components/WorkerSettingsPanel";
 import { CostStrip } from "../components/CostStrip";
@@ -29,6 +29,17 @@ export function Studio() {
   const [tab, setTab] = useState<Tab>("team");
   const [settingsRole, setSettingsRole] = useState<string | null>(null);
   const [slideOverPersonaId, setSlideOverPersonaId] = useState<string | null>(null);
+  // Track 12 — model registry for the per-use-case sub-LLM picker.
+  // Loaded once; failure leaves the picker showing "(auto: cheapest)".
+  const [models, setModels] = useState<ModelEntry[]>([]);
+  useEffect(() => {
+    let alive = true;
+    modelsApi
+      .list()
+      .then((m) => { if (alive) setModels(m); })
+      .catch(() => { /* picker degrades gracefully */ });
+    return () => { alive = false; };
+  }, []);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -254,6 +265,79 @@ export function Studio() {
                       );
                     })}
                   </div>
+                </div>
+              );
+            })()}
+
+            {/* Track 12 — per-use-case sub-LLM model picker.
+                Three known use cases (mirrors agents/tools/llm_dispatch.py).
+                Empty selection = server-side fallback to cheapest tool-capable. */}
+            {(() => {
+              const useCases: { id: string; label: string; hint: string }[] = [
+                { id: "summarise-subtask", label: "Summarise subtask", hint: "context hot-swap (Track 8)" },
+                { id: "protocol-cleanup", label: "Protocol cleanup", hint: "fix prose → COMMIT block" },
+                { id: "llm-dispatch", label: "Generic dispatch", hint: "agent-crafted prompts" },
+              ];
+              const subModels = project.sub_llm_models ?? {};
+              const fmtCost = (m: ModelEntry) => {
+                const inC = m.cost_per_1k_input ?? 0;
+                const outC = m.cost_per_1k_output ?? 0;
+                return inC === 0 && outC === 0 ? "free" : `$${inC.toFixed(3)}/$${outC.toFixed(3)} per 1k`;
+              };
+              const grouped: Record<string, ModelEntry[]> = {};
+              for (const m of models) {
+                (grouped[m.provider] ||= []).push(m);
+              }
+              return (
+                <div style={{ marginTop: 16 }}>
+                  <label style={{ display: "block", marginBottom: 6 }}>Sub-LLM models</label>
+                  <p className="muted small" style={{ marginTop: 0, marginBottom: 6 }}>
+                    Per-use-case model for tools that delegate to a cheap LLM. Empty = auto (cheapest tool-capable).
+                  </p>
+                  <table className="list" style={{ width: "100%" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ width: "32%" }}>Use case</th>
+                        <th>Model</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {useCases.map((uc) => (
+                        <tr key={uc.id}>
+                          <td>
+                            <div style={{ fontWeight: 500 }}>{uc.label}</div>
+                            <div className="muted small">{uc.hint}</div>
+                          </td>
+                          <td>
+                            <select
+                              value={subModels[uc.id] ?? ""}
+                              onChange={(e) => {
+                                const next = { ...(project.sub_llm_models ?? {}) };
+                                if (e.target.value) {
+                                  next[uc.id] = e.target.value;
+                                } else {
+                                  delete next[uc.id];
+                                }
+                                setProject({ ...project, sub_llm_models: next });
+                              }}
+                              style={{ width: "100%" }}
+                            >
+                              <option value="">(auto: cheapest tool-capable)</option>
+                              {Object.entries(grouped).sort().map(([provider, ms]) => (
+                                <optgroup key={provider} label={provider}>
+                                  {ms.map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                      {m.id} — {fmtCost(m)}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               );
             })()}
