@@ -38,16 +38,22 @@ class DecomposeTask(BaseTool):
 
     name = "decompose-task"
     priority = 120  # coordination band, same as assign-task
-    when_to_use = (
-        "task too big for one commit — break into ordered subtasks; "
-        "runner advances you through them."
-    )
+    when_to_use = "ONLY for INDEPENDENTLY-committable subtasks; for sequential/coupled steps just chain tool calls in one turn"
     description = (
-        "Decompose a task into ordered subtasks assigned to yourself. "
-        "Without parent_task_id, attaches to your synthetic root for this "
-        "run (self-decompose against the project goal). With parent_task_id, "
-        "drills into a task already on your desk — the parent must be "
-        "assigned to you and have no existing children."
+        "Decompose a task into INDEPENDENTLY-COMMITTABLE subtasks assigned to "
+        "yourself. Each subtask runs in its own context window — when subtask N "
+        "closes, its tool history is stashed and replaced with a summary marker "
+        "before subtask N+1 starts. That's a feature for unrelated work in the "
+        "same area; it's a LOBOTOMY for sequential code that builds on prior "
+        "subtasks (state → entities → scene). \n\n"
+        "RIGHT use: 'fix 5 unrelated lint warnings', 'write 4 independent doc "
+        "files', 'add 3 separate test cases that don't share fixtures'.\n"
+        "WRONG use: 'implement state → use state for entities → use entities "
+        "for scene' — that's a single coherent unit, just chain fs-write calls "
+        "within ONE iteration (you have 30 tool-iterations per turn).\n\n"
+        "Without parent_task_id, attaches to your synthetic root. With "
+        "parent_task_id, drills into a task already on your desk — the parent "
+        "must be assigned to you and have no existing children."
     )
     input_schema: dict[str, Any] = {
         "type": "object",

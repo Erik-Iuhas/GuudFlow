@@ -171,7 +171,14 @@ class AssignTask(BaseTool):
                 "minItems": 1,
                 "description": (
                     "Track 7 — optional ordered list of {goal, acceptance} "
-                    "chunks. When present the runner creates parent + "
+                    "chunks. ONLY use when the chunks are INDEPENDENTLY "
+                    "committable (each could ship alone). For sequential / "
+                    "coupled work just send one task and let the assignee "
+                    "chain tool calls. Each subtask's context window is "
+                    "isolated — its tool history gets stashed as a summary "
+                    "before the next subtask starts. That's a feature for "
+                    "unrelated work, a lobotomy for code that builds on prior "
+                    "subtasks. When present the runner creates parent + "
                     "children atomically; assignee gets the parent "
                     "IN_PROGRESS and the children PENDING in order."
                 ),
