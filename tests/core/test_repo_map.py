@@ -111,6 +111,23 @@ def test_dotfiles_skipped(tmp_path: Path):
     assert paths == ["app.py"]
 
 
+def test_vendor_dirs_pruned(tmp_path: Path):
+    """Track 4.4 — node_modules, dist, venv, etc. are skipped so init
+    stays fast on real repos. Only top-level project files land in the map."""
+    _write(tmp_path, "src/app.py", "x = 1\n")
+    _write(tmp_path, "node_modules/lodash/index.js", "module.exports = {}\n")
+    _write(tmp_path, "node_modules/react/dist/react.js", "export default 1\n")
+    _write(tmp_path, "dist/bundle.js", "var x;\n")
+    _write(tmp_path, "venv/lib/site-packages/foo.py", "secret = 1\n")
+    _write(tmp_path, "build/output.js", "var y;\n")
+    _write(tmp_path, "__pycache__/bar.py", "noop = 1\n")
+    _write(tmp_path, ".flow/runs/r1/workspace/working/work.py", "agent = 1\n")
+
+    rm = build(tmp_path)
+    paths = sorted(e.path for e in rm.entries)
+    assert paths == ["src/app.py"]
+
+
 # ── PageRank ────────────────────────────────────────────────────────────────
 
 

@@ -271,22 +271,63 @@ def _pagerank(
 
 SUPPORTED_EXTS = PY_EXTS | JS_EXTS
 
+# Track 4.4 — directories we never descend into when building the repo map.
+# These are usually massive (node_modules: ~50k+ files) and contribute zero
+# signal — they're vendored deps, build artifacts, or virtualenvs. Tree-
+# sitter parsing every file here turns a 1-second init into a multi-minute
+# stall when AgentFlow is pointed at a real repo (in-place mode).
+_SKIP_DIRS: frozenset[str] = frozenset({
+    "node_modules",
+    "venv", "env", ".venv", ".env",
+    "dist", "build", "out", "target",
+    "__pycache__",
+    ".flow",          # AgentFlow's own metadata
+    ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    "vendor",
+    "coverage", "htmlcov", ".nyc_output",
+    ".next", ".nuxt", ".svelte-kit", ".turbo",
+    "bower_components",
+    ".tox",
+    "site-packages",
+})
+
+# Soft cap: above this many parsed files, log and stop. The map has been
+# useful long before this point; PageRank on a 5k-node graph is fine, on a
+# 50k-node graph is sluggish and burns memory for no win.
+_MAX_PARSED_FILES = 5000
+
 
 def _iter_supported_files(root: Path) -> Iterable[Path]:
-    for p in root.rglob("*"):
-        if not p.is_file():
-            continue
-        if any(part.startswith(".") for part in p.relative_to(root).parts):
-            continue  # skip .git/, .venv/, etc.
-        if p.suffix in SUPPORTED_EXTS:
-            yield p
+    """Walk `root` yielding parseable source files. Prunes large
+    vendored/build/cache directories — see _SKIP_DIRS — so init stays
+    fast on real repos."""
+    import os as _os
+    for dirpath, dirnames, filenames in _os.walk(root):
+        # Prune in place — os.walk respects mutation of dirnames.
+        dirnames[:] = [
+            d for d in dirnames
+            if not d.startswith(".") and d not in _SKIP_DIRS
+        ]
+        for fname in filenames:
+            suffix = Path(fname).suffix
+            if suffix not in SUPPORTED_EXTS:
+                continue
+            yield Path(dirpath) / fname
 
 
 def build(root: Path | str, generated_at: str = "") -> RepoMap:
-    """Full scan and rebuild of the repo map for `root`."""
+    """Full scan and rebuild of the repo map for `root`. Capped at
+    `_MAX_PARSED_FILES` so a misconfigured / unfiltered tree doesn't
+    pin the runner at startup."""
+    import logging
+    log = logging.getLogger(__name__)
     root = Path(root).resolve()
     parsed: dict[str, _ParsedFile] = {}
+    capped = False
     for path in _iter_supported_files(root):
+        if len(parsed) >= _MAX_PARSED_FILES:
+            capped = True
+            break
         rel = path.relative_to(root).as_posix()
         try:
             source = path.read_bytes()
@@ -295,6 +336,13 @@ def build(root: Path | str, generated_at: str = "") -> RepoMap:
         pf = _parse_file(rel, source)
         if pf is not None:
             parsed[rel] = pf
+
+    if capped:
+        log.warning(
+            "repo_map: hit %d-file cap at %s; PageRank is partial. "
+            "Add directories to _SKIP_DIRS if a large vendored tree is leaking through.",
+            _MAX_PARSED_FILES, root,
+        )
 
     return _assemble(parsed, generated_at)
 
