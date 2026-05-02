@@ -80,6 +80,46 @@ def _data_root() -> Path:
 register_builtins()
 
 
+def _start_inproc_worker(app: FastAPI, data_root: Path) -> "asyncio.Task":
+    """Build the in-process JobRunner for `data_root` and spawn its
+    worker task. Stashes both on `app.state` and returns the task so the
+    lifespan exit can await it.
+
+    Used by lifespan startup AND by the settings PUT hot-reload path
+    (Track 4.4) — when storage_root changes, we tear down the old
+    JobRunner and start a new one bound to the new path so freshly
+    enqueued runs land in the new `<root>/runs/`.
+    """
+    async def loader(project_id: str):
+        return await app.state.project_store.get(project_id)
+
+    app.state.job_runner = JobRunner(
+        queue=app.state.queue,
+        project_loader=loader,
+        data_root=data_root,
+        docker_manager=DockerManager(),
+        run_registry=app.state.run_registry,
+        quip_registry=app.state.quip_registry,
+    )
+    worker_task = asyncio.create_task(app.state.job_runner.run_forever())
+    app.state.worker_task = worker_task
+    return worker_task
+
+
+async def restart_inproc_worker(app: FastAPI, data_root: Path) -> None:
+    """Cleanly stop the current worker and start a new one bound to
+    `data_root`. Caller must guarantee no jobs are mid-flight."""
+    existing = getattr(app.state, "worker_task", None)
+    runner = getattr(app.state, "job_runner", None)
+    if existing is not None and runner is not None:
+        runner.stop()
+        try:
+            await asyncio.wait_for(existing, timeout=5.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            existing.cancel()
+    _start_inproc_worker(app, data_root)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: build stores + queue + worker. Shutdown: stop the worker.
@@ -135,31 +175,19 @@ async def lifespan(app: FastAPI):
 
     worker_task = None
     if os.environ.get("GUUDFLOW_DISABLE_INPROC_WORKER") != "1":
-        async def loader(project_id: str):
-            return await app.state.project_store.get(project_id)
-
-        # LLM left as None so the JobRunner uses the default (Anthropic SDK).
-        # Tests inject their own runner directly.
-        app.state.job_runner = JobRunner(
-            queue=app.state.queue,
-            project_loader=loader,
-            data_root=data_root,
-            docker_manager=DockerManager(),
-            run_registry=app.state.run_registry,
-            quip_registry=app.state.quip_registry,
-        )
-        worker_task = asyncio.create_task(app.state.job_runner.run_forever())
-        app.state.worker_task = worker_task
+        worker_task = _start_inproc_worker(app, data_root)
 
     try:
         yield
     finally:
-        if worker_task is not None:
+        if app.state.__dict__.get("worker_task") is not None:
             app.state.job_runner.stop()
             try:
-                await asyncio.wait_for(worker_task, timeout=5.0)
+                await asyncio.wait_for(
+                    app.state.worker_task, timeout=5.0,
+                )
             except (asyncio.TimeoutError, asyncio.CancelledError):
-                worker_task.cancel()
+                app.state.worker_task.cancel()
 
 
 def create_app() -> FastAPI:

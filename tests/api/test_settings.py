@@ -159,6 +159,30 @@ def test_put_settings_refuses_hot_swap_when_job_in_flight(
     assert body["restart_required"] is True
 
 
+def test_put_settings_rebuilds_inproc_worker(client, tmp_path):
+    """Hot-reload also tears down and restarts the in-process JobRunner so
+    newly enqueued runs land in the new <root>/runs/. Without this, the
+    worker keeps writing to the OLD data_root and Studio shows ghost
+    runs ("no on-disk meta yet" forever)."""
+    state = client.app.state  # type: ignore[attr-defined]
+    original_runner = state.job_runner
+    original_data_root = state.job_runner.data_root
+
+    new_base = tmp_path / "new_repo"
+    new_base.mkdir()
+    resp = client.put("/api/settings", json={
+        "storage_mode": "in-directory",
+        "storage_root": str(new_base),
+    })
+    assert resp.status_code == 200
+    assert resp.json()["hot_reloaded"] is True
+
+    # JobRunner instance was replaced.
+    assert state.job_runner is not original_runner
+    assert state.job_runner.data_root != original_data_root
+    assert Path(state.job_runner.data_root) == (new_base / ".flow").resolve()
+
+
 def test_put_settings_repeat_same_value_still_hot_reloads(client):
     """PUT with the same storage_mode is idempotent and still hot-reloads
     (cheap rebuild). restart_required stays False either way."""

@@ -151,6 +151,13 @@ async def update_settings(
             request.app.state.persona_store = PersonaStore(
                 new_cfg.personas_root.resolve(),
             )
+            # Track 4.4 — also rebuild the in-process JobRunner so newly
+            # enqueued runs land in the new <root>/runs/. Without this
+            # the worker keeps writing to the old data_root and Studio
+            # shows ghost runs ("no on-disk meta yet" forever).
+            from api.main import restart_inproc_worker
+            if getattr(request.app.state, "worker_task", None) is not None:
+                await restart_inproc_worker(request.app, new_data_root)
             hot_reloaded = True
         except OSError:
             # If the new path can't be created, the persisted settings
