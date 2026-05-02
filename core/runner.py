@@ -756,6 +756,67 @@ class AgentRunner:
             bucket["input_tokens"] += in_tok
             bucket["output_tokens"] += out_tok
 
+        # Smart-parent gate for decompose-task / assign-task subtasks=[].
+        # Classifies a proposed subtask list as INDEPENDENT vs CHAINED via
+        # a cheap sub-LLM dispatch. Coupled subtask sets are rejected so
+        # the agent has to chain tool calls within a single iteration
+        # instead of context-swapping itself between sequential pieces
+        # (the run_c3efdd1b8b lobotomy regression).
+        async def _validate_subtask_independence(
+            specs: list[dict[str, Any]],
+        ) -> dict[str, Any]:
+            try:
+                client, model_id = _sub_llm_resolver("subtask-independence")
+            except Exception as exc:
+                return {"ok": True, "reason": f"resolver unavailable: {exc}"}
+
+            from core.llm import LLMMessage as _LM
+            specs_text = "\n".join(
+                f"  {i+1}. goal: {s['goal']}\n     acceptance: {s.get('acceptance', [])}"
+                for i, s in enumerate(specs)
+            )
+            system_prompt = (
+                "You classify task decomposition proposals.\n\n"
+                "Given an ordered list of proposed subtasks, decide whether they "
+                "are INDEPENDENT (each one could ship by itself, no shared in-"
+                "progress state, no 'use the output of subtask N to build "
+                "subtask N+1' relationships) or CHAINED (later subtasks build "
+                "on or import from earlier ones).\n\n"
+                "INDEPENDENT examples: 'fix 5 unrelated lint warnings', 'write "
+                "4 separate doc files that do not reference each other', 'add 3 "
+                "test cases that share no fixtures'.\n"
+                "CHAINED examples: 'build state schema → use schema for entities "
+                "→ use entities for scene', 'scaffold project → implement core "
+                "→ wire integration', 'write API → write tests for API'.\n\n"
+                'Output STRICT JSON only: {"independent": true|false, "reason": '
+                '"<one sentence>"}. No prose outside the JSON.'
+            )
+            user_prompt = f"Proposed subtasks:\n{specs_text}"
+
+            try:
+                resp = await client.complete(
+                    system=system_prompt,
+                    messages=[_LM(role="user", content=user_prompt)],
+                    max_tokens=200,
+                    model=model_id,
+                )
+                _sub_llm_metrics_sink(
+                    "subtask-independence", resp.input_tokens, resp.output_tokens,
+                )
+            except Exception as exc:
+                return {"ok": True, "reason": f"validator dispatch failed: {exc}"}
+
+            try:
+                import json as _json
+                parsed = _json.loads(resp.text.strip())
+                independent = bool(parsed.get("independent", True))
+                reason = str(parsed.get("reason") or "").strip()
+                return {"ok": independent, "reason": reason}
+            except Exception:
+                # Fail-open on unparseable output — never block a real
+                # decomposition because the cheap model produced bad JSON.
+                return {"ok": True, "reason": "validator output unparseable"}
+
         # code:exec runner — production mode + a docker_manager routes
         # through the sandbox container; dev mode (or production without
         # a docker_manager) uses the hardened host runner. The host
@@ -789,8 +850,15 @@ class AgentRunner:
             FsWriteBatch.name: FsWriteBatch(self.files, claim_emitter, release_emitter),
             FsEditBatch.name: FsEditBatch(self.files, claim_emitter, release_emitter),
             BoardMessage.name: BoardMessage(role, self.workspace),
-            AssignTask.name: AssignTask(role, self.workspace, runner=self),
-            DecomposeTask.name: DecomposeTask(role, self.workspace),
+            AssignTask.name: AssignTask(
+                role, self.workspace,
+                runner=self,
+                independence_validator=_validate_subtask_independence,
+            ),
+            DecomposeTask.name: DecomposeTask(
+                role, self.workspace,
+                independence_validator=_validate_subtask_independence,
+            ),
             RecallSubtask.name: RecallSubtask(role, runner=self),
             # Story lifecycle — available to all agents (no RBAC gate).
             # Any agent that writes .md files may open or close a story.

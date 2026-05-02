@@ -17,12 +17,29 @@ Two flows the same tool covers:
 Pairs with the delegator-side `assign-task subtasks=[...]` extension
 (Step 5) — that one creates parent + children atomically; this one
 drills into an existing task. Same Task model, same cascade closure.
+
+Smart-parent gate (added after run_c3efdd1b8b's lobotomy regression):
+when an `independence_validator` callable is wired in by the runner,
+proposed subtasks are sent to a cheap LLM that classifies them as
+INDEPENDENT (each could ship alone) vs CHAINED (each builds on the
+previous). Chained calls are rejected before the workspace is mutated,
+with the validator's reasoning surfaced as the error. The validator is
+optional — when absent (test fixtures, dev mode without a registry)
+the gate is a no-op so existing tests keep passing.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from agents.tools.base import BaseTool
+
+# Validator callable: given a list of `{goal, acceptance}` specs,
+# return `{ok: bool, reason: str}`. The runner wires this to a
+# Track 12 sub-LLM dispatch — see core/runner.py instantiation site.
+IndependenceValidator = Callable[
+    [list[dict[str, Any]]],
+    Awaitable[dict[str, Any]],
+]
 
 
 def _err(detail: str) -> dict[str, Any]:
@@ -95,9 +112,15 @@ class DecomposeTask(BaseTool):
         },
     }
 
-    def __init__(self, from_role: str, workspace: Any):
+    def __init__(
+        self,
+        from_role: str,
+        workspace: Any,
+        independence_validator: IndependenceValidator | None = None,
+    ):
         self._from_role = from_role
         self._workspace = workspace
+        self._validator = independence_validator
 
     async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
         subtasks_raw = arguments.get("subtasks")
@@ -118,6 +141,28 @@ class DecomposeTask(BaseTool):
                 return _err(f"subtasks[{i}].acceptance must be a list")
             acceptance = [str(a).strip() for a in acceptance_raw if str(a).strip()]
             normalised.append({"goal": goal.strip(), "acceptance": acceptance})
+
+        # Smart-parent gate: when a single subtask is requested, skip
+        # the validator (no coupling possible). Otherwise classify the
+        # set as INDEPENDENT vs CHAINED via a cheap LLM. Coupled work
+        # is rejected here, before any workspace mutation, with the
+        # validator's reason surfaced as the error message.
+        if self._validator is not None and len(normalised) >= 2:
+            try:
+                verdict = await self._validator(normalised)
+            except Exception as exc:
+                # Validator failure is a soft fail — do not block the
+                # decomposition on infrastructure issues. Just proceed.
+                verdict = {"ok": True, "reason": f"validator skipped: {exc}"}
+            if not verdict.get("ok", True):
+                reason = verdict.get("reason") or "subtasks appear sequentially coupled"
+                return _err(
+                    f"decomposition rejected: {reason} "
+                    "Use decompose-task ONLY for independently-committable "
+                    "subtasks. For coupled / sequential work, chain tool "
+                    "calls within a single iteration instead — you have "
+                    "30 tool-iterations per turn."
+                )
 
         # Resolve parent — explicit > synthetic root.
         parent_id = arguments.get("parent_task_id")

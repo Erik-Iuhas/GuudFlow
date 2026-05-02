@@ -208,3 +208,78 @@ async def test_validates_all_subtasks_before_writing() -> None:
     ]})
     assert "error" in res
     assert ws.child_tasks("root:dev") == []  # no partial state
+
+
+# ── Smart-parent gate (independence validator) ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_validator_rejects_chained_subtasks() -> None:
+    """The runner injects a validator that classifies subtask sets as
+    INDEPENDENT vs CHAINED. Chained sets must be refused before any
+    workspace mutation, with the validator's reason surfaced as the error."""
+    ws = _ws()
+    _seed_synthetic_root(ws, "dev")
+
+    async def _stub_validator(specs):
+        return {"ok": False, "reason": "subtask 2 imports from subtask 1"}
+
+    tool = DecomposeTask("dev", ws, independence_validator=_stub_validator)
+    res = await tool.run({"subtasks": [
+        {"goal": "build state schema"},
+        {"goal": "use state schema for entities"},
+    ]})
+    assert "error" in res
+    assert "imports from subtask 1" in res["error"]
+    # No partial state.
+    assert ws.child_tasks("root:dev") == []
+
+
+@pytest.mark.asyncio
+async def test_validator_passes_independent_subtasks() -> None:
+    ws = _ws()
+    _seed_synthetic_root(ws, "dev")
+
+    async def _stub_validator(specs):
+        return {"ok": True, "reason": "no inter-subtask references"}
+
+    tool = DecomposeTask("dev", ws, independence_validator=_stub_validator)
+    res = await tool.run({"subtasks": [
+        {"goal": "fix lint warning in util.py"},
+        {"goal": "fix lint warning in helper.py"},
+    ]})
+    assert res.get("ok") is True
+    assert len(res["subtask_ids"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_validator_skips_when_only_one_subtask() -> None:
+    """Single subtask can't be coupled with anything — skip the gate."""
+    ws = _ws()
+    _seed_synthetic_root(ws, "dev")
+
+    called = {"count": 0}
+
+    async def _stub_validator(specs):
+        called["count"] += 1
+        return {"ok": False, "reason": "should not be called"}
+
+    tool = DecomposeTask("dev", ws, independence_validator=_stub_validator)
+    res = await tool.run({"subtasks": [{"goal": "do the only thing"}]})
+    assert res.get("ok") is True
+    assert called["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_validator_failure_fails_open() -> None:
+    """If the validator raises (network error, bad model), allow the
+    decomposition through rather than block work on infrastructure issues."""
+    ws = _ws()
+    _seed_synthetic_root(ws, "dev")
+
+    async def _broken_validator(specs):
+        raise RuntimeError("API down")
+
+    tool = DecomposeTask("dev", ws, independence_validator=_broken_validator)
+    res = await tool.run({"subtasks": [{"goal": "a"}, {"goal": "b"}]})
+    assert res.get("ok") is True

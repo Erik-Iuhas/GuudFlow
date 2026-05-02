@@ -198,12 +198,21 @@ class AssignTask(BaseTool):
         "required": ["assignee", "goal"],
     }
 
-    def __init__(self, from_role: str, workspace: Any, runner: Any | None = None):
+    def __init__(
+        self,
+        from_role: str,
+        workspace: Any,
+        runner: Any | None = None,
+        independence_validator: Any | None = None,
+    ):
         self._from_role = from_role
         self._workspace = workspace
         # Optional runner handle so the tool can read the planner's
         # active story when the caller doesn't pass one explicitly.
         self._runner = runner
+        # Smart-parent gate (mirror of decompose-task) — when wired,
+        # classifies subtasks=[...] payloads as INDEPENDENT vs CHAINED.
+        self._validator = independence_validator
 
     async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
         assignee = arguments.get("assignee")
@@ -280,6 +289,24 @@ class AssignTask(BaseTool):
                     "goal": sub_goal.strip(),
                     "acceptance": sub_acc,
                 })
+
+            # Smart-parent gate (same logic as decompose-task). Only
+            # classify when ≥ 2 subtasks were proposed — single-child
+            # batches can't be coupled with anything.
+            if self._validator is not None and len(normalised_subtasks) >= 2:
+                try:
+                    verdict = await self._validator(normalised_subtasks)
+                except Exception as exc:
+                    verdict = {"ok": True, "reason": f"validator skipped: {exc}"}
+                if not verdict.get("ok", True):
+                    reason = verdict.get("reason") or "subtasks appear sequentially coupled"
+                    return _err(
+                        f"assign-task subtasks rejected: {reason} "
+                        "Use the subtasks=[] field ONLY for independently-"
+                        "committable chunks. For coupled / sequential work, "
+                        "send a single task and let the assignee chain tool "
+                        "calls within their iteration."
+                    )
 
         iteration = getattr(self._workspace, "iteration", 0)
         task = Task(
