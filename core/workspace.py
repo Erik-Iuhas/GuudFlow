@@ -378,6 +378,12 @@ class Workspace:
     # signal AND mutates the dict atomically.
     tasks: dict[str, Task] = field(default_factory=dict)
     task_queues: dict[str, list[str]] = field(default_factory=dict)
+    # Track 7 — currently-active subtask per role. Set by `mutate_task`
+    # on IN_PROGRESS transitions, cleared on terminal status. Read by
+    # `effective_system_prompt` Layer 4.7 to surface the agent's current
+    # focus and by Track 8 (subtask context hot-swap) to bound the
+    # message-history span at closure time.
+    active_subtask: dict[str, str] = field(default_factory=dict)
 
     # Run-level wall-clock deadline (epoch seconds). Set by the runner
     # from a configurable budget. The scheduler checks this between
@@ -560,9 +566,19 @@ class Workspace:
             parent = self.tasks.get(task.parent_task_id)
             if parent is None:
                 raise ValueError(f"unknown parent_task_id {task.parent_task_id!r}")
-            if parent.parent_task_id is not None:
+            # Track 7 — depth cap lifted 2 → 3 to make room for the
+            # synthetic root layer:
+            #   depth 1: root:{role}        (one per agent per run)
+            #   depth 2: decomposed subtasks (decompose-task / assign-task subtasks)
+            #   depth 3: further decomposition by the receiver
+            grandparent = (
+                self.tasks.get(parent.parent_task_id)
+                if parent.parent_task_id else None
+            )
+            if grandparent is not None and grandparent.parent_task_id is not None:
                 raise ValueError(
-                    "subtask depth cap (2 levels): parent already has a parent"
+                    "subtask depth cap (3 levels): cannot nest deeper than "
+                    "root → subtask → sub-subtask"
                 )
 
         self.tasks[task.task_id] = task
@@ -608,6 +624,17 @@ class Workspace:
             task.started_at_iter = iteration
         if status == "COMPLETE" and iteration is not None:
             task.completed_at_iter = iteration
+
+        # Track 7 — keep `active_subtask[role]` in sync with reality.
+        # Set on START; clear on any terminal transition. Layer 4.7 reads
+        # this to surface the agent's current focus; Track 8 reads it to
+        # bound the message-history span at closure time.
+        if task.assigned_to:
+            if status == "IN_PROGRESS":
+                self.active_subtask[task.assigned_to] = task.task_id
+            elif status in ("COMPLETE", "BLOCKED", "CANCELLED", "SAT_OUT"):
+                if self.active_subtask.get(task.assigned_to) == task.task_id:
+                    self.active_subtask.pop(task.assigned_to, None)
 
         signal_type = _STATUS_SIGNAL[status]
         detail = task.task_id

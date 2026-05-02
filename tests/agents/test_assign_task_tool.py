@@ -89,21 +89,26 @@ async def test_assign_task_subtask_path() -> None:
 
 @pytest.mark.asyncio
 async def test_assign_task_subtask_depth_cap_returns_error() -> None:
+    """Track 7 — cap is now 3 levels (root → subtask → sub-subtask).
+    Depth-4 still rejected so the manifest-coordination case stays bounded."""
     ws = _ws()
     tool = AssignTask("architect", ws)
-    grand = await tool.run({"assignee": "lead", "goal": "g"})
-    parent = await tool.run({
-        "assignee": "lead",
-        "goal": "p",
-        "parent_task": grand["task_id"],
+    root = await tool.run({"assignee": "lead", "goal": "root"})
+    sub = await tool.run({
+        "assignee": "lead", "goal": "sub", "parent_task": root["task_id"],
     })
-    leaf = await tool.run({
-        "assignee": "dev",
-        "goal": "leaf",
-        "parent_task": parent["task_id"],
+    # Depth-3 is now allowed.
+    sub_sub = await tool.run({
+        "assignee": "dev", "goal": "sub-sub", "parent_task": sub["task_id"],
     })
-    assert "error" in leaf
-    assert "depth cap" in leaf["error"]
+    assert sub_sub["ok"] is True
+    # Depth-4 must still error.
+    deep = await tool.run({
+        "assignee": "dev", "goal": "too deep",
+        "parent_task": sub_sub["task_id"],
+    })
+    assert "error" in deep
+    assert "depth cap" in deep["error"]
 
 
 @pytest.mark.asyncio

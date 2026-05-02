@@ -83,17 +83,74 @@ def test_add_task_rejects_duplicate_id() -> None:
         ws.add_task(Task(task_id="t1", story_id="s1", assigned_to="dev", goal="b"))
 
 
-def test_subtask_depth_cap_two_levels() -> None:
+def test_active_subtask_set_on_start_cleared_on_terminal() -> None:
+    """Track 7 — `workspace.active_subtask[role]` mirrors mutate_task
+    transitions: set on IN_PROGRESS, cleared on COMPLETE / BLOCKED /
+    CANCELLED / SAT_OUT (only when the cleared id matches — defensive
+    against out-of-order updates)."""
     ws = _ws()
-    ws.add_task(Task(task_id="parent", story_id="s1", assigned_to="planner", goal="p"))
+    ws.add_task(Task(task_id="t1", story_id="s1", assigned_to="dev", goal="x"))
+    assert "dev" not in ws.active_subtask  # PENDING tasks don't set it
+
+    ws.mutate_task("t1", "IN_PROGRESS", iteration=1)
+    assert ws.active_subtask["dev"] == "t1"
+
+    ws.mutate_task("t1", "COMPLETE", iteration=2)
+    assert "dev" not in ws.active_subtask
+
+
+def test_active_subtask_isolates_per_role() -> None:
+    ws = _ws()
+    ws.add_task(Task(task_id="ta", story_id="s1", assigned_to="dev_a", goal="a"))
+    ws.add_task(Task(task_id="tb", story_id="s1", assigned_to="dev_b", goal="b"))
+    ws.mutate_task("ta", "IN_PROGRESS", iteration=1)
+    ws.mutate_task("tb", "IN_PROGRESS", iteration=1)
+    assert ws.active_subtask == {"dev_a": "ta", "dev_b": "tb"}
+    ws.mutate_task("ta", "COMPLETE", iteration=2)
+    # Closing dev_a's task doesn't touch dev_b's slot.
+    assert ws.active_subtask == {"dev_b": "tb"}
+
+
+def test_active_subtask_does_not_clear_when_unrelated_task_terminal() -> None:
+    """If two of dev_a's tasks are flying (impossible in practice today,
+    but defensive): closing the non-active one doesn't drop the active
+    pointer."""
+    ws = _ws()
+    ws.add_task(Task(task_id="t1", story_id="s1", assigned_to="dev", goal="1"))
+    ws.add_task(Task(task_id="t2", story_id="s1", assigned_to="dev", goal="2"))
+    ws.mutate_task("t1", "IN_PROGRESS", iteration=1)
+    # Manually set active to something unrelated; close t1 — should NOT
+    # blow away the unrelated pointer.
+    ws.active_subtask["dev"] = "t2"
+    ws.mutate_task("t1", "COMPLETE", iteration=2)
+    assert ws.active_subtask["dev"] == "t2"
+
+
+def test_subtask_depth_cap_three_levels() -> None:
+    """Track 7 — depth cap lifted to 3 to make room for the synthetic-root layer.
+
+    Layout:
+        depth 1: root (synthetic per-role root, set up by the runner)
+        depth 2: subtasks created via decompose-task / assign-task subtasks
+        depth 3: further decomposition by the receiver
+        depth 4: rejected
+    """
+    ws = _ws()
+    ws.add_task(Task(task_id="root", story_id="s1", assigned_to="planner", goal="r"))
     ws.add_task(Task(
-        task_id="child", story_id="s1", assigned_to="dev",
-        parent_task_id="parent", goal="c",
+        task_id="sub", story_id="s1", assigned_to="dev",
+        parent_task_id="root", goal="s",
     ))
+    # Depth-3 must succeed (was rejected before Track 7).
+    ws.add_task(Task(
+        task_id="sub-sub", story_id="s1", assigned_to="dev",
+        parent_task_id="sub", goal="ss",
+    ))
+    # Depth-4 still rejected.
     with pytest.raises(ValueError, match="depth cap"):
         ws.add_task(Task(
-            task_id="grandchild", story_id="s1", assigned_to="dev",
-            parent_task_id="child", goal="gc",
+            task_id="sub-sub-sub", story_id="s1", assigned_to="dev",
+            parent_task_id="sub-sub", goal="sss",
         ))
 
 
