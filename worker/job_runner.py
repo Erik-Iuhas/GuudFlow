@@ -139,6 +139,32 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
     raw_pr_mode = str(data.get("pr_mode") or "manual").lower()
     pr_mode = raw_pr_mode if raw_pr_mode in ("manual", "auto") else "manual"
 
+    # Track 12 — validate sub_llm_models against the model registry. Unknown
+    # ids fail loudly so typos surface at project-load time, not at the
+    # first dispatch call mid-run. Empty / missing dict is valid (everything
+    # falls back to cheapest_tool_capable() at dispatch time).
+    raw_sub_llm = data.get("sub_llm_models") or {}
+    sub_llm_models: dict[str, str] = {}
+    if isinstance(raw_sub_llm, dict) and raw_sub_llm:
+        from pathlib import Path as _P
+        from core.llm.registry import ModelRegistry as _MR
+        try:
+            _reg = _MR(_P("data/models.json"))
+            _known = {m.id for m in _reg.list_models()}
+        except Exception:
+            _known = set()
+        for use_case, model_id in raw_sub_llm.items():
+            mid = str(model_id or "").strip()
+            if not mid:
+                continue
+            if _known and mid not in _known:
+                raise ValueError(
+                    f"sub_llm_models[{use_case!r}] = {mid!r} is not in the "
+                    "model registry (data/models.json). Pick a known model "
+                    "or remove the entry to fall back to cheapest_tool_capable()."
+                )
+            sub_llm_models[str(use_case)] = mid
+
     return ProjectConfig(
         project_id=data.get("project_id", ""),
         goal=data.get("goal", ""),
@@ -153,6 +179,7 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         desk_seeds=desk_seeds,
         stories=stories,
         pr_mode=pr_mode,  # type: ignore[arg-type]
+        sub_llm_models=sub_llm_models,
     )
 
 

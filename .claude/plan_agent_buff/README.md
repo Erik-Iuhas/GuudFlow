@@ -6,7 +6,7 @@ Detailed plans for the GuudFlow multi-track roadmap. Parent strategy doc: `~/.cl
 
 Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance criteria and a commit plan. Treat the parent roadmap as "why," and these as "how."
 
-**Progress: 10 / 16 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d, ✅ Track 2a, ✅ Track 2b, ✅ Track 3a, ✅ Track 3c, ✅ Track 3d.4, ✅ Track 3e.
+**Progress: 14 / 17 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d, ✅ Track 2a, ✅ Track 2b, ✅ Track 3a, ✅ Track 3c, ✅ Track 3d.2 *(partial → completed dd7985e)*, ✅ Track 3d.4, ✅ Track 3e, ✅ Track 4, ✅ Track 4.2, ✅ Track 4.3, ✅ Track 4.4.
 
 ## Files
 
@@ -26,8 +26,13 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 | `track_3f_cross_reference_graph.md` | 3f | Cross-reference graph (tree-sitter extension; Python/JS/TS/C++) | 🟦 **Deferred** — gated on real-run signals | Track 1, 1c | 550–850k (3 phases) |
 | `track_4_flow_dir_design.md` | 4 | Design spec (history — superseded by `track_4_flow_dir_implementation.md`) | ✅ **Shipped** (storage-mode toggle + Settings drawer; commits 5c7dc9b → 824fde5) | — | 100–150k |
 | `track_4_flow_dir_implementation.md` | 4 | Implementation plan (storage mode + Settings drawer) | ✅ **Shipped** | Track 1 | 600–900k |
-| `track_4_2_pr_mode.md` | 4.2 | Per-project pr_mode (manual stops at story branch; auto merges to main) | ⬜ Not started | Track 4 | 200–350k |
+| `track_4_2_pr_mode.md` | 4.2 | Per-project pr_mode (manual stops at story branch; auto merges to main) | ✅ **Shipped** (`d71ac2b` `ecd4b34`) | Track 4 | 200–350k |
+| _Track 4.3 (no plan file)_ | 4.3 | In-place working tree via Source repo (Local path → In-place); inherits Storage root from Settings | ✅ **Shipped** (`94b7650` `2f5f74d` `79413dc`) | Track 4 | — |
+| _Track 4.4 (no plan file)_ | 4.4 | Settings hot-reload (no uvicorn restart) + gitignore-aware fs-list/repo_map + Files/Git tabs respect in-place working dir | ✅ **Shipped** (`876cbfc` `b24b142` `2077441` `25266cf`) | Track 4.3 | — |
 | `track_6_peer_rework.md` | 6 | Feature | ⬜ Not started | — | 150–250k |
+| `track_11_worker_cognition_view.md` | 11 | Worker cognition view (live "current state of thinking" tab) | 🟦 **Deferred** — gated on Track 7 (subtask decomposition) | Track 7, pairs with Track 8 | 200–350k |
+| `master_subtasks_dispatch_t7_t8_t12.md` | 7 + 8 + 12 | **Master plan** spanning sub-LLM dispatch (T12), subtask decomposition (T7), and context hot-swap (T8). Read this first before the per-track buff files. | 🟨 **In progress** (T12 partial — `cheapest_tool_capable` shipped) | Track 1, registry | 800k–1.2M total |
+| `track_12_sub_llm_dispatch.md` | 12 | **Phase 1 detail** — `llm-dispatch` primitive + `summarise-subtask` / `protocol-cleanup` wrappers + per-use-case model picker | 🟨 **In progress** | Master | 250–400k |
 
 ### Deferred (intentionally not specced as files)
 

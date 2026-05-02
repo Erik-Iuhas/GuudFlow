@@ -232,6 +232,103 @@ def test_get_client_is_cached(tmp_path, monkeypatch):
 # ── Real models.json ──────────────────────────────────────────────────────────
 
 
+# ── Track 12 — cheapest_tool_capable() ────────────────────────────────────────
+
+
+def test_cheapest_tool_capable_picks_lowest_cost(tmp_path, monkeypatch):
+    """Lowest sum of input + output cost wins."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    path = _write_registry(tmp_path, BASE_MODELS)
+    reg = ModelRegistry(path)
+    pick = reg.cheapest_tool_capable()
+    # qwen2.5:7b is local (cost 0); should win on price.
+    assert pick.id == "qwen2.5:7b"
+
+
+def test_cheapest_tool_capable_skips_deprecated(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    models = [
+        {**BASE_MODELS[1], "deprecated": False},  # sonnet, $0.018/k
+        {
+            "id": "ancient-cheap",
+            "provider": "anthropic",
+            "tier": "fast",
+            "supports_tools": True,
+            "cost_per_1k_input": 0.001,
+            "cost_per_1k_output": 0.001,
+            "deprecated": True,
+        },
+    ]
+    path = _write_registry(tmp_path, models)
+    reg = ModelRegistry(path)
+    pick = reg.cheapest_tool_capable()
+    # ancient-cheap would win on price but is deprecated.
+    assert pick.id == "claude-sonnet-4-6"
+
+
+def test_cheapest_tool_capable_skips_no_tool_support(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    models = [
+        {**BASE_MODELS[1]},  # sonnet, supports tools
+        {
+            "id": "no-tools-cheap",
+            "provider": "anthropic",
+            "tier": "fast",
+            "supports_tools": False,
+            "cost_per_1k_input": 0.0001,
+            "cost_per_1k_output": 0.0001,
+            "deprecated": False,
+        },
+    ]
+    path = _write_registry(tmp_path, models)
+    reg = ModelRegistry(path)
+    pick = reg.cheapest_tool_capable()
+    assert pick.id == "claude-sonnet-4-6"
+
+
+def test_cheapest_tool_capable_skips_unkeyed_provider(tmp_path, monkeypatch):
+    """Models whose provider has no API key set are excluded."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    # Force only a remote anthropic model with no key
+    models = [BASE_MODELS[1]]  # sonnet
+    path = _write_registry(tmp_path, models)
+    reg = ModelRegistry(path)
+    with pytest.raises(NoModelAvailableError, match="tool-capable"):
+        reg.cheapest_tool_capable()
+
+
+def test_cheapest_tool_capable_alphabetical_tiebreak(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    models = [
+        {
+            "id": "z-zero",
+            "provider": "anthropic",
+            "tier": "fast",
+            "supports_tools": True,
+            "cost_per_1k_input": 0.0,
+            "cost_per_1k_output": 0.0,
+            "deprecated": False,
+        },
+        {
+            "id": "a-zero",
+            "provider": "anthropic",
+            "tier": "fast",
+            "supports_tools": True,
+            "cost_per_1k_input": 0.0,
+            "cost_per_1k_output": 0.0,
+            "deprecated": False,
+        },
+    ]
+    path = _write_registry(tmp_path, models)
+    reg = ModelRegistry(path)
+    pick = reg.cheapest_tool_capable()
+    assert pick.id == "a-zero"
+
+
+# ── Real models.json ──────────────────────────────────────────────────────────
+
+
 def test_real_models_json_loads(monkeypatch):
     """Smoke-test that data/models.json parses without error."""
     from pathlib import Path

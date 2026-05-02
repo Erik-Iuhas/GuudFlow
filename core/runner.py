@@ -39,6 +39,9 @@ from agents.tools.board import AssignTask, BoardMessage
 from agents.tools.code import CodeExec, CodeOutline
 from agents.tools.code_batch import CodeOutlineBatch
 from agents.tools.fs_batch import FsEditBatch, FsWriteBatch
+from agents.tools.llm_dispatch import (
+    LlmDispatchTool, ProtocolCleanupTool, SummariseSubtaskTool,
+)
 from agents.tools.data import DataCsv, DataJson, DataXml, DataYaml
 from agents.tools.desk_push import DeskPushTool
 from agents.tools.desk_search import DeskSearchTool
@@ -203,6 +206,12 @@ class ProjectConfig:
     # (`flow/story-<slug>` if a story is open, else `flow/run-<id>`) and surfaces
     # a paste-ready `gh pr create` command. Default `manual` for real-repo safety.
     pr_mode: Literal["manual", "auto"] = "manual"
+    # Track 12 — per-use-case sub-LLM model picks. Maps use_case name
+    # (e.g. "summarise-subtask", "protocol-cleanup", "llm-dispatch") to a
+    # registered model id from data/models.json. Empty dict (default) means
+    # every use_case falls back to ModelRegistry.cheapest_tool_capable() at
+    # dispatch time. Validated at project-load — unknown ids fail loudly.
+    sub_llm_models: dict[str, str] = field(default_factory=dict)
 
 
 # Default model id per tier. The runner may override via project config.
@@ -327,6 +336,7 @@ LOCAL_TOOL_CLASSES: tuple[type[BaseTool], ...] = (
     TimeDiff, TimeNow,
     WebFetch, WebSearch,
     DeskSearchTool, DeskPushTool,
+    LlmDispatchTool, SummariseSubtaskTool, ProtocolCleanupTool,  # Track 12
 )
 
 
@@ -668,6 +678,45 @@ class AgentRunner:
                 return
             await agent.release_files(self.workspace, [path], outcome=outcome, commit_hash=commit_hash)
 
+        # Track 12 — sub-LLM dispatch resolver + metrics sink. Resolver
+        # picks (LLMClient, model_id) for a use_case, honoring the
+        # project's `sub_llm_models` map first and falling back to the
+        # registry's `cheapest_tool_capable()`. Sink rolls per-use-case
+        # token usage onto the calling agent's `_current_metrics` row.
+        def _sub_llm_resolver(use_case: str) -> "tuple[LLMClient, str]":
+            override_id = (self.project.sub_llm_models or {}).get(use_case)
+            registry = getattr(self, "_model_registry", None)
+            if override_id and registry is not None:
+                m = registry.get(override_id)
+                if m is not None:
+                    return registry.get_client(m), m.id
+            if registry is not None:
+                m = registry.cheapest_tool_capable()
+                return registry.get_client(m), m.id
+            # No registry — single-LLM dev mode. Reuse the agent's own
+            # client + the agent's resolved model id.
+            agent = self.agents.get(role)
+            if agent is not None and getattr(agent, "_llm", None):
+                return agent._llm, getattr(agent, "_model", "")
+            raise RuntimeError(
+                "sub-LLM dispatch needs either a ModelRegistry or an "
+                "agent-level LLM client; neither is available."
+            )
+
+        def _sub_llm_metrics_sink(use_case: str, in_tok: int, out_tok: int) -> None:
+            agent = self.agents.get(role)
+            if agent is None:
+                return
+            m = getattr(agent, "_current_metrics", None)
+            if m is None:
+                return
+            bucket = m.sub_llm_breakdown.setdefault(
+                use_case, {"calls": 0, "input_tokens": 0, "output_tokens": 0},
+            )
+            bucket["calls"] += 1
+            bucket["input_tokens"] += in_tok
+            bucket["output_tokens"] += out_tok
+
         # code:exec runner — production mode + a docker_manager routes
         # through the sandbox container; dev mode (or production without
         # a docker_manager) uses the hardened host runner. The host
@@ -727,6 +776,23 @@ class AgentRunner:
             TimeNow.name: TimeNow(),
             WebFetch.name: WebFetch(),
             WebSearch.name: WebSearch(),
+            # Track 12 — sub-LLM dispatch primitive + opinionated wrappers.
+            # All three share the same resolver / metrics sink; the use_case
+            # tag is fixed per subclass (LlmDispatchTool.USE_CASE) so the
+            # resolver picks the right model and the sink credits the right
+            # bucket in `IterationMetrics.sub_llm_breakdown`.
+            LlmDispatchTool.name: LlmDispatchTool(
+                resolver=_sub_llm_resolver,
+                metrics_sink=_sub_llm_metrics_sink,
+            ),
+            SummariseSubtaskTool.name: SummariseSubtaskTool(
+                resolver=_sub_llm_resolver,
+                metrics_sink=_sub_llm_metrics_sink,
+            ),
+            ProtocolCleanupTool.name: ProtocolCleanupTool(
+                resolver=_sub_llm_resolver,
+                metrics_sink=_sub_llm_metrics_sink,
+            ),
         }
         # M2: add desk tools wired to this agent's desk index.
         from agents.tools.desk_search import DeskSearchTool

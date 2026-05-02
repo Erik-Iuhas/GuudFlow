@@ -133,6 +133,11 @@ class IterationMetrics:
     tool_output_tokens_raw: int = 0
     tool_output_tokens_compressed: int = 0
     tokens_saved_by_compression: int = 0
+    # Track 12: per-use-case sub-LLM dispatch roll-up. Keyed by use_case
+    # name (e.g. "summarise-subtask", "protocol-cleanup", "llm-dispatch"),
+    # each entry is `{"calls": int, "input_tokens": int, "output_tokens": int}`.
+    # Lets the user see where their sub-dispatch budget went per run.
+    sub_llm_breakdown: dict[str, dict[str, int]] = field(default_factory=dict)
 
     completed: bool = False
     failed: bool = False

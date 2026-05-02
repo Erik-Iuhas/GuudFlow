@@ -116,6 +116,44 @@ class ModelRegistry:
             "Ensure the relevant API key env var is set."
         )
 
+    def cheapest_tool_capable(self) -> ModelInfo:
+        """Track 12 — fallback model picker for sub-LLM dispatch.
+
+        Returns the cheapest non-deprecated, tool-capable model whose
+        provider has an API key configured. Cost is the sum of input +
+        output per-1k prices (equally weighted — we don't know the
+        in/out ratio at config time). Stable tiebreaker: alphabetical
+        id, so the choice doesn't drift across restarts when two
+        models cost the same.
+
+        Raises NoModelAvailableError if no candidate exists. Used when
+        a project's `sub_llm_models[use_case]` is unset.
+        """
+        candidates: list[ModelInfo] = []
+        for m in self._models.values():
+            if m.deprecated:
+                continue
+            if not m.supports_tools:
+                continue
+            if not self._has_api_key(m.provider):
+                continue
+            candidates.append(m)
+
+        if not candidates:
+            raise NoModelAvailableError(
+                "No tool-capable, non-deprecated model is available "
+                "(checked data/models.json + provider API keys). "
+                "Track 12 sub-LLM dispatch needs at least one usable model."
+            )
+
+        candidates.sort(
+            key=lambda m: (
+                m.cost_per_1k_input + m.cost_per_1k_output,
+                m.id,
+            ),
+        )
+        return candidates[0]
+
     def get_client(self, model: ModelInfo) -> LLMClient:
         """Return a cached LLMClient for the model's provider."""
         provider_name = model.provider
