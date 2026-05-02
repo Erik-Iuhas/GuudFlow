@@ -176,14 +176,23 @@ async def get_run_desks(request: Request, run_id: str) -> dict:
     registry = getattr(request.app.state, "run_registry", None)
     workspace = await registry.get(run_id) if registry is not None else None
     if workspace is not None:
+        # Synthetic `root:*` tasks are runner plumbing (Track 7) and must
+        # not surface in the Kanban — they carry the project goal verbatim
+        # and would otherwise show as phantom "assigned" cards.
         tasks_by_id = {
-            tid: serialise_task(t) for tid, t in workspace.tasks.items()
+            tid: serialise_task(t)
+            for tid, t in workspace.tasks.items()
+            if not tid.startswith("root:")
         }
         desks: dict[str, list[dict]] = {}
         for role, ids in workspace.task_queues.items():
-            desks[role] = [
-                tasks_by_id[tid] for tid in ids if tid in tasks_by_id
-            ]
+            seen: set[str] = set()
+            desks[role] = []
+            for tid in ids:
+                if tid in seen or tid not in tasks_by_id:
+                    continue
+                seen.add(tid)
+                desks[role].append(tasks_by_id[tid])
         return {"desks": desks, "tasks_by_id": tasks_by_id}
 
     # Run is not active — fall through to disk.

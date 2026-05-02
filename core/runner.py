@@ -950,7 +950,9 @@ class AgentRunner:
             # Bypass add_task / mutate_task — direct write so the board
             # stays quiet and the persister doesn't fire for plumbing.
             ws.tasks[root_id] = task
-            ws.task_queues.setdefault(cfg.role, []).append(root_id)
+            queue = ws.task_queues.setdefault(cfg.role, [])
+            if root_id not in queue:
+                queue.append(root_id)
             # Seed active_subtask manually (mutate_task would have done
             # this; we're skipping that path for silence).
             ws.active_subtask[cfg.role] = root_id
