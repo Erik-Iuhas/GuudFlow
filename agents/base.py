@@ -867,6 +867,35 @@ class BaseAgent:
             if resp.model:
                 m.model = resp.model
             m.final_message_tokens = _approx_tokens(resp.text)
+
+        # Raw LLM-call dump — every system + messages + response triple
+        # appended to <run_root>/llm_calls.jsonl. No schema babysitting,
+        # no try/except swallowing — if it crashes, we want to know.
+        # Sink is injected by the runner; if absent, this is a no-op.
+        sink = getattr(self, "_llm_call_dump_sink", None)
+        if sink is not None:
+            sink({
+                "ts": time.time(),
+                "role": self.role,
+                "iteration": self.iteration,
+                "model": self._model,
+                "system": system,
+                "messages": [{"role": msg.role, "content": msg.content} for msg in messages],
+                "tools_count": len(tools) if tools else 0,
+                "tools": tools or [],
+                "response": {
+                    "text": resp.text,
+                    "stop_reason": resp.stop_reason,
+                    "tool_calls": [
+                        {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                        for tc in resp.tool_calls
+                    ],
+                    "input_tokens": resp.input_tokens,
+                    "output_tokens": resp.output_tokens,
+                    "cache_read_tokens": resp.cache_read_tokens,
+                    "cache_creation_tokens": resp.cache_creation_tokens,
+                },
+            })
         return resp
 
     def _tool_schemas_for_llm(self) -> list[dict[str, Any]]:

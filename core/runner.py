@@ -563,6 +563,7 @@ class AgentRunner:
             self._build_context_log_persister()
         )
         self._agent_turns_persister = self._build_agent_turns_persister()
+        self._llm_call_dump_sink = self._build_llm_call_dump_sink()
         # Run-level deadline — checked by the scheduler.
         if max_wall_seconds is not None:
             import time as _time
@@ -1067,6 +1068,38 @@ class AgentRunner:
 
         return _persist
 
+    def _build_llm_call_dump_sink(self):
+        """Return a sink callable that appends one JSON line per LLM call
+        to <run_root>/llm_calls.jsonl. Captures the full system prompt,
+        every message, the raw response text + tool_calls, and token
+        counts. The sink is injected into every agent at setup time.
+
+        This is the unconditional debug dump — no filtering, no schema
+        validation, no try/except swallowing. If something blows up
+        we want the traceback in the run log instead of silence.
+        """
+        try:
+            self.run_root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "llm_calls sink disabled — could not create run_root %s: %s",
+                self.run_root, exc,
+            )
+            return None
+        path = self.run_root / "llm_calls.jsonl"
+        try:
+            path.touch(exist_ok=True)
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "llm_calls touch failed for %s: %s", path, exc,
+            )
+
+        def _sink(record: dict) -> None:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, default=str) + "\n")
+
+        return _sink
+
     # ── Git signal callback ─────────────────────────────────────────────────
 
     def _git_signal_emitter(self, signal_type: SignalType, summary: str, detail: str | None) -> None:
@@ -1162,6 +1195,7 @@ class AgentRunner:
             agent._llm, agent._model = self._resolve_llm_for_tier(cfg.model_tier)
             agent._broker = self.broker
             agent._context_manager = self.context_manager
+            agent._llm_call_dump_sink = self._llm_call_dump_sink
             # Track 1c — workspace handle so effective_system_prompt() can
             # inject Layer 4.5 (codebase structure from repo_map) per §28.
             agent._workspace = self.workspace
@@ -1754,11 +1788,12 @@ class AgentRunner:
                     drive_result_local = locals().get("drive_result", None)
                     try:
                         def _serialise_msg(msg: LLMMessage) -> dict:
-                            tc = None
-                            if msg.tool_calls:
-                                tc = [{"id": c.id, "name": c.name, "arguments": c.arguments}
-                                      for c in msg.tool_calls]
-                            return {"role": msg.role, "content": msg.content, "tool_calls": tc}
+                            # LLMMessage has only role + content. Tool-use
+                            # blocks live INSIDE assistant content as
+                            # Anthropic-style typed dicts (the runner
+                            # already builds them at line ~3145), so they
+                            # round-trip through `content` faithfully.
+                            return {"role": msg.role, "content": msg.content}
 
                         if isinstance(drive_result_local, protocol.CompactBlock):
                             final_output = {
@@ -4735,6 +4770,7 @@ class AgentRunner:
         agent._llm, agent._model = self._resolve_llm_for_tier(cfg.model_tier)
         agent._broker = self.broker
         agent._context_manager = self.context_manager
+        agent._llm_call_dump_sink = self._llm_call_dump_sink
         # Track 1c — see comment at primary spawn site.
         agent._workspace = self.workspace
         agent._manifest = self.manifest_builder.build_for_agent(
