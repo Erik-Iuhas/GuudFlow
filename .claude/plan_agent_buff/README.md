@@ -31,8 +31,9 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 | _Track 4.4 (no plan file)_ | 4.4 | Settings hot-reload (no uvicorn restart) + gitignore-aware fs-list/repo_map + Files/Git tabs respect in-place working dir | ✅ **Shipped** (`876cbfc` `b24b142` `2077441` `25266cf`) | Track 4.3 | — |
 | `track_6_peer_rework.md` | 6 | Feature | ⬜ Not started | — | 150–250k |
 | `track_11_worker_cognition_view.md` | 11 | Worker cognition view (live "current state of thinking" tab) | 🟦 **Deferred** — gated on Track 7 (subtask decomposition) | Track 7, pairs with Track 8 | 200–350k |
-| `master_subtasks_dispatch_t7_t8_t12.md` | 7 + 8 + 12 | **Master plan** spanning sub-LLM dispatch (T12), subtask decomposition (T7), and context hot-swap (T8). Read this first before the per-track buff files. | 🟨 **In progress** (T12 partial — `cheapest_tool_capable` shipped) | Track 1, registry | 800k–1.2M total |
-| `track_12_sub_llm_dispatch.md` | 12 | **Phase 1 detail** — `llm-dispatch` primitive + `summarise-subtask` / `protocol-cleanup` wrappers + per-use-case model picker | 🟨 **In progress** | Master | 250–400k |
+| `master_subtasks_dispatch_t7_t8_t12.md` | 7 + 8 + 12 | **Master plan** spanning sub-LLM dispatch (T12), subtask decomposition (T7), and context hot-swap (T8). Read this first before the per-track buff files. | 🟨 **In progress** (T12 shipped, dormant) | Track 1, registry | 800k–1.2M total |
+| `track_12_sub_llm_dispatch.md` | 12 | **Phase 1 detail** — `llm-dispatch` primitive + `summarise-subtask` / `protocol-cleanup` wrappers + per-use-case + per-agent model picker | ✅ **Shipped** as dormant primitive (`cb3422e`, `6905348`, `1148bf1`); consumers in T8 / T9 | Master | 250–400k |
+| `track_8_subtask_context_hotswap.md` | 8 | **Phase 3 detail** — stash + summary marker + `recall-subtask` tool. Primary consumer of T12's `summarise-subtask`. | ⬜ Not started — gated on T7 | T7, T12 | 200–350k |
 
 ### Deferred (intentionally not specced as files)
 

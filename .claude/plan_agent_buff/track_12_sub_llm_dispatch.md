@@ -222,3 +222,37 @@ test(track-12): dispatch happy path, RBAC, metrics roll-up, registry validation
 - **Provider skew.** Cheapest-rule gracefully picks the only Anthropic
   model when that's all the user has; transparently switches to a
   cheaper local when it appears.
+
+---
+
+## Status — what shipped is dormant plumbing
+
+**As of commit `1148bf1`, all three tools exist but none of them get
+called automatically.** They're agent-callable, but:
+
+- The agent doesn't know when its own response failed protocol parsing.
+  The runner detects parse failures and appends a nudge user message
+  ("end your response with EXACTLY this text…") — the nudge does NOT
+  tell the agent to call `protocol-cleanup`. So the wrapper is reachable
+  only if a system prompt explicitly directs the agent to it. Today no
+  system prompt does. **Net cost: zero. Net value: zero.**
+- `summarise-subtask` is in the same boat — designed to be called by
+  the runner from inside `_compact_messages_after_close` once Track 8
+  lands; not used otherwise.
+- `llm-dispatch` (the generic) requires explicit RBAC grant + an agent
+  prompted to use it for some narrow purpose. Possible but unlikely
+  to fire in any current built-in agent.
+
+This is the design — **Phase 12 ships the primitive, the consumers
+ship in their own phases.** Protocol-cleanup needs Track 9 to wire it
+into the runner's parse-fail handler so it fires automatically on
+`PROTOCOL_PARSE_FAIL`, with the agent's raw response as input, BEFORE
+the existing nudge retry. That's where the win lives. Same for
+`summarise-subtask` once Track 8's hot-swap is live.
+
+**Implication for ordering:** if the immediate pain is the protocol-
+fail class of stalls (e.g. codebase_analyst on QuickRefs-web),
+**Track 9 is higher ROI than Track 7** — it's bounded scope, doesn't
+depend on subtasks, and turns the dormant primitive into actual cost
+savings. Track 7 → 8 is the bigger architectural arc; Track 9 is the
+direct fix.
