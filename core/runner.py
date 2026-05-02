@@ -2206,6 +2206,14 @@ class AgentRunner:
         # children are all COMPLETE / CANCELLED. The parent's
         # closed_by_commit is taken from the last child's commit so
         # the audit trail is complete.
+        #
+        # Track 7 — also advances `active_subtask`: when a child of a
+        # not-yet-fully-closed parent terminates, find the next PENDING
+        # sibling and mutate it to IN_PROGRESS. This drives the agent
+        # through the decomposition without requiring the agent to know
+        # about the next subtask explicitly. mutate_task fires the
+        # standard TASK_STARTED signal AND populates `active_subtask`
+        # so Layer 4.7's next render surfaces the new focus.
         for parent_id in closed_parent_ids:
             parent = ws.tasks.get(parent_id)
             if parent is None or parent.status == "COMPLETE":
@@ -2222,6 +2230,23 @@ class AgentRunner:
                     parent_id, "COMPLETE",
                     iteration=iteration,
                     closed_by_commit=last_commit,
+                )
+            else:
+                # Track 7 — pick the next PENDING sibling (FIFO over
+                # creation order) and start it. Skip if any sibling is
+                # already IN_PROGRESS (out-of-order close shouldn't
+                # double-spawn) or if no PENDING remain.
+                if any(s.status == "IN_PROGRESS" for s in siblings):
+                    continue
+                next_pending = next(
+                    (s for s in siblings if s.status == "PENDING"),
+                    None,
+                )
+                if next_pending is None:
+                    continue
+                ws.mutate_task(
+                    next_pending.task_id, "IN_PROGRESS",
+                    iteration=iteration,
                 )
 
     def _compact_messages_after_close(
