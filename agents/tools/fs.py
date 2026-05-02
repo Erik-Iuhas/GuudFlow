@@ -421,11 +421,12 @@ class _ClaimingTool(BaseTool):
 class FsWrite(_ClaimingTool):
     name = "fs-write"
     priority = 105
-    when_to_use = "single file write; PREFER fs-write-batch when you have ≥ 2 files to create"
+    when_to_use = "single file write — use for files > ~1K tokens; smaller batches go through fs-write-batch"
     description = (
         "Write/overwrite a file under working/. Creates parent dirs as needed. "
-        "TIP: when writing several files in a row, prefer fs-write-batch — "
-        "one tool call replaces N sequential round-trips."
+        "TIP: for several SHORT files, fs-write-batch is one round-trip — but "
+        "large file contents must use fs-write because batch arguments share "
+        "the model's output token budget."
     )
     input_schema = {
         "type": "object",

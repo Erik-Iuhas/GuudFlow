@@ -31,6 +31,14 @@ from core.file_workspace import FileWorkspace, PathSafetyError
 
 _MAX_ENTRIES = 30
 
+# Token-budget guards — every byte of `content` lives inside the tool
+# arguments JSON, which counts against the model's output_tokens cap.
+# At ~4 bytes/token, the defaults below keep a worst-case batch under
+# ~3K output tokens (well below the 4096-default max_tokens), leaving
+# headroom for surrounding response text.
+_MAX_BYTES_PER_ENTRY = 4_000   # ~1K tokens — single moderate file
+_MAX_BYTES_PER_BATCH = 12_000  # ~3K tokens — sum across all entries
+
 
 def _summarize_paths(paths: list[str]) -> str:
     """Compact summary: 'src/{a, b, c}, tests/{x, y}' style.
@@ -64,11 +72,13 @@ class FsWriteBatch(BaseTool):
 
     name = "fs-write-batch"
     priority = 100
-    when_to_use = "PREFER over fs-write when creating multiple files in one logical step"
+    when_to_use = "≥ 2 SHORT files in one call (per-file ≤ ~1K tokens, total ≤ ~3K); larger files → fs-write"
     description = (
-        "Write/overwrite many files in one tool call. Use when you have "
-        "multiple file writes lined up — one batch call replaces N sequential "
-        "fs-write round-trips. Per-entry failures are reported individually; "
+        "Write/overwrite many SHORT files in one tool call. Each file's content "
+        "lives inside the arguments JSON which counts against output_tokens, so "
+        f"per-entry contents must stay under {_MAX_BYTES_PER_ENTRY} bytes and "
+        f"total batch under {_MAX_BYTES_PER_BATCH} bytes. Larger files MUST use "
+        "individual fs-write calls. Per-entry failures are reported individually; "
         "successes are not rolled back."
     )
     input_schema = {
@@ -141,6 +151,38 @@ class FsWriteBatch(BaseTool):
                 f"too many entries: {len(entries)} (max {_MAX_ENTRIES}; split into multiple calls)"
             )
 
+        # Pre-flight token-budget check. Reject the entire batch if any
+        # entry is too big OR the total payload would blow output_tokens.
+        # This prevents the LLM from wasting an LLM call on a request that
+        # Anthropic would truncate at max_tokens (with empty arguments
+        # returned), and points it at the right tool instead.
+        oversized = [
+            (e.get("path", f"<entry {i}>"), len((e.get("content") or "").encode("utf-8")))
+            for i, e in enumerate(entries)
+            if isinstance(e, dict)
+            and isinstance(e.get("content"), str)
+            and len(e["content"].encode("utf-8")) > _MAX_BYTES_PER_ENTRY
+        ]
+        if oversized:
+            offending = "; ".join(f"{p}={n}B" for p, n in oversized[:5])
+            return _err(
+                f"entries exceed per-file cap of {_MAX_BYTES_PER_ENTRY} bytes "
+                f"(~{_MAX_BYTES_PER_ENTRY//4} tokens): {offending}. "
+                "Use individual fs-write calls for files this large — "
+                "batch arguments share the model's output token budget."
+            )
+        total_payload = sum(
+            len((e.get("content") or "").encode("utf-8"))
+            for e in entries if isinstance(e, dict) and isinstance(e.get("content"), str)
+        )
+        if total_payload > _MAX_BYTES_PER_BATCH:
+            return _err(
+                f"total batch payload {total_payload} bytes exceeds cap of "
+                f"{_MAX_BYTES_PER_BATCH} bytes (~{_MAX_BYTES_PER_BATCH//4} tokens). "
+                "Split into smaller batches OR use individual fs-write for the "
+                "larger files — batch arguments share the model's output token budget."
+            )
+
         successes: list[str] = []
         failures: list[dict[str, str]] = []
         total_bytes = 0
@@ -192,12 +234,13 @@ class FsEditBatch(BaseTool):
 
     name = "fs-edit-batch"
     priority = 100
-    when_to_use = "PREFER over fs-edit when you have ≥ 2 edits — one call replaces N round-trips"
+    when_to_use = "≥ 2 SHORT find/replace edits (per-entry ≤ ~1K tokens, total ≤ ~3K); larger → fs-edit"
     description = (
         "Surgical find/replace on many files in one tool call. Each entry "
         "follows fs-edit semantics (exact match unless replace_all=true). "
-        "Per-entry failures are reported individually; successes are not "
-        "rolled back."
+        f"Per-entry find+replace text capped at {_MAX_BYTES_PER_ENTRY} bytes, "
+        f"total batch payload at {_MAX_BYTES_PER_BATCH} bytes. Per-entry "
+        "failures are reported individually; successes are not rolled back."
     )
     input_schema = {
         "type": "object",
@@ -273,6 +316,34 @@ class FsEditBatch(BaseTool):
         if len(entries) > _MAX_ENTRIES:
             return _err(
                 f"too many entries: {len(entries)} (max {_MAX_ENTRIES}; split into multiple calls)"
+            )
+
+        # Pre-flight token-budget check (same rationale as fs-write-batch).
+        # find+replace text both live in the arguments JSON and count
+        # against the model's output_tokens cap.
+        def _entry_bytes(e: dict) -> int:
+            f = e.get("find") if isinstance(e.get("find"), str) else ""
+            r = e.get("replace") if isinstance(e.get("replace"), str) else ""
+            return len((f + r).encode("utf-8"))
+        oversized = [
+            (e.get("path", f"<entry {i}>"), _entry_bytes(e))
+            for i, e in enumerate(entries)
+            if isinstance(e, dict) and _entry_bytes(e) > _MAX_BYTES_PER_ENTRY
+        ]
+        if oversized:
+            offending = "; ".join(f"{p}={n}B" for p, n in oversized[:5])
+            return _err(
+                f"entries exceed per-entry cap of {_MAX_BYTES_PER_ENTRY} bytes "
+                f"of find+replace text: {offending}. "
+                "Use individual fs-edit calls for edits this large."
+            )
+        total_payload = sum(
+            _entry_bytes(e) for e in entries if isinstance(e, dict)
+        )
+        if total_payload > _MAX_BYTES_PER_BATCH:
+            return _err(
+                f"total batch payload {total_payload} bytes exceeds cap of "
+                f"{_MAX_BYTES_PER_BATCH} bytes. Split into smaller batches."
             )
 
         successes: list[str] = []

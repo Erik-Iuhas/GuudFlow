@@ -221,3 +221,56 @@ async def test_fs_edit_batch_no_emitters_does_not_crash(fw: FileWorkspace):
         {"path": "a.py", "find": "x = 1", "replace": "x = 2"},
     ]})
     assert res["edited"] == 1
+
+
+# ── Token-budget caps (output_tokens guard) ─────────────────────────────────
+
+
+async def test_fs_write_batch_rejects_oversized_single_entry(fw: FileWorkspace):
+    """A single content > _MAX_BYTES_PER_ENTRY (~1K tokens) must be rejected
+    with a message pointing the LLM at fs-write."""
+    from agents.tools.fs_batch import _MAX_BYTES_PER_ENTRY
+    big = "x" * (_MAX_BYTES_PER_ENTRY + 1)
+    res = await FsWriteBatch(fw).run({"files": [
+        {"path": "a.py", "content": "small"},
+        {"path": "b.py", "content": big},
+    ]})
+    assert "error" in res
+    assert "per-file cap" in res["error"]
+    assert "fs-write" in res["error"]
+    # No partial writes.
+    assert not (fw.root / "a.py").exists()
+
+
+async def test_fs_write_batch_rejects_oversized_total_payload(fw: FileWorkspace):
+    """Six 3KB files individually fit but together exceed the batch cap."""
+    from agents.tools.fs_batch import _MAX_BYTES_PER_ENTRY, _MAX_BYTES_PER_BATCH
+    chunk = "y" * 2_500  # under per-entry cap
+    n = (_MAX_BYTES_PER_BATCH // 2_500) + 2
+    files = [{"path": f"f{i}.py", "content": chunk} for i in range(n)]
+    res = await FsWriteBatch(fw).run({"files": files})
+    assert "error" in res
+    assert "total batch payload" in res["error"]
+
+
+async def test_fs_write_batch_accepts_small_batch(fw: FileWorkspace):
+    """Five small files should pass through cleanly."""
+    res = await FsWriteBatch(fw).run({"files": [
+        {"path": f"docs/{name}.md", "content": f"# {name}\nshort body\n"}
+        for name in ("a", "b", "c", "d", "e")
+    ]})
+    assert res.get("ok") is True
+    assert res["written"] == 5
+
+
+async def test_fs_edit_batch_rejects_oversized_single_entry(fw: FileWorkspace):
+    """A single find+replace > per-entry cap must be rejected with a
+    message pointing the LLM at fs-edit."""
+    from agents.tools.fs_batch import _MAX_BYTES_PER_ENTRY
+    big_replace = "z" * (_MAX_BYTES_PER_ENTRY + 1)
+    res = await FsEditBatch(fw).run({"edits": [
+        {"path": "a.py", "find": "x", "replace": big_replace},
+    ]})
+    assert "error" in res
+    assert "per-entry cap" in res["error"]
+    assert "fs-edit" in res["error"]
