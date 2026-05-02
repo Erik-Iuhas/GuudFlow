@@ -386,6 +386,11 @@ BASELINE_LOCAL_SCOPES: frozenset[str] = frozenset({
     # Story lifecycle — no RBAC gate, same as board-message.
     # Any agent that writes docs may open or close a story.
     "story-open", "story-complete",
+    # Track 7 — every agent can break down their own work into subtasks.
+    # No abuse vector: an agent can only decompose tasks assigned to them
+    # (or their synthetic root). Required for the "first agent in run,
+    # too-big project goal" case to be self-fixable.
+    "decompose-task",
 })
 
 

@@ -36,6 +36,7 @@ from typing import Any, Awaitable, Callable, Literal
 from agents.base import BaseAgent, ToolNotAvailable
 from agents.tools.base import BaseTool
 from agents.tools.board import AssignTask, BoardMessage
+from agents.tools.decompose_task import DecomposeTask
 from agents.tools.code import CodeExec, CodeOutline
 from agents.tools.code_batch import CodeOutlineBatch
 from agents.tools.fs_batch import FsEditBatch, FsWriteBatch
@@ -339,7 +340,7 @@ LOCAL_TOOL_CLASSES: tuple[type[BaseTool], ...] = (
     FsCreate, FsWrite, FsEdit, FsDelete, FsRename,
     FsWriteBatch, FsEditBatch,                # Track 3e — batch variants
     GitDiff, GitChangedFiles, GitLog, GitRead, GitStatus,
-    BoardMessage, AssignTask,
+    BoardMessage, AssignTask, DecomposeTask,  # Track 7 — decompose-task
     CodeExec, CodeOutline, CodeOutlineBatch,  # Track 3e — batch variant
     DataCsv, DataJson, DataXml, DataYaml,
     DocHtml, DocMarkdown,
@@ -778,6 +779,7 @@ class AgentRunner:
             FsEditBatch.name: FsEditBatch(self.files, claim_emitter, release_emitter),
             BoardMessage.name: BoardMessage(role, self.workspace),
             AssignTask.name: AssignTask(role, self.workspace, runner=self),
+            DecomposeTask.name: DecomposeTask(role, self.workspace),
             # Story lifecycle — available to all agents (no RBAC gate).
             # Any agent that writes .md files may open or close a story.
             StoryComplete.name: StoryComplete(role, self.workspace, runner=self),
