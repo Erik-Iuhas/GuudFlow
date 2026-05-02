@@ -126,6 +126,13 @@ class IterationMetrics:
     # the total token cost of all results returned by that tool this
     # iteration. Read-class tool entries also feed direct_file_read_tokens.
     tool_token_breakdown: dict[str, int] = field(default_factory=dict)
+    # Track 3c: tool output compression savings. Counts measure the JSON-
+    # serialised forms of tool results before and after compression — what
+    # the LLM actually receives. Compression happens at BaseAgent.call_tool
+    # via agents/tools/output_compress.py.
+    tool_output_tokens_raw: int = 0
+    tool_output_tokens_compressed: int = 0
+    tokens_saved_by_compression: int = 0
 
     completed: bool = False
     failed: bool = False
