@@ -338,6 +338,11 @@ def _persist_run(run_root: Path, runner: AgentRunner, run_id: str,
         "completed_agents": list(runner.workspace.completed_agents),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "pr_mode": getattr(runner.project, "pr_mode", "manual"),
+        # Track 4.4 — absolute path of the agents' working tree. In normal
+        # (isolated) runs this is `<run>/workspace/working/`; in in-place
+        # mode (Track 4.3) it points at the user's chosen directory. The
+        # runs API reads this so Files / Git tabs show the right tree.
+        "working_dir": str(runner.files.working),
     }
     # Track 4.2 — surface the latest PR_READY signal so the run-completion
     # view can read the integration branch + gh command without scanning

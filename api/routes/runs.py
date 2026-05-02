@@ -15,6 +15,31 @@ from core.signals import Signal, SignalType
 from worker.queue import JOB_QUEUED, JOB_RUNNING, Job
 
 
+def _run_working_dir(data_root: Path, run_id: str) -> Path:
+    """Track 4.4 — resolve the agents' working tree for `run_id`.
+
+    Reads `working_dir` from the run's meta.json if present (Track 4.4
+    began persisting it). In in-place mode (Track 4.3) this points at
+    the user's chosen directory; in normal isolated runs it's the
+    legacy `<run>/workspace/working/`. Falls back to the legacy path
+    for older runs whose meta.json predates this field, so the Files /
+    Git tabs keep working on historical runs.
+    """
+    legacy = data_root / "runs" / run_id / "workspace" / "working"
+    meta_path = data_root / "runs" / run_id / "meta.json"
+    if meta_path.is_file():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            override = meta.get("working_dir")
+            if override:
+                p = Path(override)
+                if p.is_dir():
+                    return p
+        except (OSError, json.JSONDecodeError):
+            pass
+    return legacy
+
+
 # ── Graph helpers (M5.C4) ──────────────────────────────────────────────────
 
 
@@ -245,7 +270,7 @@ async def list_git_commits(request: Request, run_id: str) -> list[dict]:
     from git import InvalidGitRepositoryError, NoSuchPathError, Repo
 
     data_root = Path(request.app.state.data_root)
-    working_dir = data_root / "runs" / run_id / "workspace" / "working"
+    working_dir = _run_working_dir(data_root, run_id)
     try:
         repo = Repo(working_dir)
     except (InvalidGitRepositoryError, NoSuchPathError):
@@ -341,7 +366,7 @@ async def get_git_diff(
     from git import InvalidGitRepositoryError, NoSuchPathError, Repo
 
     data_root = Path(request.app.state.data_root)
-    working_dir = data_root / "runs" / run_id / "workspace" / "working"
+    working_dir = _run_working_dir(data_root, run_id)
     try:
         repo = Repo(working_dir)
     except (InvalidGitRepositoryError, NoSuchPathError):
@@ -489,7 +514,7 @@ async def list_run_tags(request: Request, run_id: str) -> list[dict]:
     from git import InvalidGitRepositoryError, NoSuchPathError, Repo
 
     data_root = Path(request.app.state.data_root)
-    working_dir = data_root / "runs" / run_id / "workspace" / "working"
+    working_dir = _run_working_dir(data_root, run_id)
     try:
         repo = Repo(working_dir)
     except (InvalidGitRepositoryError, NoSuchPathError):
@@ -680,7 +705,7 @@ _MAX_FILE_BYTES = 500 * 1024  # 500 KB
 
 def _safe_workspace_path(run_id: str, rel_path: str, data_root: str) -> Path:
     """Resolve rel_path under the run's working/ dir with path-escape check."""
-    working = (Path(data_root) / "runs" / run_id / "workspace" / "working").resolve()
+    working = _run_working_dir(Path(data_root), run_id).resolve()
     target = (working / rel_path).resolve()
     try:
         target.relative_to(working)
@@ -715,7 +740,7 @@ async def get_file_content(
     if ref:
         # Read via git show
         from git import InvalidGitRepositoryError, NoSuchPathError, Repo
-        working = (Path(data_root) / "runs" / run_id / "workspace" / "working").resolve()
+        working = _run_working_dir(Path(data_root), run_id).resolve()
         try:
             repo = Repo(working)
             content_bytes = repo.git.show(f"{ref}:{path}").encode("utf-8", errors="replace")
@@ -755,7 +780,7 @@ async def get_file_history(
     from git import InvalidGitRepositoryError, NoSuchPathError, Repo
 
     data_root = request.app.state.data_root
-    working = (Path(data_root) / "runs" / run_id / "workspace" / "working").resolve()
+    working = _run_working_dir(Path(data_root), run_id).resolve()
     try:
         repo = Repo(working)
     except (InvalidGitRepositoryError, NoSuchPathError):
@@ -810,7 +835,7 @@ async def get_git_branches(request: Request, run_id: str) -> list[str]:
     from git import InvalidGitRepositoryError, NoSuchPathError, Repo
 
     data_root = request.app.state.data_root
-    working = (Path(data_root) / "runs" / run_id / "workspace" / "working").resolve()
+    working = _run_working_dir(Path(data_root), run_id).resolve()
     try:
         repo = Repo(working)
     except (InvalidGitRepositoryError, NoSuchPathError):
@@ -839,7 +864,7 @@ async def get_git_tree(
     from git import InvalidGitRepositoryError, NoSuchPathError, Repo
 
     data_root = request.app.state.data_root
-    working = (Path(data_root) / "runs" / run_id / "workspace" / "working").resolve()
+    working = _run_working_dir(Path(data_root), run_id).resolve()
     try:
         repo = Repo(working)
     except (InvalidGitRepositoryError, NoSuchPathError):

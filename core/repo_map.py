@@ -298,21 +298,21 @@ _MAX_PARSED_FILES = 5000
 
 
 def _iter_supported_files(root: Path) -> Iterable[Path]:
-    """Walk `root` yielding parseable source files. Prunes large
-    vendored/build/cache directories — see _SKIP_DIRS — so init stays
-    fast on real repos."""
-    import os as _os
-    for dirpath, dirnames, filenames in _os.walk(root):
-        # Prune in place — os.walk respects mutation of dirnames.
-        dirnames[:] = [
-            d for d in dirnames
-            if not d.startswith(".") and d not in _SKIP_DIRS
-        ]
-        for fname in filenames:
-            suffix = Path(fname).suffix
-            if suffix not in SUPPORTED_EXTS:
-                continue
-            yield Path(dirpath) / fname
+    """Walk `root` yielding parseable source files.
+
+    Track 4.4 — routes through `repo_walk.iter_repo_files` which
+    honors `.gitignore` when `root` is a git repo, falling back to
+    a manual walk pruning `_SKIP_DIRS` otherwise. Without this step
+    a real codebase (in-place mode) blows up the parse loop on
+    `node_modules/` and similar.
+    """
+    from core.repo_walk import iter_repo_files
+
+    for rel in iter_repo_files(root, recursive=True):
+        suffix = Path(rel).suffix
+        if suffix not in SUPPORTED_EXTS:
+            continue
+        yield root / rel
 
 
 def build(root: Path | str, generated_at: str = "") -> RepoMap:

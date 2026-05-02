@@ -127,19 +127,26 @@ class FileWorkspace:
 
     async def list(self, path: str = "", recursive: bool = False) -> list[str]:
         """List files under `path` relative to working/. Returns paths
-        relative to working/. Directories are NOT included; only files."""
-        base = self._safe_path(path, self.working) if path else self.working
-        if not await asyncio.to_thread(base.exists):
-            return []
+        relative to working/. Directories are NOT included; only files.
 
-        def _walk() -> list[str]:
-            if recursive:
-                items = [p for p in base.rglob("*") if p.is_file()]
-            else:
-                items = [p for p in base.iterdir() if p.is_file()]
-            return sorted(str(p.relative_to(self.working)).replace("\\", "/") for p in items)
+        Track 4.4 — when working/ is a git repo (typical of in-place
+        mode), routes through `repo_walk.iter_repo_files` so .gitignore
+        is honored. That keeps fs-list outputs sane on real codebases —
+        without it, a single recursive list of a Vite/Next.js project
+        returns 30k+ paths from node_modules and blows agent context.
+        """
+        from core.repo_walk import iter_repo_files
 
-        return await asyncio.to_thread(_walk)
+        if path:
+            # Path-safety check before delegating — `iter_repo_files`
+            # accepts arbitrary subpath strings; we still want to refuse
+            # `../escape`.
+            self._safe_path(path, self.working)
+
+        return await asyncio.to_thread(
+            iter_repo_files,
+            self.working, subpath=path, recursive=recursive,
+        )
 
     async def exists(self, path: str) -> bool:
         try:
