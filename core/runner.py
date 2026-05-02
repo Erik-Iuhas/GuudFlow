@@ -530,7 +530,17 @@ class AgentRunner:
         if max_wall_seconds is not None:
             import time as _time
             self.workspace.deadline_at = _time.time() + max_wall_seconds
-        self.files = FileWorkspace(self.run_root / "workspace")
+        # Track 4.3 — in `in-place` mode, agents work directly in the user's
+        # chosen directory instead of a copy under `<run>/workspace/working`.
+        # Inputs/deliverables stay under run_root for run isolation.
+        from core import storage as _storage
+        _cfg = _storage.get_storage_config()
+        working_override: Path | None = None
+        if _cfg.working_tree_mode == "in-place" and _cfg.storage_base is not None:
+            working_override = _cfg.storage_base
+        self.files = FileWorkspace(
+            self.run_root / "workspace", working_override=working_override,
+        )
         self.workspace.files = self.files
         self.git = GitWorkspace(
             self.files.working,

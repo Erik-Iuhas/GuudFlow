@@ -95,6 +95,9 @@ function StorageSection({ settings, onUpdated }: StorageSectionProps) {
       ? settings.effective.storage_root.replace(/[/\\]\.flow[/\\]?$/, "")
       : "",
   );
+  const [workingTreeMode, setWorkingTreeMode] = useState<"isolated" | "in-place">(
+    settings.effective.working_tree_mode ?? "isolated",
+  );
   const [validation, setValidation] = useState<StorageRootValidation | null>(null);
   const [validating, setValidating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -136,11 +139,19 @@ function StorageSection({ settings, onUpdated }: StorageSectionProps) {
     }
     setSaving(true);
     try {
-      const updates: { storage_mode: "global" | "in-directory"; storage_root?: string } = {
+      const updates: {
+        storage_mode: "global" | "in-directory";
+        storage_root?: string;
+        working_tree_mode?: "isolated" | "in-place";
+      } = {
         storage_mode: mode,
       };
       if (mode === "in-directory") {
         updates.storage_root = storageRoot;
+        updates.working_tree_mode = workingTreeMode;
+      } else {
+        // Global mode forces isolated server-side; persist to keep state consistent.
+        updates.working_tree_mode = "isolated";
       }
       const result = await settingsApi.update(updates);
       setRestartRequired(result.restart_required);
@@ -212,6 +223,48 @@ function StorageSection({ settings, onUpdated }: StorageSectionProps) {
                 : `✗ ${validation.reason}`}
             </div>
           )}
+
+          <div className="settings-field" style={{ marginTop: 16 }}>
+            <label>Working tree</label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 4 }}>
+              {[
+                { value: "isolated" as const, title: "Isolated", hint: "Each run gets its own copy under .flow/runs/<id>/workspace/working/. Safe for sandbox repos." },
+                { value: "in-place" as const, title: "In-place", hint: "Agents work directly in this directory. Pair with PR mode = manual to keep main untouched." },
+              ].map((o) => {
+                const selected = workingTreeMode === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => setWorkingTreeMode(o.value)}
+                    style={{
+                      textAlign: "left",
+                      padding: "10px 12px",
+                      borderRadius: 6,
+                      border: selected ? "1.5px solid #16a34a" : "1px solid #e2e8f0",
+                      background: selected ? "#f0fdf4" : "#fff",
+                      cursor: "pointer",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>
+                      {selected ? "● " : "○ "}{o.title}
+                    </span>
+                    <span className="settings-hint" style={{ lineHeight: 1.3 }}>
+                      {o.hint}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {workingTreeMode === "in-place" && (
+              <small className="settings-hint" style={{ display: "block", marginTop: 6 }}>
+                ⚠ Agents will modify files in this directory directly. Strongly recommended: keep PR mode = manual on every project so main is never auto-merged.
+              </small>
+            )}
+          </div>
         </div>
       )}
 

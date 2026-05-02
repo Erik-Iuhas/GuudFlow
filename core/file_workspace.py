@@ -38,14 +38,22 @@ class FileWorkspace:
     standard subdirectories if they don't already exist.
     """
 
-    def __init__(self, root: Path | str):
+    def __init__(
+        self, root: Path | str, *, working_override: Path | str | None = None,
+    ):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
-        self.working = self.root / "working"
+        # Track 4.3 — when `working_override` is set, the agents' working tree
+        # lives outside the run dir (typically the user's repo in in-place mode).
+        # `inputs/` and `deliverables/` still live under root for run isolation.
+        if working_override is not None:
+            self.working = Path(working_override).resolve()
+        else:
+            self.working = self.root / "working"
         self.inputs = self.root / "inputs"
         self.deliverables = self.root / "deliverables"
         for d in (self.working, self.inputs, self.deliverables):
-            d.mkdir(exist_ok=True)
+            d.mkdir(parents=True, exist_ok=True)
 
     # ── Path safety ─────────────────────────────────────────────────────────
 

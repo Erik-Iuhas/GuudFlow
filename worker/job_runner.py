@@ -508,9 +508,13 @@ class JobRunner:
         run_inputs = run_root / "workspace" / "inputs"
         working_dir = run_root / "workspace" / "working"
 
-        run_initializer.seed_working_from_source(
-            working_dir, run_inputs / "source_repo"
-        )
+        # Track 4.3 — in `in-place` working-tree mode the runner uses the
+        # user's chosen directory directly; do not wipe and re-seed it.
+        from core import storage as _storage
+        if _storage.working_tree_mode() != "in-place":
+            run_initializer.seed_working_from_source(
+                working_dir, run_inputs / "source_repo"
+            )
 
         for meta_entry in run_inputs.glob("from_run_*.meta.json"):
             try:
