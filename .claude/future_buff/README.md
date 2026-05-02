@@ -17,6 +17,7 @@ These are tracks that came up during strategic discussion but do **not** belong 
 | `production_sandbox.md` | Stage 9 from the original CLAUDE.md plan. Container with `network_mode: none`, resource limits, FileWorkspace as only host bridge. | Becomes urgent before running this against any untrusted repo or in any non-toy production context. |
 | `functional_verification.md` | Automated "does the produced game run / do the tests pass" gate. Deprioritised because manual quality verification has been excellent — but worth capturing for regression safety later. | Becomes urgent when a refactor change inadvertently hurts output quality (we won't catch it without this). |
 | `recalibration_notes.md` | Lesson from May 2 — token efficiency metrics don't measure output quality. Don't repeat the mistake. | Re-read before recommending any "we need to measure quality" track. |
+| `cli_v1.md` | Headless terminal CLI surface (`aflow run "..."`). Engine reuse-only — Studio + WebSocket layer skipped. | When a real distribution / scripted-CI use case appears. **Lowest priority in this folder.** |
 
 ## Framing — why these are "future"
 
