@@ -3187,6 +3187,74 @@ class AgentRunner:
             iteration += 1
             response = await self._llm_with_backoff(agent, messages)
 
+            # Detect output-cap truncation. Anthropic returns stop_reason
+            # "max_tokens" when the model's response (text OR tool_call
+            # arguments JSON) hit the max_tokens cap mid-emission. This
+            # is especially dangerous for batched write tools (fs-write-batch,
+            # fs-edit-batch) where the LLM packs N file contents into the
+            # arguments JSON — a 5-file batch trivially exceeds 4096 output
+            # tokens. The truncated tool_call lands with empty/partial
+            # arguments and silently fails. Recover by surfacing the
+            # truncation back to the LLM with explicit instructions to
+            # split the work into smaller calls. Do NOT execute the
+            # truncated tool call.
+            if response.stop_reason == "max_tokens":
+                self.workspace.post_signal(Signal(
+                    type=SignalType.PROTOCOL_PARSE_FAIL,
+                    summary=f"{cfg.role} output truncated at max_tokens cap",
+                    detail=(
+                        f"truncated mid-emission ({response.output_tokens} out tokens); "
+                        f"tool_calls={[tc.name for tc in response.tool_calls]}; "
+                        f"text_len={len(response.text or '')}"
+                    ),
+                    from_agent=cfg.role,
+                    iteration=self.workspace.iteration,
+                ))
+                # Echo the truncated assistant turn so the LLM sees what
+                # it produced. Drop the half-baked tool_calls — Anthropic
+                # requires every tool_use to be paired with a tool_result,
+                # so we synthesise an error result for each one.
+                assistant_blocks: list[dict[str, Any]] = []
+                if response.text:
+                    assistant_blocks.append({"type": "text", "text": response.text})
+                for tc in response.tool_calls:
+                    assistant_blocks.append({
+                        "type": "tool_use",
+                        "id": tc.id,
+                        "name": tc.name,
+                        "input": tc.arguments,
+                    })
+                if assistant_blocks:
+                    messages.append(LLMMessage(role="assistant", content=assistant_blocks))
+                    truncation_results = [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": json.dumps({
+                                "error": "tool call truncated at max_tokens cap; "
+                                         "arguments JSON was incomplete and not executed",
+                            }),
+                            "is_error": True,
+                        }
+                        for tc in response.tool_calls
+                    ]
+                    if truncation_results:
+                        messages.append(LLMMessage(role="user", content=truncation_results))
+                messages.append(LLMMessage(
+                    role="user",
+                    content=(
+                        "[OUTPUT TRUNCATED] Your last response hit the max_tokens cap "
+                        f"({response.output_tokens} tokens). "
+                        "If you were generating a batched tool call (fs-write-batch, "
+                        "fs-edit-batch), the arguments JSON was cut off and the call "
+                        "did NOT execute. Recover by splitting the work into smaller "
+                        "individual calls — one fs-write per file, or smaller batches "
+                        "of 1-2 files at a time. Do NOT pack many file contents into "
+                        "a single tool call."
+                    ),
+                ))
+                continue
+
             if response.stop_reason == "tool_use" and response.tool_calls:
                 # Echo assistant turn (including tool_use blocks) — keep raw if available.
                 assistant_blocks: list[dict[str, Any]] = []
