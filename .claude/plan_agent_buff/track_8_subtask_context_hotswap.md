@@ -205,6 +205,30 @@ test(track-8): unit + integration coverage for stash/recall + metrics
 Each phase: ~50–120 LOC, ~30–80k tokens. Total estimated: ~250k of the
 master-plan budget for Phase 8.
 
+## Status — what shipped vs. what's deferred
+
+Shipped (`dfa8958`):
+- `_compact_messages_after_close` upgraded to stash + new marker.
+- Stash dict on runner, `recall-subtask` tool, baseline RBAC.
+- New `[SUBTASK CLOSED — id=…]` marker format with deliverables +
+  recall hint. Compaction recognises both new and legacy markers.
+- 7 integration tests + 4 updated compaction tests.
+
+**Deferred** (acceptance criterion #2 from the plan):
+- Marker summary text still comes from M5.5's existing task_summarizer
+  (agent's main LLM client), NOT Track 12's `summarise-subtask`
+  wrapper. The stash architecture doesn't need it; this is a
+  cost-attribution improvement only. Hooking it up means routing
+  task_summarizer through Track 12's resolver → cost moves from the
+  agent's heavy tier to the project's `sub_llm_models[summarise-subtask]`
+  pick (typically a cheap model). Bounded follow-up: ~30-50 LOC,
+  one new test asserting `IterationMetrics.sub_llm_breakdown` rolls.
+- The plan's #7 acceptance ("≥40% input_tokens reduction") is left
+  as an empirical check — needs a real run on a 3-subtask
+  decomposition to measure honestly. Tested mechanically in
+  test_close_subtask_stashes_message_span_and_inserts_marker (live
+  list shrinks to a single marker).
+
 ## After this lands
 
 - The codebase_analyst class of failure has a real architectural fix:
