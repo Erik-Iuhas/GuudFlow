@@ -708,4 +708,41 @@ export const modelsApi = {
     ),
 };
 
+// ── Settings (Track 4) ─────────────────────────────────────────────────────
+
+export interface SettingsState {
+  effective: {
+    storage_mode: "global" | "in-directory";
+    storage_root: string;
+    personas_root: string;
+  };
+  persisted: Record<string, string>;
+  env_overrides_active: boolean;
+}
+
+export interface SettingsUpdateResponse {
+  persisted: Record<string, string>;
+  restart_required: boolean;
+}
+
+export interface StorageRootValidation {
+  valid: boolean;
+  exists: boolean;
+  writable: boolean;
+  reason: string | null;
+}
+
+export const settingsApi = {
+  get: () => request<SettingsState>("GET", "/api/settings"),
+  update: (updates: Partial<{
+    storage_mode: "global" | "in-directory";
+    storage_root: string;
+    personas_root: string;
+    data_root: string;
+  }>) =>
+    request<SettingsUpdateResponse>("PUT", "/api/settings", updates),
+  validateStorageRoot: (path: string) =>
+    request<StorageRootValidation>("POST", "/api/settings/validate-storage-root", { path }),
+};
+
 export { ApiError };

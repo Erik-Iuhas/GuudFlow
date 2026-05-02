@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { SettingsDrawer } from "./components/SettingsDrawer";
 import { GlobalErrorHandler, ToastProvider } from "./components/Toaster";
 import { Dashboard } from "./views/Dashboard";
 import { Projects } from "./views/Projects";
@@ -34,6 +35,7 @@ function AppShell({
   token: string;
   setTokenLocal: (s: string) => void;
 }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div className="shell">
       <header className="topbar">
@@ -62,7 +64,16 @@ function AppShell({
           value={token}
           onChange={(e) => setTokenLocal(e.target.value)}
         />
+        <button
+          className="settings-button"
+          aria-label="Open settings"
+          title="Settings"
+          onClick={() => setSettingsOpen(true)}
+        >
+          ⚙
+        </button>
       </header>
+      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <main className="main">
         <Routes>
           <Route path="/" element={<Dashboard />} />
