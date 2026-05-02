@@ -142,6 +142,18 @@ class AgentConfig:
     # M2 — one-sentence goal for the persona filling this slot. Written to
     # profile.json on create_new bootstrap; used in teammate brief (Layer 3.5).
     persona_goal: str = ""
+    # Track 12 — per-agent override for sub-LLM dispatch model selection.
+    # Maps use_case → registered model id (data/models.json). Checked
+    # before the project-level `sub_llm_models`. Empty dict (default)
+    # means agent inherits whatever the project has set, which itself
+    # falls back to ModelRegistry.cheapest_tool_capable() if missing.
+    sub_llm_models_override: dict[str, str] = field(default_factory=dict)
+    # Track 12 — explicit opt-out of baseline tools (read-class tools that
+    # are normally always granted, like fs-read / git-log). Most users
+    # shouldn't touch this; it exists for tightly scoped agents that
+    # genuinely shouldn't see, say, the git read tools. Studio's tool
+    # picker exposes this via the un-locked baseline checkbox.
+    excluded_baseline_tools: list[str] = field(default_factory=list)
     # Explicit hierarchy. Empty lists fall back to today's derived behavior:
     # manages → RBAC-derived can_assign_to; escalates_to → tech_lead if present.
     manages: list[str] = field(default_factory=list)
@@ -684,8 +696,19 @@ class AgentRunner:
         # registry's `cheapest_tool_capable()`. Sink rolls per-use-case
         # token usage onto the calling agent's `_current_metrics` row.
         def _sub_llm_resolver(use_case: str) -> "tuple[LLMClient, str]":
-            override_id = (self.project.sub_llm_models or {}).get(use_case)
             registry = getattr(self, "_model_registry", None)
+            # Resolution order (Track 12):
+            #   1. Per-agent override on this role's AgentConfig.
+            #   2. Project-wide sub_llm_models[use_case].
+            #   3. Registry's cheapest_tool_capable() fallback.
+            #   4. Agent's own LLM client (no-registry dev mode).
+            cfg = next((c for c in self.project.agents if c.role == role), None)
+            agent_override = (
+                (getattr(cfg, "sub_llm_models_override", None) or {}).get(use_case)
+                if cfg is not None else None
+            )
+            project_override = (self.project.sub_llm_models or {}).get(use_case)
+            override_id = agent_override or project_override
             if override_id and registry is not None:
                 m = registry.get(override_id)
                 if m is not None:
@@ -1070,6 +1093,7 @@ class AgentRunner:
                 role=cfg.role,
                 declared_local_tools=cfg.declared_local_tools,
                 declared_mcp_servers=cfg.declared_mcp_servers,
+                excluded_baseline=cfg.excluded_baseline_tools,
             )
             agent._local_tools = self._instantiate_local_tools(cfg.role)
             # On a continuation run, the agent's "task" used for context

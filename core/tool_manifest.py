@@ -257,9 +257,20 @@ class ToolManifestBuilder:
         role: str,
         declared_local_tools: Iterable[str],
         declared_mcp_servers: Iterable[str],
+        excluded_baseline: Iterable[str] = (),
     ) -> ToolManifest:
+        """Build the tool manifest for `role`.
+
+        `excluded_baseline` (Track 12) is the optional set of baseline
+        scopes the agent has explicitly opted out of. Studio's tool
+        picker writes here when the user un-checks a baseline tool.
+        Tools in this set are skipped from the auto-include baseline
+        loop AND, if the user happened to also list them in
+        declared_local_tools, those are filtered too.
+        """
         descriptors: list[ToolDescriptor] = []
         role_rbac = self.rbac.get(role) or RoleRBAC(role=role)
+        excluded = set(excluded_baseline or ())
 
         # 1. Local tools
         for tool_name in declared_local_tools:
@@ -270,6 +281,11 @@ class ToolManifestBuilder:
             # role with `fs-edit` declared+granted gets `fs-edit-batch` for
             # free without needing a separate RBAC entry.
             scope = BATCH_PARENT_SCOPES.get(tool_name, tool_name)
+            # Track 12 — honour explicit baseline opt-out even if the user
+            # also (redundantly) declared the tool. Otherwise the manifest
+            # would still grant a tool the user clicked off.
+            if scope in excluded:
+                continue
             if not _scope_is_baseline(scope) and not role_rbac.grants(scope):
                 continue
             descriptors.append(ToolDescriptor(
@@ -285,6 +301,8 @@ class ToolManifestBuilder:
         # 1b. Auto-include baseline tools not already added via declared_local_tools
         already_names = {d.name for d in descriptors}
         for scope in BASELINE_LOCAL_SCOPES:
+            if scope in excluded:
+                continue  # Track 12 — explicit baseline opt-out
             entry = self.local_registry.get(scope)
             if entry is None:
                 continue

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentConfig, ModelTier } from "../types";
-import type { ModelEntry } from "../api";
+import { modelsApi, type ModelEntry } from "../api";
 
 interface Props {
   agent: AgentConfig;
@@ -161,9 +161,18 @@ const NAMESPACE_LABELS: Record<string, string> = {
   desk: "Knowledge",
   mcp: "External MCP",
   task: "Task Management",
+  // Track 12 — three sub-LLM tools share one group so the per-tool model
+  // dropdown lives somewhere coherent in the UI.
+  sub_llm: "Sub-LLM Dispatch",
 };
 
+// Track 12 — sub-LLM dispatch scopes: llm-dispatch, summarise-subtask,
+// protocol-cleanup. Folded under one synthetic namespace so they don't
+// scatter into three single-tool groups.
+const SUB_LLM_SCOPES = new Set(["llm-dispatch", "summarise-subtask", "protocol-cleanup"]);
+
 function toolNamespace(tool: ToolEntry): string {
+  if (SUB_LLM_SCOPES.has(tool.scope)) return "sub_llm";
   if (tool.scope.includes(":")) return tool.scope.split(":")[0];
   return tool.scope.split("-")[0];
 }
@@ -205,22 +214,49 @@ function GroupedToolPicker({
   onRbacChange,
   archetypeRoleType,
   projectRbacScopes,
+  excludedBaseline,
+  onExcludedBaselineChange,
+  subLlmModels,
+  onSubLlmModelsChange,
 }: {
   selected: string[];
   onChange: (next: string[]) => void;
   onRbacChange?: (add: string[], remove: string[]) => void;
   archetypeRoleType: string | null;
   projectRbacScopes: string[];
+  /** Track 12 — explicit baseline opt-out list. Un-checking a baseline tool
+   *  pushes its scope here. Empty by default. */
+  excludedBaseline?: string[];
+  onExcludedBaselineChange?: (next: string[]) => void;
+  /** Track 12 — per-agent sub-LLM model overrides. Surfaced as a small
+   *  dropdown below the llm-dispatch checkbox when granted. */
+  subLlmModels?: Record<string, string>;
+  onSubLlmModelsChange?: (next: Record<string, string>) => void;
 }) {
   const [tools, setTools] = useState<ToolEntry[]>([]);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [error, setError] = useState(false);
+  // Track 12 — model registry for the per-agent sub-LLM dropdown shown
+  // beneath llm-dispatch when granted. Loaded once; failure leaves the
+  // dropdown empty (user falls back to project / auto pick).
+  const [models, setModels] = useState<ModelEntry[]>([]);
 
   useEffect(() => {
     fetchTools()
       .then(setTools)
       .catch(() => setError(true));
+    modelsApi.list().then(setModels).catch(() => {/* noop */});
   }, []);
+
+  const excludedSet = new Set(excludedBaseline ?? []);
+  function toggleBaselineExclude(scope: string) {
+    if (!onExcludedBaselineChange) return;
+    if (excludedSet.has(scope)) {
+      onExcludedBaselineChange((excludedBaseline ?? []).filter((s) => s !== scope));
+    } else {
+      onExcludedBaselineChange([...(excludedBaseline ?? []), scope]);
+    }
+  }
 
   if (error) {
     return <p className="muted small">Could not load tools (check bearer token).</p>;
@@ -254,7 +290,12 @@ function GroupedToolPicker({
   }
 
   function toggleTool(t: ToolEntry) {
-    if (t.baseline) return;
+    // Track 12 — baseline tools are toggleable now (writes to the
+    // excluded list, not to selected).
+    if (t.baseline) {
+      toggleBaselineExclude(t.scope);
+      return;
+    }
     const scope = t.scope;
     if (selected.includes(scope)) {
       onChange(selected.filter((s) => s !== scope));
@@ -271,6 +312,16 @@ function GroupedToolPicker({
     const offArchetypeAdd = nsTools.filter((t) => !t.baseline && isOffArchetype(t) && !selected.includes(t.scope)).map((t) => t.scope);
     onChange([...new Set([...selected, ...nsScopes])]);
     if (offArchetypeAdd.length) onRbacChange?.(offArchetypeAdd, []);
+    // Track 12 — also re-include any baselines in this group the agent had opted out of.
+    if (onExcludedBaselineChange) {
+      const baselineScopes = new Set(
+        nsTools.filter((t) => t.baseline).map((t) => t.scope),
+      );
+      const next = (excludedBaseline ?? []).filter((s) => !baselineScopes.has(s));
+      if (next.length !== (excludedBaseline ?? []).length) {
+        onExcludedBaselineChange(next);
+      }
+    }
   }
 
   function deselectAll(ns: string) {
@@ -279,6 +330,12 @@ function GroupedToolPicker({
     const offArchetypeRemove = nsTools.filter((t) => !t.baseline && isOffArchetype(t) && selected.includes(t.scope)).map((t) => t.scope);
     onChange(selected.filter((s) => !nsScopes.has(s)));
     if (offArchetypeRemove.length) onRbacChange?.([], offArchetypeRemove);
+    // Track 12 — also opt this agent out of every baseline tool in the group.
+    if (onExcludedBaselineChange) {
+      const baselineScopes = nsTools.filter((t) => t.baseline).map((t) => t.scope);
+      const next = [...new Set([...(excludedBaseline ?? []), ...baselineScopes])];
+      onExcludedBaselineChange(next);
+    }
   }
 
   if (tools.length === 0) {
@@ -289,10 +346,22 @@ function GroupedToolPicker({
     <div>
       {orderedKeys.map((ns) => {
         const nsTools = groups.get(ns) ?? [];
-        const nsSelected = nsTools.filter((t) => selected.includes(t.scope)).length;
+        // Track 12 fix — baseline tools are "on" by default unless the user
+        // explicitly excluded them. The old counter only counted entries in
+        // `selected`, so a baseline-heavy group (Code Execution: 2 of 3
+        // baseline) showed "0/3" even when all baselines were granted.
+        const nsSelected = nsTools.filter((t) =>
+          t.baseline ? !excludedSet.has(t.scope) : selected.includes(t.scope),
+        ).length;
         const nsNonBaseline = nsTools.filter((t) => !t.baseline);
+        const nsBaseline = nsTools.filter((t) => t.baseline);
         const isOpen = openGroups.has(ns);
-        const allSelected = nsNonBaseline.length > 0 && nsNonBaseline.every((t) => selected.includes(t.scope));
+        // Track 12 — group header reflects "every tool granted":
+        //  - every non-baseline must be in selected, AND
+        //  - no baseline in this group is on the excluded list.
+        const allSelected =
+          nsNonBaseline.every((t) => selected.includes(t.scope))
+          && nsBaseline.every((t) => !excludedSet.has(t.scope));
         return (
           <div key={ns} style={{ marginBottom: 4, border: "1px solid #e2e8f0", borderRadius: 6, overflow: "hidden" }}>
             <div
@@ -324,43 +393,115 @@ function GroupedToolPicker({
               <div style={{ padding: "4px 0" }}>
                 {nsTools.map((t) => {
                   const offArchetype = isOffArchetype(t);
-                  const isSelected = selected.includes(t.scope);
+                  const isExcludedBaseline = t.baseline && excludedSet.has(t.scope);
+                  // A baseline tool is "on" iff not explicitly excluded.
+                  const isSelected = t.baseline
+                    ? !isExcludedBaseline
+                    : selected.includes(t.scope);
                   const archLabel = archetypeRoleType ?? "this role";
                   const title = t.baseline
-                    ? "Baseline — always granted"
+                    ? (isExcludedBaseline
+                        ? "Baseline — opted out for this agent. Re-check to grant."
+                        : "Baseline — always granted by default. Un-check to opt this agent out.")
                     : offArchetype
                       ? `Unusual for a ${archLabel} — grants ${t.scope} to this role for this run.`
                       : t.description;
+                  // Track 12 — for the three sub-LLM dispatch tools, show a
+                  // per-agent model dropdown beneath the row when granted.
+                  const isSubLlmTool = (
+                    t.scope === "llm-dispatch"
+                    || t.scope === "summarise-subtask"
+                    || t.scope === "protocol-cleanup"
+                  );
+                  const showModelPicker =
+                    isSubLlmTool
+                    && isSelected
+                    && !!onSubLlmModelsChange;
+                  const currentModelId = (subLlmModels ?? {})[t.scope] ?? "";
                   return (
-                    <label
-                      key={t.scope}
-                      title={title}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "4px 10px 4px 28px",
-                        cursor: t.baseline ? "not-allowed" : "pointer",
-                        background: t.baseline
-                          ? (isSelected ? "#eef2ff" : "transparent")
-                          : offArchetype
-                            ? "rgba(251,146,60,.12)"
-                            : isSelected
-                              ? "#eef2ff"
-                              : "transparent",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={t.baseline || isSelected}
-                        disabled={t.baseline}
-                        style={{ width: "auto" }}
-                        onChange={() => !t.baseline && toggleTool(t)}
-                      />
-                      <span style={{ fontFamily: "monospace", fontSize: 12 }}>{t.name}</span>
-                      {t.baseline && <span className="tag small" style={{ fontSize: 10 }}>baseline</span>}
-                      {offArchetype && <span className="tag small" style={{ fontSize: 10, background: "#fed7aa", color: "#92400e", border: "none" }}>off-archetype</span>}
-                    </label>
+                    <div key={t.scope}>
+                      <label
+                        title={title}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: "4px 10px 4px 28px",
+                          cursor: "pointer",
+                          background: t.baseline
+                            ? (isExcludedBaseline ? "rgba(239,68,68,.08)" : (isSelected ? "#eef2ff" : "transparent"))
+                            : offArchetype
+                              ? "rgba(251,146,60,.12)"
+                              : isSelected
+                                ? "#eef2ff"
+                                : "transparent",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          style={{ width: "auto" }}
+                          onChange={() => toggleTool(t)}
+                        />
+                        <span style={{ fontFamily: "monospace", fontSize: 12 }}>{t.name}</span>
+                        {t.baseline && (
+                          <span
+                            className="tag small"
+                            style={{
+                              fontSize: 10,
+                              background: isExcludedBaseline ? "#fee2e2" : undefined,
+                              color: isExcludedBaseline ? "#991b1b" : undefined,
+                            }}
+                          >
+                            {isExcludedBaseline ? "baseline (off)" : "baseline"}
+                          </span>
+                        )}
+                        {offArchetype && <span className="tag small" style={{ fontSize: 10, background: "#fed7aa", color: "#92400e", border: "none" }}>off-archetype</span>}
+                      </label>
+                      {showModelPicker && (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "2px 10px 6px 60px",
+                            fontSize: 12,
+                          }}
+                        >
+                          <span className="muted small" style={{ minWidth: 50 }}>Model:</span>
+                          <select
+                            value={currentModelId}
+                            onChange={(e) => {
+                              const next = { ...(subLlmModels ?? {}) };
+                              if (e.target.value) {
+                                next[t.scope] = e.target.value;
+                              } else {
+                                delete next[t.scope];
+                              }
+                              onSubLlmModelsChange!(next);
+                            }}
+                            style={{ flex: 1 }}
+                          >
+                            <option value="">(inherit project / auto)</option>
+                            {(() => {
+                              const grouped: Record<string, ModelEntry[]> = {};
+                              for (const m of models) {
+                                (grouped[m.provider] ||= []).push(m);
+                              }
+                              return Object.entries(grouped).sort().map(([prov, ms]) => (
+                                <optgroup key={prov} label={prov}>
+                                  {ms.map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                      {m.id}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ));
+                            })()}
+                          </select>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -536,6 +677,14 @@ export function WorkerSettingsPanel({
             onRbacChange={onRbacChange}
             archetypeRoleType={current.agent_class_role_type ?? null}
             projectRbacScopes={projectRbacScopes}
+            excludedBaseline={current.excluded_baseline_tools ?? []}
+            onExcludedBaselineChange={(next) =>
+              void handleChange({ excluded_baseline_tools: next })
+            }
+            subLlmModels={current.sub_llm_models_override ?? {}}
+            onSubLlmModelsChange={(next) =>
+              void handleChange({ sub_llm_models_override: next })
+            }
           />
         </section>
 

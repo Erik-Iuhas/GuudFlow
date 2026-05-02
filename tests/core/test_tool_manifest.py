@@ -279,3 +279,48 @@ def test_baseline_set_membership():
     assert "git-diff" in BASELINE_LOCAL_SCOPES
     assert "fs-write" not in BASELINE_LOCAL_SCOPES
     assert "code-exec" not in BASELINE_LOCAL_SCOPES
+
+
+# ── Track 12 — explicit baseline opt-out ───────────────────────────────────
+
+
+def test_excluded_baseline_drops_tool_even_though_baseline(builder: ToolManifestBuilder):
+    """When the agent has explicitly excluded a baseline scope, the manifest
+    drops it even though it would normally be auto-included."""
+    m = builder.build_for_agent(
+        role="developer",
+        declared_local_tools=[],
+        declared_mcp_servers=[],
+        excluded_baseline=["git-diff"],
+    )
+    names = m.names()
+    # Other baseline tools still present.
+    assert "fs-read" in names
+    assert "fs-list" in names
+    # Excluded one is gone.
+    assert "git-diff" not in names
+
+
+def test_excluded_baseline_overrides_explicit_declaration(builder: ToolManifestBuilder):
+    """If a user redundantly declared a baseline tool AND excluded it, the
+    exclusion wins. (Avoids the manifest lying about UI state.)"""
+    m = builder.build_for_agent(
+        role="developer",
+        declared_local_tools=["fs-read"],
+        declared_mcp_servers=[],
+        excluded_baseline=["fs-read"],
+    )
+    assert "fs-read" not in m.names()
+
+
+def test_excluded_baseline_default_is_empty(builder: ToolManifestBuilder):
+    """Default behaviour is unchanged: omit excluded_baseline → all baseline
+    tools land in the manifest as before."""
+    m = builder.build_for_agent(
+        role="developer",
+        declared_local_tools=[],
+        declared_mcp_servers=[],
+    )
+    names = m.names()
+    assert "fs-read" in names
+    assert "git-diff" in names

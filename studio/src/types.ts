@@ -17,6 +17,14 @@ export interface AgentConfig {
   max_tool_iterations?: number;
   manages?: string[];
   escalates_to?: string[];
+  /** Track 12 — per-agent override for sub-LLM dispatch model selection.
+   *  Maps use_case → registered model id. Checked before the project's
+   *  sub_llm_models. Empty/missing → inherit project default. */
+  sub_llm_models_override?: Record<string, string>;
+  /** Track 12 — explicit baseline opt-out. Tools listed here are dropped
+   *  from the manifest even though they're in BASELINE_LOCAL_SCOPES.
+   *  Studio's tool picker writes here when the user un-checks a baseline. */
+  excluded_baseline_tools?: string[];
 }
 
 export interface RoleRBAC {

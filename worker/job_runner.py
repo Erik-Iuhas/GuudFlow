@@ -75,6 +75,19 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
     """
     agents: list[AgentConfig] = []
     for a in data.get("agents") or []:
+        # Track 12 — per-agent sub-LLM model overrides (dict[use_case → model_id]).
+        raw_agent_sub_llm = a.get("sub_llm_models_override") or {}
+        agent_sub_llm: dict[str, str] = {}
+        if isinstance(raw_agent_sub_llm, dict):
+            for k, v in raw_agent_sub_llm.items():
+                if v:
+                    agent_sub_llm[str(k)] = str(v)
+        # Track 12 — explicit baseline opt-out list.
+        raw_excluded = a.get("excluded_baseline_tools") or []
+        excluded_baseline = (
+            [str(x) for x in raw_excluded if x]
+            if isinstance(raw_excluded, list) else []
+        )
         agents.append(AgentConfig(
             role=a.get("role", ""),
             description=a.get("description", ""),
@@ -88,6 +101,8 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             is_reviewer=bool(a.get("is_reviewer", False)),
             is_final_reviewer=bool(a.get("is_final_reviewer", False)),
             max_tool_iterations=int(a.get("max_tool_iterations", 10)),
+            sub_llm_models_override=agent_sub_llm,
+            excluded_baseline_tools=excluded_baseline,
         ))
 
     rbac: dict[str, RoleRBAC] = {}

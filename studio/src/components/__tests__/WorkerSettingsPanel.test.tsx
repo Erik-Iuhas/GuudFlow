@@ -104,32 +104,35 @@ describe("WorkerSettingsPanel", () => {
     expect(inRbac).toBeTruthy();
   });
 
-  it("baseline tools render as checked and disabled regardless of declared_local_tools", async () => {
-    // declared_local_tools is empty but baseline=true tools must still appear checked+disabled
+  it("baseline tools render checked but un-locked; clicking writes to excluded_baseline_tools", async () => {
+    // Track 12 — baseline tools are now toggleable. Default state is
+    // checked (granted by default). Clicking adds the scope to the
+    // excluded_baseline_tools list (does NOT touch declared_local_tools).
     const { onChange } = renderPanel({
       agent: { ...agent, declared_local_tools: [] },
     });
-    // Wait for the "File System" group header to appear (tools loaded)
     const fsGroupHeader = await waitFor(() => screen.getByText("File System"));
-    // Expand the group
     fireEvent.click(fsGroupHeader);
 
-    // Now fs-read checkbox should be visible, checked, and disabled
     await waitFor(() => {
       const checkboxes = document.querySelectorAll<HTMLInputElement>("input[type=checkbox]");
       const baselineBox = [...checkboxes].find((cb) =>
         cb.closest("label")?.textContent?.includes("fs-read"),
       );
       expect(baselineBox).toBeTruthy();
+      // Baseline starts checked — granted by default.
       expect(baselineBox!.checked).toBe(true);
-      expect(baselineBox!.disabled).toBe(true);
+      // Track 12 fix — no longer disabled. Users can opt this agent out.
+      expect(baselineBox!.disabled).toBe(false);
     });
-    // Clicking a baseline tool must NOT call onChange
     const baselineBox = [...document.querySelectorAll<HTMLInputElement>("input[type=checkbox]")].find(
       (cb) => cb.closest("label")?.textContent?.includes("fs-read"),
     )!;
     fireEvent.click(baselineBox);
-    expect(onChange).not.toHaveBeenCalled();
+    // Click writes to excluded_baseline_tools (not declared_local_tools).
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ excluded_baseline_tools: ["fs-read"] }),
+    );
   });
 
   it("off-archetype tool check fires onChange AND onRbacChange with scope to add", async () => {
