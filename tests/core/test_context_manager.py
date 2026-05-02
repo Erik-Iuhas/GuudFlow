@@ -102,40 +102,34 @@ async def test_unrelated_task_does_not_pull_files(setup):
     assert ctx.relevant_files == {}
 
 
-# ── Iteration-aware diff ───────────────────────────────────────────────────
+# ── Track 3a: wholesale diff path removed ──────────────────────────────────
 
 
-async def test_iteration_2_uses_diff_over_full_files(tmp_path: Path):
+async def test_iteration_2_uses_relevant_files_not_diff(tmp_path: Path):
+    """Track 3a: on iter-2 (and any iter), get_context fills the budget with
+    relevant files. The old `include_diff=True` wholesale-diff path was
+    removed because it broke fs-edit's exact-match semantics."""
     fw = FileWorkspace(tmp_path / "ws")
     gw = GitWorkspace(fw.working)
     gw.init()
-    (fw.working / "auth.py").write_text("class AuthManager:\n    pass\n")
+    (fw.working / "auth.py").write_text("class AuthManager:\n    def login(self):\n        pass\n")
     gw.commit("developer", "feat: auth")
 
     ws = Workspace(run_id="r1", goal="x", files=fw, iteration=2)
     ws.repo_map = build(fw.working)
     ws.git.agent_branches["developer"] = "agent/developer"
 
-    # Make a change on the dev branch so diff has content
-    gw.repo.git.checkout("agent/developer")
-    (fw.working / "auth.py").write_text("class AuthManager:\n    def login(self):\n        pass\n")
-    gw.commit("developer", "feat: add login")
-
     cm = ContextManager(ws, files=fw, git=gw)
-    ctx = await cm.get_context("review changes", agent_role="developer", include_diff=True)
-    assert ctx.git_diff is not None
-    assert "login" in ctx.git_diff
-
-
-async def test_iteration_1_does_not_use_diff(setup):
-    ws, fw = setup
-    ws.iteration = 1
-    cm = ContextManager(ws, files=fw)
-    ctx = await cm.get_context("review", agent_role="developer", include_diff=True)
+    ctx = await cm.get_context("review auth", agent_role="developer", include_diff=True)
+    # No git_diff — that path is gone.
     assert ctx.git_diff is None
+    # Relevant files populated instead (auth.py matched the task keyword).
+    assert "auth.py" in ctx.relevant_files
 
 
-async def test_include_diff_false_skips_diff(tmp_path: Path):
+async def test_include_diff_param_is_no_op_backward_compat(tmp_path: Path):
+    """Track 3a: `include_diff` kept for backward-compat but does nothing.
+    Both True and False should produce identical output."""
     fw = FileWorkspace(tmp_path / "ws")
     gw = GitWorkspace(fw.working)
     gw.init()
@@ -147,8 +141,10 @@ async def test_include_diff_false_skips_diff(tmp_path: Path):
     ws.git.agent_branches["developer"] = "agent/developer"
 
     cm = ContextManager(ws, files=fw, git=gw)
-    ctx = await cm.get_context("x", agent_role="developer", include_diff=False)
-    assert ctx.git_diff is None
+    ctx_t = await cm.get_context("x", agent_role="developer", include_diff=True)
+    ctx_f = await cm.get_context("x", agent_role="developer", include_diff=False)
+    assert ctx_t.git_diff is None
+    assert ctx_f.git_diff is None
 
 
 # ── Recent signals ──────────────────────────────────────────────────────────

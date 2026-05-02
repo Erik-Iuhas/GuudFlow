@@ -8,9 +8,14 @@ Default behaviour:
 - The repo map is always included. It is cheap (~3-5k tokens) and always
   useful (DESIGN rule 56).
 - Full file contents are pull-not-push, ranked by task-keyword relevance.
-- On iteration ≥ 2 with `include_diff=True`, prefer the git diff over
-  re-reading full files. This alone can cut reviewer cost by ~80%.
 - Embeddings are off by default. Symbol search is the fallback.
+
+Track 3a: the iteration-2 wholesale-code-diff path was removed. Treating
+source code as a document-style diff broke edit semantics — `fs-edit`
+relies on byte-identical content for its exact-match `find` strings.
+Agents that want to review their own commits use the `git-diff` tool
+explicitly, scoped to a path. The `include_diff` parameter is retained
+for backward compatibility but is now a no-op.
 """
 
 from __future__ import annotations
@@ -155,32 +160,19 @@ class ContextManager:
 
         ctx = AgentContext(repo_map=repo_map_text)
 
-        # Iteration 2+: prefer diff over re-read.
-        diff_used = False
-        if (
-            include_diff
-            and self.workspace.iteration > 1
-            and self.git is not None
-            and self.workspace.git.agent_branches.get(agent_role)
-        ):
-            try:
-                diff = self.git.diff(
-                    self.workspace.git.agent_branches[agent_role],
-                    self.workspace.git.main_branch,
-                )
-            except Exception:
-                diff = ""
-            if diff.strip():
-                diff_tokens = _approx_tokens(diff)
-                if used + diff_tokens <= max_tokens:
-                    ctx.git_diff = diff
-                    used += diff_tokens
-                    diff_used = True
+        # Track 3a: the iteration-2 wholesale-code-diff path was removed.
+        # Wholesale diff treats source as a document — but source has
+        # exact-match edit semantics via fs-edit. Compressing or summarizing
+        # via diff would silently break subsequent edits. Agents that need
+        # diffs request them explicitly via the git-diff tool, scoped to a
+        # path. `include_diff` parameter retained for backward-compat
+        # (now a no-op).
+        _ = include_diff  # acknowledged deprecated
 
         # Fill remaining budget with full contents of top-ranked relevant files.
         # Track per-file token counts for the ContextSnapshot.
         _file_token_pairs: list[tuple[str, int]] = []
-        if not diff_used and self.files is not None and repo_map.entries:
+        if self.files is not None and repo_map.entries:
             query_tokens = _tokens(task)
             scored = [(_score_entry(e, query_tokens), e) for e in repo_map.entries]
             scored.sort(key=lambda pair: pair[0], reverse=True)
