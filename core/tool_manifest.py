@@ -391,6 +391,11 @@ BASELINE_LOCAL_SCOPES: frozenset[str] = frozenset({
     # (or their synthetic root). Required for the "first agent in run,
     # too-big project goal" case to be self-fixable.
     "decompose-task",
+    # Track 8 — recall-subtask is read-class (cheap splice operation).
+    # Inert when no stash exists. Every agent gets it so a later
+    # subtask can reach back into earlier closed work without
+    # explicit RBAC plumbing.
+    "recall-subtask",
 })
 
 

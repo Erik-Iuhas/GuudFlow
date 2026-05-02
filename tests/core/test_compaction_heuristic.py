@@ -52,9 +52,13 @@ def _msgs(*texts: str) -> list[LLMMessage]:
 
 
 def test_compaction_with_prior_marker(tmp_path: Path) -> None:
-    """Compaction starts from the message AFTER the most recent prior marker."""
+    """Compaction starts from the message AFTER the most recent prior marker.
+
+    Track 8 — marker format updated from `[runner] Task X closed at Y`
+    to `[SUBTASK CLOSED — id=X, sha=Y]`. Compaction recognises both
+    formats so historical runs / bisect builds keep working."""
     messages = _msgs(
-        "[runner] Task T0 closed at abc1234. Summary: previous task done",
+        "[SUBTASK CLOSED — id=T0, sha=abc1234]\nsummary: previous task done",
         "start working on T1 now",
         "using tool fs-write",
         "result: file written",
@@ -65,8 +69,26 @@ def test_compaction_with_prior_marker(tmp_path: Path) -> None:
 
     # Should have: original prior-marker message + new marker for T1
     assert len(messages) == 2
+    assert "[SUBTASK CLOSED — id=T0" in messages[0].content
+    assert "[SUBTASK CLOSED — id=T1, sha=def5678]" in messages[1].content
+
+
+def test_compaction_recognises_legacy_marker(tmp_path: Path) -> None:
+    """Track 8 — legacy `[runner] Task X closed at Y` markers from older
+    runs are still recognised as boundaries during compaction."""
+    messages = _msgs(
+        "[runner] Task T0 closed at abc1234. Summary: previous task done",
+        "start working on T1 now",
+        "tool call",
+        "result",
+    )
+    runner = _runner(tmp_path)
+    runner._compact_messages_after_close(messages, "T1", "def56789", _record())
+
+    assert len(messages) == 2
+    # Legacy marker preserved; new marker uses Track 8 format.
     assert "[runner] Task T0 closed" in messages[0].content
-    assert "[runner] Task T1 closed at def5678" in messages[1].content
+    assert "[SUBTASK CLOSED — id=T1, sha=def5678]" in messages[1].content
 
 
 def test_compaction_no_prior_marker_uses_task_id(tmp_path: Path) -> None:
@@ -84,7 +106,7 @@ def test_compaction_no_prior_marker_uses_task_id(tmp_path: Path) -> None:
     # The message at index 1 mentions T1; everything from there onward is replaced.
     assert len(messages) == 2
     assert messages[0].content == "some setup context"
-    assert "[runner] Task T1 closed at abc1234" in messages[1].content
+    assert "[SUBTASK CLOSED — id=T1, sha=abc1234]" in messages[1].content
 
 
 def test_compaction_fallback_last_two(tmp_path: Path) -> None:
@@ -99,7 +121,7 @@ def test_compaction_fallback_last_two(tmp_path: Path) -> None:
     assert messages[0].content == "msg A"
     assert messages[1].content == "msg B"
     assert messages[2].content == "msg C"
-    assert "[runner] Task TXYZ closed" in messages[3].content
+    assert "[SUBTASK CLOSED — id=TXYZ" in messages[3].content
 
 
 def test_compaction_empty_messages(tmp_path: Path) -> None:
@@ -122,4 +144,7 @@ def test_compaction_degraded_record(tmp_path: Path) -> None:
         closed_by_commit="abc12345",
     )
     runner._compact_messages_after_close(messages, "T1", "abc12345", degraded)
-    assert "[runner] Task T1 closed" in messages[-1].content
+    # Track 8 — degraded marker uses fallback summary text.
+    marker = messages[-1].content
+    assert "[SUBTASK CLOSED — id=T1" in marker
+    assert "[task T1] work completed" in marker

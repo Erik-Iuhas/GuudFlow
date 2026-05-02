@@ -37,6 +37,7 @@ from agents.base import BaseAgent, ToolNotAvailable
 from agents.tools.base import BaseTool
 from agents.tools.board import AssignTask, BoardMessage
 from agents.tools.decompose_task import DecomposeTask
+from agents.tools.recall_subtask import RecallSubtask
 from agents.tools.code import CodeExec, CodeOutline
 from agents.tools.code_batch import CodeOutlineBatch
 from agents.tools.fs_batch import FsEditBatch, FsWriteBatch
@@ -341,6 +342,7 @@ LOCAL_TOOL_CLASSES: tuple[type[BaseTool], ...] = (
     FsWriteBatch, FsEditBatch,                # Track 3e — batch variants
     GitDiff, GitChangedFiles, GitLog, GitRead, GitStatus,
     BoardMessage, AssignTask, DecomposeTask,  # Track 7 — decompose-task
+    RecallSubtask,                              # Track 8 — recall-subtask
     CodeExec, CodeOutline, CodeOutlineBatch,  # Track 3e — batch variant
     DataCsv, DataJson, DataXml, DataYaml,
     DocHtml, DocMarkdown,
@@ -425,6 +427,14 @@ class AgentRunner:
         # Set at the start of _generic_tool_use_loop so compaction can
         # access it from _handle_task_closures.
         self._current_agent_messages: list[LLMMessage] = []
+        # Track 8 — per-subtask stash. When a subtask closes, the runner
+        # extracts the message-history span produced since it started
+        # and stashes it here (keyed by subtask_id), replacing the live
+        # span with a single summary marker. The recall-subtask tool
+        # splices the stashed span back into _current_agent_messages on
+        # demand. Process-memory only — not persisted (acceptable per
+        # the master plan; agent_turns.jsonl still holds the forensic copy).
+        self._stashed_subtask_messages: dict[str, list["LLMMessage"]] = {}
         self.agent_factory = agent_factory or default_agent_factory
         self.max_wall_seconds = max_wall_seconds
         # Track 1d — repo_map dirty flag. Set on GIT_COMMIT, consumed at
@@ -780,6 +790,7 @@ class AgentRunner:
             BoardMessage.name: BoardMessage(role, self.workspace),
             AssignTask.name: AssignTask(role, self.workspace, runner=self),
             DecomposeTask.name: DecomposeTask(role, self.workspace),
+            RecallSubtask.name: RecallSubtask(role, runner=self),
             # Story lifecycle — available to all agents (no RBAC gate).
             # Any agent that writes .md files may open or close a story.
             StoryComplete.name: StoryComplete(role, self.workspace, runner=self),
@@ -2256,24 +2267,50 @@ class AgentRunner:
         sha: str,
         record: "TaskSummarizer | Any",
     ) -> None:
-        """M5.5 C2: replace task's verbose message history with a single marker.
+        """Track 8 — generalised hot-swap. Replaces the verbose message
+        history span produced since `task_id` started with a single
+        canonical marker that names the subtask, the closing commit, a
+        one-line outcome (from M5.5's TaskCompletionRecord OR
+        Track 12's summarise-subtask wrapper), and a hint that the
+        original detail can be re-hydrated via `recall-subtask`.
 
-        Heuristic: walk backwards from the end to find where this task's work
-        began (the message after the most recent prior `closes: task:*` marker,
-        or the first message mentioning task_id, or fallback to last 2 messages).
+        Original message span is **stashed** (Track 8) into
+        `self._stashed_subtask_messages[task_id]` so the recall-subtask
+        tool can splice it back later. Pre-Track-8 behaviour discarded
+        the span outright; the new behaviour keeps the cost-saving
+        compaction AND opens the door to retrieval.
+
         Mutates ``messages`` in-place.
         """
-        from core.task_summarizer import TaskCompletionRecord
-
         summary = record.summary if hasattr(record, "summary") else str(record)
+        deliverables: list[str] = []
+        if hasattr(record, "deliverables"):
+            try:
+                deliverables = [str(d) for d in (record.deliverables or [])]
+            except (TypeError, ValueError):
+                deliverables = []
         degraded = summary == "(summary unavailable)"
         # Use the task goal as fallback text on degraded records.
         marker_text = summary if not degraded else f"[task {task_id}] work completed"
 
-        marker = LLMMessage(
-            role="user",
-            content=f"[runner] Task {task_id} closed at {sha[:7]}. Summary: {marker_text}",
+        # Track 8 — canonical marker format. The leading sentinel
+        # `[SUBTASK CLOSED — id=<task_id>` lets recall-subtask find the
+        # marker by exact prefix match (only on user-role messages, so
+        # a model's prose can't false-positive). Kept short — the agent
+        # already knows the run-level context; this is a one-line
+        # reminder + recall affordance.
+        marker_lines: list[str] = [
+            f"[SUBTASK CLOSED — id={task_id}, sha={sha[:7]}]",
+            f"summary: {marker_text}",
+        ]
+        if deliverables:
+            # Cap to 5 to keep the marker bounded.
+            visible = deliverables[:5]
+            marker_lines.append("deliverables: [" + ", ".join(visible) + "]")
+        marker_lines.append(
+            f'recall via recall-subtask("{task_id}") to see the full tool history'
         )
+        marker = LLMMessage(role="user", content="\n".join(marker_lines))
 
         if not messages:
             return
@@ -2282,11 +2319,16 @@ class AgentRunner:
         i_start = 0
 
         # Search for the start of this task's work: the first message after
-        # the most recent prior "[runner] Task ... closed at" marker.
+        # the most recent prior `[SUBTASK CLOSED — id=…` marker (or the
+        # legacy `[runner] Task … closed at` marker so older runs still
+        # compact correctly during the transition).
         for i in range(len(messages) - 1, -1, -1):
             content = messages[i].content
             text = content if isinstance(content, str) else ""
-            if "[runner] Task" in text and "closed at" in text:
+            if (
+                text.startswith("[SUBTASK CLOSED — id=")
+                or ("[runner] Task" in text and "closed at" in text)
+            ):
                 i_start = i + 1
                 found_start = True
                 break
@@ -2304,6 +2346,22 @@ class AgentRunner:
         # Safety fallback: task_id never mentioned and no prior marker.
         if not found_start:
             i_start = max(0, len(messages) - 2)
+
+        # Track 8 — stash the original span BEFORE replacing. Use a
+        # shallow copy of the list slice so subsequent mutations of
+        # `messages` don't bleed into the stash.
+        stashed_span = list(messages[i_start:])
+        if stashed_span:
+            self._stashed_subtask_messages[task_id] = stashed_span
+            # Bump iteration metric so the dashboard can prove the win.
+            # Best-effort: find any agent with an active metrics row.
+            for _role, agent in (self.agents or {}).items():
+                if agent is None:
+                    continue
+                m = getattr(agent, "_current_metrics", None)
+                if m is not None:
+                    m.subtask_messages_stashed += len(stashed_span)
+                    break
 
         # Replace everything from i_start to end with the marker.
         messages[i_start:] = [marker]

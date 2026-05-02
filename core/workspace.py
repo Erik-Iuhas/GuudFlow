@@ -138,6 +138,14 @@ class IterationMetrics:
     # each entry is `{"calls": int, "input_tokens": int, "output_tokens": int}`.
     # Lets the user see where their sub-dispatch budget went per run.
     sub_llm_breakdown: dict[str, dict[str, int]] = field(default_factory=dict)
+    # Track 8: subtask context hot-swap counters. `stashed` increments
+    # by N when a closed subtask's N message blocks are evicted from
+    # the live history and replaced by a summary marker. `restored`
+    # increments by N when `recall-subtask` splices stashed messages
+    # back in. Together they prove the cost-savings story: a high
+    # stashed count + low restored count = working as intended.
+    subtask_messages_stashed: int = 0
+    subtask_messages_restored: int = 0
 
     completed: bool = False
     failed: bool = False
