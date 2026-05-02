@@ -46,6 +46,7 @@ from api.routes import projects as projects_router
 from api.routes import runs as runs_router
 from api.routes import dashboard as dashboard_router
 from api.routes import models as models_router
+from api.routes import settings as settings_router
 from api.routes import tools as tools_router
 from api.routes import training as training_router
 from api.storage import PersonaStore, ProjectStore, RunStore
@@ -56,7 +57,21 @@ from worker.queue import InMemoryJobQueue
 
 
 def _data_root() -> Path:
-    return Path(os.environ.get("GUUDFLOW_DATA_DIR", "./data")).resolve()
+    """Resolve the storage root.
+
+    Track 4: routes through core/storage.py which honours the storage_mode
+    toggle (`global` | `in-directory`). The legacy `GUUDFLOW_DATA_DIR` env
+    var still works because it's read by storage.py as `GUUDFLOW_DATA_ROOT`
+    via the `data_root` settings key — but the new env var name is
+    `GUUDFLOW_DATA_ROOT` (or `GUUDFLOW_STORAGE_ROOT` in in-directory mode).
+    """
+    # Honour legacy GUUDFLOW_DATA_DIR for backward-compat: if set, treat it
+    # as an explicit storage root in global mode.
+    legacy = os.environ.get("GUUDFLOW_DATA_DIR")
+    if legacy and not os.environ.get("GUUDFLOW_STORAGE_MODE"):
+        return Path(legacy).resolve()
+    from core import storage as _storage
+    return _storage.data_root().resolve()
 
 
 # Register catalog-able builtins at module import so `GET /api/agents/catalog`
@@ -77,10 +92,22 @@ async def lifespan(app: FastAPI):
     data_root = _data_root()
     data_root.mkdir(parents=True, exist_ok=True)
 
+    # Track 4: in in-directory mode, ensure the .flow/ scaffold exists.
+    # init_flow_dir is idempotent — safe to call every startup.
+    from core import storage as _storage
+    cfg = _storage.get_storage_config()
+    if cfg.mode == "in-directory":
+        from core.flow_dir import init_flow_dir
+        # storage_root for in-directory mode is already <something>/.flow,
+        # so we init at the parent.
+        init_flow_dir(data_root.parent)
+
     app.state.data_root = data_root
     app.state.project_store = ProjectStore(data_root)
     app.state.run_store = RunStore(data_root / "runs")
-    app.state.persona_store = PersonaStore(data_root / "personas")
+    # Personas root is ALWAYS global regardless of storage_mode.
+    # Track 4 §35 — personas cross directories by design.
+    app.state.persona_store = PersonaStore(_storage.personas_root().resolve())
     app.state.queue = InMemoryJobQueue()
     app.state.run_registry = RunRegistry()
     app.state.quip_registry = QuipRegistry()
@@ -140,6 +167,7 @@ def create_app() -> FastAPI:
     app.include_router(invoke_router.router)
     app.include_router(dashboard_router.router)
     app.include_router(models_router.router)
+    app.include_router(settings_router.router)
     app.include_router(tools_router.router)
     app.include_router(training_router.router)
     app.include_router(ws_router)
