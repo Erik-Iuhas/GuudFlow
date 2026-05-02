@@ -1046,6 +1046,15 @@ class AgentRunner:
             )
             return None
         path = self.run_root / "agent_turns.jsonl"
+        # Touch the file at builder time so its absence on disk
+        # immediately tells us the persister wasn't wired in (vs being
+        # wired but never invoked, which leaves an empty file).
+        try:
+            path.touch(exist_ok=True)
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "agent_turns touch failed for %s: %s", path, exc,
+            )
 
         def _persist(record: dict) -> None:
             try:
