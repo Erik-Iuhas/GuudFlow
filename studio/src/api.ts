@@ -123,6 +123,15 @@ export const runsApi = {
     ),
   get: (id: string) => request<RunMeta>("GET", `/api/runs/${id}`),
   board: (id: string) => request<Signal[]>("GET", `/api/runs/${id}/board`),
+  /** Track 11 — live cognition snapshot for the Workers tab. Studio
+   *  polls this every ~1.5s while the tab is visible. */
+  workers: (id: string) =>
+    request<WorkersSnapshot>(
+      "GET",
+      `/api/runs/${encodeURIComponent(id)}/workers`,
+      undefined,
+      true,
+    ),
   postComment: (
     id: string,
     text: string,
@@ -187,6 +196,45 @@ export const runsApi = {
   contextLog: (id: string) =>
     request<ContextSnapshot[]>("GET", `/api/runs/${encodeURIComponent(id)}/context_log`, undefined, true),
 };
+
+// Track 11 — Worker cognition view payload.
+export interface WorkerCurrentToolCall {
+  name: string;
+  arguments_preview: string;
+  elapsed_seconds: number;
+}
+export interface WorkerLastToolSummary {
+  name: string;
+  summary: string;
+  ago_seconds: number;
+}
+export interface WorkerActiveSubtask {
+  id: string;
+  goal: string;
+  parent_task_id: string | null;
+  acceptance: string[];
+}
+export interface WorkerSubtaskHistoryEntry {
+  id: string;
+  goal: string;
+  status: string;
+  parent_task_id?: string | null;
+}
+export interface WorkerCognition {
+  role: string;
+  state: string;
+  iteration: number;
+  active_subtask: WorkerActiveSubtask | null;
+  current_tool_call: WorkerCurrentToolCall | null;
+  last_tool_summary: WorkerLastToolSummary | null;
+  iteration_cost_usd: number;
+  subtask_history: WorkerSubtaskHistoryEntry[];
+}
+export interface WorkersSnapshot {
+  workers: WorkerCognition[];
+  live: boolean;
+}
+
 
 export interface RunTag {
   name: string;

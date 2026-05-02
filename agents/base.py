@@ -71,6 +71,27 @@ READ_CLASS_TOOLS: frozenset[str] = frozenset({
 })
 
 
+def _summarise_tool_result(result: Any) -> str:
+    """Track 11 — short, human-readable summary of a tool result for the
+    Workers panel. Single line, ≤120 chars. Falls back to `(result)` on
+    any formatting hiccup. Never raises."""
+    try:
+        if isinstance(result, dict):
+            if "error" in result:
+                return f"error: {str(result['error'])[:100]}"
+            # Pull the most informative single line out of common shapes.
+            for key in ("summary", "ok", "text", "content", "path", "task_id"):
+                if key in result:
+                    val = str(result[key])[:100]
+                    return f"{key}: {val}" if key != "ok" else f"ok ({val})"
+            keys = sorted(result.keys())[:3]
+            return "ok {" + ", ".join(keys) + (", ..." if len(result) > 3 else "") + "}"
+        s = str(result)
+        return s[:117] + "..." if len(s) > 120 else s
+    except Exception:
+        return "(result)"
+
+
 def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -163,6 +184,22 @@ class BaseAgent:
     # Track 2b: set by emit_no_op(); read by the runner's finalize block to
     # populate IterationMetrics.no_op. Reset to False before each run.
     _last_commit_was_noop: bool = field(default=False, repr=False)
+
+    # Track 11 — live cognition view. Set by `call_tool` immediately
+    # before invoking the tool, cleared after the call returns. The
+    # Workers tab in Studio reads these via the WORKER_TICK WS frame
+    # so the user can see what each agent is currently doing.
+    # `_current_tool_call` carries (name, arguments, started_at_epoch).
+    # `_last_tool_summary` carries the most recent completed call as
+    # (name, summary_str, ended_at_epoch); `summary_str` is a short
+    # representation of the result so the panel doesn't have to render
+    # raw JSON.
+    _current_tool_call: tuple[str, dict[str, Any], float] | None = field(
+        default=None, repr=False,
+    )
+    _last_tool_summary: tuple[str, str, float] | None = field(
+        default=None, repr=False,
+    )
 
     # Track 1c: workspace handle set by the runner before each run() so
     # effective_system_prompt() can inject Layer 4.5 (codebase structure
@@ -627,26 +664,43 @@ class BaseAgent:
         if m is not None:
             m.tools_called.append(name)
 
-        if d.invocation == "local":
-            tool = self._local_tools.get(name)
-            if tool is None:
-                raise ToolError(f"local tool {name!r} declared but not instantiated")
-            try:
+        # Track 11 — live cognition hook. Stamp the in-flight call so the
+        # Workers panel can render "currently calling: <tool>(<args>)"
+        # while we're awaiting. Cleared in `finally` whether the call
+        # succeeds, errors, or is cancelled.
+        import time as _time
+        self._current_tool_call = (name, arguments, _time.time())
+        try:
+            if d.invocation == "local":
+                tool = self._local_tools.get(name)
+                if tool is None:
+                    raise ToolError(f"local tool {name!r} declared but not instantiated")
                 result = await tool.run(arguments)
-            except Exception:
-                raise
-            return self._post_process_tool_result(name, result, compress=compress)
+                processed = self._post_process_tool_result(name, result, compress=compress)
+            else:
+                # Broker-routed.
+                broker_result = await self.request_credential(
+                    scope=d.scope or name,
+                    operation=name,
+                    payload=arguments,
+                )
+                if not broker_result.granted:
+                    raise ToolDenied(name, broker_result.reason)
+                result = broker_result.result or {}
+                processed = self._post_process_tool_result(name, result, compress=compress)
+        finally:
+            self._current_tool_call = None
 
-        # Broker-routed.
-        broker_result = await self.request_credential(
-            scope=d.scope or name,
-            operation=name,
-            payload=arguments,
-        )
-        if not broker_result.granted:
-            raise ToolDenied(name, broker_result.reason)
-        result = broker_result.result or {}
-        return self._post_process_tool_result(name, result, compress=compress)
+        # Track 11 — capture a short summary of the just-completed call
+        # so the Workers panel can show "last: <tool> → <summary>".
+        # Best-effort: never let summary formatting fail the call.
+        try:
+            self._last_tool_summary = (
+                name, _summarise_tool_result(processed), _time.time(),
+            )
+        except Exception:
+            self._last_tool_summary = (name, "(result)", _time.time())
+        return processed
 
     def _post_process_tool_result(
         self,

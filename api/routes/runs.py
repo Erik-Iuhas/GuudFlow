@@ -195,6 +195,157 @@ async def get_run_desks(request: Request, run_id: str) -> dict:
     return payload
 
 
+@router.get("/{run_id}/workers", dependencies=[Depends(require_bearer)])
+async def get_run_workers(request: Request, run_id: str) -> dict:
+    """Track 11 — live cognition snapshot for the Workers tab.
+
+    Returns one entry per agent role with the current state Studio
+    needs to render the cognition view:
+
+      {
+        "workers": [
+          {
+            "role": "dev",
+            "state": "running" | "complete" | "pending" | "...",
+            "iteration": int,
+            "active_subtask": {"id": ..., "goal": ..., "parent_task_id": ...} | None,
+            "current_tool_call": {"name": ..., "arguments_preview": ..., "elapsed_seconds": ...} | None,
+            "last_tool_summary": {"name": ..., "summary": ..., "ago_seconds": ...} | None,
+            "iteration_cost_usd": float,
+            "subtask_history": [{"id": ..., "goal": ..., "status": ...}, ...]
+          },
+          ...
+        ],
+        "live": bool
+      }
+
+    Live runs read from the in-memory workspace + agent state; completed
+    runs degrade to a "live=false" snapshot derived from tasks.jsonl
+    only. Studio polls this every ~1.5s while the Workers tab is open.
+    """
+    import json
+    import time as _time
+    from pathlib import Path as _Path
+
+    registry = getattr(request.app.state, "run_registry", None)
+    workspace = await registry.get(run_id) if registry is not None else None
+    runner = await registry.get_runner(run_id) if registry is not None else None
+
+    if workspace is None or runner is None:
+        # Run is not active — degrade gracefully. Read tasks from disk
+        # and skip the live-only fields (current tool call, etc).
+        payload = await _store(request).get_tasks(run_id)
+        if payload is None:
+            raise HTTPException(
+                status_code=404, detail=f"run {run_id!r} not found",
+            )
+        # Group tasks by assigned_to to reconstruct a basic worker view.
+        tasks_by_role: dict[str, list[dict]] = {}
+        for t in (payload.get("tasks_by_id") or {}).values():
+            assignee = t.get("assigned_to") or "?"
+            tasks_by_role.setdefault(assignee, []).append(t)
+        workers = []
+        for role, tasks in sorted(tasks_by_role.items()):
+            history = [
+                {"id": t["task_id"], "goal": t.get("goal", ""), "status": t.get("status", "")}
+                for t in tasks if not t["task_id"].startswith("root:")
+            ]
+            workers.append({
+                "role": role,
+                "state": "complete",
+                "iteration": 0,
+                "active_subtask": None,
+                "current_tool_call": None,
+                "last_tool_summary": None,
+                "iteration_cost_usd": 0.0,
+                "subtask_history": history,
+            })
+        return {"workers": workers, "live": False}
+
+    # Live snapshot.
+    workers = []
+    now = _time.time()
+    for cfg in runner.project.agents:
+        role = cfg.role
+        agent = (runner.agents or {}).get(role)
+        state = workspace.agent_states.get(role)
+        state_str = state.value if state is not None else "pending"
+
+        # Active subtask (Track 7).
+        active_sub_id = (workspace.active_subtask or {}).get(role)
+        active_sub: dict | None = None
+        if active_sub_id and not active_sub_id.startswith("root:"):
+            t = workspace.tasks.get(active_sub_id)
+            if t is not None:
+                active_sub = {
+                    "id": t.task_id,
+                    "goal": t.goal,
+                    "parent_task_id": t.parent_task_id,
+                    "acceptance": list(t.acceptance_criteria or [])[:5],
+                }
+
+        # In-flight tool call (Track 11 BaseAgent hook).
+        current_tool: dict | None = None
+        last_summary: dict | None = None
+        iteration_cost = 0.0
+        iter_no = 0
+        if agent is not None:
+            ct = getattr(agent, "_current_tool_call", None)
+            if ct is not None:
+                name, args, started = ct
+                # Truncate args preview to keep payload small.
+                args_preview = json.dumps(args, default=str)
+                if len(args_preview) > 200:
+                    args_preview = args_preview[:197] + "..."
+                current_tool = {
+                    "name": name,
+                    "arguments_preview": args_preview,
+                    "elapsed_seconds": round(now - started, 1),
+                }
+            ls = getattr(agent, "_last_tool_summary", None)
+            if ls is not None:
+                lname, lsummary, lended = ls
+                last_summary = {
+                    "name": lname,
+                    "summary": lsummary,
+                    "ago_seconds": round(now - lended, 1),
+                }
+            m = getattr(agent, "_current_metrics", None)
+            if m is not None:
+                iteration_cost = float(getattr(m, "estimated_cost_usd", 0.0) or 0.0)
+                iter_no = int(getattr(m, "iteration", 0) or 0)
+
+        # Subtask history — flat list of all non-root tasks assigned to
+        # this role, oldest first, with status. Caller paginates / collapses
+        # in the UI.
+        history: list[dict] = []
+        for tid in workspace.task_queues.get(role, []):
+            if tid.startswith("root:"):
+                continue
+            t = workspace.tasks.get(tid)
+            if t is None:
+                continue
+            history.append({
+                "id": t.task_id,
+                "goal": t.goal,
+                "status": t.status,
+                "parent_task_id": t.parent_task_id,
+            })
+
+        workers.append({
+            "role": role,
+            "state": state_str,
+            "iteration": iter_no,
+            "active_subtask": active_sub,
+            "current_tool_call": current_tool,
+            "last_tool_summary": last_summary,
+            "iteration_cost_usd": iteration_cost,
+            "subtask_history": history,
+        })
+
+    return {"workers": workers, "live": True}
+
+
 @router.get("/{run_id}/graph", dependencies=[Depends(require_bearer)])
 async def get_run_graph(request: Request, run_id: str) -> dict:
     """Return the agent hierarchy graph for a run (M5.C4).
