@@ -86,7 +86,7 @@ interface StorageSectionProps {
   onUpdated: (next: SettingsState) => void;
 }
 
-function StorageSection({ settings, onUpdated }: StorageSectionProps) {
+export function StorageSection({ settings, onUpdated }: StorageSectionProps) {
   const [mode, setMode] = useState<"global" | "in-directory">(
     settings.effective.storage_mode,
   );

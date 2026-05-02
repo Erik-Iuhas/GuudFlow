@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
-import { SettingsDrawer } from "./components/SettingsDrawer";
 import { GlobalErrorHandler, ToastProvider } from "./components/Toaster";
 import { Dashboard } from "./views/Dashboard";
 import { Projects } from "./views/Projects";
 import { Propose } from "./views/Propose";
 import { Roster } from "./views/Roster";
 import { Run } from "./views/Run";
+import { Settings } from "./views/Settings";
 import { Studio } from "./views/Studio";
 import { Tournament } from "./views/Tournament";
 import { Training } from "./views/Training";
@@ -35,7 +35,6 @@ function AppShell({
   token: string;
   setTokenLocal: (s: string) => void;
 }) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <div className="shell">
       <header className="topbar">
@@ -56,6 +55,9 @@ function AppShell({
           <NavLink to="/training" className={({ isActive }) => (isActive ? "active" : "")}>
             Training
           </NavLink>
+          <NavLink to="/settings" className={({ isActive }) => (isActive ? "active" : "")}>
+            Settings
+          </NavLink>
         </nav>
         <input
           className="token-input"
@@ -64,16 +66,7 @@ function AppShell({
           value={token}
           onChange={(e) => setTokenLocal(e.target.value)}
         />
-        <button
-          className="settings-button"
-          aria-label="Open settings"
-          title="Settings"
-          onClick={() => setSettingsOpen(true)}
-        >
-          ⚙
-        </button>
       </header>
-      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <main className="main">
         <Routes>
           <Route path="/" element={<Dashboard />} />
@@ -85,6 +78,7 @@ function AppShell({
           <Route path="/roster/:id" element={<Roster />} />
           <Route path="/training" element={<Training />} />
           <Route path="/training/tournaments/:id" element={<Tournament />} />
+          <Route path="/settings" element={<Settings />} />
           <Route
             path="*"
             element={
