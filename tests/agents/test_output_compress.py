@@ -11,18 +11,24 @@ from agents.tools.output_compress import (
     _group_files_by_dir,
     _serialise_tokens,
     _squash_blank_runs,
+    _strip_cargo_banners,
     _strip_commit_trailers,
     _strip_diff_index_lines,
+    _strip_go_test_pass_noise,
     _strip_npm_noise,
     _strip_pip_noise,
     _strip_pytest_banners,
+    _strip_ruff_warnings,
     _strip_trailing_whitespace,
     _truncate_oversize_diff,
     compress,
     compress_code_exec,
+    compress_fs_grep,
+    compress_fs_list,
     compress_git_changed_files,
     compress_git_diff,
     compress_git_log,
+    compress_git_status,
 )
 
 
@@ -365,4 +371,254 @@ def test_git_log_compression_idempotent():
     }
     cr1 = compress_git_log(result)
     cr2 = compress_git_log(cr1.result)
+    assert abs(cr2.compressed_tokens - cr1.compressed_tokens) <= 5
+
+
+# ── code-exec framework-specific banners (RTK parity) ──────────────────────
+
+
+def test_strip_cargo_banners():
+    text = (
+        "   Compiling crate-foo v0.1.0 (/path/to/foo)\n"
+        "   Compiling crate-bar v2.3.4\n"
+        "   Updating crates.io index\n"
+        "   Downloaded serde v1.0.0\n"
+        "    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.21s\n"
+        "running 3 tests\n"
+        "test tests::a ... ok\n"
+        "test result: ok. 3 passed; 0 failed\n"
+    )
+    new_text, hit = _strip_cargo_banners(text)
+    assert hit is True
+    assert "Compiling" not in new_text
+    assert "Updating crates.io" not in new_text
+    assert "Downloaded" not in new_text
+    assert "Finished" not in new_text
+    assert "running 3 tests" not in new_text
+    # Test result summary preserved.
+    assert "test result: ok" in new_text
+    assert "test tests::a" in new_text
+
+
+def test_strip_go_test_pass_noise():
+    text = (
+        "=== RUN   TestFoo\n"
+        "--- PASS: TestFoo (0.00s)\n"
+        "=== RUN   TestBar\n"
+        "--- FAIL: TestBar (0.01s)\n"
+        "    bar_test.go:42: expected 1, got 2\n"
+        "FAIL\n"
+    )
+    new_text, hit = _strip_go_test_pass_noise(text)
+    assert hit is True
+    assert "=== RUN" not in new_text
+    assert "--- PASS:" not in new_text
+    # Failures retained.
+    assert "--- FAIL: TestBar" in new_text
+    assert "expected 1, got 2" in new_text
+    assert "FAIL" in new_text
+
+
+def test_strip_ruff_warnings_keeps_findings():
+    text = (
+        "warning: `nonexistent.py` does not exist\n"
+        "src/auth.py:42:1: F401 imported but unused\n"
+        "Found 1 error.\n"
+    )
+    new_text, hit = _strip_ruff_warnings(text)
+    assert hit is True
+    assert "does not exist" not in new_text
+    # Findings + summary preserved.
+    assert "F401" in new_text
+    assert "Found 1 error" in new_text
+
+
+def test_compress_code_exec_with_cargo_output():
+    """End-to-end: cargo test output through the full strategy chain."""
+    cargo_out = (
+        "   Compiling foo v0.1.0\n"
+        "   Compiling bar v0.2.0\n"
+        "    Finished `test` profile in 4.21s\n"
+        "running 5 tests\n"
+        "test tests::a ... ok\n"
+        "test tests::b ... ok\n"
+        "test result: ok. 5 passed; 0 failed\n"
+    )
+    cr = compress_code_exec({"ok": True, "stdout": cargo_out})
+    assert "cargo_banner" in cr.strategies_applied
+    assert cr.tokens_saved > 0
+
+
+# ── fs-list compressor ─────────────────────────────────────────────────────
+
+
+def test_compress_fs_list_groups_long_lists():
+    files = [
+        "src/api/a.py", "src/api/b.py", "src/api/c.py",
+        "src/db/d.py", "src/db/e.py", "src/db/f.py",
+        "tests/g.py", "tests/h.py",
+    ]
+    result = {"ok": True, "path": "", "recursive": True, "files": files, "count": 8}
+    cr = compress_fs_list(result)
+    assert "dir_grouping" in cr.strategies_applied
+    assert "summary" in cr.result
+    assert "files" not in cr.result
+    assert cr.result["files_full_count"] == 8
+    assert cr.tokens_saved > 0
+
+
+def test_compress_fs_list_short_list_no_op():
+    """≤ 5 files isn't worth grouping — keep the list as-is."""
+    files = ["a.py", "b.py", "c.py"]
+    result = {"ok": True, "files": files, "count": 3}
+    cr = compress_fs_list(result)
+    assert "dir_grouping" not in cr.strategies_applied
+    assert cr.result["files"] == files
+
+
+def test_compress_fs_list_preserves_tagged_dict_entries():
+    """fs-list returns a mix of str (plain files) and dict (story-tagged files).
+    Dict entries carry semantic info — they must be preserved separately."""
+    files = [
+        "src/a.py", "src/b.py", "src/c.py", "src/d.py", "src/e.py", "src/f.py",
+        {"path": "docs/spec.md", "story": "auth-redesign"},
+        {"path": "docs/api.md", "changed_in_story": True},
+    ]
+    result = {"ok": True, "files": files, "count": 8}
+    cr = compress_fs_list(result)
+    assert "dir_grouping" in cr.strategies_applied
+    assert "summary" in cr.result
+    assert "tagged_files" in cr.result
+    assert len(cr.result["tagged_files"]) == 2
+    # The tagged files keep their story info intact.
+    assert any(t.get("story") == "auth-redesign" for t in cr.result["tagged_files"])
+
+
+# ── fs-grep compressor ─────────────────────────────────────────────────────
+
+
+def test_compress_fs_grep_groups_matches_by_file():
+    matches = [
+        {"path": "src/auth.py", "line_number": 1, "line": "import os", "before": [], "after": []},
+        {"path": "src/auth.py", "line_number": 5, "line": "from db import x", "before": [], "after": []},
+        {"path": "src/db.py", "line_number": 3, "line": "import os", "before": [], "after": []},
+        {"path": "src/utils.py", "line_number": 2, "line": "import os", "before": [], "after": []},
+        {"path": "src/main.py", "line_number": 1, "line": "import os", "before": [], "after": []},
+        {"path": "src/cli.py", "line_number": 1, "line": "import os", "before": [], "after": []},
+    ]
+    result = {"ok": True, "query": "import", "matches": matches, "count": 6, "files_searched": 5}
+    cr = compress_fs_grep(result)
+    assert "group_by_path" in cr.strategies_applied or "drop_empty_context" in cr.strategies_applied
+    assert "matches_by_file" in cr.result
+    assert "matches" not in cr.result
+    # Each path appears once now, with its sub-matches.
+    paths = [block["path"] for block in cr.result["matches_by_file"]]
+    assert len(paths) == len(set(paths))
+
+
+def test_compress_fs_grep_drops_empty_context_lists():
+    matches = [
+        {"path": "a.py", "line_number": i, "line": f"x{i}", "before": [], "after": []}
+        for i in range(10)
+    ]
+    result = {"ok": True, "matches": matches, "count": 10}
+    cr = compress_fs_grep(result)
+    assert "drop_empty_context" in cr.strategies_applied
+    # Cleaned matches don't carry empty before/after fields.
+    block = cr.result["matches_by_file"][0]
+    for m in block["matches"]:
+        assert "before" not in m
+        assert "after" not in m
+
+
+def test_compress_fs_grep_within_file_dedup():
+    """Same line text matched at multiple line numbers — render once with × N."""
+    matches = [
+        {"path": "src/auth.py", "line_number": 1, "line": "import os", "before": [], "after": []},
+        {"path": "src/auth.py", "line_number": 50, "line": "import os", "before": [], "after": []},
+        {"path": "src/auth.py", "line_number": 100, "line": "import os", "before": [], "after": []},
+        {"path": "src/auth.py", "line_number": 200, "line": "import os", "before": [], "after": []},
+        {"path": "src/auth.py", "line_number": 300, "line": "import os", "before": [], "after": []},
+        {"path": "src/auth.py", "line_number": 7, "line": "from db import x", "before": [], "after": []},
+    ]
+    result = {"ok": True, "matches": matches, "count": 6}
+    cr = compress_fs_grep(result)
+    assert "within_file_dedup" in cr.strategies_applied
+    block = cr.result["matches_by_file"][0]
+    # The repeated "import os" entry now has occurrences=5.
+    repeated = [m for m in block["matches"] if m.get("line") == "import os"]
+    assert len(repeated) == 1
+    assert repeated[0]["occurrences"] == 5
+
+
+def test_compress_fs_grep_short_no_op():
+    """≤ 5 matches is too small to benefit from grouping — leave it alone."""
+    matches = [{"path": "a.py", "line_number": 1, "line": "x"}]
+    result = {"ok": True, "matches": matches, "count": 1}
+    cr = compress_fs_grep(result)
+    assert cr.strategies_applied == []
+    assert cr.result == result
+
+
+# ── git-status compressor ──────────────────────────────────────────────────
+
+
+def test_compress_git_status_groups_by_state_and_dir():
+    entries = [
+        {"path": "src/api/a.py", "state": "modified", "staged": False},
+        {"path": "src/api/b.py", "state": "modified", "staged": False},
+        {"path": "src/api/c.py", "state": "modified", "staged": False},
+        {"path": "tests/test_a.py", "state": "added", "staged": True},
+        {"path": "tests/test_b.py", "state": "added", "staged": True},
+        {"path": "tmp/scratch.txt", "state": "untracked", "staged": False},
+    ]
+    result = {"ok": True, "branch": "feat-auth", "clean": False, "entries": entries}
+    cr = compress_git_status(result)
+    assert "state_grouping" in cr.strategies_applied
+    assert "by_state" in cr.result
+    assert "entries" not in cr.result
+    assert cr.result["entries_count"] == 6
+    # State buckets exist with grouped paths.
+    assert "modified" in cr.result["by_state"]
+    assert "added (staged)" in cr.result["by_state"]
+    assert "untracked" in cr.result["by_state"]
+    # Path-grouping inside each bucket worked.
+    assert "src/api/" in cr.result["by_state"]["modified"]
+
+
+def test_compress_git_status_clean_branch_no_op():
+    """Clean branch — no entries — returns identity."""
+    result = {"ok": True, "branch": "main", "clean": True, "entries": []}
+    cr = compress_git_status(result)
+    assert cr.strategies_applied == []
+    assert cr.result == result
+
+
+def test_compress_git_status_short_list_no_op():
+    """Few entries — not worth grouping."""
+    entries = [{"path": "a.py", "state": "modified", "staged": False}]
+    result = {"ok": True, "branch": "x", "clean": False, "entries": entries}
+    cr = compress_git_status(result)
+    assert cr.strategies_applied == []
+
+
+# ── Idempotency for the new compressors ──────────────────────────────────
+
+
+def test_fs_list_idempotent():
+    files = [f"src/dir{i}/file.py" for i in range(20)]
+    result = {"ok": True, "files": files, "count": 20}
+    cr1 = compress_fs_list(result)
+    cr2 = compress_fs_list(cr1.result)
+    assert abs(cr2.compressed_tokens - cr1.compressed_tokens) <= 5
+
+
+def test_git_status_idempotent():
+    entries = [
+        {"path": f"src/d{i}/f.py", "state": "modified", "staged": False}
+        for i in range(15)
+    ]
+    result = {"ok": True, "branch": "x", "clean": False, "entries": entries}
+    cr1 = compress_git_status(result)
+    cr2 = compress_git_status(cr1.result)
     assert abs(cr2.compressed_tokens - cr1.compressed_tokens) <= 5
