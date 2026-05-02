@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { ApiError, inputsApi } from "../api";
+import { useEffect, useMemo, useState } from "react";
+import { ApiError, inputsApi, settingsApi, type SettingsState } from "../api";
 import { PriorRunPicker } from "../components/PriorRunPicker";
 import { SourceRepoField } from "../components/SourceRepoField";
 import { UploadDropzone } from "../components/UploadDropzone";
@@ -18,11 +18,31 @@ function humanSize(bytes: number): string {
 export function Inputs({ projectId }: InputsProps) {
   const [state, setState] = useState<InputsState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<SettingsState | null>(null);
 
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  // Fetch effective settings once — used to derive `storageBase` so the
+  // In-place sub-mode of Source repo can lock to the user's chosen folder
+  // (no re-paste). Failures are non-fatal: SourceRepoField falls back to
+  // the disabled-In-place state when storageMode is unknown.
+  useEffect(() => {
+    let alive = true;
+    settingsApi
+      .get()
+      .then((s) => { if (alive) setSettings(s); })
+      .catch(() => { /* noop */ });
+    return () => { alive = false; };
+  }, []);
+
+  const storageMode = settings?.effective.storage_mode ?? "global";
+  const storageBase = useMemo(() => {
+    const root = settings?.effective.storage_root ?? "";
+    return root.replace(/[/\\]\.flow[/\\]?$/, "");
+  }, [settings]);
 
   async function load() {
     try {
@@ -203,6 +223,8 @@ export function Inputs({ projectId }: InputsProps) {
       </p>
       <SourceRepoField
         current={state.source_repo}
+        storageMode={storageMode}
+        storageBase={storageBase}
         onImportGit={handleImportGit}
         onImportLocalPath={handleImportLocalPath}
         onImportLocalPathInPlace={handleImportLocalPathInPlace}

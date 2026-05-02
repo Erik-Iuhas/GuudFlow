@@ -4,6 +4,12 @@ import { FolderPicker } from "./FolderPicker";
 
 export interface SourceRepoFieldProps {
   current: SourceRepoMeta | null;
+  /** Effective storage mode from /api/settings. When `"in-directory"` the
+   *  In-place sub-mode is enabled; in `"global"` it's disabled with a hint. */
+  storageMode?: "global" | "in-directory";
+  /** User-chosen base directory (storage_root with trailing `.flow/`
+   *  stripped). Drives the read-only chip in In-place mode. */
+  storageBase?: string;
   onImportGit: (body: {
     git_url: string;
     branch?: string;
@@ -25,11 +31,14 @@ type LocalSubMode = "isolated" | "in-place";
 
 export function SourceRepoField({
   current,
+  storageMode = "global",
+  storageBase = "",
   onImportGit,
   onImportLocalPath,
   onImportLocalPathInPlace,
   onDetach,
 }: SourceRepoFieldProps) {
+  const inPlaceAvailable = storageMode === "in-directory" && storageBase.length > 0;
   const [editing, setEditing] = useState(current === null);
   const [mode, setMode] = useState<Mode>("git");
   const [localSubMode, setLocalSubMode] = useState<LocalSubMode>("isolated");
@@ -56,7 +65,8 @@ export function SourceRepoField({
           force,
         });
       } else if (localSubMode === "in-place") {
-        res = await onImportLocalPathInPlace({ path: localPath.trim() });
+        // Path is locked to storageBase from Settings — single source of truth.
+        res = await onImportLocalPathInPlace({ path: storageBase });
       } else {
         res = await onImportLocalPath({ path: localPath.trim(), force });
       }
@@ -165,29 +175,37 @@ export function SourceRepoField({
         <div style={{ marginTop: 8 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {[
-              { value: "isolated" as const, title: "Isolated", hint: "Copy this directory into the run's workspace. Original is untouched." },
-              { value: "in-place" as const, title: "In-place", hint: "Agents work directly in this directory. Pair with PR mode = manual." },
+              { value: "isolated" as const, title: "Isolated", hint: "Copy this directory into the run's workspace. Original is untouched.", available: true },
+              { value: "in-place" as const, title: "In-place", hint: inPlaceAvailable
+                ? "Agents work directly in your Storage root. Pair with PR mode = manual."
+                : "Set Storage root in Settings to use In-place.", available: inPlaceAvailable },
             ].map((o) => {
               const selected = localSubMode === o.value;
+              const disabled = !o.available;
               return (
                 <button
                   key={o.value}
                   type="button"
-                  onClick={() => setLocalSubMode(o.value)}
+                  onClick={() => { if (!disabled) setLocalSubMode(o.value); }}
+                  disabled={disabled}
                   style={{
                     textAlign: "left",
                     padding: "10px 12px",
                     borderRadius: 6,
-                    border: selected ? "1.5px solid #16a34a" : "1px solid #e2e8f0",
-                    background: selected ? "#f0fdf4" : "#fff",
-                    cursor: "pointer",
+                    border: selected && !disabled ? "1.5px solid #16a34a" : "1px solid #e2e8f0",
+                    background: selected && !disabled
+                      ? "#f0fdf4"
+                      : disabled ? "#f8fafc" : "#fff",
+                    cursor: disabled ? "not-allowed" : "pointer",
+                    opacity: disabled ? 0.65 : 1,
                     display: "flex",
                     flexDirection: "column",
                     gap: 2,
                   }}
+                  data-testid={`source-local-submode-${o.value}`}
                 >
                   <span style={{ fontWeight: 600, fontSize: 13 }}>
-                    {selected ? "● " : "○ "}{o.title}
+                    {selected && !disabled ? "● " : "○ "}{o.title}
                   </span>
                   <span className="muted small" style={{ lineHeight: 1.3 }}>
                     {o.hint}
@@ -197,43 +215,65 @@ export function SourceRepoField({
             })}
           </div>
 
-          <label style={{ display: "block", marginTop: 12 }}>
-            Absolute path on the API host
-          </label>
-          <div className="row" style={{ gap: 6 }}>
-            <input
-              type="text"
-              placeholder="/abs/path/to/dir"
-              value={localPath}
-              onChange={(e) => setLocalPath(e.target.value)}
-              style={{ flex: 1 }}
-            />
-            <button type="button" onClick={() => setPickerOpen(true)}>
-              Browse…
-            </button>
-          </div>
-          {pickerOpen && (
-            <FolderPicker
-              initialPath={localPath || undefined}
-              onSelect={setLocalPath}
-              onClose={() => setPickerOpen(false)}
-            />
-          )}
-          <p className="muted small" style={{ marginTop: 4 }}>
-            {localSubMode === "in-place" ? (
-              <>
+          {localSubMode === "in-place" && inPlaceAvailable ? (
+            <div style={{ marginTop: 12 }}>
+              <label style={{ display: "block" }}>Working directory</label>
+              <div
+                className="row"
+                style={{
+                  gap: 8,
+                  alignItems: "center",
+                  marginTop: 4,
+                  padding: "8px 10px",
+                  background: "#f1f5f9",
+                  borderRadius: 6,
+                  border: "1px solid #e2e8f0",
+                }}
+                data-testid="source-in-place-chip"
+              >
+                <span aria-hidden>📁</span>
+                <span className="mono small" style={{ flex: 1, overflowX: "auto" }}>
+                  {storageBase}
+                </span>
+                <span className="muted small">From Settings → Storage root</span>
+              </div>
+              <p className="muted small" style={{ marginTop: 6 }}>
                 ⚠ Agents will modify files in this directory directly. Strongly
                 recommended: keep PR mode = manual on every project so main is
                 never auto-merged.
-              </>
-            ) : (
-              <>
+              </p>
+            </div>
+          ) : (
+            <div style={{ marginTop: 12 }}>
+              <label style={{ display: "block" }}>
+                Absolute path on the API host
+              </label>
+              <div className="row" style={{ gap: 6 }}>
+                <input
+                  type="text"
+                  placeholder="/abs/path/to/dir"
+                  value={localPath}
+                  onChange={(e) => setLocalPath(e.target.value)}
+                  style={{ flex: 1 }}
+                />
+                <button type="button" onClick={() => setPickerOpen(true)}>
+                  Browse…
+                </button>
+              </div>
+              {pickerOpen && (
+                <FolderPicker
+                  initialPath={localPath || undefined}
+                  onSelect={setLocalPath}
+                  onClose={() => setPickerOpen(false)}
+                />
+              )}
+              <p className="muted small" style={{ marginTop: 4 }}>
                 The API process must have read access to this path. Multi-tenant
                 deployments restrict this via{" "}
                 <span className="mono">GUUDFLOW_LOCAL_PATH_ALLOWLIST</span>.
-              </>
-            )}
-          </p>
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -262,7 +302,14 @@ export function SourceRepoField({
         <button
           className="primary"
           onClick={() => void submit(false)}
-          disabled={busy || (mode === "git" ? !gitUrl.trim() : !localPath.trim())}
+          disabled={
+            busy ||
+            (mode === "git"
+              ? !gitUrl.trim()
+              : localSubMode === "in-place"
+                ? !inPlaceAvailable
+                : !localPath.trim())
+          }
         >
           {busy ? "Importing…" : "Import"}
         </button>
