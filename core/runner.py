@@ -1034,11 +1034,16 @@ class AgentRunner:
 
         Each record contains: role, iteration, model, all messages (prompt,
         tool calls, tool results, final response), and the final output text.
-        Crash-safe: each append is independent.
+        Crash-safe: each append is independent. Surfaces errors via logging
+        so a missing log file is detectable instead of silent.
         """
         try:
             self.run_root.mkdir(parents=True, exist_ok=True)
-        except OSError:
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "agent_turns persister disabled — could not create run_root %s: %s",
+                self.run_root, exc,
+            )
             return None
         path = self.run_root / "agent_turns.jsonl"
 
@@ -1046,8 +1051,10 @@ class AgentRunner:
             try:
                 with open(path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(record, default=str) + "\n")
-            except OSError:
-                pass
+            except OSError as exc:
+                logging.getLogger(__name__).warning(
+                    "agent_turns write failed for %s: %s", path, exc,
+                )
 
         return _persist
 
@@ -1729,7 +1736,13 @@ class AgentRunner:
                     workspace.add_iteration_metrics(_m)
                     agent._current_metrics = None
                 # Log the full turn — messages + output — to agent_turns.jsonl.
+                # The previous version swallowed all exceptions; that hid a
+                # NameError on `drive_result` (unbound when _drive_agent_run
+                # raised through the finally) and meant the file silently
+                # never appeared. Now we surface errors via logging so a
+                # missing log is visible in the runner log stream.
                 if self._agent_turns_persister is not None:
+                    drive_result_local = locals().get("drive_result", None)
                     try:
                         def _serialise_msg(msg: LLMMessage) -> dict:
                             tc = None
@@ -1737,6 +1750,16 @@ class AgentRunner:
                                 tc = [{"id": c.id, "name": c.name, "arguments": c.arguments}
                                       for c in msg.tool_calls]
                             return {"role": msg.role, "content": msg.content, "tool_calls": tc}
+
+                        if isinstance(drive_result_local, protocol.CompactBlock):
+                            final_output = {
+                                "kind": drive_result_local.kind,
+                                "fields": drive_result_local.fields,
+                            }
+                        elif drive_result_local is not None:
+                            final_output = str(drive_result_local)
+                        else:
+                            final_output = None
 
                         turn_record: dict = {
                             "run_id": workspace.run_id,
@@ -1753,15 +1776,14 @@ class AgentRunner:
                             "completed": _m.completed if _m else False,
                             "failed": _m.failed if _m else True,
                             "messages": [_serialise_msg(msg) for msg in self._current_agent_messages],
-                            "final_output": (
-                                {"kind": drive_result.kind, "fields": drive_result.fields}
-                                if isinstance(drive_result, protocol.CompactBlock)
-                                else str(drive_result) if drive_result else None
-                            ),
+                            "final_output": final_output,
                         }
                         self._agent_turns_persister(turn_record)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logging.getLogger(__name__).warning(
+                            "agent_turns persister failed for %s iter %s: %s",
+                            cfg.role, agent.iteration, exc, exc_info=True,
+                        )
 
             # M1: handle REQUEST_SKIP before treating the block as work output.
             if (
