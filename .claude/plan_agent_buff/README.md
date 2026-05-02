@@ -35,6 +35,8 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 | `track_12_sub_llm_dispatch.md` | 12 | **Phase 1 detail** — `llm-dispatch` primitive + `summarise-subtask` / `protocol-cleanup` wrappers + per-use-case + per-agent model picker | ✅ **Shipped** as dormant primitive (`cb3422e`, `6905348`, `1148bf1`); consumers in T8 / T9 | Master | 250–400k |
 | `track_7_subtask_decomposition.md` | 7 | **Phase 2 detail** — synthetic root + `decompose-task` tool + `assign-task` extension + active subtask layer | ✅ **Shipped** (`4e8cc09` `0ef8ed3` `fce079a` `89a3bff` `6050e34` `7af5fab`) | Master | ~300k actual |
 | `track_8_subtask_context_hotswap.md` | 8 | **Phase 3 detail** — stash + summary marker + `recall-subtask` tool. Primary consumer of T12's `summarise-subtask`. | ✅ **Shipped** (`dfa8958`) | T7, T12 | ~200k actual |
+| `track_9_protocol_cleaner_sidecar.md` | 9 | Auto-fire `protocol-cleanup` on PROTOCOL_PARSE_FAIL — turns a heavy retry into a cheap dispatch. | ✅ **Shipped** (`f4c2710`) | T12 | ~150k actual |
+| `track_3g_tools_array_slim.md` | 3g | Strip duplicate `description` fields from the API tools array (~2-3K token savings) | ⬜ Not started — not urgent | T3d.4 | 50–120k |
 
 ### Deferred (intentionally not specced as files)
 
