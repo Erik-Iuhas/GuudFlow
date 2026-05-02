@@ -24,7 +24,9 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 | `track_3e_batch_tool_calls.md` | 3e | Batch tools: fs-edit-batch, fs-write-batch, code-outline-batch | ✅ **Shipped** | Track 1 | 200–350k |
 | `track_3d4_manifest_render.md` | 3d.4 | Manifest auto-render: priority + when_to_use on every tool | ✅ **Shipped** | Track 3e | 200–350k |
 | `track_3f_cross_reference_graph.md` | 3f | Cross-reference graph (tree-sitter extension; Python/JS/TS/C++) | 🟦 **Deferred** — gated on real-run signals | Track 1, 1c | 550–850k (3 phases) |
-| `track_4_flow_dir_design.md` | 4 | Design spec (needs sign-off) | ⬜ Pending review | — | 100–150k |
+| `track_4_flow_dir_design.md` | 4 | Design spec (history — superseded by `track_4_flow_dir_implementation.md`) | ✅ **Shipped** (storage-mode toggle + Settings drawer; commits 5c7dc9b → 824fde5) | — | 100–150k |
+| `track_4_flow_dir_implementation.md` | 4 | Implementation plan (storage mode + Settings drawer) | ✅ **Shipped** | Track 1 | 600–900k |
+| `track_4_2_pr_mode.md` | 4.2 | Per-project pr_mode (manual stops at story branch; auto merges to main) | ⬜ Not started | Track 4 | 200–350k |
 | `track_6_peer_rework.md` | 6 | Feature | ⬜ Not started | — | 150–250k |
 
 ### Deferred (intentionally not specced as files)
