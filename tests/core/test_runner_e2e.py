@@ -63,6 +63,9 @@ async def test_two_agent_run_e2e(tmp_path: Path):
     project = ProjectConfig(
         project_id="proj_e2e",
         goal="Add a hello.py module",
+        # Track 4.2 — this test asserts merges land on main. Default flipped
+        # to "manual" in 4.2; opt back into auto-merge for legacy assertion.
+        pr_mode="auto",
         agents=[
             AgentConfig(
                 role="developer",

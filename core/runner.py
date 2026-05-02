@@ -31,7 +31,7 @@ import uuid as _uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Literal
 
 from agents.base import BaseAgent, ToolNotAvailable
 from agents.tools.base import BaseTool
@@ -198,6 +198,11 @@ class ProjectConfig:
     # tech_lead is escalated instead of bouncing the work back again.
     # Separate from escalation_thresholds (which is cumulative across the run).
     consecutive_fail_threshold: int = 2
+    # Track 4.2 — when a run completes, `auto` merges the leaf branch into main
+    # (sandbox-friendly), `manual` lands work on an integration branch
+    # (`flow/story-<slug>` if a story is open, else `flow/run-<id>`) and surfaces
+    # a paste-ready `gh pr create` command. Default `manual` for real-repo safety.
+    pr_mode: Literal["manual", "auto"] = "manual"
 
 
 # Default model id per tier. The runner may override via project config.
@@ -1793,7 +1798,19 @@ class AgentRunner:
             if cfg.is_reviewer and final_signal is SignalType.APPROVED:
                 reviewer_branch = workspace.git.agent_branches.get(cfg.role)
                 if reviewer_branch:
-                    ok = self.git.merge(reviewer_branch, into="main")
+                    pr_mode = getattr(self.project, "pr_mode", "manual")
+                    if pr_mode == "auto":
+                        merge_target = "main"
+                    else:
+                        merge_target = self._integration_branch_name()
+                        try:
+                            from git import Repo
+                            repo = Repo(self.git.working_dir)
+                            if merge_target not in [h.name for h in repo.heads]:
+                                repo.create_head(merge_target, "main")
+                        except Exception:
+                            pass
+                    ok = self.git.merge(reviewer_branch, into=merge_target)
                     if ok:
                         workspace.git.merged.append(reviewer_branch)
                 # M1 §7b: auto-close each dep's active story if its
@@ -2872,17 +2889,83 @@ class AgentRunner:
             messages.append(LLMMessage(role="user", content=nudge_msg))
             continue
 
+    def _integration_branch_name(self) -> str:
+        """Track 4.2 — name of the branch leaf-work merges into when
+        `pr_mode=manual`. Prefers the active story slug if any role has one
+        open; otherwise uses a short run-id-based name.
+        """
+        ws = self.workspace
+        active_story = getattr(ws, "active_story", None) or {}
+        stories = getattr(ws, "stories", None) or {}
+        for _role, story_id in active_story.items():
+            story = stories.get(story_id) if stories else None
+            if story is not None and not getattr(story, "closed", False):
+                slug = (
+                    str(story_id).lower().replace(" ", "-").replace("_", "-")
+                )
+                return f"flow/story-{slug}"
+        return f"flow/run-{self.run_id[:10]}"
+
+    def _suggest_pr_title(self) -> str:
+        """One-line PR title suggestion derived from the project goal."""
+        goal = (self.project.goal or "").strip().replace("\n", " ")
+        if len(goal) > 60:
+            goal = goal[:57].rstrip() + "..."
+        return goal or f"AgentFlow run {self.run_id[:10]}"
+
+    async def _emit_pr_ready_signal(
+        self, integration_branch: str, leaf_branch: str
+    ) -> None:
+        """Post PR_READY with branch + paste-ready `gh pr create` command."""
+        head_sha = ""
+        try:
+            from git import Repo
+            repo = Repo(self.git.working_dir)
+            if integration_branch in [h.name for h in repo.heads]:
+                head_sha = repo.heads[integration_branch].commit.hexsha
+        except Exception:
+            pass
+
+        title = self._suggest_pr_title()
+        # Quote the title for shell safety; the user pastes this verbatim.
+        gh_command = (
+            f'gh pr create --base main --head {integration_branch} '
+            f'--title "{title}"'
+        )
+        detail = json.dumps({
+            "integration_branch": integration_branch,
+            "base_branch": "main",
+            "head_sha": head_sha,
+            "leaf_branch": leaf_branch,
+            "gh_command": gh_command,
+            "title_suggestion": title,
+        })
+        self.workspace.post_signal(Signal(
+            type=SignalType.PR_READY,
+            summary=f"branch ready for PR: {integration_branch}",
+            detail=detail,
+            from_agent="runner",
+        ))
+
     async def _land_leaf_on_main(self) -> None:
-        """Merge the leaf agent's branch into main if main hasn't already
-        received that work.
+        """Merge the leaf agent's branch into the run's landing target.
+
+        Landing target depends on `project.pr_mode`:
+        - `auto` → `main` (today's behaviour; merges direct).
+        - `manual` → an integration branch (`flow/story-<slug>` if a story is
+          open, else `flow/run-<id>`); main is left untouched and a PR_READY
+          signal is posted with a paste-ready `gh pr create` command.
 
         The leaf is the agent with is_final_reviewer=True, or — if none —
         the agent that no other agent depends on (a sink in the dep graph)
-        with the most commits ahead of main.  Skips silently if main already
-        contains the leaf's tip as an ancestor.
+        with the most commits ahead of main. Skips silently if the target
+        already contains the leaf's tip as an ancestor.
         """
         if self.git is None:
             return
+
+        pr_mode = getattr(self.project, "pr_mode", "manual")
+        target = "main" if pr_mode == "auto" else self._integration_branch_name()
 
         agents = self.project.agents
 
@@ -2916,30 +2999,53 @@ class AgentRunner:
             leaf_cfg.role, f"agent/{leaf_cfg.role}"
         )
 
-        # Check whether main already contains the leaf's tip.
+        # Check whether the target already contains the leaf's tip.
         try:
-            from git import InvalidGitRepositoryError, NoSuchPathError, Repo
+            from git import Repo
             repo = Repo(self.git.working_dir)
-            main_commit = repo.heads["main"].commit
+            target_ref = (
+                repo.heads[target] if target in [h.name for h in repo.heads] else None
+            )
             leaf_commit = repo.commit(leaf_branch)
-            # If main is an ancestor-or-equal of leaf, the work is already there.
-            if repo.is_ancestor(leaf_commit, main_commit) or main_commit == leaf_commit:
+            if target_ref is not None and (
+                repo.is_ancestor(leaf_commit, target_ref.commit)
+                or target_ref.commit == leaf_commit
+            ):
+                # Already landed on this target. Manual mode still posts a
+                # PR_READY signal so the UI can surface the gh command.
+                if pr_mode == "manual":
+                    await self._emit_pr_ready_signal(target, leaf_branch)
                 return
         except Exception:
             return
 
         async with self._git_lock:
-            ok = self.git.merge(leaf_branch, into="main")
+            # In manual mode the integration branch may not exist yet — fork
+            # it from main so it carries the same baseline as auto mode.
+            if pr_mode == "manual" and target != "main":
+                try:
+                    from git import Repo
+                    repo = Repo(self.git.working_dir)
+                    if target not in [h.name for h in repo.heads]:
+                        repo.create_head(target, "main")
+                except Exception:
+                    pass
+
+            ok = self.git.merge(leaf_branch, into=target)
             if not ok:
                 self.workspace.post_signal(Signal(
                     type=SignalType.GIT_CONFLICT,
-                    summary=f"end-of-run merge conflict: {leaf_branch} → main",
+                    summary=f"end-of-run merge conflict: {leaf_branch} → {target}",
                     detail=(
-                        "The final branch could not be merged into main automatically. "
+                        f"The final branch could not be merged into {target} automatically. "
                         "Resolve conflicts manually in the run workspace."
                     ),
                     from_agent="runner",
                 ))
+                return
+
+            if pr_mode == "manual":
+                await self._emit_pr_ready_signal(target, leaf_branch)
 
     async def _premerge_upstream_deps(
         self, cfg: AgentConfig,

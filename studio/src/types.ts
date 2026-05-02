@@ -31,6 +31,16 @@ export interface ProjectConfig {
   mcp_servers?: unknown[];
   max_iterations?: number;
   approval_gates?: Partial<ApprovalGates>;
+  pr_mode?: "manual" | "auto";
+}
+
+export interface PrReadyInfo {
+  integration_branch: string;
+  base_branch: string;
+  head_sha?: string;
+  leaf_branch?: string;
+  gh_command: string;
+  title_suggestion?: string;
 }
 
 export interface RunMeta {
@@ -41,6 +51,8 @@ export interface RunMeta {
   iteration?: number;
   completed_agents?: string[];
   created_at?: string;
+  pr_mode?: "manual" | "auto";
+  pr_ready?: PrReadyInfo;
 }
 
 export interface Signal {

@@ -122,6 +122,9 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             if isinstance(s, dict) and s.get("name") and s.get("goal"):
                 stories.append(s)
 
+    raw_pr_mode = str(data.get("pr_mode") or "manual").lower()
+    pr_mode = raw_pr_mode if raw_pr_mode in ("manual", "auto") else "manual"
+
     return ProjectConfig(
         project_id=data.get("project_id", ""),
         goal=data.get("goal", ""),
@@ -135,6 +138,7 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         training_scenario_id=data.get("training_scenario_id"),
         desk_seeds=desk_seeds,
         stories=stories,
+        pr_mode=pr_mode,  # type: ignore[arg-type]
     )
 
 
@@ -319,7 +323,21 @@ def _persist_run(run_root: Path, runner: AgentRunner, run_id: str,
         "iteration": runner.workspace.iteration,
         "completed_agents": list(runner.workspace.completed_agents),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "pr_mode": getattr(runner.project, "pr_mode", "manual"),
     }
+    # Track 4.2 — surface the latest PR_READY signal so the run-completion
+    # view can read the integration branch + gh command without scanning
+    # the full board.
+    pr_ready = next(
+        (sig for sig in reversed(runner.workspace.board)
+         if sig.type.value == "PR_READY"),
+        None,
+    )
+    if pr_ready is not None:
+        try:
+            meta["pr_ready"] = json.loads(pr_ready.detail or "{}")
+        except (json.JSONDecodeError, TypeError):
+            meta["pr_ready"] = {"summary": pr_ready.summary}
     (run_root / "meta.json").write_text(
         json.dumps(meta, indent=2, default=str), encoding="utf-8",
     )

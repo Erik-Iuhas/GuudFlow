@@ -135,6 +135,10 @@ async def test_full_user_journey(
             "agents": agents,
             "rbac": proposal["rbac"],
             "max_iterations": 2,
+            # Track 4.2 — this end-to-end journey asserts main was advanced
+            # after the reviewer approves; default flipped to "manual" so we
+            # opt back into the legacy auto-merge for this assertion.
+            "pr_mode": "auto",
         },
         headers=auth_header,
     )

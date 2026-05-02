@@ -13,7 +13,11 @@ from core.tool_manifest import RoleRBAC
 
 def _make_runner(agents: list[AgentConfig], tmp_path: Path) -> AgentRunner:
     rbac = {c.role: RoleRBAC(role=c.role, allowed_scopes=[]) for c in agents}
-    proj = ProjectConfig(project_id="p_land", goal="test", agents=agents, rbac=rbac)
+    # These tests verify the auto-merge-to-main path; pr_mode default flipped
+    # to "manual" in Track 4.2, so opt back into "auto" here.
+    proj = ProjectConfig(
+        project_id="p_land", goal="test", agents=agents, rbac=rbac, pr_mode="auto",
+    )
     return AgentRunner(
         project=proj, run_id="r_land",
         run_root=tmp_path / "run", llm=MockLLMClient([]),

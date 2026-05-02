@@ -213,6 +213,35 @@ export function Studio() {
                 />
               </div>
             </div>
+            <fieldset style={{ marginTop: 12, border: "1px solid var(--border, #ccc)", padding: 8 }}>
+              <legend className="small">PR mode (when run completes)</legend>
+              <label className="row" style={{ gap: 6, alignItems: "flex-start" }}>
+                <input
+                  type="radio"
+                  name="pr_mode"
+                  value="manual"
+                  checked={(project.pr_mode ?? "manual") === "manual"}
+                  onChange={() => setProject({ ...project, pr_mode: "manual" })}
+                />
+                <span>
+                  <strong>Manual</strong> — stop at an integration branch; you open the PR yourself
+                  <span className="muted small"> (recommended for real repos)</span>
+                </span>
+              </label>
+              <label className="row" style={{ gap: 6, alignItems: "flex-start", marginTop: 4 }}>
+                <input
+                  type="radio"
+                  name="pr_mode"
+                  value="auto"
+                  checked={project.pr_mode === "auto"}
+                  onChange={() => setProject({ ...project, pr_mode: "auto" })}
+                />
+                <span>
+                  <strong>Auto</strong> — merge into main directly
+                  <span className="muted small"> (sandbox / throwaway projects only)</span>
+                </span>
+              </label>
+            </fieldset>
           </div>
 
           <CostStrip project={project} />

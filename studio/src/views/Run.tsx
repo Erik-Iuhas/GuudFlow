@@ -328,6 +328,51 @@ export function Run() {
             );
           })()}
 
+          {/* Track 4.2 — PR-ready banner. Shown when pr_mode=manual and the
+              runner has merged leaf work to the integration branch. The user
+              opens the PR themselves; we surface the paste-ready gh command. */}
+          {(() => {
+            if (!meta || !isTerminal(meta.status)) return null;
+            let prReady = meta.pr_ready;
+            if (!prReady) {
+              const sig = [...signals].reverse().find((s) => s.type === "PR_READY");
+              if (sig?.detail) {
+                try { prReady = JSON.parse(sig.detail); } catch { /* noop */ }
+              }
+            }
+            if (!prReady) return null;
+            return (
+              <div className="card" style={{ borderLeft: "4px solid #16a34a" }}>
+                <div style={{ fontWeight: 600 }}>
+                  🌿 Branch ready: <span className="mono">{prReady.integration_branch}</span>
+                </div>
+                <div className="small muted" style={{ marginTop: 4 }}>
+                  Open the PR yourself with:
+                </div>
+                <div className="row" style={{ gap: 6, marginTop: 4, alignItems: "center" }}>
+                  <code
+                    className="mono"
+                    style={{
+                      flex: 1, padding: "6px 8px", background: "#f1f5f9",
+                      borderRadius: 4, fontSize: 12, overflowX: "auto",
+                    }}
+                  >
+                    {prReady.gh_command}
+                  </code>
+                  <button
+                    className="small"
+                    onClick={() => {
+                      if (prReady) void navigator.clipboard.writeText(prReady.gh_command);
+                    }}
+                    title="Copy to clipboard"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Pending approval gates (Phase C.0.5). Surfaced inline at
               the top of the run view so the user can grant/deny without
               hunting through the board. */}

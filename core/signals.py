@@ -114,6 +114,11 @@ class SignalType(str, Enum):
     PEER_TIMEOUT = "PEER_TIMEOUT"       # ASK target didn't answer within deadline
     SKIP_TIMEOUT = "SKIP_TIMEOUT"       # REQUEST_SKIP confirmer didn't respond in time
 
+    # Track 4.2 — pr_mode=manual. Posted at end-of-run when leaf work has been
+    # merged into an integration branch instead of main. Carries the branch
+    # name and a paste-ready `gh pr create` command.
+    PR_READY = "PR_READY"
+
 
 Priority = Literal["normal", "high"]
 
