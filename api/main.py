@@ -90,17 +90,38 @@ async def lifespan(app: FastAPI):
     `GUUDFLOW_DISABLE_INPROC_WORKER=1`.
     """
     data_root = _data_root()
-    data_root.mkdir(parents=True, exist_ok=True)
+    try:
+        data_root.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        # Don't crash startup — log and fall back to default.
+        import logging
+        logging.error(
+            "Failed to create storage root %s: %s. "
+            "Falling back to ./data — fix your settings to use the intended location.",
+            data_root, e,
+        )
+        data_root = Path("./data").resolve()
+        data_root.mkdir(parents=True, exist_ok=True)
 
     # Track 4: in in-directory mode, ensure the .flow/ scaffold exists.
     # init_flow_dir is idempotent — safe to call every startup.
+    # ANY failure here MUST NOT crash the lifespan — log and continue with
+    # whatever's there. Otherwise a misconfigured settings.json bricks the
+    # backend until the user manually edits the file.
     from core import storage as _storage
     cfg = _storage.get_storage_config()
     if cfg.mode == "in-directory":
-        from core.flow_dir import init_flow_dir
-        # storage_root for in-directory mode is already <something>/.flow,
-        # so we init at the parent.
-        init_flow_dir(data_root.parent)
+        try:
+            from core.flow_dir import init_flow_dir, FlowDirError
+            init_flow_dir(data_root.parent)
+        except (FlowDirError, OSError, Exception) as e:
+            import logging
+            logging.warning(
+                "init_flow_dir failed at %s: %s. "
+                "In-directory mode will work as long as the path exists; "
+                "fix your settings if this is unexpected.",
+                data_root.parent, e,
+            )
 
     app.state.data_root = data_root
     app.state.project_store = ProjectStore(data_root)

@@ -36,6 +36,7 @@ async function request<T>(
   path: string,
   body?: unknown,
   authed = false,
+  timeoutMs = 30000,
 ): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -44,11 +45,26 @@ async function request<T>(
     const t = getToken();
     if (t) headers["Authorization"] = `Bearer ${t}`;
   }
-  const res = await fetch(path, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  // 30s default timeout — prevents indefinite hangs on slow endpoints.
+  // Settings validation uses a tighter timeout via its own AbortController.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") {
+      throw new ApiError(0, `request timed out after ${timeoutMs}ms`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -741,8 +757,13 @@ export const settingsApi = {
     data_root: string;
   }>) =>
     request<SettingsUpdateResponse>("PUT", "/api/settings", updates),
+  // Tighter timeout (8s) — path validation hits the filesystem and can
+  // hang on slow / unresponsive mounts. Better to fail fast than freeze
+  // the drawer.
   validateStorageRoot: (path: string) =>
-    request<StorageRootValidation>("POST", "/api/settings/validate-storage-root", { path }),
+    request<StorageRootValidation>(
+      "POST", "/api/settings/validate-storage-root", { path }, false, 8000,
+    ),
 };
 
 export { ApiError };

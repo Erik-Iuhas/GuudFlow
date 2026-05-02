@@ -218,7 +218,17 @@ function StorageSection({ settings, onUpdated }: StorageSectionProps) {
       {saveError && <div className="settings-error">{saveError}</div>}
       {restartRequired && (
         <div className="settings-banner settings-banner-warn">
-          Saved — restart the backend to apply the storage-mode change.
+          <strong>Saved — but restart required.</strong> The backend is
+          still running with the previous storage config. Stop and
+          restart <code>uvicorn</code> to switch to the new mode.
+          New projects in the new location will appear once you restart.
+        </div>
+      )}
+      {mode === "in-directory" && settings.effective.storage_mode !== "in-directory" && !restartRequired && (
+        <div className="settings-banner settings-banner-warn" style={{marginTop: 8}}>
+          <strong>Heads up:</strong> switching to in-directory mode means projects
+          won't transfer automatically. You'll see an empty list at the new
+          location until you create projects there or migrate manually.
         </div>
       )}
 
