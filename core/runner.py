@@ -1789,10 +1789,24 @@ class AgentRunner:
                         }
                         self._agent_turns_persister(turn_record)
                     except Exception as exc:
+                        # Log to stderr AND drop a sibling file in the run
+                        # dir so the failure is visible without grepping
+                        # uvicorn output.
+                        import traceback as _tb
                         logging.getLogger(__name__).warning(
                             "agent_turns persister failed for %s iter %s: %s",
                             cfg.role, agent.iteration, exc, exc_info=True,
                         )
+                        try:
+                            err_path = self.run_root / "agent_turns.errors.log"
+                            with open(err_path, "a", encoding="utf-8") as _f:
+                                _f.write(
+                                    f"--- {cfg.role} iter {agent.iteration} ---\n"
+                                    f"{type(exc).__name__}: {exc}\n"
+                                    f"{_tb.format_exc()}\n"
+                                )
+                        except Exception:
+                            pass
 
             # M1: handle REQUEST_SKIP before treating the block as work output.
             if (
