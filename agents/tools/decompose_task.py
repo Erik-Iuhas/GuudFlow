@@ -169,7 +169,16 @@ class DecomposeTask(BaseTool):
                 goal=spec["goal"],
                 acceptance_criteria=spec["acceptance"],
             )
-            ws.add_task(t)
+            try:
+                ws.add_task(t)
+            except ValueError as e:
+                # Surface depth-cap and similar add_task rejections as a
+                # clean tool error (consistent with the up-front
+                # validation cases above) rather than letting the
+                # exception bubble out of the tool.
+                return _err(
+                    f"failed to add subtasks[{len(subtask_ids)}]: {e}"
+                )
             subtask_ids.append(t.task_id)
 
         return _ok(

@@ -960,6 +960,51 @@ class BaseAgent:
         )
         return text, _approx_tokens(text)
 
+    def _render_active_subtask_layer(self, workspace: Any) -> tuple[str, int]:
+        """Track 7 — Layer 4.7. Surface the agent's currently-active
+        subtask (set by the runner via mutate_task on IN_PROGRESS) so
+        Sonnet/Haiku-class models stay focused on one chunk at a time.
+
+        Returns ("", 0) when no active subtask is set OR when the active
+        subtask is the synthetic root (root:* — that's run-scope plumbing,
+        the project goal already shows up in the user-turn prompt).
+
+        Hard-capped: goal truncated to 200 chars; acceptance limited to
+        first 5 lines. Mirrors the teammate-brief cap pattern so Layer
+        4.7 stays bounded even when the agent decomposed into a verbose
+        subtask.
+        """
+        if workspace is None:
+            return "", 0
+        active_map = getattr(workspace, "active_subtask", None) or {}
+        subtask_id = active_map.get(self.role)
+        if not subtask_id or subtask_id.startswith("root:"):
+            return "", 0
+        tasks = getattr(workspace, "tasks", None) or {}
+        task = tasks.get(subtask_id)
+        if task is None or task.status != "IN_PROGRESS":
+            return "", 0
+
+        goal = (task.goal or "").strip()
+        if len(goal) > 200:
+            goal = goal[:197].rstrip() + "..."
+        lines: list[str] = [
+            "ACTIVE SUBTASK (commit closes this when done):",
+            "",
+            f"  task: {task.task_id}"
+            + (f"  (parent: {task.parent_task_id})" if task.parent_task_id else ""),
+            f"  goal: {goal}",
+        ]
+        if task.acceptance_criteria:
+            lines.append("  acceptance:")
+            for crit in task.acceptance_criteria[:5]:
+                c = str(crit).strip()
+                if len(c) > 160:
+                    c = c[:157].rstrip() + "..."
+                lines.append(f"    - {c}")
+        text = "\n".join(lines)
+        return text, _approx_tokens(text)
+
     async def effective_system_prompt(
         self,
         teammate_brief: str = "",
@@ -1044,17 +1089,26 @@ class BaseAgent:
         relevance_text, relevance_tokens = self._render_task_relevance_layer(ws)
         if relevance_text:
             parts.append(relevance_text)
+        # Layer 4.7 — Track 7. Active subtask (current decomposed chunk)
+        # so the agent stays focused. Suppresses cleanly when no subtask
+        # is in flight or only the synthetic root is active.
+        subtask_text, subtask_tokens = self._render_active_subtask_layer(ws)
+        if subtask_text:
+            parts.append(subtask_text)
         # Track 3d.2 — record what actually landed in the prompt. Without
         # this, IterationMetrics.repo_map_tokens / relevant_files_tokens /
         # context_tokens_total stayed 0 forever (the dead ContextManager
         # path that the runner used to aggregate from never fires; agents
         # don't call get_context()). Counted once per LLM call into the
-        # cumulative iteration row.
+        # cumulative iteration row. Subtask tokens roll into the
+        # relevant-files bucket since they're task-relevant by definition.
         m = self._current_metrics
         if m is not None:
             m.repo_map_tokens += structure_tokens
-            m.relevant_files_tokens += relevance_tokens
-            m.context_tokens_total += structure_tokens + relevance_tokens
+            m.relevant_files_tokens += relevance_tokens + subtask_tokens
+            m.context_tokens_total += (
+                structure_tokens + relevance_tokens + subtask_tokens
+            )
 
         if self.system_prompt:
             parts.append(self.system_prompt)
