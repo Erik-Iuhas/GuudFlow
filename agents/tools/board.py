@@ -166,6 +166,27 @@ class AssignTask(BaseTool):
                     "assignee's diff against these."
                 ),
             },
+            "subtasks": {
+                "type": "array",
+                "minItems": 1,
+                "description": (
+                    "Track 7 — optional ordered list of {goal, acceptance} "
+                    "chunks. When present the runner creates parent + "
+                    "children atomically; assignee gets the parent "
+                    "IN_PROGRESS and the children PENDING in order."
+                ),
+                "items": {
+                    "type": "object",
+                    "required": ["goal"],
+                    "properties": {
+                        "goal": {"type": "string"},
+                        "acceptance": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                },
+            },
         },
         "required": ["assignee", "goal"],
     }
@@ -230,6 +251,29 @@ class AssignTask(BaseTool):
                 return _err("reference.value is required")
             references.append(TaskRef(kind=kind, value=value, note=note))
 
+        # Track 7 — optional `subtasks` list for atomic parent + children.
+        # Validate every entry up front so we don't half-commit a malformed
+        # batch to the desk.
+        subtasks_raw = arguments.get("subtasks")
+        normalised_subtasks: list[dict[str, Any]] = []
+        if subtasks_raw is not None:
+            if not isinstance(subtasks_raw, list) or not subtasks_raw:
+                return _err("subtasks must be a non-empty list when provided")
+            for i, spec in enumerate(subtasks_raw):
+                if not isinstance(spec, dict):
+                    return _err(f"subtasks[{i}] must be an object")
+                sub_goal = spec.get("goal")
+                if not sub_goal or not isinstance(sub_goal, str):
+                    return _err(f"subtasks[{i}].goal is required")
+                sub_acc_raw = spec.get("acceptance") or []
+                if not isinstance(sub_acc_raw, list):
+                    return _err(f"subtasks[{i}].acceptance must be a list")
+                sub_acc = [str(a).strip() for a in sub_acc_raw if str(a).strip()]
+                normalised_subtasks.append({
+                    "goal": sub_goal.strip(),
+                    "acceptance": sub_acc,
+                })
+
         iteration = getattr(self._workspace, "iteration", 0)
         task = Task(
             task_id="",  # workspace.add_task auto-generates if blank
@@ -247,6 +291,31 @@ class AssignTask(BaseTool):
             self._workspace.add_task(task)
         except ValueError as e:
             return _err(str(e))
+
+        # Create children under the just-created parent. Same iteration,
+        # same story, all assigned to the assignee. If add_task fails on
+        # any (e.g. depth-cap because parent_task is itself depth-3),
+        # surface the error — parent already landed, but children are a
+        # best-effort follow-on.
+        subtask_ids: list[str] = []
+        for spec in normalised_subtasks:
+            child = Task(
+                task_id="",
+                story_id=task.story_id,
+                parent_task_id=task.task_id,
+                assigned_to=assignee,
+                created_by=self._from_role,
+                created_at_iter=iteration,
+                goal=spec["goal"],
+                acceptance_criteria=spec["acceptance"],
+            )
+            try:
+                self._workspace.add_task(child)
+            except ValueError as e:
+                return _err(
+                    f"created parent {task.task_id} but failed on subtasks[{len(subtask_ids)}]: {e}"
+                )
+            subtask_ids.append(child.task_id)
 
         # Mirror the structured ASSIGN_TASK protocol message onto the
         # board so reviewers and the studio see the same wire format
@@ -277,9 +346,13 @@ class AssignTask(BaseTool):
                 "no acceptance criteria — reviewer has nothing to check against"
             )
 
-        return {
+        result: dict[str, Any] = {
             "ok": True,
             "task_id": task.task_id,
             "assignee": assignee,
             "warnings": warnings,
         }
+        # Track 7 — surface child ids when subtasks were created.
+        if subtask_ids:
+            result["subtask_ids"] = subtask_ids
+        return result

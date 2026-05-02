@@ -112,6 +112,68 @@ async def test_assign_task_subtask_depth_cap_returns_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_assign_task_with_subtasks_creates_parent_plus_children_atomically() -> None:
+    """Track 7 — `subtasks` field on assign-task creates parent + children
+    in one shot, all assigned to the same assignee."""
+    ws = _ws()
+    tool = AssignTask("architect", ws)
+    res = await tool.run({
+        "assignee": "dev",
+        "goal": "build the auth module",
+        "acceptance": ["JWT issuer", "rate limit"],
+        "subtasks": [
+            {"goal": "scaffold routes", "acceptance": ["POST /login", "POST /logout"]},
+            {"goal": "wire JWT signing"},
+        ],
+    })
+    assert res["ok"] is True
+    assert "task_id" in res
+    assert "subtask_ids" in res
+    assert len(res["subtask_ids"]) == 2
+
+    # Parent + children all assigned to dev; children point at parent.
+    parent = ws.tasks[res["task_id"]]
+    assert parent.assigned_to == "dev"
+    for tid in res["subtask_ids"]:
+        child = ws.tasks[tid]
+        assert child.assigned_to == "dev"
+        assert child.parent_task_id == res["task_id"]
+        assert child.status == "PENDING"
+
+    # Acceptance preserved on the first child.
+    first_child = ws.tasks[res["subtask_ids"][0]]
+    assert first_child.acceptance_criteria == ["POST /login", "POST /logout"]
+    # Empty acceptance on the second.
+    second_child = ws.tasks[res["subtask_ids"][1]]
+    assert second_child.acceptance_criteria == []
+
+
+@pytest.mark.asyncio
+async def test_assign_task_with_empty_subtasks_list_rejects() -> None:
+    ws = _ws()
+    tool = AssignTask("architect", ws)
+    res = await tool.run({
+        "assignee": "dev", "goal": "x", "subtasks": [],
+    })
+    assert "error" in res
+    assert "non-empty" in res["error"]
+
+
+@pytest.mark.asyncio
+async def test_assign_task_subtasks_validation_does_not_create_parent() -> None:
+    """If subtasks validation fails BEFORE parent creation, no task lands."""
+    ws = _ws()
+    tool = AssignTask("architect", ws)
+    res = await tool.run({
+        "assignee": "dev", "goal": "x",
+        "subtasks": [{"acceptance": ["bad"]}],  # missing goal
+    })
+    assert "error" in res
+    # Parent did NOT land — full validation was up-front.
+    assert ws.tasks == {}
+
+
+@pytest.mark.asyncio
 async def test_assign_task_empty_acceptance_returns_warning() -> None:
     ws = _ws()
     tool = AssignTask("architect", ws)
