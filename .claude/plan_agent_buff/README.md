@@ -6,7 +6,7 @@ Detailed plans for the GuudFlow multi-track roadmap. Parent strategy doc: `~/.cl
 
 Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance criteria and a commit plan. Treat the parent roadmap as "why," and these as "how."
 
-**Progress: 6 / 16 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d, ✅ Track 3e, ✅ Track 3d.4.
+**Progress: 7 / 16 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d, ✅ Track 3e, ✅ Track 3d.4, ✅ Track 3c.
 
 ## Files
 
@@ -19,7 +19,7 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 | `track_2a_orphan_question.md` | 2a | Bug fix | ⬜ Not started | — | 100–200k |
 | `track_2b_no_op_rationale.md` | 2b | Bug fix | ⬜ Not started | — (pairs with 2a) | 100–200k |
 | `track_3a_outline_funnel.md` | 3 (code-side) | Architecture | ⬜ Not started (partially adopted in personas) | Track 1 | 250–400k |
-| `track_3c_output_compression.md` | 3c | Context economy (RTK-inspired) | ⬜ Not started | Track 1 | 200–350k |
+| `track_3c_output_compression.md` | 3c | Context economy (RTK-inspired) | ✅ **Shipped** | Track 1 | 200–350k |
 | `track_3d_agent_io_hygiene.md` | 3d | Hygiene + drift + cost (4 sub-deliverables; 3d.3 superseded by 3e) | ⬜ Not started | Track 1 | 280–450k |
 | `track_3e_batch_tool_calls.md` | 3e | Batch tools: fs-edit-batch, fs-write-batch, code-outline-batch | ✅ **Shipped** | Track 1 | 200–350k |
 | `track_3d4_manifest_render.md` | 3d.4 | Manifest auto-render: priority + when_to_use on every tool | ✅ **Shipped** | Track 3e | 200–350k |
@@ -70,6 +70,18 @@ Sprint 1.9 (drift fix — adoption nudge for batch tools) — SHIPPED:
             inline. Batch variants sit at priority 100 with "PREFER..."
             hints; singular write tools at 105. Closes the adoption gap
             from run_543a09eb6a.
+
+Sprint 1.10 (provider-portable cost reduction) — SHIPPED:
+  Track 3c  ✅ tool output compression (RTK-inspired). Every tool result
+            flows through a structure-aware compressor at the
+            BaseAgent.call_tool boundary before being returned to the
+            agent. Four compressors registered: code-exec (pytest banner
+            strip + dedup), git-log (trailer strip + history truncate),
+            git-diff (index-line strip + oversize cap), git-changed-files
+            (directory grouping). Provider-portable: helps Anthropic,
+            OpenAI, Groq, local models equally because it reduces the
+            actual bytes sent to the LLM, not vendor-specific cache
+            tricks.
 
 Sprint 2 (parallel-safe):
   Track 2a  ←── bug, highest user value
