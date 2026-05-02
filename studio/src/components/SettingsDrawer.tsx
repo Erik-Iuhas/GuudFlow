@@ -100,6 +100,7 @@ export function StorageSection({ settings, onUpdated }: StorageSectionProps) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [restartRequired, setRestartRequired] = useState(false);
+  const [hotReloaded, setHotReloaded] = useState(false);
 
   const validate = async () => {
     if (!storageRoot.trim()) {
@@ -144,6 +145,7 @@ export function StorageSection({ settings, onUpdated }: StorageSectionProps) {
       }
       const result = await settingsApi.update(updates);
       setRestartRequired(result.restart_required);
+      setHotReloaded(result.hot_reloaded === true && !result.restart_required);
       // Re-fetch effective to surface what changed.
       const fresh = await settingsApi.get();
       onUpdated(fresh);
@@ -217,12 +219,27 @@ export function StorageSection({ settings, onUpdated }: StorageSectionProps) {
       )}
 
       {saveError && <div className="settings-error">{saveError}</div>}
+      {hotReloaded && (
+        <div
+          className="settings-banner"
+          style={{
+            background: "#f0fdf4",
+            border: "1px solid #16a34a",
+            color: "#166534",
+            padding: "8px 10px",
+            borderRadius: 6,
+          }}
+        >
+          <strong>✓ Saved.</strong> New storage location is live — no
+          restart needed.
+        </div>
+      )}
       {restartRequired && (
         <div className="settings-banner settings-banner-warn">
-          <strong>Saved — but restart required.</strong> The backend is
-          still running with the previous storage config. Stop and
-          restart <code>uvicorn</code> to switch to the new mode.
-          New projects in the new location will appear once you restart.
+          <strong>Saved — but a restart is required.</strong> A run is
+          in flight, so the backend kept the old storage config to avoid
+          corrupting it. Once the run finishes, restart{" "}
+          <code>uvicorn</code> to pick up the new location.
         </div>
       )}
       {mode === "in-directory" && settings.effective.storage_mode !== "in-directory" && !restartRequired && (

@@ -749,6 +749,7 @@ export interface SettingsState {
 export interface SettingsUpdateResponse {
   persisted: Record<string, string>;
   restart_required: boolean;
+  hot_reloaded?: boolean;
 }
 
 export interface StorageRootValidation {

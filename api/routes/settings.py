@@ -10,10 +10,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from api.storage import PersonaStore, ProjectStore, RunStore
 from core import storage, user_settings
+from worker.queue import JOB_QUEUED, JOB_RUNNING
 
 
 router = APIRouter()
@@ -74,12 +76,19 @@ class SettingsUpdate(BaseModel):
 
 
 @router.put("/api/settings")
-async def update_settings(update: SettingsUpdate) -> dict[str, Any]:
+async def update_settings(
+    update: SettingsUpdate, request: Request,
+) -> dict[str, Any]:
     """Persist the given settings to ~/.guudflow/settings.json.
 
     Returns the new persisted settings + a `restart_required` flag.
-    Mode change always requires restart; storage_root change does not
-    (next run will pick it up).
+
+    Track 4.4 — when no job is in flight, we hot-rebuild the read stores
+    (`project_store`, `run_store`, `persona_store`) and `data_root` on
+    `app.state` so the new storage_root takes effect immediately. The
+    long-running JobRunner keeps its captured `data_root` for any
+    in-progress run; that's why we refuse to hot-swap when the queue
+    has running/queued jobs and surface `restart_required=true` instead.
     """
     update_dict = update.model_dump(exclude_none=True)
 
@@ -104,20 +113,60 @@ async def update_settings(update: SettingsUpdate) -> dict[str, Any]:
             if not check["valid"]:
                 raise HTTPException(status_code=400, detail=check["reason"])
 
-    # Compare against the running EFFECTIVE config, not just the persisted
-    # dict. Setting storage_mode=global when defaults already gave global
-    # is not a change requiring restart.
-    current_effective_mode = storage.get_storage_config().mode
+    # Detect changes that affect storage paths so we know whether to
+    # hot-reload the stores below.
+    pre_cfg = storage.get_storage_config()
     persisted = user_settings.write_settings(update_dict)
 
-    mode_changed = (
-        "storage_mode" in update_dict
-        and current_effective_mode != update_dict["storage_mode"]
+    storage_changed = any(
+        k in update_dict for k in ("storage_mode", "storage_root", "data_root", "personas_root")
     )
+
+    # If a job is queued/running, refuse to hot-swap — the JobRunner has
+    # its own data_root captured for the in-flight run and switching out
+    # from under it would corrupt the run. Surface restart_required so the
+    # user knows their changes are persisted but pending.
+    has_in_flight_job = False
+    queue = getattr(request.app.state, "queue", None)
+    if queue is not None and storage_changed:
+        try:
+            jobs = await queue.list(limit=200)
+            has_in_flight_job = any(
+                j.status in (JOB_QUEUED, JOB_RUNNING) for j in jobs
+            )
+        except Exception:
+            # On any queue read error, fall back to restart_required.
+            has_in_flight_job = True
+
+    hot_reloaded = False
+    if storage_changed and not has_in_flight_job:
+        storage.invalidate_storage_config_cache()
+        new_cfg = storage.get_storage_config()
+        new_data_root = new_cfg.storage_root.resolve()
+        try:
+            new_data_root.mkdir(parents=True, exist_ok=True)
+            request.app.state.data_root = new_data_root
+            request.app.state.project_store = ProjectStore(new_data_root)
+            request.app.state.run_store = RunStore(new_data_root / "runs")
+            request.app.state.persona_store = PersonaStore(
+                new_cfg.personas_root.resolve(),
+            )
+            hot_reloaded = True
+        except OSError:
+            # If the new path can't be created, the persisted settings
+            # still stand but the live app keeps the old stores; tell
+            # the user to restart so the next process picks them up.
+            hot_reloaded = False
+
+    restart_required = storage_changed and not hot_reloaded
+
+    # `pre_cfg` retained for callers that want to confirm what changed.
+    _ = pre_cfg
 
     return {
         "persisted": persisted,
-        "restart_required": mode_changed,
+        "restart_required": restart_required,
+        "hot_reloaded": hot_reloaded,
     }
 
 

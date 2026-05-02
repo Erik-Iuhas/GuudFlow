@@ -124,6 +124,15 @@ def reset_storage_config_for_tests() -> None:
     _cached = None
 
 
+def invalidate_storage_config_cache() -> None:
+    """Production hot-reload: drop the cached config so the next
+    `get_storage_config()` re-reads env vars + settings file. Used by the
+    settings PUT handler to make storage_root changes take effect without
+    a server restart (Track 4.4)."""
+    global _cached
+    _cached = None
+
+
 # ── Path helpers — call these instead of constructing paths inline ────────
 
 

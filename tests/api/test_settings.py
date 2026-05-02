@@ -58,12 +58,19 @@ def test_put_settings_persists_storage_mode(client):
     assert data["restart_required"] is False  # was already global (defaults)
 
 
-def test_put_settings_mode_change_requires_restart(client):
-    """Changing storage_mode flips restart_required to True."""
+def test_put_settings_mode_change_hot_reloads_when_idle(client, tmp_path):
+    """Track 4.4 — with no in-flight jobs, switching storage mode rebuilds
+    the read stores in place; restart_required stays False, hot_reloaded
+    is True. Pre-Track-4.4 behaviour was always-restart."""
     client.put("/api/settings", json={"storage_mode": "global"})
-    resp = client.put("/api/settings", json={"storage_mode": "in-directory"})
+    resp = client.put("/api/settings", json={
+        "storage_mode": "in-directory",
+        "storage_root": str(tmp_path),
+    })
     assert resp.status_code == 200
-    assert resp.json()["restart_required"] is True
+    body = resp.json()
+    assert body["hot_reloaded"] is True
+    assert body["restart_required"] is False
 
 
 def test_put_settings_rejects_bad_mode(client):
@@ -99,6 +106,67 @@ def test_put_settings_skips_root_validation_in_global_mode(client):
         "storage_root": "/will/exist/later",
     })
     assert resp.status_code == 200
+
+
+# ── Track 4.4 — hot-reload of storage paths ────────────────────────────────
+
+
+def test_put_settings_hot_swaps_data_root_on_app_state(client, tmp_path):
+    """After PUT, app.state.data_root reflects the new storage_root and the
+    project_store reads from the new location."""
+    new_base = tmp_path / "new_repo"
+    new_base.mkdir()
+    resp = client.put("/api/settings", json={
+        "storage_mode": "in-directory",
+        "storage_root": str(new_base),
+    })
+    assert resp.status_code == 200
+    assert resp.json()["hot_reloaded"] is True
+
+    state = client.app.state  # type: ignore[attr-defined]
+    assert Path(state.data_root) == (new_base / ".flow").resolve()
+    # Project store is rebuilt; its root must point at the new location.
+    assert Path(state.project_store.root) == (new_base / ".flow").resolve()
+    # Run store rooted under <new>/.flow/runs.
+    assert Path(state.run_store.runs_root) == (new_base / ".flow" / "runs").resolve()
+
+
+def test_put_settings_refuses_hot_swap_when_job_in_flight(
+    client, tmp_path, monkeypatch,
+):
+    """If a job is queued or running, hot-swap is refused; restart_required
+    flips True so the user knows to restart once the job finishes."""
+    from worker.queue import Job, JOB_RUNNING
+
+    class _StubQueue:
+        async def list(self, limit=50):
+            return [Job(
+                job_id="j1", run_id="r1", project_id="p1",
+                status=JOB_RUNNING,
+            )]
+
+    client.app.state.queue = _StubQueue()  # type: ignore[attr-defined]
+
+    new_base = tmp_path / "new_repo"
+    new_base.mkdir()
+    resp = client.put("/api/settings", json={
+        "storage_mode": "in-directory",
+        "storage_root": str(new_base),
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["hot_reloaded"] is False
+    assert body["restart_required"] is True
+
+
+def test_put_settings_repeat_same_value_still_hot_reloads(client):
+    """PUT with the same storage_mode is idempotent and still hot-reloads
+    (cheap rebuild). restart_required stays False either way."""
+    resp = client.put("/api/settings", json={"storage_mode": "global"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["hot_reloaded"] is True
+    assert body["restart_required"] is False
 
 
 # ── POST /api/settings/validate-storage-root ───────────────────────────────
