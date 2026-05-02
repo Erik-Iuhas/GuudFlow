@@ -602,10 +602,18 @@ class BaseAgent:
         workspace: Workspace,
         name: str,
         arguments: dict[str, Any],
+        *,
+        compress: bool = True,
     ) -> dict[str, Any]:
         """The single tool entrypoint. Local tools run directly; broker-
         routed tools go through `request_credential`. Manifest membership
-        is enforced (DESIGN rule 76)."""
+        is enforced (DESIGN rule 76).
+
+        Track 3c: tool output is compressed via the registry in
+        `agents/tools/output_compress.py` before returning. Pass
+        `compress=False` to bypass (used by tests verifying raw output and
+        by any caller that genuinely needs the unprocessed result).
+        """
         if self._manifest is None:
             raise ToolError("agent not initialised — manifest is None")
 
@@ -627,8 +635,7 @@ class BaseAgent:
                 result = await tool.run(arguments)
             except Exception:
                 raise
-            self._account_tool_tokens(name, result)
-            return result
+            return self._post_process_tool_result(name, result, compress=compress)
 
         # Broker-routed.
         broker_result = await self.request_credential(
@@ -639,8 +646,46 @@ class BaseAgent:
         if not broker_result.granted:
             raise ToolDenied(name, broker_result.reason)
         result = broker_result.result or {}
+        return self._post_process_tool_result(name, result, compress=compress)
+
+    def _post_process_tool_result(
+        self,
+        name: str,
+        result: Any,
+        *,
+        compress: bool,
+    ) -> Any:
+        """Track 3c: compress (if enabled) then account for tokens.
+
+        Order matters: compression first so the metrics reflect what the LLM
+        actually receives (post-compression bytes). Compression is a no-op
+        for tools without a registered compressor or when `compress=False`.
+        Failures in compression fall through to identity (see
+        `agents.tools.output_compress.compress`).
+        """
+        if compress:
+            from agents.tools.output_compress import compress as _compress
+            cr = _compress(name, result)
+            self._account_compression_savings(name, cr)
+            result = cr.result
         self._account_tool_tokens(name, result)
         return result
+
+    def _account_compression_savings(self, name: str, cr: Any) -> None:
+        """Track 3c: record before/after token counts and savings.
+
+        Failures here must never break the tool call. Same rule as
+        `_account_tool_tokens`.
+        """
+        m = self._current_metrics
+        if m is None:
+            return
+        try:
+            m.tool_output_tokens_raw += cr.original_tokens
+            m.tool_output_tokens_compressed += cr.compressed_tokens
+            m.tokens_saved_by_compression += cr.tokens_saved
+        except Exception:
+            pass
 
     def _account_tool_tokens(self, name: str, result: Any) -> None:
         """Track 1b: record the token cost of a tool result.
