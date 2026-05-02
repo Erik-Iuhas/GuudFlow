@@ -6,7 +6,7 @@ Detailed plans for the GuudFlow multi-track roadmap. Parent strategy doc: `~/.cl
 
 Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance criteria and a commit plan. Treat the parent roadmap as "why," and these as "how."
 
-**Progress: 7 / 16 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d, ✅ Track 3e, ✅ Track 3d.4, ✅ Track 3c.
+**Progress: 10 / 16 tracks queued.** ✅ Track 1, ✅ Track 1b, ✅ Track 1c, ✅ Track 1d, ✅ Track 2a, ✅ Track 2b, ✅ Track 3a, ✅ Track 3c, ✅ Track 3d.4, ✅ Track 3e.
 
 ## Files
 
@@ -16,9 +16,9 @@ Each file is **Sonnet-executable**: self-contained, code-cited, with acceptance 
 | `track_1b_logging_fix.md` | 1b | Logging truth-telling (Sprint 1.5) | ✅ **Shipped** | Track 1 | 80–150k |
 | `track_1c_wire_repomap.md` | 1c | Wire repo_map into prompt (Sprint 1.6) | ✅ **Shipped** | Track 1b | 80–150k |
 | `track_1d_repo_map_stability.md` | 1d | Repo_map cache stability + task-aware relevance (Sprint 1.7) | ✅ **Shipped** | Track 1c | 120–200k |
-| `track_2a_orphan_question.md` | 2a | Bug fix | ⬜ Not started | — | 100–200k |
-| `track_2b_no_op_rationale.md` | 2b | Bug fix | ⬜ Not started | — (pairs with 2a) | 100–200k |
-| `track_3a_outline_funnel.md` | 3 (code-side) | Architecture | ⬜ Not started (partially adopted in personas) | Track 1 | 250–400k |
+| `track_2a_orphan_question.md` | 2a | Bug fix | ✅ **Shipped** (verified 2026-05-02 — implementation predated this conversation) | — | 100–200k |
+| `track_2b_no_op_rationale.md` | 2b | Bug fix | ✅ **Shipped** (verified 2026-05-02 — implementation predated this conversation) | — (pairs with 2a) | 100–200k |
+| `track_3a_outline_funnel.md` | 3 (code-side) | Architecture | ✅ **Shipped** (most landed via 1c/3d.4; dead-diff-path cleanup in `0027069`) | Track 1 | 250–400k |
 | `track_3c_output_compression.md` | 3c | Context economy (RTK-inspired) | ✅ **Shipped** | Track 1 | 200–350k |
 | `track_3d_agent_io_hygiene.md` | 3d | Hygiene + drift + cost (4 sub-deliverables; 3d.3 superseded by 3e) | ⬜ Not started | Track 1 | 280–450k |
 | `track_3e_batch_tool_calls.md` | 3e | Batch tools: fs-edit-batch, fs-write-batch, code-outline-batch | ✅ **Shipped** | Track 1 | 200–350k |
@@ -83,9 +83,14 @@ Sprint 1.10 (provider-portable cost reduction) — SHIPPED:
             actual bytes sent to the LLM, not vendor-specific cache
             tricks.
 
-Sprint 2 (parallel-safe):
-  Track 2a  ←── bug, highest user value
-  Track 2b  ←── bug, pairs with 2a in verification
+Sprint 2 (parallel-safe) — SHIPPED:
+  Track 2a  ✅ orphan question respawn (was already implemented before
+            this conversation — verified 2026-05-02 with 6 passing tests).
+  Track 2b  ✅ no-op rationale (also already shipped — emit_no_op,
+            runner enforcement, NO_OP_REASON protocol block; 3 tests).
+  Track 3a  ✅ outline-first funnel (mostly delivered via Track 1c repo_map
+            injection + Track 3d.4 manifest auto-render; dead iteration-2
+            wholesale-diff path removed in commit 0027069).
 
 Sprint 3:
   Track 3a  ←── outline funnel; pairs naturally with 3d.4 drift fix
