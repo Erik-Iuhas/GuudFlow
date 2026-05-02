@@ -659,9 +659,18 @@ class Workspace:
         role: str,
         *,
         include_complete: bool = False,
+        include_synthetic_roots: bool = False,
     ) -> list[Task]:
         """Return tasks currently on `role`'s desk in FIFO order.
-        COMPLETE and CANCELLED are filtered by default."""
+        COMPLETE and CANCELLED are filtered by default.
+
+        Track 7 — synthetic root tasks (`task_id` prefix `root:`) are
+        plumbing for `decompose-task`'s default parent. They're filtered
+        by default so they don't pollute the Kanban or trip M3.5's
+        "synthetic task when desk empty" check. Pass
+        `include_synthetic_roots=True` to see them (the runner's
+        decompose-task resolution path does this).
+        """
         ids = self.task_queues.get(role, [])
         out: list[Task] = []
         for tid in ids:
@@ -669,6 +678,8 @@ class Workspace:
             if t is None:
                 continue
             if not include_complete and t.status in ("COMPLETE", "CANCELLED", "SAT_OUT"):
+                continue
+            if not include_synthetic_roots and tid.startswith("root:"):
                 continue
             out.append(t)
         return out

@@ -533,6 +533,10 @@ class AgentRunner:
         # M3.5 chunk 7 — task mutation persister so resume can restore
         # the per-agent desks without replaying every TASK_* signal.
         self.workspace.set_task_persister(self._build_task_persister())
+        # Track 7 — synthetic root task per agent role. Created BEFORE
+        # the task persister fires for any other task so the resume
+        # replay sees roots first; idempotent on resumed runs.
+        self._create_synthetic_root_tasks()
         # Phase G-prime.1 — artifact persistence. When a completed
         # agent's artifact is set via workspace.set_artifact, persist
         # the full dict so a resumed run can read the agent's output
@@ -896,6 +900,47 @@ class AgentRunner:
                 pass
 
         return _persist
+
+    def _create_synthetic_root_tasks(self) -> None:
+        """Track 7 — create one synthetic root Task per agent role.
+
+        Acts as the default parent for `decompose-task` calls that don't
+        specify one. Idempotent — skips if `root:{role}` already exists
+        (resumed runs). Filtered from `desk_for()` by default so it
+        doesn't pollute the Kanban or trip M3.5's "synthetic task when
+        desk empty" check.
+
+        **Silent infrastructure** — bypasses `add_task` / `mutate_task`
+        so no TASK_ASSIGNED or TASK_STARTED signals land on the board.
+        Same pattern as M3.5's `_ensure_synthetic_task`. The agent
+        doesn't need to "see" the root via signals; it interacts with
+        it implicitly through `decompose-task`'s default-parent
+        resolution and Layer 4.7's active-subtask render.
+        """
+        ws = self.workspace
+        iteration = ws.iteration
+        for cfg in self.project.agents:
+            root_id = f"root:{cfg.role}"
+            if root_id in ws.tasks:
+                continue  # resumed run already has it
+            task = Task(
+                task_id=root_id,
+                story_id="",  # root isn't tied to a story
+                assigned_to=cfg.role,
+                created_by="runner",
+                created_at_iter=iteration,
+                goal=self.project.goal or f"({cfg.role} run scope)",
+                acceptance_criteria=[],
+                status="IN_PROGRESS",
+                started_at_iter=iteration,
+            )
+            # Bypass add_task / mutate_task — direct write so the board
+            # stays quiet and the persister doesn't fire for plumbing.
+            ws.tasks[root_id] = task
+            ws.task_queues.setdefault(cfg.role, []).append(root_id)
+            # Seed active_subtask manually (mutate_task would have done
+            # this; we're skipping that path for silence).
+            ws.active_subtask[cfg.role] = root_id
 
     def _build_artifact_persister(self):
         """Returns a callable that writes the full artifacts dict to

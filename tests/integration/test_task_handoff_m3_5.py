@@ -377,7 +377,11 @@ def test_user_comment_with_no_planner_no_synthetic_task(tmp_path: Path) -> None:
         tmp_path, ("dev", None), ("reviewer", "code_reviewer"),
     )
     sig = _post_user_comment(r.workspace)
-    assert r.workspace.tasks == {}
+    # Track 7 — synthetic root tasks (`root:*`) are runner plumbing.
+    # Filter them out for this assertion; the original intent is "no
+    # planner created an explicit task from the comment".
+    non_root = {k: v for k, v in r.workspace.tasks.items() if not k.startswith("root:")}
+    assert non_root == {}
     assert sig.seen_by == []  # no planner absorbed it
 
 
@@ -419,7 +423,9 @@ def test_all_planners_running_no_synthetic_task(tmp_path: Path) -> None:
     r.workspace.agent_states["design_lead"] = AgentState.RUNNING
     _post_user_comment(r.workspace)
 
-    assert r.workspace.tasks == {}
+    # Track 7 — filter synthetic root plumbing (`root:*`).
+    non_root = {k: v for k, v in r.workspace.tasks.items() if not k.startswith("root:")}
+    assert non_root == {}
 
 
 def test_user_comment_priority_also_routed(tmp_path: Path) -> None:
@@ -481,7 +487,9 @@ def test_routing_ignores_non_user_comment_signals(tmp_path: Path) -> None:
     r.workspace.post_signal(Signal(
         type=SignalType.GIT_COMMIT, summary="x", from_agent="dev",
     ))
-    assert r.workspace.tasks == {}
+    # Track 7 — filter synthetic root plumbing (`root:*`).
+    non_root = {k: v for k, v in r.workspace.tasks.items() if not k.startswith("root:")}
+    assert non_root == {}
 
 
 def test_planner_system_prompts_include_user_comment_addendum() -> None:

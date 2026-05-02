@@ -60,6 +60,48 @@ async def test_runner_initialises_workspace_and_git(tmp_path: Path):
     assert runner.broker is not None
 
 
+async def test_runner_creates_synthetic_root_task_per_agent(tmp_path: Path):
+    """Track 7 — every agent role gets one root:{role} task at IN_PROGRESS
+    sitting on its desk, ready as the default decompose-task parent."""
+    proj = _project(agents=[
+        AgentConfig(role="dev", model_tier="solid"),
+        AgentConfig(role="reviewer", model_tier="solid", is_reviewer=True),
+    ])
+    runner = AgentRunner(
+        project=proj, run_id="r_root",
+        run_root=tmp_path / "run", llm=MockLLMClient([]),
+    )
+    ws = runner.workspace
+    assert "root:dev" in ws.tasks
+    assert "root:reviewer" in ws.tasks
+    assert ws.tasks["root:dev"].status == "IN_PROGRESS"
+    assert ws.tasks["root:dev"].assigned_to == "dev"
+    assert ws.tasks["root:dev"].goal == proj.goal
+    # active_subtask seeded so Layer 4.7 has something to render even
+    # before the agent decomposes.
+    assert ws.active_subtask["dev"] == "root:dev"
+    assert ws.active_subtask["reviewer"] == "root:reviewer"
+
+
+async def test_runner_synthetic_root_idempotent_on_resumed_run(tmp_path: Path):
+    """Pre-populate `root:dev` (simulating a resumed run that already
+    replayed tasks.jsonl). The runner must not double-create."""
+    from core.workspace import Task as _Task
+
+    proj = _project(agents=[AgentConfig(role="dev")])
+    # Pre-instantiate workspace state by running once, then simulate a
+    # second runner over the same workspace by calling _create directly.
+    runner = AgentRunner(
+        project=proj, run_id="r_resume",
+        run_root=tmp_path / "run", llm=MockLLMClient([]),
+    )
+    initial_count = sum(1 for tid in runner.workspace.tasks if tid.startswith("root:"))
+    # Call again — should be a no-op.
+    runner._create_synthetic_root_tasks()
+    second_count = sum(1 for tid in runner.workspace.tasks if tid.startswith("root:"))
+    assert initial_count == second_count == 1
+
+
 async def test_runner_builds_per_agent_manifest(tmp_path: Path):
     proj = _project(
         agents=[AgentConfig(
