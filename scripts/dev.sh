@@ -37,10 +37,23 @@ kill_port() {
     fi
 }
 
+kill_leftover_uvicorn() {
+    # Sweep any python process whose argv contains both "uvicorn" and
+    # "api.main" — covers the watcher + worker subprocess pair that
+    # --reload uses, even if the worker hasn't bound to a port yet.
+    local pids
+    pids=$(pgrep -f 'uvicorn.*api\.main' 2>/dev/null || true)
+    if [ -n "${pids}" ]; then
+        echo "  killing leftover uvicorn pid(s) ${pids}"
+        kill -9 ${pids} 2>/dev/null || true
+    fi
+}
+
 # ── stop existing servers ───────────────────────────────────────────────────
 info "→ Stopping existing servers..."
 kill_port 8000
 kill_port 3000
+kill_leftover_uvicorn
 sleep 0.3
 
 # ── python / venv ──────────────────────────────────────────────────────────

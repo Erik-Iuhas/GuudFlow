@@ -143,6 +143,10 @@ class BaseAgent:
     # Declared intent (DESIGN §31). Actual surface is `_manifest`.
     declared_local_tools: list[str] = field(default_factory=list)
     declared_mcp_servers: list[str] = field(default_factory=list)
+    # Roles this agent can dispatch tasks to (cfg.manages, DESIGN §38).
+    # Used by the dispatch rule in effective_system_prompt() to NAME the
+    # teammates so the LLM doesn't have to guess who's downstream.
+    _manages: list[str] = field(default_factory=list)
 
     persona: Persona | None = None
 
@@ -898,6 +902,14 @@ class BaseAgent:
             })
         return resp
 
+    def _has_assign_task(self) -> bool:
+        """True if `assign-task` is in this agent's tool manifest. Used
+        by the per-role dispatch rule in effective_system_prompt() to
+        only inject the rule for roles that can actually delegate."""
+        if self._manifest is None:
+            return False
+        return any(d.name == "assign-task" for d in self._manifest.descriptors)
+
     def _tool_schemas_for_llm(self) -> list[dict[str, Any]]:
         """Convert manifest descriptors into the Anthropic tool schema."""
         if self._manifest is None:
@@ -1244,6 +1256,31 @@ class BaseAgent:
             "then `fs-read` to understand what has been built before you start.\n"
             "- Your output is code, files, and decisions — not plans, options, or questions."
         )
+
+        # Per-role dispatch rule — only relevant when the agent has
+        # assign-task AND there are >= 2 teammates listed in `manages`.
+        # Architects/leads tend to bundle all downstream work into one
+        # giant task on the first dev's desk, leaving other specialists
+        # (e.g. the renderer) waking with an empty desk.
+        manages_others = [r for r in (self._manages or []) if r != self.role]
+        if self._has_assign_task() and len(manages_others) >= 2:
+            roster = ", ".join(f"`{r}`" for r in manages_others)
+            parts.append(
+                "## DISPATCH RULE — split work by domain\n\n"
+                f"You manage these teammates: {roster}. Each has their own "
+                "specialty and their own desk.\n\n"
+                f"Emit ONE `assign-task` PER teammate in {{{roster}}} that "
+                "has work to do this run, with that teammate's scope only. "
+                "Do NOT bundle multiple roles' work into a single task on "
+                "one dev's desk — the others will wake confused with empty "
+                "desks and have to ASK you to clarify.\n\n"
+                "RIGHT shape: assign-task(assignee='X', goal='X-only scope') "
+                "then assign-task(assignee='Y', goal='Y-only scope').\n"
+                "WRONG shape: assign-task(assignee='X', goal='do X and Y and Z').\n\n"
+                "If a teammate genuinely has no work this run, skip them — "
+                "but the default is one assign-task call per teammate above."
+            )
+
         parts.append(self._protocol_output_primer())
         parts.append("Make this something you are proud of.")
 

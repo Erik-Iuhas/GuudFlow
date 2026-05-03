@@ -1259,6 +1259,11 @@ class AgentRunner:
                 agent.system_prompt = cfg.system_prompt
             agent.declared_local_tools = list(cfg.declared_local_tools)
             agent.declared_mcp_servers = list(cfg.declared_mcp_servers)
+            # Plumb the explicit `manages` list (DESIGN §38) so the agent
+            # knows exactly who it can dispatch tasks to, AND so the
+            # dispatch rule in effective_system_prompt() can name those
+            # teammates instead of leaving the LLM to guess.
+            agent._manages = list(cfg.manages or [])
             # Inject runtime handles.
             agent._llm, agent._model = self._resolve_llm_for_tier(cfg.model_tier)
             agent._broker = self.broker
@@ -4951,6 +4956,7 @@ class AgentRunner:
             agent.system_prompt = cfg.system_prompt
         agent.declared_local_tools = list(cfg.declared_local_tools)
         agent.declared_mcp_servers = list(cfg.declared_mcp_servers)
+        agent._manages = list(cfg.manages or [])
         agent._llm, agent._model = self._resolve_llm_for_tier(cfg.model_tier)
         agent._broker = self.broker
         agent._context_manager = self.context_manager

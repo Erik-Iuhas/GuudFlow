@@ -27,9 +27,22 @@ function Kill-Port($port) {
     }
 }
 
+function Kill-LeftoverUvicorn {
+    # uvicorn --reload spawns a watcher + a worker subprocess. If the watcher
+    # gets killed by Kill-Port (port 8000) but the worker hasn't bound to the
+    # port yet (mid-startup, mid-restart), the worker can linger. Sweep any
+    # python.exe whose command line mentions uvicorn + api.main.
+    Get-CimInstance Win32_Process -Filter "name like '%python%'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -match 'uvicorn' -and $_.CommandLine -match 'api\.main' } |
+        ForEach-Object {
+            try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+        }
+}
+
 Write-Host "Stopping existing servers..." -ForegroundColor Yellow
 Kill-Port 8000
 Kill-Port 3000
+Kill-LeftoverUvicorn
 Start-Sleep -Milliseconds 500
 
 # Ensure venv exists
