@@ -2703,6 +2703,19 @@ class AgentRunner:
         if block is None:
             return None, "cleanup output had no trailing protocol block"
 
+        # Validate the recovered block kind matches what we asked for.
+        # The cleanup model sometimes returns [VERIFY] for a specialist
+        # (because the prose said "I verified the rendering works") —
+        # accepting it would tag the specialist as a no-op reviewer and
+        # send it into a FAILED loop. Reject the recovery and let the
+        # normal nudge path retry instead.
+        if block.kind != expected_kind:
+            return None, (
+                f"cleanup returned {block.kind!r} but caller expected "
+                f"{expected_kind!r} (specialist returned reviewer-style "
+                f"block, or vice-versa) — falling through to nudge"
+            )
+
         return block, f"recovered {block.kind} via protocol-cleanup"
 
     def _maybe_auto_start_task(

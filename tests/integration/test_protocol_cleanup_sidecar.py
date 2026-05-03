@@ -244,3 +244,43 @@ async def test_sidecar_handles_unknown_role(tmp_path):
     )
     assert block is None
     assert "not yet" in note.lower() or "agent" in note.lower()
+
+
+@pytest.mark.asyncio
+async def test_sidecar_rejects_kind_mismatch_for_specialist(tmp_path):
+    """Real bug from run_dfcfd6eee3: cleanup model returned [VERIFY] for
+    a specialist (renderer_dev) because the prose said 'I verified the
+    rendering works'. Accepting the VERIFY tagged the specialist as a
+    no-op reviewer and looped them through FAILED → STARTED → FAILED.
+
+    Kind must match expected; mismatch returns None so the normal
+    nudge path retries instead.
+    """
+    cleanup = _CleanupClient(text="[VERIFY]\n  result: PASS")
+    runner = _build_minimal_runner(tmp_path)
+    _attach_dev_with_cleanup_tool(runner, cleanup)
+
+    # is_reviewer=False → expected_kind=COMMIT, but cleanup returns VERIFY
+    block, note = await runner._try_auto_protocol_cleanup(
+        "dev",
+        "I implemented the renderer and verified it works.",
+        is_reviewer=False,
+    )
+    assert block is None
+    assert "expected" in note.lower() and "verify" in note.lower()
+
+
+@pytest.mark.asyncio
+async def test_sidecar_rejects_commit_when_reviewer_expected(tmp_path):
+    """Mirror case: reviewer wrote prose that sounds like a commit
+    summary ('I changed X'). Cleanup must not let that slip through
+    as a [COMMIT] when the reviewer was supposed to emit [VERIFY]."""
+    cleanup = _CleanupClient(text="[COMMIT]\n  summary: changed X")
+    runner = _build_minimal_runner(tmp_path)
+    _attach_dev_with_cleanup_tool(runner, cleanup)
+
+    block, note = await runner._try_auto_protocol_cleanup(
+        "dev", "I changed X.", is_reviewer=True,
+    )
+    assert block is None
+    assert "expected" in note.lower() and "commit" in note.lower()
