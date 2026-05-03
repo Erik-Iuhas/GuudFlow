@@ -545,17 +545,64 @@ class JobRunner:
         self._stop.set()
 
     async def run_forever(self) -> None:
-        """Main loop. Runs until `stop()` is called."""
-        _logger.info("JobRunner started (mode=%s)", self.docker.mode)
-        while not self._stop.is_set():
-            job = await self.queue.dequeue(timeout=self.poll_timeout_s)
-            if job is None:
+        """Main loop. Runs until `stop()` is called or the task is cancelled.
+
+        Exit-cause forensics: when CancelledError fires, dump diagnostics
+        to `<data_root>/worker.cancellations.log` so we can finally pin
+        down what's killing the worker mid-run (signals, lifespan exit,
+        watchfiles reload, etc).
+        """
+        import os as _os, signal as _signal, time as _time, traceback as _tb
+        _logger.info("JobRunner started pid=%d (mode=%s)", _os.getpid(), self.docker.mode)
+        # Install a SIGTERM/SIGINT logger so we know WHEN signals land,
+        # separately from whatever cancels the asyncio task. Best-effort —
+        # signal.signal raises ValueError on Windows for some signals.
+        worker_log = self.data_root / "worker.cancellations.log"
+        def _signal_tap(signum, frame):
+            try:
+                with open(worker_log, "a", encoding="utf-8") as f:
+                    f.write(f"--- signal {signum} @ {_time.time():.3f} pid={_os.getpid()} ---\n")
+                    f.write(_tb.format_stack(frame, limit=10))
+                    f.write("\n")
+            except Exception:
+                pass
+        for sig_name in ("SIGTERM", "SIGINT", "SIGBREAK"):
+            sig = getattr(_signal, sig_name, None)
+            if sig is None:
                 continue
             try:
-                await self.run_one(job)
-            except Exception as e:
-                _logger.exception("job %s crashed", job.job_id)
-                await self.queue.update_status(job.job_id, JOB_FAILED, error=str(e))
+                # Don't replace existing handlers — chain.
+                prev = _signal.signal(sig, _signal_tap)
+                if prev is not None and not callable(prev):
+                    pass
+            except (ValueError, OSError):
+                pass
+
+        try:
+            while not self._stop.is_set():
+                job = await self.queue.dequeue(timeout=self.poll_timeout_s)
+                if job is None:
+                    continue
+                try:
+                    await self.run_one(job)
+                except Exception as e:
+                    _logger.exception("job %s crashed", job.job_id)
+                    await self.queue.update_status(job.job_id, JOB_FAILED, error=str(e))
+        except asyncio.CancelledError:
+            try:
+                with open(worker_log, "a", encoding="utf-8") as f:
+                    f.write(
+                        f"--- run_forever CANCELLED @ {_time.time():.3f} pid={_os.getpid()} ---\n"
+                        f"_stop.is_set={self._stop.is_set()}\n"
+                        f"current_task={asyncio.current_task()!r}\n"
+                        f"all tasks ({len(asyncio.all_tasks())}):\n"
+                    )
+                    for t in asyncio.all_tasks():
+                        f.write(f"  - {t!r}\n")
+                    f.write(f"\nstack:\n{_tb.format_exc()}\n\n")
+            except Exception:
+                pass
+            raise
 
     def _initialize_run(self, job: Job, run_root: Path) -> None:
         """Seed the run's workspace from the project's persistent inputs.
