@@ -16,6 +16,8 @@ vi.mock("../../api", () => ({
       { id: "claude-sonnet-4-6", provider: "anthropic", tier: "solid", supports_tools: true, deprecated: false },
       { id: "claude-opus-4-7", provider: "anthropic", tier: "heavy", supports_tools: true, deprecated: false },
       { id: "claude-haiku-4-5-20251001", provider: "anthropic", tier: "fast", supports_tools: true, deprecated: false },
+      { id: "mistral-large-latest", provider: "mistral", tier: "heavy", supports_tools: true, deprecated: false },
+      { id: "mistral-medium-latest", provider: "mistral", tier: "solid", supports_tools: true, deprecated: false },
     ]),
   },
 }));
@@ -69,12 +71,52 @@ describe("WorkerSettingsPanel", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("editing model tier fires onChange with model_tier", async () => {
+  it("switching provider to mistral persists model_id (no revert to anthropic)", async () => {
+    // Regression: ModelPicker used to drop model_id, so on save the project
+    // round-tripped to "first heavy model" = Anthropic Opus, making the UI
+    // appear to revert. Both fields must travel together.
+    const { onChange } = renderPanel();
+    const providerSelect = await waitFor(() => screen.getByLabelText("Provider"));
+    fireEvent.change(providerSelect, { target: { value: "mistral" } });
+    // Provider change auto-picks the same-tier model in the new provider —
+    // here that's mistral-medium-latest (solid).
+    expect(onChange).toHaveBeenCalledWith({
+      model_tier: "solid",
+      model_id: "mistral-medium-latest",
+    });
+  });
+
+  it("hydrates provider from saved model_id (not the tier fallback)", async () => {
+    // If the agent has model_id="mistral-large-latest" the provider
+    // dropdown must show "mistral", not "anthropic" (which would happen
+    // if the picker hydrated from tier alone — first heavy = Opus).
+    renderPanel({
+      agent: {
+        ...agent,
+        model_tier: "heavy",
+        model_id: "mistral-large-latest",
+      },
+    });
+    const providerSelect = (await waitFor(() =>
+      screen.getByLabelText("Provider"),
+    )) as HTMLSelectElement;
+    expect(providerSelect.value).toBe("mistral");
+    const modelSelect = (await waitFor(() =>
+      screen.getByLabelText("Model"),
+    )) as HTMLSelectElement;
+    expect(modelSelect.value).toBe("mistral-large-latest");
+  });
+
+  it("editing model fires onChange with both model_tier AND model_id", async () => {
     const { onChange } = renderPanel();
     // Wait for the async model picker to load
     const modelSelect = await waitFor(() => screen.getByLabelText("Model"));
     fireEvent.change(modelSelect, { target: { value: "claude-haiku-4-5-20251001" } });
-    expect(onChange).toHaveBeenCalledWith({ model_tier: "fast" });
+    // Both fields must persist or the save round-trips back to first-tier-match.
+    expect(onChange).toHaveBeenCalledWith({
+      model_tier: "fast",
+      model_id: "claude-haiku-4-5-20251001",
+    });
   });
 
   it("RBAC section lists baseline scopes under 'from baseline'", async () => {
@@ -202,11 +244,17 @@ describe("WorkerSettingsPanel", () => {
     );
     const modelSelect = await waitFor(() => screen.getByLabelText("Model"));
     fireEvent.change(modelSelect, { target: { value: "claude-haiku-4-5-20251001" } });
-    // First call: optimistic update with new value
-    expect(onChange).toHaveBeenNthCalledWith(1, { model_tier: "fast" });
+    // First call: optimistic update with new value (both fields).
+    expect(onChange).toHaveBeenNthCalledWith(1, {
+      model_tier: "fast",
+      model_id: "claude-haiku-4-5-20251001",
+    });
     // After save fails, revert call fires
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2));
-    // Second call reverts to original
-    expect(onChange).toHaveBeenNthCalledWith(2, { model_tier: "solid" });
+    // Second call reverts both fields to their original values.
+    expect(onChange).toHaveBeenNthCalledWith(2, {
+      model_tier: "solid",
+      model_id: undefined,
+    });
   });
 });

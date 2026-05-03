@@ -410,6 +410,7 @@ async def get_run_graph(request: Request, run_id: str) -> dict:
             "persona_name": persona_name,
             "persona_id": persona_id,
             "model_tier": cfg.get("model_tier") or "solid",
+            "model_id": cfg.get("model_id") or "",
             "is_final_reviewer": bool(cfg.get("is_final_reviewer")),
         })
 

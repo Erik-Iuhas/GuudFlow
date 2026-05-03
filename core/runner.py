@@ -128,6 +128,12 @@ class AgentConfig:
     declared_mcp_servers: list[str] = field(default_factory=list)
     persona_id: str | None = None
     model_tier: str = "solid"  # "heavy" | "solid" | "fast"
+    # Optional explicit model id (e.g. "mistral-large-latest"). When set
+    # AND the model's tier matches `model_tier`, the registry returns this
+    # model. Empty string means "first available model in tier" (the
+    # default behaviour). Studio's ModelPicker writes both fields so the
+    # provider+model dropdowns persist correctly across reloads.
+    model_id: str = ""
     agent_class_role_type: str | None = None  # registry lookup; None = generic BaseAgent
     is_reviewer: bool = False
     # Phase C.4: final-stage reviewer (architect pattern). Auto-depends
@@ -1274,7 +1280,9 @@ class AgentRunner:
             # teammates instead of leaving the LLM to guess.
             agent._manages = list(cfg.manages or [])
             # Inject runtime handles.
-            agent._llm, agent._model = self._resolve_llm_for_tier(cfg.model_tier)
+            agent._llm, agent._model = self._resolve_llm_for_tier(
+                cfg.model_tier, preference=cfg.model_id or None,
+            )
             agent._broker = self.broker
             agent._context_manager = self.context_manager
             agent._llm_call_dump_sink = self._llm_call_dump_sink
@@ -1507,6 +1515,7 @@ class AgentRunner:
         allowed = {
             "declared_local_tools",
             "model_tier",
+            "model_id",
             "description",
             "max_tool_iterations",
             "max_protocol_retries",
@@ -1516,6 +1525,21 @@ class AgentRunner:
                 continue
             if hasattr(cfg, key):
                 setattr(cfg, key, value)
+
+        # Re-resolve the LLM client when the model selection changed so the
+        # next iteration actually uses the new model. Without this, editing
+        # a live run's agent to (say) Mistral updates the cfg but the agent
+        # keeps calling the previously-bound client.
+        if "model_tier" in partial or "model_id" in partial:
+            try:
+                agent._llm, agent._model = self._resolve_llm_for_tier(
+                    cfg.model_tier, preference=cfg.model_id or None,
+                )
+            except Exception:
+                # Resolution failure (missing API key, etc.) leaves the
+                # existing client in place — the next iteration logs the
+                # mismatch but doesn't crash the panel save.
+                pass
 
         # Rebuild tool manifest if tools changed.
         if "declared_local_tools" in partial:
@@ -3069,7 +3093,9 @@ class AgentRunner:
         except Exception:
             return ""
 
-    def _resolve_llm_for_tier(self, tier: str) -> tuple[LLMClient, str]:
+    def _resolve_llm_for_tier(
+        self, tier: str, preference: str | None = None,
+    ) -> tuple[LLMClient, str]:
         """Return (client, model_id) for an agent's tier.
 
         Priority:
@@ -3077,13 +3103,15 @@ class AgentRunner:
              When set, ALL agents share it; model string still varies by tier.
           2. self._model_registry — per-agent client from the registry.
              Production multi-model path: fast-tier agent may get Groq, heavy gets Opus.
+             When `preference` is given AND it matches a model in `tier`, the
+             registry returns that exact model (e.g. mistral-large-latest).
           3. Error — no client configured.
         """
         if self.llm is not None:
             return self.llm, TIER_TO_MODEL.get(tier, TIER_TO_MODEL["solid"])
         if self._model_registry is not None:
             try:
-                model_info = self._model_registry.resolve(tier)
+                model_info = self._model_registry.resolve(tier, preference=preference or None)
                 return self._model_registry.get_client(model_info), model_info.id
             except Exception:
                 pass
@@ -5112,7 +5140,9 @@ class AgentRunner:
         agent.declared_local_tools = list(cfg.declared_local_tools)
         agent.declared_mcp_servers = list(cfg.declared_mcp_servers)
         agent._manages = list(cfg.manages or [])
-        agent._llm, agent._model = self._resolve_llm_for_tier(cfg.model_tier)
+        agent._llm, agent._model = self._resolve_llm_for_tier(
+            cfg.model_tier, preference=cfg.model_id or None,
+        )
         agent._broker = self.broker
         agent._context_manager = self.context_manager
         agent._llm_call_dump_sink = self._llm_call_dump_sink

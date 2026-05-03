@@ -61,10 +61,12 @@ function fetchModels(): Promise<ModelEntry[]> {
 
 function ModelPicker({
   value,
+  valueModelId,
   onChange,
 }: {
   value: ModelTier;
-  onChange: (tier: ModelTier) => void;
+  valueModelId?: string;
+  onChange: (next: { model_tier: ModelTier; model_id: string }) => void;
 }) {
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [provider, setProvider] = useState<string>("");
@@ -73,9 +75,16 @@ function ModelPicker({
     fetchModels()
       .then((ms) => {
         setModels(ms);
-        // Pick provider that has a model matching the current tier, default anthropic
-        const match = ms.find((m) => m.tier === value);
-        setProvider(match?.provider ?? "anthropic");
+        // Pick provider from the saved model_id when present so the dropdowns
+        // hydrate to whatever the user previously chose. Falls back to a
+        // provider that has a model matching the current tier, then anthropic.
+        const explicit = valueModelId ? ms.find((m) => m.id === valueModelId) : undefined;
+        if (explicit) {
+          setProvider(explicit.provider);
+          return;
+        }
+        const tierMatch = ms.find((m) => m.tier === value);
+        setProvider(tierMatch?.provider ?? "anthropic");
       })
       .catch(() => {});
   }, []);
@@ -85,25 +94,36 @@ function ModelPicker({
 
   function handleProviderChange(p: string) {
     setProvider(p);
-    // Auto-select first model in new provider
-    const first = models.find((m) => m.provider === p);
-    if (first) onChange(first.tier as ModelTier);
+    // Prefer a model in the new provider that matches the current tier;
+    // otherwise pick its first model. Either way emit BOTH tier + id so
+    // the saved selection survives a reload.
+    const sameTier = models.find((m) => m.provider === p && m.tier === value);
+    const first = sameTier ?? models.find((m) => m.provider === p);
+    if (first) onChange({ model_tier: first.tier as ModelTier, model_id: first.id });
   }
 
   function handleModelChange(modelId: string) {
     const m = models.find((m) => m.id === modelId);
-    if (m) onChange(m.tier as ModelTier);
+    if (m) onChange({ model_tier: m.tier as ModelTier, model_id: m.id });
   }
 
-  // Find the currently selected model in the active provider
-  const currentModel = providerModels.find((m) => m.tier === value) ?? providerModels[0];
+  // Find the currently selected model: explicit id wins, else first
+  // tier-matching model in the active provider.
+  const explicitInProvider = valueModelId
+    ? providerModels.find((m) => m.id === valueModelId)
+    : undefined;
+  const currentModel =
+    explicitInProvider ?? providerModels.find((m) => m.tier === value) ?? providerModels[0];
 
   if (models.length === 0) {
-    // Fallback while loading or if API unavailable
+    // Fallback while loading or if API unavailable. Tier-only emit is fine
+    // here — model_id stays empty until the registry populates.
     return (
       <select
         value={value}
-        onChange={(e) => onChange(e.target.value as ModelTier)}
+        onChange={(e) =>
+          onChange({ model_tier: e.target.value as ModelTier, model_id: "" })
+        }
         style={{ width: "100%" }}
       >
         <option value="heavy">Heavy (claude-opus-4-7)</option>
@@ -664,7 +684,8 @@ export function WorkerSettingsPanel({
           <h3 className="small" style={{ textTransform: "uppercase", color: "var(--muted)" }}>Model</h3>
           <ModelPicker
             value={current.model_tier ?? "solid"}
-            onChange={(tier) => void handleChange({ model_tier: tier })}
+            valueModelId={current.model_id ?? ""}
+            onChange={(next) => void handleChange(next)}
           />
         </section>
 

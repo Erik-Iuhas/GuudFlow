@@ -11,6 +11,10 @@ export interface AgentConfig {
   declared_mcp_servers?: string[];
   persona_id?: string | null;
   model_tier?: ModelTier;
+  /** Optional explicit model id (e.g. "mistral-large-latest"). When set
+   *  AND the model's tier matches `model_tier`, the runner uses this exact
+   *  model. Empty / missing → first available model in tier. */
+  model_id?: string;
   agent_class_role_type?: string | null;
   is_reviewer?: boolean;
   is_final_reviewer?: boolean;
