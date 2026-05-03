@@ -319,30 +319,31 @@ class ToolManifestBuilder:
             ))
             already_names.add(entry.name)
 
-        # 1c. Track 3e — auto-include batch variants when the parent is in the
-        # manifest. Means agents that have fs-edit/fs-write get the batch
+        # 1c. Track 3e — auto-include derived variants when the parent is in
+        # the manifest. fs-write parents BOTH fs-write-batch (multi-file)
+        # AND fs-write-append (single-file chunked); fs-edit parents
+        # fs-edit-batch. Roles with fs-edit/fs-write get all derived
         # variants automatically without explicit declaration.
-        parent_to_child = {parent: child for child, parent in BATCH_PARENT_SCOPES.items()}
-        existing_scopes = {d.scope for d in descriptors}
+        parent_to_children: dict[str, list[str]] = {}
+        for child, parent in BATCH_PARENT_SCOPES.items():
+            parent_to_children.setdefault(parent, []).append(child)
         for d in list(descriptors):  # snapshot — we mutate below
-            child_name = parent_to_child.get(d.scope)
-            if child_name is None:
-                continue
-            if child_name in already_names:
-                continue
-            child_entry = self.local_registry.get(child_name)
-            if child_entry is None:
-                continue
-            descriptors.append(ToolDescriptor(
-                name=child_entry.name,
-                description=child_entry.description,
-                input_schema=child_entry.input_schema,
-                invocation="local",
-                scope=d.scope,  # share the parent's scope for RBAC accounting
-                priority=child_entry.priority,
-                when_to_use=child_entry.when_to_use,
-            ))
-            already_names.add(child_entry.name)
+            for child_name in parent_to_children.get(d.scope, []):
+                if child_name in already_names:
+                    continue
+                child_entry = self.local_registry.get(child_name)
+                if child_entry is None:
+                    continue
+                descriptors.append(ToolDescriptor(
+                    name=child_entry.name,
+                    description=child_entry.description,
+                    input_schema=child_entry.input_schema,
+                    invocation="local",
+                    scope=d.scope,  # share parent's scope for RBAC accounting
+                    priority=child_entry.priority,
+                    when_to_use=child_entry.when_to_use,
+                ))
+                already_names.add(child_entry.name)
 
         # 2. MCP tools
         for server in declared_mcp_servers:
@@ -406,12 +407,16 @@ BASELINE_LOCAL_SCOPES: frozenset[str] = frozenset({
 })
 
 
-# Track 3e — write-class batch tools piggyback on their singular counterpart's
-# scope, so any role with `fs-edit` granted automatically gets `fs-edit-batch`
-# without project-config changes.
+# Track 3e — write-class batch + chunk tools piggyback on their singular
+# counterpart's scope, so any role with `fs-edit` granted automatically gets
+# `fs-edit-batch`, and any role with `fs-write` gets both `fs-write-batch`
+# (multi-file in one call) and `fs-write-append` (single-file in chunks).
+# All three derived tools share the same write capability — different shapes,
+# same RBAC.
 BATCH_PARENT_SCOPES: dict[str, str] = {
     "fs-edit-batch": "fs-edit",
     "fs-write-batch": "fs-write",
+    "fs-write-append": "fs-write",
 }
 
 

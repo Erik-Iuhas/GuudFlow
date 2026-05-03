@@ -421,12 +421,12 @@ class _ClaimingTool(BaseTool):
 class FsWrite(_ClaimingTool):
     name = "fs-write"
     priority = 105
-    when_to_use = "single file write — use for files > ~1K tokens; smaller batches go through fs-write-batch"
+    when_to_use = "single file ≤ ~6K tokens; for bigger use fs-create + fs-write-append; for ≥ 2 short files use fs-write-batch"
     description = (
         "Write/overwrite a file under working/. Creates parent dirs as needed. "
-        "TIP: for several SHORT files, fs-write-batch is one round-trip — but "
-        "large file contents must use fs-write because batch arguments share "
-        "the model's output token budget."
+        "Bounded by your output token cap (~6-7K tokens of content). For "
+        "anything larger, use fs-create with empty content then fs-write-append "
+        "in chunks. For several SHORT files in one round-trip use fs-write-batch."
     )
     input_schema = {
         "type": "object",
@@ -466,6 +466,92 @@ class FsWrite(_ClaimingTool):
             return _err(f"write failed: {e}")
         await self._release(path, "written")
         return _ok(path=path, bytes_written=len(content.encode("utf-8")))
+
+
+class FsWriteAppend(_ClaimingTool):
+    """Append content to an existing file. Lets agents build files larger
+    than the model's max_tokens output cap by writing them in chunks."""
+
+    name = "fs-write-append"
+    priority = 106
+    when_to_use = "build big files in chunks (after fs-create) — bypasses the ~6K-token fs-write cap"
+    description = (
+        "Append content to an existing file under working/. The file MUST "
+        "already exist — call fs-create first with empty content. Use this "
+        "when a single fs-write would exceed the model's output token cap "
+        "(roughly 6-7K tokens of content). Pattern: fs-create('big.md'), "
+        "fs-write-append('big.md', part1), fs-write-append('big.md', part2). "
+        "Each append call's content is bounded only by your output budget; "
+        "the file accumulates server-side."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "content": {"type": "string"},
+        },
+        "required": ["path", "content"],
+    }
+    intent = "edit"
+
+    def aci_doc(self) -> dict[str, str]:
+        return {
+            "purpose": "Append content to an existing file (Track 7+ chunked writes).",
+            "args": "{path:string, content:string}",
+            "emits": "{ok:true, path, bytes_appended, total_bytes}",
+            "errors": "path safety | file does not exist (use fs-create first)",
+            "example": (
+                'fs-create({"path": "docs/big.md", "content": ""})\n'
+                'fs-write-append({"path": "docs/big.md", "content": "# Heading\\n..."})\n'
+                'fs-write-append({"path": "docs/big.md", "content": "## More\\n..."})'
+            ),
+            "notes": (
+                "Pairs with fs-create. Use when a single fs-write of the full "
+                "content would exceed max_tokens (~6-7K tokens). Each append "
+                "reads only the size of the appended chunk, not the whole file."
+            ),
+        }
+
+    async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        path = arguments.get("path")
+        content = arguments.get("content")
+        if not path or not isinstance(path, str):
+            return _err("missing required argument: path")
+        if content is None or not isinstance(content, str):
+            return _err("missing required argument: content (string)")
+        # Require the file to exist — append-to-nonexistent is silent file
+        # creation, which is a footgun. Force the agent to fs-create first
+        # so they're explicit about intent.
+        try:
+            if not await self.files.exists(path):
+                return _err(
+                    f"file does not exist: {path}. "
+                    "Call fs-create with empty content first, then fs-write-append in chunks."
+                )
+        except PathSafetyError as e:
+            return _err(f"path safety: {e}")
+        await self._claim(path)
+        try:
+            await self.files.append(path, content)
+        except PathSafetyError as e:
+            await self._release(path, "aborted")
+            return _err(f"path safety: {e}")
+        except OSError as e:
+            await self._release(path, "aborted")
+            return _err(f"append failed: {e}")
+        # Compute total bytes for the response so the agent can track
+        # progress without re-reading the file.
+        try:
+            full_text = await self.files.read(path)
+            total_bytes = len(full_text.encode("utf-8"))
+        except (PathSafetyError, OSError):
+            total_bytes = -1  # post-write read failed; not fatal
+        await self._release(path, "appended")
+        return _ok(
+            path=path,
+            bytes_appended=len(content.encode("utf-8")),
+            total_bytes=total_bytes,
+        )
 
 
 class FsCreate(_ClaimingTool):

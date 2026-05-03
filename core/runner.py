@@ -60,6 +60,7 @@ from agents.tools.fs import (
     FsReadRange,
     FsRename,
     FsWrite,
+    FsWriteAppend,
 )
 from agents.tools.git import GitChangedFiles, GitDiff, GitLog, GitRead, GitStatus
 from agents.tools.story import StoryComplete, StoryOpen
@@ -338,7 +339,7 @@ def _extract_field(detail: str | None, key: str) -> str | None:
 # Used by /api/tools to enumerate the catalog without constructing a runner.
 LOCAL_TOOL_CLASSES: tuple[type[BaseTool], ...] = (
     FsRead, FsList, FsExists, FsReadRange, FsGrep,
-    FsCreate, FsWrite, FsEdit, FsDelete, FsRename,
+    FsCreate, FsWrite, FsWriteAppend, FsEdit, FsDelete, FsRename,
     FsWriteBatch, FsEditBatch,                # Track 3e — batch variants
     GitDiff, GitChangedFiles, GitLog, GitRead, GitStatus,
     BoardMessage, AssignTask, DecomposeTask,  # Track 7 — decompose-task
@@ -843,6 +844,7 @@ class AgentRunner:
             FsDiff.name: FsDiff(self.files, workspace=self.workspace, role=role, git=self.git),
             FsCreate.name: FsCreate(self.files, claim_emitter, release_emitter),
             FsWrite.name: FsWrite(self.files, claim_emitter, release_emitter),
+            FsWriteAppend.name: FsWriteAppend(self.files, claim_emitter, release_emitter),
             FsEdit.name: FsEdit(self.files, claim_emitter, release_emitter),
             FsDelete.name: FsDelete(self.files, claim_emitter, release_emitter),
             FsRename.name: FsRename(self.files, claim_emitter, release_emitter),

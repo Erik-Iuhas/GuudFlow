@@ -15,6 +15,7 @@ from agents.tools.fs import (
     FsRead,
     FsRename,
     FsWrite,
+    FsWriteAppend,
 )
 from core.file_workspace import FileWorkspace
 
@@ -330,3 +331,58 @@ async def test_fs_list_no_active_story_omits_changed_flag(fw: FileWorkspace):
     for entry in res["files"]:
         if isinstance(entry, dict):
             assert "changed_in_story" not in entry
+
+
+# ── FsWriteAppend ──────────────────────────────────────────────────────────
+
+
+async def test_fs_write_append_appends_to_existing(fw: FileWorkspace, emitters, claim_log):
+    claim, release = emitters
+    await fw.write("doc.md", "# Heading\n")
+    tool = FsWriteAppend(fw, claim_emitter=claim, release_emitter=release)
+    res = await tool.run({"path": "doc.md", "content": "body line 1\n"})
+    assert res["ok"] is True
+    assert res["bytes_appended"] == len("body line 1\n".encode("utf-8"))
+    assert res["total_bytes"] == len("# Heading\nbody line 1\n".encode("utf-8"))
+    assert await fw.read("doc.md") == "# Heading\nbody line 1\n"
+    assert claim_log["claims"] == [("edit", "doc.md")]
+    assert claim_log["releases"] == [("doc.md", "appended", None)]
+
+
+async def test_fs_write_append_chunks_build_a_big_file(fw: FileWorkspace):
+    """The killer use case: build a file in N chunks each well under
+    the model's max_tokens cap."""
+    await FsCreate(fw).run({"path": "big.md", "content": ""})
+    tool = FsWriteAppend(fw)
+    for i in range(5):
+        res = await tool.run({"path": "big.md", "content": f"## chunk {i}\n" + "x" * 200 + "\n"})
+        assert res["ok"] is True
+    final = await fw.read("big.md")
+    assert "## chunk 0" in final
+    assert "## chunk 4" in final
+    # 5 chunks × ~213 bytes each = ~1065 bytes
+    assert len(final) > 1000
+
+
+async def test_fs_write_append_refuses_nonexistent_file(fw: FileWorkspace):
+    """Force the agent to be explicit: fs-create first, then append."""
+    res = await FsWriteAppend(fw).run({"path": "missing.md", "content": "hi"})
+    assert "error" in res
+    assert "fs-create" in res["error"].lower()
+
+
+async def test_fs_write_append_rejects_path_safety(fw: FileWorkspace):
+    res = await FsWriteAppend(fw).run({"path": "../escape.md", "content": "x"})
+    assert "error" in res
+
+
+async def test_fs_write_append_rejects_missing_args(fw: FileWorkspace):
+    assert "error" in await FsWriteAppend(fw).run({"content": "x"})
+    assert "error" in await FsWriteAppend(fw).run({"path": "x.md"})
+
+
+async def test_fs_write_append_no_emitters_runs_silently(fw: FileWorkspace):
+    """Standalone usage (no claim/release emitters) must not crash."""
+    await fw.write("x.md", "header\n")
+    res = await FsWriteAppend(fw).run({"path": "x.md", "content": "body\n"})
+    assert res["ok"] is True
