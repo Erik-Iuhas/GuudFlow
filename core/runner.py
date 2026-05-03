@@ -3791,6 +3791,29 @@ class AgentRunner:
 
         conflicted: list[str] = []
         async with self._git_lock:
+            # Step 1 of the peer-comms plan: any COMPLETE dep with
+            # uncommitted files in working/ gets a forced auto-commit
+            # BEFORE we resolve their branch tip for the merge. This
+            # catches the case where iteration-end auto-commit didn't
+            # fire (mid-iteration cancellation, respawn handoff, etc.)
+            # and the dep's branch tip is stale relative to disk —
+            # the symptom from run_dfcfd6eee3 where QA's working tree
+            # had no IC code because the IC branches were empty.
+            #
+            # Only fires for COMPLETE deps — mid-iteration agents own
+            # their commit cadence and touching their branch races.
+            for dep_role in cfg.depends_on:
+                dep_state = self.workspace.agent_states.get(dep_role)
+                if dep_state != AgentState.COMPLETE:
+                    continue
+                # `_auto_commit_locked` is a no-op when status is clean,
+                # so this is safe even when the dep already committed.
+                try:
+                    await self._auto_commit_locked(dep_role, self.workspace)
+                except Exception:
+                    # Best-effort flush — never block the merge on it.
+                    pass
+
             # Ensure the agent's own branch exists (may not yet on iter 1
             # before the agent has done any work of their own).
             # Resolve which parent branches exist so we can fork from the
@@ -3828,42 +3851,62 @@ class AgentRunner:
         Serialized via _git_lock so parallel agents don't race on the
         shared working directory — concurrent `git add -A` + checkout
         would mix files from different agents into the wrong branch.
+
+        Callers that ALREADY hold `_git_lock` (e.g. `_premerge_upstream_deps`
+        which serialises the merge under the same lock) MUST use
+        `_auto_commit_locked` directly to avoid recursive lock acquisition.
         """
         async with self._git_lock:
-            try:
-                branch = self.git.agent_branch(role)
-                workspace.git.agent_branches[role] = branch
-            except Exception:
-                return None
+            return await self._auto_commit_locked(role, workspace)
 
-            status = self.git.status()
-            if status.clean:
-                return None
+    async def _auto_commit_locked(
+        self, role: str, workspace: Workspace,
+    ) -> str | None:
+        """Inner of `_auto_commit` — caller must already hold `_git_lock`.
 
-            changed_files = [e.path for e in status.entries]
+        Exists so other lock-holding callers (premerge dep flush,
+        question-respawn handoff) can commit without re-acquiring the
+        lock and deadlocking. Behaviour is otherwise identical to
+        `_auto_commit`: returns the new commit sha, or None when the
+        working tree was clean / branch creation failed / commit failed.
+        """
+        try:
+            branch = self.git.agent_branch(role)
+            workspace.git.agent_branches[role] = branch
+        except Exception:
+            return None
 
-            try:
-                info = self.git.commit(role, message=f"feat: {role} iteration {workspace.iteration}")
-            except Exception:
-                return None
+        status = self.git.status()
+        if status.clean:
+            return None
 
-            workspace.git.commits.append(CommitRecord(
-                hash=info.hash,
-                branch=info.branch,
-                agent=role,
-                message=info.message,
-                iteration=workspace.iteration,
-                files=changed_files,
-            ))
-            # Post a GIT_COMMIT signal attributed to the agent role so the
-            # board (and the Studio git-activity tab) can surface it.
-            workspace.post_signal(Signal(
-                type=SignalType.GIT_COMMIT,
-                summary=f"{role}: committed {info.hash[:7]} — {info.message}",
-                from_agent=role,
-                detail=info.hash,
-            ))
-            return info.hash
+        changed_files = [e.path for e in status.entries]
+
+        try:
+            info = self.git.commit(
+                role,
+                message=f"feat: {role} iteration {workspace.iteration}",
+            )
+        except Exception:
+            return None
+
+        workspace.git.commits.append(CommitRecord(
+            hash=info.hash,
+            branch=info.branch,
+            agent=role,
+            message=info.message,
+            iteration=workspace.iteration,
+            files=changed_files,
+        ))
+        # Post a GIT_COMMIT signal attributed to the agent role so the
+        # board (and the Studio git-activity tab) can surface it.
+        workspace.post_signal(Signal(
+            type=SignalType.GIT_COMMIT,
+            summary=f"{role}: committed {info.hash[:7]} — {info.message}",
+            from_agent=role,
+            detail=info.hash,
+        ))
+        return info.hash
 
     # ── Memory writer ───────────────────────────────────────────────────────
 
