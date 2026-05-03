@@ -1266,6 +1266,32 @@ class BaseAgent:
             "- Your output is code, files, and decisions — not plans, options, or questions."
         )
 
+        # ── CONTEXT BEFORE OUTPUT ───────────────────────────────────────
+        # Universal nudge: read the spec before producing work. Diagnosed
+        # in run_f741ea78ba where IC devs read 3 architecture docs but
+        # skipped 26 design docs — they wrote ghost_ai_system.py without
+        # reading ghost_ai.md. Architecture describes shape, design
+        # describes behaviour; both are required before code lands.
+        parts.append(
+            "## CONTEXT BEFORE OUTPUT — read what specifies your work\n\n"
+            "Before you make code, file, or design decisions:\n\n"
+            "- **Read every file listed as a reference in your task brief.** "
+            "References are not optional pointers — they are the spec your "
+            "reviewer will check your work against. Skipping one is guaranteed "
+            "rework.\n"
+            "- **Find domain-relevant docs you weren't pointed at.** "
+            "`fs-list docs/` (or your project's spec dir) and read any filename "
+            "that overlaps your task scope. Architecture / contract docs "
+            "describe **shape**; design docs describe **behaviour**. You need "
+            "both before writing code.\n"
+            "- **Inventory first, then batch your reads.** Don't loop "
+            "fs-list → fs-read → fs-list → fs-read; list the dir once, decide "
+            "what's relevant, then read the relevant files together.\n"
+            "- Reviewer / QA / test roles: the same rule applies. Your test "
+            "cases come from the spec, not from inferring intent off the code "
+            "under test."
+        )
+
         # Per-role dispatch rule — only relevant when the agent has
         # assign-task AND there are >= 2 teammates listed in `manages`.
         # Architects/leads tend to bundle all downstream work into one

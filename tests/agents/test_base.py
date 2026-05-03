@@ -339,6 +339,39 @@ async def test_effective_system_prompt_skips_empty_layers():
     assert "PROJECT RULES" not in text
 
 
+async def test_effective_system_prompt_includes_context_before_output_layer():
+    """Universal nudge added after diagnosing run_f741ea78ba: every agent,
+    every project, every model must see the read-the-spec-first rule.
+
+    Architecture / contract docs describe SHAPE; design docs describe
+    BEHAVIOUR. Agents need both before they write code. Earlier runs
+    showed Mistral devs reading 3 architecture docs and skipping 26
+    design docs — this layer is the load-bearing reminder."""
+    a = BaseAgent(role="any_role", system_prompt="prompt")
+    text = await a.effective_system_prompt()
+    assert "CONTEXT BEFORE OUTPUT" in text
+    # Both spec-shape concepts must be present in the same block.
+    section_start = text.index("CONTEXT BEFORE OUTPUT")
+    section = text[section_start:]
+    assert "shape" in section.lower()
+    assert "behaviour" in section.lower()
+    # Reviewer/QA carve-out so test agents don't think the rule is dev-only.
+    assert "QA" in section
+
+
+async def test_context_before_output_layer_after_autonomy_before_protocol_primer():
+    """Layer ordering: AUTONOMY RULES → CONTEXT BEFORE OUTPUT → (dispatch
+    rule conditional) → protocol output primer. Wrong order breaks the
+    behaviour: if CONTEXT lands before AUTONOMY, the agent reads but
+    doesn't act; if it lands after the primer, the agent has already
+    started emitting protocol blocks."""
+    a = BaseAgent(role="dev", system_prompt="prompt")
+    text = await a.effective_system_prompt()
+    idx_autonomy = text.index("AUTONOMY RULES")
+    idx_context = text.index("CONTEXT BEFORE OUTPUT")
+    assert idx_autonomy < idx_context, "context layer must follow autonomy rules"
+
+
 # ── Track 1c — Layer 4.5: repo_map injection ──────────────────────────────
 
 
