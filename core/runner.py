@@ -35,6 +35,7 @@ from typing import Any, Awaitable, Callable, Literal
 
 from agents.base import BaseAgent, ToolNotAvailable
 from agents.tools.base import BaseTool
+from agents.tools.ask_peer import AskPeer
 from agents.tools.board import AssignTask, BoardMessage
 from agents.tools.decompose_task import DecomposeTask
 from agents.tools.recall_subtask import RecallSubtask
@@ -342,7 +343,7 @@ LOCAL_TOOL_CLASSES: tuple[type[BaseTool], ...] = (
     FsCreate, FsWrite, FsWriteAppend, FsEdit, FsDelete, FsRename,
     FsWriteBatch, FsEditBatch,                # Track 3e — batch variants
     GitDiff, GitChangedFiles, GitLog, GitRead, GitStatus,
-    BoardMessage, AssignTask, DecomposeTask,  # Track 7 — decompose-task
+    BoardMessage, AssignTask, DecomposeTask, AskPeer,  # Track 7 + peer-comms cleanup
     RecallSubtask,                              # Track 8 — recall-subtask
     CodeExec, CodeOutline, CodeOutlineBatch,  # Track 3e — batch variant
     DataCsv, DataJson, DataXml, DataYaml,
@@ -852,6 +853,7 @@ class AgentRunner:
             FsWriteBatch.name: FsWriteBatch(self.files, claim_emitter, release_emitter),
             FsEditBatch.name: FsEditBatch(self.files, claim_emitter, release_emitter),
             BoardMessage.name: BoardMessage(role, self.workspace),
+            AskPeer.name: AskPeer(),
             AssignTask.name: AssignTask(
                 role, self.workspace,
                 runner=self,
@@ -3466,6 +3468,51 @@ class AgentRunner:
                     except (ToolNotAvailable, Exception) as e:
                         result = {"error": f"{type(e).__name__}: {e}"}
                         is_error = True
+
+                    # Peer-comms cleanup — ask-peer (and any future tool
+                    # that wants to emit a protocol block instead of
+                    # returning data) returns a sentinel
+                    # `{"_emit_protocol": "<KIND>", "fields": {...}}`.
+                    # We intercept here, append tool_results for ALL
+                    # tool_uses in this turn (not just up to the
+                    # sentinel) so the message history stays well-formed
+                    # for Anthropic's tool_use/tool_result pairing
+                    # requirement, then synthesize a CompactBlock and
+                    # return it AS IF the agent had emitted that
+                    # protocol block at end_turn. The caller
+                    # (_drive_agent_run) then routes through the
+                    # existing [ASK] handler at line 2013+.
+                    if isinstance(result, dict) and result.get("_emit_protocol"):
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": json.dumps(
+                                {"ok": True, "emitted": result["_emit_protocol"]},
+                                default=str,
+                            ),
+                        })
+                        # Synthesize is_error tool_results for any
+                        # tool_calls AFTER this one in the same response
+                        # — they never executed but Anthropic requires
+                        # every tool_use to have a paired tool_result.
+                        for skipped in response.tool_calls[tc_idx + 1:]:
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": skipped.id,
+                                "content": json.dumps({
+                                    "error": (
+                                        "skipped: a sibling tool call "
+                                        "in the same turn emitted a "
+                                        "protocol block, ending the turn"
+                                    ),
+                                }),
+                                "is_error": True,
+                            })
+                        messages.append(LLMMessage(role="user", content=tool_results))
+                        return protocol.CompactBlock(
+                            kind=str(result["_emit_protocol"]),
+                            fields=dict(result.get("fields") or {}),
+                        )
 
                     verdict = guard.record(tc.name, tc.arguments, result)
                     tool_results.append({

@@ -404,6 +404,12 @@ BASELINE_LOCAL_SCOPES: frozenset[str] = frozenset({
     # Agents can technically also call it manually, but the sidecar
     # is the primary consumer.
     "protocol-cleanup",
+    # Peer-comms cleanup — ask-peer is a discoverable wrapper around
+    # the M1 [ASK]/[ANSWER] handshake. Baseline so every agent has
+    # the suspend-and-route option visible in the catalog instead of
+    # falling back to board-message for questions (which triggers
+    # Track 2a respawn cascades).
+    "ask-peer",
 })
 
 
