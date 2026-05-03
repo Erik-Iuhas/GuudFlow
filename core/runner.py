@@ -243,6 +243,13 @@ TIER_TO_MODEL: dict[str, str] = {
     "fast": "claude-haiku-4-5-20251001",
 }
 
+# Tool-call cap inside a peer-respond turn (`_generic_peer_answer`). The
+# responder can call up to this many read-class tools before the runtime
+# synthesizes a fallback ANSWER. 3 is enough to: list a dir, read one
+# file, then answer — covers Codestral's "verify before answering"
+# pattern without letting it loop fs-list 15 times like the main run.
+PEER_ANSWER_MAX_ITERATIONS = 3
+
 
 def _split_paths(raw: str) -> list[str]:
     """Split a comma-separated path list. Trims whitespace and drops empties."""
@@ -4950,26 +4957,167 @@ class AgentRunner:
         question: str,
         context_paths: list[str],
     ) -> str:
-        """Single-LLM-call ANSWER for agents without a specialised handler."""
+        """Bounded tool-use loop ANSWER for agents without a specialised handler.
+
+        Diagnosed in run_6b8d0190b2: the prior single-LLM-call version
+        silently swallowed tool_use responses. Codestral chose to call
+        fs-list before answering, the function returned `response.text`
+        (empty), and QA got `answer: ""` — looked like no response.
+
+        New behaviour:
+          - Inject the responder's OWN recent commits + last COMMIT block
+            so they can answer from "what I just shipped" without
+            re-exploring the codebase.
+          - Allow up to PEER_ANSWER_MAX_ITERATIONS (3) tool calls so the
+            responder can verify a detail before answering. Tools come
+            from their existing manifest (read-class only in practice
+            since respond mode shouldn't be writing files).
+          - On exhaustion synthesize a fallback `[ANSWER]` so the asker
+            isn't blocked by silent emptiness. The synthetic answer
+            names the tool calls used so QA can ask a more targeted
+            follow-up.
+        """
         from core.llm import LLMMessage
-        ctx_note = (
-            f"\nContext files: {', '.join(context_paths)}" if context_paths else ""
-        )
+
+        own_work = self._render_responder_own_work(agent.role)
+        ctx_note_parts: list[str] = []
+        if context_paths:
+            ctx_note_parts.append(
+                f"Context files cited by asker: {', '.join(context_paths)}"
+            )
+        if own_work:
+            ctx_note_parts.append(f"YOUR RECENT WORK:\n{own_work}")
+        ctx_note = ("\n\n" + "\n\n".join(ctx_note_parts)) if ctx_note_parts else ""
+
         prompt = (
             f"PEER QUESTION from {asker_role}:\n"
             f"ask_id: {ask_id}\n"
             f"question: {question}{ctx_note}\n\n"
-            f"Answer in ≤12 words. End with:\n"
+            f"Answer using the work YOU just shipped. You may call up to "
+            f"{PEER_ANSWER_MAX_ITERATIONS} read-class tools (fs-read, fs-list, "
+            f"git-diff, etc.) if you need to verify a specific detail before "
+            f"answering — don't re-explore the codebase from scratch. End your "
+            f"final turn with:\n"
             f"[ANSWER]\n"
             f"  ask_id: {ask_id}\n"
             f"  to: {asker_role}\n"
-            f"  answer: <your answer>"
+            f"  answer: <your answer in ≤40 words>"
         )
-        try:
-            response = await agent.llm([LLMMessage(role="user", content=prompt)])
-            return response.text or ""
-        except Exception:
+
+        messages: list[LLMMessage] = [LLMMessage(role="user", content=prompt)]
+        tools_called: list[str] = []
+
+        for iteration in range(PEER_ANSWER_MAX_ITERATIONS + 1):
+            try:
+                response = await agent.llm(messages)
+            except Exception:
+                return ""
+
+            text = response.text or ""
+
+            # Done: model emitted text containing the [ANSWER] block.
+            if "[ANSWER]" in text:
+                return text
+
+            # Continue: model wants to call tools — execute and loop.
+            if response.tool_calls:
+                # Cap iterations: the +1 in range() lets the loop reach
+                # the cap, then this branch synthesises if still no answer.
+                if iteration >= PEER_ANSWER_MAX_ITERATIONS:
+                    break
+
+                assistant_blocks: list[dict[str, Any]] = []
+                if text:
+                    assistant_blocks.append({"type": "text", "text": text})
+                for tc in response.tool_calls:
+                    tools_called.append(tc.name)
+                    assistant_blocks.append({
+                        "type": "tool_use",
+                        "id": tc.id,
+                        "name": tc.name,
+                        "input": tc.arguments,
+                    })
+                messages.append(
+                    LLMMessage(role="assistant", content=assistant_blocks)
+                )
+
+                tool_results: list[dict[str, Any]] = []
+                for tc in response.tool_calls:
+                    try:
+                        result = await agent.call_tool(
+                            self.workspace, tc.name, tc.arguments,
+                        )
+                    except Exception as e:
+                        result = {"error": f"{type(e).__name__}: {e}"}
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": json.dumps(result, default=str),
+                    })
+                messages.append(LLMMessage(role="user", content=tool_results))
+                continue
+
+            # Neither [ANSWER] in text nor tool calls — model gave up.
+            # Return whatever text they did produce; the caller's
+            # extract_trailing will fail and we'll synthesize below.
+            if text:
+                return text
+            break
+
+        # Synthesize a fallback answer so the asker isn't silently blocked.
+        used = (
+            f"used {len(tools_called)} tool call(s) ({', '.join(tools_called[:5])})"
+            if tools_called else "produced no output"
+        )
+        return (
+            f"[ANSWER]\n"
+            f"  ask_id: {ask_id}\n"
+            f"  to: {asker_role}\n"
+            f"  answer: (responder {used} but never produced an [ANSWER] "
+            f"block within {PEER_ANSWER_MAX_ITERATIONS} turns — likely got "
+            f"stuck researching. Ask again with a more specific question, or "
+            f"check the responder's recent commits directly via git-log.)"
+        )
+
+    def _render_responder_own_work(self, role: str) -> str:
+        """Build a short context block of files the responder committed
+        this run + their last COMMIT summary. Lets `_generic_peer_answer`
+        give the responder back their own work as the answer's source of
+        truth, so they don't fs-list the codebase to remember what they
+        just built."""
+        own_commits = [
+            c for c in self.workspace.git.commits if c.agent == role
+        ]
+        if not own_commits:
             return ""
+
+        files_set: set[str] = set()
+        for c in own_commits:
+            for f in (c.files or []):
+                files_set.add(f)
+        files_block = ""
+        if files_set:
+            files_list = "\n  ".join(sorted(files_set)[:30])
+            files_block = f"Files you committed this run:\n  {files_list}"
+
+        # Last COMMIT protocol block this role posted (carries summary +
+        # files + any rationale the agent wrote when closing the task).
+        last_commit_text = ""
+        for s in reversed(self.workspace.board):
+            if (
+                s.from_agent == role
+                and s.type is SignalType.PROTOCOL
+                and (s.summary or "").startswith("COMMIT")
+            ):
+                last_commit_text = s.detail or s.summary or ""
+                break
+
+        parts: list[str] = []
+        if files_block:
+            parts.append(files_block)
+        if last_commit_text:
+            parts.append(f"Your last COMMIT block:\n{last_commit_text}")
+        return "\n\n".join(parts)
 
     def _dispatch_skip_confirmation(
         self,
