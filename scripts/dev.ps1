@@ -61,9 +61,11 @@ $reloadArgs = if ($NoReload) {
     ""
 } else {
     Write-Host "Starting backend  -> http://localhost:8000  [reload watches api/core/agents/worker]" -ForegroundColor Cyan
-    # Explicit --reload-include / --reload-exclude so .pyc writes from
-    # lazy imports during a run can't silently kill the worker.
-    "--reload --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker --reload-include *.py --reload-exclude *.pyc --reload-exclude __pycache__/*"
+    # NOTE: do NOT pass --reload-include — it OVERRIDES the --reload-dir
+    # scoping and makes watchfiles see *.py files anywhere in the project,
+    # including data/runs/<id>/workspace/working/**/*.py written by agents.
+    # That's how src/constants.py writes were killing the worker mid-run.
+    "--reload --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker --reload-exclude *.pyc --reload-exclude __pycache__/*"
 }
 Start-Process pwsh -ArgumentList @(
     "-NoExit", "-Command",

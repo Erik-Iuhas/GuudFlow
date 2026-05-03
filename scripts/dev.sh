@@ -101,9 +101,12 @@ if [ "${NO_RELOAD}" -eq 1 ]; then
     uvicorn api.main:app --port 8000 > "${LOG_BACK}" 2>&1 &
 else
     info "→ Starting backend  → http://localhost:8000  [reload watches api/core/agents/worker]"
+    # NOTE: do NOT pass --reload-include — it OVERRIDES --reload-dir scoping
+    # and makes watchfiles see *.py files anywhere in the project, including
+    # data/runs/<id>/workspace/working/**/*.py written by agents.
     uvicorn api.main:app --reload \
         --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker \
-        --reload-include '*.py' --reload-exclude '*.pyc' --reload-exclude '__pycache__/*' \
+        --reload-exclude '*.pyc' --reload-exclude '__pycache__/*' \
         --port 8000 > "${LOG_BACK}" 2>&1 &
 fi
 BACK_PID=$!

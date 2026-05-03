@@ -694,15 +694,48 @@ function _connectWithReconnect(
   let closed = false;
   let backoffMs = 500;
   let reconnectTimer: number | null = null;
+  // Bug fix: only reset backoff after the connection has been STABLE for
+  // a meaningful interval. The previous "reset on open" path created a
+  // tight reconnect loop when the server accepted then immediately
+  // closed the socket (e.g. the run is no longer in the registry) —
+  // hundreds of connect → close cycles in seconds.
+  const STABLE_MS = 3000;
+  // Hard cap on consecutive failed attempts. Once exceeded, give up
+  // entirely instead of pounding the server forever. Caller can re-create
+  // the handle by re-rendering the component.
+  const MAX_ATTEMPTS = 12;
+  let attempts = 0;
+  let stableTimer: number | null = null;
 
   const open = () => {
     if (closed) return;
+    if (attempts >= MAX_ATTEMPTS) {
+      closed = true;
+      onStateChange?.(false);
+      return;
+    }
+    attempts += 1;
     ws = new WebSocket(url);
     ws.addEventListener("open", () => {
-      backoffMs = 500;  // reset on successful connect
       onStateChange?.(true);
+      // Don't reset attempts/backoff yet — wait for STABLE_MS of uptime
+      // OR a real message. Either proves the server isn't immediately
+      // closing on us.
+      if (stableTimer !== null) window.clearTimeout(stableTimer);
+      stableTimer = window.setTimeout(() => {
+        attempts = 0;
+        backoffMs = 500;
+        stableTimer = null;
+      }, STABLE_MS);
     });
     ws.addEventListener("message", (ev) => {
+      // First message also counts as "stable enough" — reset immediately.
+      attempts = 0;
+      backoffMs = 500;
+      if (stableTimer !== null) {
+        window.clearTimeout(stableTimer);
+        stableTimer = null;
+      }
       try {
         onMessage(JSON.parse(ev.data));
       } catch {
@@ -711,8 +744,14 @@ function _connectWithReconnect(
     });
     const handleDrop = () => {
       if (closed) return;
+      // Cancel the stability timer — we never reached stable.
+      if (stableTimer !== null) {
+        window.clearTimeout(stableTimer);
+        stableTimer = null;
+      }
       onStateChange?.(false);
-      // Schedule a reconnect with exponential backoff, capped at 5s.
+      // Don't double-schedule if both close + error fire.
+      if (reconnectTimer !== null) return;
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null;
         backoffMs = Math.min(backoffMs * 2, 5000);
@@ -731,6 +770,10 @@ function _connectWithReconnect(
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
         reconnectTimer = null;
+      }
+      if (stableTimer !== null) {
+        window.clearTimeout(stableTimer);
+        stableTimer = null;
       }
       if (ws) {
         try { ws.close(); } catch { /* ignore */ }
