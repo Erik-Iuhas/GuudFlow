@@ -1,5 +1,16 @@
 # GuudFlow dev launcher - kills existing servers then starts both fresh.
-# Usage: powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
+# Usage:
+#   powershell -ExecutionPolicy Bypass -File scripts\dev.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 -NoReload
+#
+# Pass -NoReload to launch uvicorn WITHOUT --reload. Use this while
+# actively testing agent runs so source-code edits don't restart the
+# worker mid-iteration and cancel your in-flight agents. The dashboard
+# will show the run die with cancelled=True every time uvicorn restarts.
+
+param(
+    [switch]$NoReload
+)
 
 $ErrorActionPreference = "Stop"
 $Repo = Split-Path -Parent $PSScriptRoot
@@ -32,10 +43,16 @@ if (-not (Test-Path $activate)) {
 }
 
 # Backend
-Write-Host "Starting backend  -> http://localhost:8000" -ForegroundColor Cyan
+$reloadArgs = if ($NoReload) {
+    Write-Host "Starting backend  -> http://localhost:8000  [NO RELOAD - safe for agent testing]" -ForegroundColor Yellow
+    ""
+} else {
+    Write-Host "Starting backend  -> http://localhost:8000  [reload watches api/core/agents/worker]" -ForegroundColor Cyan
+    "--reload --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker"
+}
 Start-Process pwsh -ArgumentList @(
     "-NoExit", "-Command",
-    "Set-Location '$Repo'; & '$activate'; uvicorn api.main:app --reload --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker --port 8000"
+    "Set-Location '$Repo'; & '$activate'; uvicorn api.main:app $reloadArgs --port 8000"
 )
 
 # Frontend
