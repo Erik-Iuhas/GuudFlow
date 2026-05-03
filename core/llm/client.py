@@ -46,7 +46,7 @@ class LLMClient(Protocol):
         system: str,
         messages: list[LLMMessage],
         tools: list[dict[str, Any]] | None = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         model: str = "claude-sonnet-4-6",
         cache_system: bool = False,
     ) -> LLMResponse: ...
@@ -85,7 +85,7 @@ class MockLLMClient:
         system: str,
         messages: list[LLMMessage],
         tools: list[dict[str, Any]] | None = None,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         model: str = "claude-sonnet-4-6",
         cache_system: bool = False,
     ) -> LLMResponse:

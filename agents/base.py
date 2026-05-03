@@ -837,10 +837,18 @@ class BaseAgent:
     async def llm(
         self,
         messages: list[LLMMessage],
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         teammate_brief: str = "",
     ) -> LLMResponse:
         """One LLM call with this agent's effective system prompt.
+
+        Default `max_tokens=8192` (was 4096): Sonnet 4.6 and Haiku 4.5 both
+        natively support 8192 output without a beta header. The 4096 default
+        was triggering max_tokens truncation on perfectly reasonable file
+        writes (e.g. a designer writing a 5K-token spec doc, or an engineer
+        writing a 6K-token implementation file). One successful 6500-token
+        write is cheaper than four failed 4096-token retries — caps don't
+        bill for unused capacity, only generated tokens.
 
         The runner injects `_llm` and `_model` before calling `run()`.
         Tool schemas come from this agent's manifest.
