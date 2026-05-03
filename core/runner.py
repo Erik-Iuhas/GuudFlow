@@ -852,7 +852,12 @@ class AgentRunner:
             # Track 3e — batch variants share scope/safety with their singular counterparts.
             FsWriteBatch.name: FsWriteBatch(self.files, claim_emitter, release_emitter),
             FsEditBatch.name: FsEditBatch(self.files, claim_emitter, release_emitter),
-            BoardMessage.name: BoardMessage(role, self.workspace),
+            BoardMessage.name: BoardMessage(
+                role, self.workspace,
+                block_questions_to_completed=self._is_gate_enabled(
+                    "block_board_message_questions"
+                ),
+            ),
             AskPeer.name: AskPeer(),
             AssignTask.name: AssignTask(
                 role, self.workspace,
@@ -3962,14 +3967,20 @@ class AgentRunner:
     def _is_gate_enabled(self, gate_name: str) -> bool:
         """Read a boolean gate from project config. Falls back to True
         for the baseline-ON gates if the config dict is missing the key
-        (so projects pre-dating C.0.5 still get the safer defaults)."""
+        (so projects pre-dating each gate's introduction still get the
+        safer defaults)."""
         gates = self.project.approval_gates or {}
         if gate_name in gates:
             return bool(gates[gate_name])
-        # Baseline ON for the cost-control gates.
+        # Baseline ON gates — explicit False in project config to disable.
         return gate_name in (
             "pre_run_cost_preview",
             "heavy_tier_mid_run_dispatch",
+            # Peer-comms cleanup — block question-shaped board-messages
+            # to completed agents (which would trigger Track 2a respawn
+            # cascades). Even old projects without this field set get
+            # the safer behaviour; explicit False to opt out.
+            "block_board_message_questions",
         )
 
     async def _request_approval(

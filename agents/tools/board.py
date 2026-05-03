@@ -39,12 +39,17 @@ class BoardMessage(BaseTool):
     """
 
     name = "board-message"
-    priority = 120
-    when_to_use = "post a directed message to a peer agent on the board"
+    # Demoted from 120 → 200 (peer-comms cleanup) so ask-peer (110)
+    # sorts ABOVE this in the catalog. Agents see the right tool first.
+    priority = 200
+    when_to_use = "fire-and-forget note to a peer; for QUESTIONS use ask-peer instead"
     description = (
-        "Send a directed message to another agent on the board. "
-        "Use instead of asking the human when you need clarification "
-        "from a peer. The recipient sees your message at turn start."
+        "Fire-and-forget directed message to another agent on the board. "
+        "The recipient sees it at their next turn. Do NOT use for "
+        "questions you need answered — use `ask-peer` instead, which "
+        "suspends you and gets a real answer without triggering the "
+        "recipient's full respawn cycle. board-message is for status "
+        "pings, FYI notes, or post-completion handoffs."
     )
     input_schema = {
         "type": "object",
@@ -55,15 +60,25 @@ class BoardMessage(BaseTool):
             },
             "message": {
                 "type": "string",
-                "description": "Your question or note to the other agent",
+                "description": "Your note to the other agent. NOT for questions — use ask-peer for those.",
             },
         },
         "required": ["to", "message"],
     }
 
-    def __init__(self, from_role: str, workspace: Any):
+    def __init__(
+        self,
+        from_role: str,
+        workspace: Any,
+        block_questions_to_completed: bool = True,
+    ):
         self._from_role = from_role
         self._workspace = workspace
+        # Peer-comms cleanup gate. Default True (safer behaviour even
+        # for old projects). Runner reads `approval_gates.
+        # block_board_message_questions` from project config when
+        # constructing the tool — explicit False there opts out.
+        self._block_questions_to_completed = block_questions_to_completed
 
     async def run(self, arguments: dict[str, Any]) -> dict[str, Any]:
         to = arguments.get("to")
@@ -73,6 +88,24 @@ class BoardMessage(BaseTool):
         if not message or not isinstance(message, str):
             return _err("missing required argument: message")
 
+        # Peer-comms cleanup — heuristic gate: if the message ends with
+        # `?` AND the recipient is a completed agent, this is almost
+        # certainly a question that would trigger Track 2a respawn for
+        # no useful reason (the asker is fire-and-forget; they can't
+        # actually receive an answer through this tool). Reject and
+        # nudge toward ask-peer. Gated by the `block_board_message_questions`
+        # approval gate (default ON for new and old projects via
+        # `_is_gate_enabled` baseline).
+        is_question = message.rstrip().endswith("?")
+        if is_question and self._gate_blocks_questions(to):
+            return _err(
+                f"this looks like a question to {to!r} (a completed "
+                "agent) — use the `ask-peer` tool instead. ask-peer "
+                "suspends you and gets a real answer; board-message is "
+                "fire-and-forget and would trigger the recipient's full "
+                "respawn cycle without giving you the answer."
+            )
+
         detail = json.dumps({"to": to, "from": self._from_role, "message": message})
         self._workspace.post_signal(Signal(
             type=SignalType.AGENT_MESSAGE,
@@ -81,6 +114,19 @@ class BoardMessage(BaseTool):
             from_agent=self._from_role,
         ))
         return {"ok": True, "sent_to": to, "message": message}
+
+    def _gate_blocks_questions(self, to_role: str) -> bool:
+        """True when the question-block heuristic should fire.
+
+        Only fires when the recipient is COMPLETED. Mid-iteration
+        recipients can read board-messages on their next turn naturally;
+        the cascade pathology is specifically for completed agents
+        (which trigger Track 2a respawn on incoming AGENT_MESSAGE).
+        """
+        if not self._block_questions_to_completed:
+            return False
+        completed = getattr(self._workspace, "completed_agents", None) or []
+        return to_role in completed
 
 
 _REF_KINDS: frozenset[str] = frozenset({"file", "commit", "task", "story"})
