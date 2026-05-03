@@ -92,11 +92,13 @@ async def test_closing_other_roles_task_emits_warning_does_not_block(tmp_path: P
     )
     # Task untouched.
     assert r.workspace.tasks["t1"].status == "IN_PROGRESS"
-    # Warning posted.
+    # Warning posted (consolidated single warning, role appears in detail).
     warnings = [s for s in r.workspace.board if s.type == SignalType.TASK_OUT_OF_SCOPE]
     assert len(warnings) == 1
     assert "wrong_role" in warnings[0].summary
-    assert "developer" in warnings[0].summary
+    # Per-id details (offending task + actual assignee) live in the detail.
+    assert "developer" in (warnings[0].detail or "")
+    assert "t1" in (warnings[0].detail or "")
 
 
 @pytest.mark.asyncio

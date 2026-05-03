@@ -2357,37 +2357,63 @@ class AgentRunner:
                 detail=detail,
             ))
 
-        # If the working tree was clean, _auto_commit returned None.
-        # The agent emitted closes: anyway — surface it so the
-        # reviewer sees that nothing actually shipped against
-        # the named tasks.
-        if commit_hash is None:
+        # Layer-2 defence (defence-in-depth, behind the cleanup-side strip):
+        # silently drop hallucinated/foreign ids BEFORE the per-id loop and
+        # consolidate the noise. Agents (and the cleanup model) sometimes
+        # emit `closes:` lines that reference role names ('task:audio_dev'),
+        # git SHAs ('task:137d517'), English phrases ('task:implementation-
+        # complete'), or another agent's task ids. None of those are
+        # actionable — the runner correctly skips them today, but spamming
+        # one TASK_OUT_OF_SCOPE per bogus id buries real signals.
+        # Now: filter once, post AT MOST one consolidated warning.
+        valid_ids: list[str] = []
+        bogus_ids: list[str] = []
+        wrong_role_ids: list[tuple[str, str]] = []
+        wrong_state_ids: list[tuple[str, str]] = []
+        for tid in ids:
+            task = ws.tasks.get(tid)
+            if task is None:
+                bogus_ids.append(tid)
+                continue
+            if task.assigned_to != role:
+                wrong_role_ids.append((tid, task.assigned_to))
+                continue
+            if task.status not in ("IN_PROGRESS", "PENDING"):
+                wrong_state_ids.append((tid, task.status))
+                continue
+            valid_ids.append(tid)
+
+        # Consolidated warnings — one signal per category, listing affected
+        # ids in detail. Far less noisy than N individual TASK_OUT_OF_SCOPE.
+        if bogus_ids:
+            _warn(
+                f"{role} commit referenced {len(bogus_ids)} unknown task id(s)",
+                f"unknown_ids={','.join(bogus_ids)}",
+            )
+        if wrong_role_ids:
+            _warn(
+                f"{role} commit referenced {len(wrong_role_ids)} task(s) assigned to other roles",
+                "; ".join(f"task:{tid}->role:{r}" for tid, r in wrong_role_ids),
+            )
+        if wrong_state_ids:
+            _warn(
+                f"{role} commit referenced {len(wrong_state_ids)} task(s) not in PENDING/IN_PROGRESS",
+                "; ".join(f"task:{tid}->state:{s}" for tid, s in wrong_state_ids),
+            )
+
+        # If the working tree was clean, _auto_commit returned None. The
+        # agent emitted closes: anyway — surface ONLY when there's a
+        # real (valid) close being asserted; otherwise the bogus-ids
+        # warning above already covers it.
+        if commit_hash is None and valid_ids:
             _warn(
                 f"{role} commit closes tasks but produced no git commit",
                 f"closes={raw_closes};commit_hash=None",
             )
 
         closed_parent_ids: set[str] = set()
-        for tid in ids:
-            task = ws.tasks.get(tid)
-            if task is None:
-                _warn(
-                    f"{role} commit closes unknown task:{tid}",
-                    f"task_id={tid}",
-                )
-                continue
-            if task.assigned_to != role:
-                _warn(
-                    f"{role} commit closes task:{tid} assigned to {task.assigned_to}",
-                    f"task_id={tid};expected_role={task.assigned_to}",
-                )
-                continue
-            if task.status not in ("IN_PROGRESS", "PENDING"):
-                _warn(
-                    f"{role} commit closes task:{tid} in state {task.status}",
-                    f"task_id={tid};state={task.status}",
-                )
-                continue
+        for tid in valid_ids:
+            task = ws.tasks[tid]  # known valid from filter above
 
             # M5.5 C1: synthesize completion record before mutating task.
             completion_record_dict: dict | None = None
