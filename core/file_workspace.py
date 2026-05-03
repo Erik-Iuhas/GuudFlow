@@ -22,8 +22,11 @@ DESIGN rules enforced here:
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 from pathlib import Path
+
+_log = logging.getLogger(__name__)
 
 
 class PathSafetyError(ValueError):
@@ -64,9 +67,20 @@ class FileWorkspace:
           - absolute paths
           - `..` traversal that escapes ``base``
           - symlinks whose target lies outside ``base``
+
+        Defensive ``working/`` strip: tool-call-adverse safety net for
+        diagnosed-in-run_445b1f6974 where Codestral / Mistral agents,
+        confused by continuation-brief copy that mentioned ``working/``,
+        prefixed every fs-* path with ``working/``. That made
+        ``fs-write("working/docs/x.md")`` resolve to
+        ``<root>/working/working/docs/x.md`` — a doubled silo invisible
+        to any agent that called ``fs-list("docs")`` correctly.
+        Stripping the leading segment + warn() is cheaper than letting
+        an entire run silo itself off.
         """
         if path is None:
             raise PathSafetyError("path must not be None")
+        path = _strip_redundant_working_prefix(path)
         p = Path(path)
         if p.is_absolute():
             raise PathSafetyError(f"absolute paths not allowed: {path!r}")
@@ -229,3 +243,39 @@ def _is_relative_to(p: Path, base: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _strip_redundant_working_prefix(path: str) -> str:
+    """Strip a leading ``working/`` (or ``./working/``) segment when an
+    agent prefixed their path with it by mistake.
+
+    The fs-* tools resolve every path under ``self.working`` already, so
+    ``working/foo`` resolves to ``<root>/working/working/foo`` — a doubled
+    silo. Codestral and several Mistral models reliably emit this when
+    the prompt mentions a ``working/`` directory at all. Strip + warn is
+    a tool-call-adverse safety net so a single misread instruction can't
+    fork the run's filesystem.
+
+    Idempotent for ``working/working/x`` (strips one segment only — leaves
+    the second ``working/`` alone in case it's a real subdirectory).
+
+    Plain ``"working"`` (no trailing slash) is left alone — it could
+    legitimately refer to a file or directory literally named that.
+    """
+    if not path:
+        return path
+    # Normalise leading "./" first so "./working/x" matches.
+    norm = path
+    while norm.startswith("./") or norm.startswith(".\\"):
+        norm = norm[2:]
+    for prefix in ("working/", "working\\"):
+        if norm.startswith(prefix):
+            stripped = norm[len(prefix):]
+            _log.warning(
+                "fs-* path %r had a redundant leading 'working/' — stripped to %r. "
+                "Agents must NOT prefix paths with 'working/'; the runtime already "
+                "roots fs-* operations under the working tree.",
+                path, stripped,
+            )
+            return stripped
+    return path

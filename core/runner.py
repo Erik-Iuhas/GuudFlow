@@ -1403,9 +1403,9 @@ class AgentRunner:
         lines: list[str] = [
             "## CONTINUATION RUN — read this before any other work",
             "",
-            "This is NOT a fresh start. A prior run produced deliverables "
-            "that were seeded into `working/`. Your job is to extend / "
-            "fix that work, NOT redo it from scratch.",
+            "This is NOT a fresh start. A prior run produced files that are "
+            "already in your working tree. Your job is to extend / fix that "
+            "work, NOT redo it from scratch.",
             "",
             "Prior run(s) attached:",
         ]
@@ -1423,9 +1423,27 @@ class AgentRunner:
                 lines.append(f"> {text}")
                 lines.append("")
 
+        # PATH CONVENTION: every fs-* tool resolves paths relative to your
+        # working tree's root. Diagnosed in run_445b1f6974 where Codestral
+        # / Mistral agents read "seeded into working/" and started prefixing
+        # every path with `working/` (e.g. `fs-write("working/docs/x.md")`),
+        # producing a doubled `working/working/...` silo on disk and empty
+        # fs-list results for any agent that didn't make the same mistake.
+        # Be unmistakable here.
         lines.append(
-            "Before you write code: `fs-list` and `fs-read` what's already "
-            "in `working/`. Identify the deltas the feedback asks for. "
+            "PATH CONVENTION — all `fs-*` tools resolve paths relative to "
+            "the root of your working tree. Do NOT prefix paths with "
+            "`working/`. To list the docs directory, call "
+            "`fs-list(\"docs\")` not `fs-list(\"working/docs\")`. To write "
+            "a requirements file, call `fs-write(\"docs/requirements.md\")` "
+            "not `fs-write(\"working/docs/requirements.md\")`. The runtime "
+            "will strip a leading `working/` defensively, but get it right "
+            "the first time."
+        )
+        lines.append("")
+        lines.append(
+            "Before you write code: `fs-list` (no prefix) and `fs-read` what "
+            "already exists. Identify the deltas the feedback asks for. "
             "Edit existing files where possible — only add new files when "
             "the change genuinely needs a new module."
         )

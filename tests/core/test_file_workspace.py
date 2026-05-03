@@ -242,3 +242,55 @@ def test_absolute_for_subpath(fw: FileWorkspace):
 def test_absolute_traversal_rejected(fw: FileWorkspace):
     with pytest.raises(PathSafetyError):
         fw.absolute("../escape.py")
+
+
+# ── Defensive working/ prefix strip (run_445b1f6974 regression) ─────────
+
+
+async def test_leading_working_prefix_is_stripped_on_write(
+    fw: FileWorkspace, caplog,
+):
+    """Codestral / Mistral agents reliably emit
+    `fs-write("working/docs/x.md")` because the continuation brief
+    mentions `working/`. Without the strip, that resolved to
+    `<root>/working/working/docs/x.md` — a doubled silo invisible
+    to any agent that called `fs-list("docs")` correctly."""
+    import logging
+    caplog.set_level(logging.WARNING)
+    await fw.write("working/docs/requirements.md", "FR-1: do thing")
+    # File lands at the SINGLE working/ root, not doubled.
+    assert (fw.working / "docs" / "requirements.md").is_file()
+    assert not (fw.working / "working" / "docs" / "requirements.md").exists()
+    # And we logged a warning so operators see when this fires.
+    assert any(
+        "redundant leading 'working/'" in rec.message for rec in caplog.records
+    )
+
+
+async def test_leading_working_prefix_is_stripped_on_read(fw: FileWorkspace):
+    """Reads use the same _safe_path so a confused agent calling
+    fs-read("working/docs/x.md") still finds the file written at
+    the canonical relative path."""
+    await fw.write("docs/x.md", "hello")
+    assert await fw.read("working/docs/x.md") == "hello"
+
+
+async def test_dot_slash_working_prefix_also_stripped(fw: FileWorkspace):
+    """Some models emit `./working/foo`; same strip rule applies."""
+    await fw.write("./working/notes.md", "x")
+    assert (fw.working / "notes.md").is_file()
+
+
+def test_plain_working_no_slash_is_left_alone(fw: FileWorkspace):
+    """A path that is literally `working` (no trailing slash, no
+    children) could legitimately be a file or directory name. Don't
+    strip; resolve normally under the workspace root."""
+    p = fw.absolute("working")
+    assert p == (fw.working / "working").resolve()
+
+
+def test_only_first_working_segment_is_stripped(fw: FileWorkspace):
+    """`working/working/x` strips ONE leading `working/`, leaving the
+    second segment intact in case it's a real subdirectory."""
+    p = fw.absolute("working/working/x.py")
+    assert p == (fw.working / "working" / "x.py").resolve()
