@@ -6,6 +6,7 @@ Uses httpx directly — no openai SDK dependency.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from core.llm.client import LLMMessage, LLMResponse, ToolCall
@@ -265,6 +266,26 @@ def _from_openai_response(resp: dict[str, Any]) -> LLMResponse:
     finish_reason = choice.get("finish_reason", "stop")
     stop_reason = _OPENAI_FINISH_MAP.get(finish_reason, finish_reason)
 
+    # Defensive recovery for "text-as-tool-call" — diagnosed in
+    # run_2b1c86d56f where Codestral wrote `fs-list {"path":"src/render"}`
+    # as plain text content with `finish_reason="stop"` and `tool_calls=[]`,
+    # silently bricking the agent (runner saw end_turn → synthesised a
+    # no-op COMMIT → task falsely marked complete). Salvage by parsing
+    # the text shape `<tool-name> <json-args>`. Conservative: only fires
+    # when we have NO real tool_calls AND the entire stripped text matches
+    # the pattern AND the JSON parses cleanly. Any of those checks failing
+    # leaves the response as text, preserving today's behaviour.
+    if (
+        not tool_calls
+        and stop_reason == "end_turn"
+        and text
+    ):
+        salvaged = _try_parse_text_as_tool_call(text)
+        if salvaged is not None:
+            tool_calls = [salvaged]
+            text = ""
+            stop_reason = "tool_use"
+
     usage = resp.get("usage") or {}
     cache_read = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0))
     return LLMResponse(
@@ -277,6 +298,50 @@ def _from_openai_response(resp: dict[str, Any]) -> LLMResponse:
         cache_read_tokens=cache_read,
         raw=resp,
     )
+
+
+# Matches `<identifier> <{...json}>` over the WHOLE stripped text. The
+# identifier allows hyphens (fs-list, ask-peer) and underscores. No
+# leading prose, no trailing prose — strict to avoid false positives on
+# normal model output that happens to mention a tool name.
+_TEXT_TOOL_CALL_RE = re.compile(
+    r"^([A-Za-z_][\w-]*)\s*(\{.*\})\s*$",
+    re.DOTALL,
+)
+
+
+def _try_parse_text_as_tool_call(text: str) -> ToolCall | None:
+    """Recognise `fs-list {"path": "x"}` written as text instead of as a
+    structured tool_call (Codestral / some Mistral failure mode). Returns
+    a synthetic ToolCall on confident match, None otherwise.
+
+    Rules (all required):
+      - whole stripped text matches `<identifier> <{json}>`
+      - the JSON portion parses to a dict
+      - identifier is at least 2 chars (cuts down on false positives
+        like `x {1}` from incidental content)
+
+    The synthetic id starts with `salvaged_` so downstream logs make it
+    obvious this was a recovery, not a model-emitted tool_use block.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return None
+    m = _TEXT_TOOL_CALL_RE.match(stripped)
+    if m is None:
+        return None
+    name, raw_args = m.group(1), m.group(2)
+    if len(name) < 2:
+        return None
+    try:
+        args = json.loads(raw_args)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(args, dict):
+        return None
+    # Synthetic id; the runner doesn't care about the value beyond
+    # tool_use/tool_result pairing, but the prefix tags it for debugging.
+    return ToolCall(id=f"salvaged_{name}", name=name, arguments=args)
 
 
 # ── Factories ──────────────────────────────────────────────────────────────────

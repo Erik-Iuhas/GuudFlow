@@ -157,6 +157,13 @@ class BaseAgent:
     _context_manager: ContextManager | None = None
     _llm: LLMClient | None = None
     _model: str = "claude-sonnet-4-6"
+    # Per-model output cap from the registry (data/models.json
+    # max_output_tokens). When set, `agent.llm()` uses this as its default
+    # max_tokens instead of the hardcoded 8192. Mistral models advertise
+    # 16384 — bumping their cap stops the truncation loop where Codestral
+    # tried to emit work + closing protocol block in one turn and ran out.
+    # 0 / unset means "use the agent.llm() default" (8192).
+    _max_output_tokens: int = 0
     # M1 §9 — scheduler handle so ask_human / request_visual_feedback can
     # park via interrupt() instead of mutating workspace.pending_human.
     # Injected by the runner immediately after Scheduler construction.
@@ -837,24 +844,34 @@ class BaseAgent:
     async def llm(
         self,
         messages: list[LLMMessage],
-        max_tokens: int = 8192,
+        max_tokens: int | None = None,
         teammate_brief: str = "",
     ) -> LLMResponse:
         """One LLM call with this agent's effective system prompt.
 
-        Default `max_tokens=8192` (was 4096): Sonnet 4.6 and Haiku 4.5 both
-        natively support 8192 output without a beta header. The 4096 default
-        was triggering max_tokens truncation on perfectly reasonable file
-        writes (e.g. a designer writing a 5K-token spec doc, or an engineer
-        writing a 6K-token implementation file). One successful 6500-token
-        write is cheaper than four failed 4096-token retries — caps don't
-        bill for unused capacity, only generated tokens.
+        `max_tokens` resolution:
+          1. explicit caller arg
+          2. `self._max_output_tokens` (set by the runner from the
+             registry's data/models.json `max_output_tokens` field —
+             Mistral advertises 16384, Anthropic 8192)
+          3. 8192 fallback (Sonnet 4.6 / Haiku 4.5 native ceiling)
 
-        The runner injects `_llm` and `_model` before calling `run()`.
-        Tool schemas come from this agent's manifest.
+        The bump from 4096 → 8192 → per-model is to stop max_tokens
+        truncation on perfectly reasonable emissions. Codestral kept
+        truncating at 8192 trying to emit work + closing protocol
+        block in one turn. One successful 12k-token emission is
+        cheaper than three failed 8k-token retries — caps don't bill
+        for unused capacity, only generated tokens.
+
+        The runner injects `_llm`, `_model`, and `_max_output_tokens`
+        before calling `run()`. Tool schemas come from this agent's
+        manifest.
         """
         if self._llm is None:
             raise ToolError("agent has no LLM client")
+
+        if max_tokens is None:
+            max_tokens = self._max_output_tokens or 8192
 
         # Use the runner-injected brief if caller doesn't supply one.
         effective_brief = teammate_brief or self._teammate_brief

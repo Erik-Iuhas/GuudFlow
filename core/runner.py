@@ -1283,6 +1283,7 @@ class AgentRunner:
             agent._llm, agent._model = self._resolve_llm_for_tier(
                 cfg.model_tier, preference=cfg.model_id or None,
             )
+            agent._max_output_tokens = self._max_output_tokens_for(agent._model)
             agent._broker = self.broker
             agent._context_manager = self.context_manager
             agent._llm_call_dump_sink = self._llm_call_dump_sink
@@ -3120,6 +3121,20 @@ class AgentRunner:
             "Inject an llm or provide a model_registry."
         )
 
+    def _max_output_tokens_for(self, model_id: str) -> int:
+        """Look up the registered model's max_output_tokens, or 0 when
+        unknown. Callers default to 8192 on 0 — the safe Anthropic-native
+        ceiling. Mistral models advertise 16384 in data/models.json so the
+        agent's llm() call uses 16k where supported and stops the
+        Codestral truncation loop diagnosed in run_2b1c86d56f."""
+        if self._model_registry is None:
+            return 0
+        try:
+            mi = self._model_registry.get(model_id)
+            return int(getattr(mi, "max_output_tokens", 0) or 0) if mi else 0
+        except Exception:
+            return 0
+
     def _persona_name(self, role: str) -> str:
         agent = self.agents.get(role)
         if agent and agent.persona is not None:
@@ -3354,6 +3369,16 @@ class AgentRunner:
         nudges: list[str] = []  # accumulated for the next user turn
         protocol_retries_used = 0
         ask_enforcement_failures = 0  # track how many times we've caught non-ASK on empty upstream
+        # Continuation budget for max_tokens truncation. First two
+        # truncations get a "continue from where you left off" nudge so
+        # the model can finish a long emission. After that we fall back
+        # to the older "split into smaller calls" recovery, which is
+        # more conservative but loses progress. Two retries is enough
+        # to cover Codestral's "tool call + closing protocol block in
+        # one turn" pattern (audio_dev hit max_tokens 3 times in
+        # run_2b1c86d56f — the third was a real "the model is stuck").
+        max_tokens_continuations_used = 0
+        MAX_TOKENS_CONTINUATION_CAP = 2
 
         # Tool-iteration cap is extendable: when the agent hits the cap we
         # ask the user "keep going?" rather than silently returning a string
@@ -3398,16 +3423,26 @@ class AgentRunner:
             response = await self._llm_with_backoff(agent, messages)
 
             # Detect output-cap truncation. Anthropic returns stop_reason
-            # "max_tokens" when the model's response (text OR tool_call
-            # arguments JSON) hit the max_tokens cap mid-emission. This
-            # is especially dangerous for batched write tools (fs-write-batch,
-            # fs-edit-batch) where the LLM packs N file contents into the
-            # arguments JSON — a 5-file batch trivially exceeds 4096 output
-            # tokens. The truncated tool_call lands with empty/partial
-            # arguments and silently fails. Recover by surfacing the
-            # truncation back to the LLM with explicit instructions to
-            # split the work into smaller calls. Do NOT execute the
-            # truncated tool call.
+            # "max_tokens", OpenAI/Mistral return "length" (mapped to
+            # "max_tokens" by the adapter) when the model's response
+            # (text OR tool_call arguments JSON) hit the cap mid-emission.
+            #
+            # Recovery is two-staged:
+            #   1. First MAX_TOKENS_CONTINUATION_CAP truncations: send a
+            #      "continue from where you left off" prompt so the model
+            #      can finish whatever it was emitting. Per-model
+            #      max_output_tokens is already plumbed (Mistral=16384),
+            #      so a continuation usually completes in one more turn.
+            #   2. After the cap: fall back to the older "split into
+            #      smaller calls" recovery, which loses partial progress
+            #      but unsticks the model when it's stuck mid-pattern.
+            #
+            # Diagnosed in run_2b1c86d56f: audio_dev (Codestral) hit
+            # max_tokens on calls #6/#8/#10 trying to emit
+            # "tool_use + ## [COMMIT] block" in one turn. The previous
+            # code only nudged "split smaller", which Codestral ignored
+            # and kept truncating. Continuation lets it finish the
+            # protocol block on a follow-up turn.
             if response.stop_reason == "max_tokens":
                 self.workspace.post_signal(Signal(
                     type=SignalType.PROTOCOL_PARSE_FAIL,
@@ -3415,7 +3450,8 @@ class AgentRunner:
                     detail=(
                         f"truncated mid-emission ({response.output_tokens} out tokens); "
                         f"tool_calls={[tc.name for tc in response.tool_calls]}; "
-                        f"text_len={len(response.text or '')}"
+                        f"text_len={len(response.text or '')}; "
+                        f"continuations_used={max_tokens_continuations_used}"
                     ),
                     from_agent=cfg.role,
                     iteration=self.workspace.iteration,
@@ -3450,19 +3486,42 @@ class AgentRunner:
                     ]
                     if truncation_results:
                         messages.append(LLMMessage(role="user", content=truncation_results))
-                messages.append(LLMMessage(
-                    role="user",
-                    content=(
-                        "[OUTPUT TRUNCATED] Your last response hit the max_tokens cap "
-                        f"({response.output_tokens} tokens). "
-                        "If you were generating a batched tool call (fs-write-batch, "
-                        "fs-edit-batch), the arguments JSON was cut off and the call "
-                        "did NOT execute. Recover by splitting the work into smaller "
-                        "individual calls — one fs-write per file, or smaller batches "
-                        "of 1-2 files at a time. Do NOT pack many file contents into "
-                        "a single tool call."
-                    ),
-                ))
+
+                if max_tokens_continuations_used < MAX_TOKENS_CONTINUATION_CAP:
+                    max_tokens_continuations_used += 1
+                    messages.append(LLMMessage(
+                        role="user",
+                        content=(
+                            "[OUTPUT TRUNCATED — CONTINUE] Your previous response was "
+                            f"cut off at the max_tokens cap ({response.output_tokens} tokens).\n\n"
+                            "Continue from exactly where you left off. Do NOT repeat what "
+                            "you already wrote — the partial response is preserved above.\n"
+                            "- If you were mid-way through a [COMMIT] / [ASK] / [VERIFY] / "
+                            "[ACTION] / [DELTA] / [STATUS] block, finish it now.\n"
+                            "- If you were emitting a tool call whose arguments got cut "
+                            "off, that call did NOT execute — re-issue it (smaller args "
+                            "if it was a batch).\n"
+                            "- Any tool calls that DID complete already have their results "
+                            "above; do not re-call them."
+                        ),
+                    ))
+                else:
+                    messages.append(LLMMessage(
+                        role="user",
+                        content=(
+                            "[OUTPUT TRUNCATED — SPLIT] Your last response hit the "
+                            f"max_tokens cap ({response.output_tokens} tokens) for "
+                            f"the {MAX_TOKENS_CONTINUATION_CAP + 1}th time this turn. "
+                            "Continuation isn't working — the pattern itself is too "
+                            "large.\n\n"
+                            "Recovery: split the work into smaller individual calls. "
+                            "If you were generating a batched tool call (fs-write-batch, "
+                            "fs-edit-batch), use one fs-write per file instead, or "
+                            "1-2 files per batch. If you were emitting work + a closing "
+                            "protocol block in one turn, do the work calls now and emit "
+                            "the protocol block on a follow-up turn."
+                        ),
+                    ))
                 continue
 
             if response.stop_reason == "tool_use" and response.tool_calls:
@@ -5143,6 +5202,7 @@ class AgentRunner:
         agent._llm, agent._model = self._resolve_llm_for_tier(
             cfg.model_tier, preference=cfg.model_id or None,
         )
+        agent._max_output_tokens = self._max_output_tokens_for(agent._model)
         agent._broker = self.broker
         agent._context_manager = self.context_manager
         agent._llm_call_dump_sink = self._llm_call_dump_sink

@@ -196,6 +196,127 @@ def test_from_openai_response_empty_choices():
     assert out.tool_calls == []
 
 
+# ── Defensive recovery: text-as-tool-call (Codestral failure mode) ───────
+
+
+def test_salvages_text_as_tool_call_when_no_structured_tool_calls():
+    """Codestral / some Mistral models occasionally write a tool call
+    as plain text content with finish_reason="stop". Without recovery
+    the runner sees end_turn → no tool calls → synthesises a no-op
+    completion. With recovery we extract the call and re-emit as
+    tool_use. Diagnosed in run_2b1c86d56f for renderer_dev."""
+    resp = {
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": 'fs-list {"path": "src/render", "recursive": true}',
+            },
+            "finish_reason": "stop",
+        }],
+    }
+    out = _from_openai_response(resp)
+    assert out.stop_reason == "tool_use"
+    assert len(out.tool_calls) == 1
+    assert out.tool_calls[0].name == "fs-list"
+    assert out.tool_calls[0].arguments == {"path": "src/render", "recursive": True}
+    # Salvaged calls get a recognisable id prefix for log debugging.
+    assert out.tool_calls[0].id.startswith("salvaged_")
+    # Text is consumed — it's now in the synthetic tool_use, not free text.
+    assert out.text == ""
+
+
+def test_does_not_salvage_when_structured_tool_calls_already_present():
+    """If the model emitted real tool_calls, never second-guess them
+    even if the content also has tool-call-shaped text."""
+    resp = {
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": 'fs-list {"path": "x"}',
+                "tool_calls": [{
+                    "id": "real_call",
+                    "function": {"name": "fs-read", "arguments": '{"path": "real.py"}'},
+                }],
+            },
+            "finish_reason": "tool_calls",
+        }],
+    }
+    out = _from_openai_response(resp)
+    assert len(out.tool_calls) == 1
+    assert out.tool_calls[0].name == "fs-read"
+    assert out.tool_calls[0].id == "real_call"
+
+
+def test_does_not_salvage_normal_prose_that_mentions_a_tool():
+    """English text shouldn't trigger recovery just because it mentions
+    a tool name. The whole-string regex prevents this."""
+    cases = [
+        "I'll use fs-list to check the directory.",
+        "Calling fs-read on auth.py to inspect.",
+        "fs-list with recursive=true would be ideal.",
+    ]
+    for text in cases:
+        resp = {
+            "choices": [{
+                "message": {"role": "assistant", "content": text},
+                "finish_reason": "stop",
+            }],
+        }
+        out = _from_openai_response(resp)
+        assert out.stop_reason == "end_turn"
+        assert out.tool_calls == []
+        assert out.text == text
+
+
+def test_does_not_salvage_when_finish_reason_is_length():
+    """Truncation has its own recovery path (continuation prompt). Don't
+    misinterpret a truncated `tool-name {partial...` as a real tool call."""
+    resp = {
+        "choices": [{
+            "message": {"role": "assistant", "content": 'fs-list {"path": "x"}'},
+            "finish_reason": "length",
+        }],
+    }
+    out = _from_openai_response(resp)
+    # Recovery only fires for end_turn; max_tokens passes through.
+    assert out.stop_reason == "max_tokens"
+    assert out.tool_calls == []
+
+
+def test_does_not_salvage_invalid_json_args():
+    """Garbled JSON args shouldn't synthesise a tool call — no execution
+    is better than wrong execution."""
+    resp = {
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": 'fs-list {invalid json here',
+            },
+            "finish_reason": "stop",
+        }],
+    }
+    out = _from_openai_response(resp)
+    assert out.stop_reason == "end_turn"
+    assert out.tool_calls == []
+
+
+def test_salvage_handles_hyphenated_and_underscored_tool_names():
+    """Tool names use hyphens (fs-list, ask-peer) per the project's
+    naming convention. Underscores covered for legacy/MCP names."""
+    for name in ("fs-list", "ask-peer", "code_outline", "mcp-github-list"):
+        resp = {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": f'{name} {{"x": 1}}',
+                },
+                "finish_reason": "stop",
+            }],
+        }
+        out = _from_openai_response(resp)
+        assert out.tool_calls and out.tool_calls[0].name == name, name
+
+
 # ── End-to-end with httpx.MockTransport ────────────────────────────────────
 
 
