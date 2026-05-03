@@ -674,26 +674,85 @@ export const approvalsApi = {
 
 // ── WebSocket helper ───────────────────────────────────────────────────────
 
+/** Auto-reconnecting WebSocket wrapper. Caller treats it as a `{ close }`
+ *  handle. Internally we create a fresh WebSocket on drop with exponential
+ *  backoff (capped at 5s) until `close()` is called. Survives uvicorn
+ *  --reload restarts so the dashboard / Run view never get stuck on
+ *  "disconnected" after a backend reload. */
+export interface WsHandle {
+  close: () => void;
+  /** True only while the underlying socket is OPEN. */
+  isConnected: () => boolean;
+}
+
+function _connectWithReconnect(
+  url: string,
+  onMessage: (data: unknown) => void,
+  onStateChange?: (connected: boolean) => void,
+): WsHandle {
+  let ws: WebSocket | null = null;
+  let closed = false;
+  let backoffMs = 500;
+  let reconnectTimer: number | null = null;
+
+  const open = () => {
+    if (closed) return;
+    ws = new WebSocket(url);
+    ws.addEventListener("open", () => {
+      backoffMs = 500;  // reset on successful connect
+      onStateChange?.(true);
+    });
+    ws.addEventListener("message", (ev) => {
+      try {
+        onMessage(JSON.parse(ev.data));
+      } catch {
+        /* ignore malformed */
+      }
+    });
+    const handleDrop = () => {
+      if (closed) return;
+      onStateChange?.(false);
+      // Schedule a reconnect with exponential backoff, capped at 5s.
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        backoffMs = Math.min(backoffMs * 2, 5000);
+        open();
+      }, backoffMs);
+    };
+    ws.addEventListener("close", handleDrop);
+    ws.addEventListener("error", handleDrop);
+  };
+
+  open();
+
+  return {
+    close: () => {
+      closed = true;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (ws) {
+        try { ws.close(); } catch { /* ignore */ }
+        ws = null;
+      }
+    },
+    isConnected: () => ws !== null && ws.readyState === WebSocket.OPEN,
+  };
+}
+
 export function connectRunStream(
   runId: string,
   onMessage: (msg: { type: string; signals?: Signal[]; signal?: Signal }) => void,
   onClose?: () => void,
-): WebSocket {
+): WsHandle {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   const url = `${proto}://${window.location.host}/ws/runs/${encodeURIComponent(runId)}`;
-  const ws = new WebSocket(url);
-  ws.addEventListener("message", (ev) => {
-    try {
-      onMessage(JSON.parse(ev.data));
-    } catch {
-      /* ignore malformed */
-    }
-  });
-  if (onClose) {
-    ws.addEventListener("close", onClose);
-    ws.addEventListener("error", onClose);
-  }
-  return ws;
+  return _connectWithReconnect(
+    url,
+    (data) => onMessage(data as { type: string; signals?: Signal[]; signal?: Signal }),
+    (connected) => { if (!connected) onClose?.(); },
+  );
 }
 
 export interface QuipWire {
@@ -713,22 +772,14 @@ export function connectQuipStream(
     live?: boolean;
   }) => void,
   onClose?: () => void,
-): WebSocket {
+): WsHandle {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   const url = `${proto}://${window.location.host}/ws/runs/${encodeURIComponent(runId)}/quips`;
-  const ws = new WebSocket(url);
-  ws.addEventListener("message", (ev) => {
-    try {
-      onMessage(JSON.parse(ev.data));
-    } catch {
-      /* ignore malformed */
-    }
-  });
-  if (onClose) {
-    ws.addEventListener("close", onClose);
-    ws.addEventListener("error", onClose);
-  }
-  return ws;
+  return _connectWithReconnect(
+    url,
+    (data) => onMessage(data as { type: string; quips?: QuipWire[]; quip?: QuipWire; live?: boolean }),
+    (connected) => { if (!connected) onClose?.(); },
+  );
 }
 
 import type { ToolEntry } from "./components/ToolsMultiSelect";

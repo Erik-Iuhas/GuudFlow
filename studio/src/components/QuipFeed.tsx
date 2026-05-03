@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { connectQuipStream, type QuipWire } from "../api";
+import { connectQuipStream, type QuipWire, type WsHandle } from "../api";
 import { avatarFor } from "../lib/avatar";
 
 const EVENT_LABEL: Record<string, string> = {
@@ -17,7 +17,7 @@ interface Props {
 export function QuipFeed({ runId }: Props) {
   const [quips, setQuips] = useState<QuipWire[]>([]);
   const [connected, setConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<WsHandle | null>(null);
 
   useEffect(() => {
     const ws = connectQuipStream(

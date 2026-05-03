@@ -1810,6 +1810,21 @@ class AgentRunner:
             )
             try:
                 drive_result = await self._drive_agent_run(agent, cfg)
+            except asyncio.CancelledError:
+                # The asyncio task was cancelled (uvicorn --reload restart,
+                # explicit shutdown, scheduler kill). CancelledError is a
+                # BaseException — NOT caught by `except Exception` below
+                # — and the previous code path let the finally mark the
+                # agent as `completed=True` because `failed` defaulted to
+                # False. That misled the dashboard ("running" forever) AND
+                # the scheduler ("logic_dev done, advance to renderer")
+                # while the runner loop itself was being torn down.
+                # Mark explicitly aborted so observers can tell.
+                workspace.agent_states[cfg.role] = AgentState.FAILED
+                if agent._current_metrics is not None:
+                    agent._current_metrics.failed = True
+                    agent._current_metrics.cancelled = True
+                raise
             except Exception as e:
                 workspace.agent_states[cfg.role] = AgentState.FAILED
                 await agent.signal(

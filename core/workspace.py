@@ -158,6 +158,11 @@ class IterationMetrics:
     completed: bool = False
     failed: bool = False
     no_op: bool = False
+    # True when the agent's asyncio task was cancelled mid-flight (uvicorn
+    # restart, scheduler kill). Differs from `failed` — cancellation is
+    # an external interrupt, not the agent itself crashing. The runner
+    # loop won't have advanced to the next agent in this case.
+    cancelled: bool = False
 
 
 @dataclass

@@ -130,14 +130,20 @@ async def list_runs(
     limit: int = Query(50, ge=1, le=500),
 ) -> list[dict]:
     runs = await _store(request).list(project_id=project_id, limit=limit)
-    # Override status to "running" for any run the registry knows is live.
-    # This handles resumed runs whose meta.json still says "stuck".
+    # Reconcile meta.json status against the live registry:
+    #   - In-registry → status stays / becomes "running" (handles resumes)
+    #   - meta says "running" but NOT in registry → downgrade to "stale"
+    #     (worker died before finalising; startup recovery normally rewrites
+    #     these to disk too, but defending here covers the in-flight case
+    #     where the worker died this session before we restarted)
     registry = getattr(request.app.state, "run_registry", None)
-    if registry is not None:
-        active_ids: set[str] = set(registry.runs.keys())
-        for r in runs:
-            if r.get("run_id") in active_ids:
-                r["status"] = "running"
+    active_ids: set[str] = set(registry.runs.keys()) if registry is not None else set()
+    for r in runs:
+        rid = r.get("run_id")
+        if rid in active_ids:
+            r["status"] = "running"
+        elif r.get("status") == "running":
+            r["status"] = "stale"
     return runs
 
 
@@ -146,6 +152,11 @@ async def get_run(request: Request, run_id: str) -> dict:
     meta = await _store(request).get(run_id)
     if meta is None:
         raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+    # Same reconciliation as list_runs — orphaned "running" → "stale".
+    registry = getattr(request.app.state, "run_registry", None)
+    if registry is not None and meta.get("status") == "running":
+        if run_id not in registry.runs:
+            meta["status"] = "stale"
     return meta
 
 

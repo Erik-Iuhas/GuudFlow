@@ -10,6 +10,7 @@ Run with:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -120,6 +121,49 @@ async def restart_inproc_worker(app: FastAPI, data_root: Path) -> None:
     _start_inproc_worker(app, data_root)
 
 
+def _recover_orphaned_runs(runs_dir: Path) -> None:
+    """Mark any run still tagged status="running" as "stale".
+
+    The in-process worker is the only thing that drives runs in dev mode,
+    so a process restart leaves "running" rows behind that will never
+    finalise. Reading status purely from disk would forever lie to the
+    dashboard. Rewriting once at startup is safe — if the same run is
+    re-enqueued (resume) it will overwrite back to "running" itself.
+
+    Tolerant of malformed meta.json / missing dirs / permission errors —
+    nothing here should crash startup.
+    """
+    if not runs_dir.exists():
+        return
+    import logging as _logging
+    log = _logging.getLogger(__name__)
+    recovered = 0
+    for run_dir in runs_dir.iterdir():
+        if not run_dir.is_dir():
+            continue
+        meta_path = run_dir / "meta.json"
+        if not meta_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if meta.get("status") != "running":
+            continue
+        meta["status"] = "stale"
+        meta["stale_reason"] = "worker process died before run finalised"
+        try:
+            meta_path.write_text(
+                json.dumps(meta, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            recovered += 1
+        except OSError as exc:
+            log.warning("could not rewrite meta.json for %s: %s", run_dir.name, exc)
+    if recovered:
+        log.info("recovered %d orphaned 'running' run(s) → 'stale'", recovered)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: build stores + queue + worker. Shutdown: stop the worker.
@@ -166,6 +210,15 @@ async def lifespan(app: FastAPI):
     app.state.data_root = data_root
     app.state.project_store = ProjectStore(data_root)
     app.state.run_store = RunStore(data_root / "runs")
+
+    # Recover from orphaned "running" runs left behind when the previous
+    # worker process died (uvicorn --reload restart, crash, hard kill).
+    # In dev mode the in-process worker IS the only thing that runs these,
+    # so any meta.json still saying "running" at startup is by definition
+    # orphaned — mark them "stale" so the dashboard stops showing them
+    # as live and the user can decide what to do with them.
+    _recover_orphaned_runs(data_root / "runs")
+
     # Personas root is ALWAYS global regardless of storage_mode.
     # Track 4 §35 — personas cross directories by design.
     app.state.persona_store = PersonaStore(_storage.personas_root().resolve())

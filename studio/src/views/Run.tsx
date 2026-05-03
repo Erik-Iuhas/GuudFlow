@@ -73,7 +73,7 @@ export function Run() {
   const [continueOpen, setContinueOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [continueBusy, setContinueBusy] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const wsRef = useRef<{ close: () => void } | null>(null);
   const signalHandlersRef = useRef<Set<(s: Signal) => void>>(new Set());
   const [slideOverPersonaId, setSlideOverPersonaId] = useState<string | null>(null);
   const [agentDetailRole, setAgentDetailRole] = useState<string | null>(null);
