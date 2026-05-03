@@ -90,6 +90,7 @@ async def main(project_id: str, role: str) -> None:
     )
     agent._workspace = Workspace(run_id="dump", goal=project.goal)
     agent._current_task = project.goal
+    agent._manages = list(getattr(cfg, "manages", []) or [])
 
     prompt = await agent.effective_system_prompt()
     out = Path("scripts") / f"prompt_dump_{project_id}_{role}.txt"

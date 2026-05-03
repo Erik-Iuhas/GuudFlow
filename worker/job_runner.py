@@ -103,6 +103,11 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             max_tool_iterations=int(a.get("max_tool_iterations", 10)),
             sub_llm_models_override=agent_sub_llm,
             excluded_baseline_tools=excluded_baseline,
+            # Hierarchy fields — were silently dropped, which is why the
+            # per-role dispatch rule never fired even though projects.json
+            # had `manages` populated.
+            manages=list(a.get("manages") or []),
+            escalates_to=list(a.get("escalates_to") or []),
         ))
 
     rbac: dict[str, RoleRBAC] = {}
