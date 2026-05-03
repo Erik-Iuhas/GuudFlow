@@ -208,3 +208,93 @@ async def test_approved_merges_reviewer_branch_into_main_once(runner_with_two_de
     ]
     assert "dev_a.py" in main_files
     assert "dev_b.py" in main_files
+
+
+# ── Step 1: force-commit dirty COMPLETE deps before merge ──────────────────
+
+
+async def test_premerge_force_commits_dirty_complete_dep(tmp_path: Path):
+    """Step 1 of the peer-comms cleanup plan. If a dep is COMPLETE but
+    has uncommitted files in working/ (iteration-end auto_commit didn't
+    fire — mid-iteration cancellation, respawn handoff, etc.), the
+    premerge step must flush the dirty work to the dep's branch BEFORE
+    merging into the downstream agent. Otherwise the downstream sees an
+    empty merge result, which was the symptom in run_dfcfd6eee3."""
+    from core.workspace import AgentState
+
+    runner = AgentRunner(
+        project=_project_two_devs_one_reviewer(),
+        run_id="r_premerge_dirty",
+        run_root=tmp_path / "run",
+        llm=MockLLMClient([]),
+    )
+    working = runner.files.working
+
+    # dev_a committed cleanly.
+    (working / "dev_a.py").write_text("clean = 1\n")
+    runner.git.commit("dev_a", "feat: dev_a clean work")
+    runner.workspace.git.agent_branches["dev_a"] = "agent/dev_a"
+    runner.workspace.agent_states["dev_a"] = AgentState.COMPLETE
+
+    # dev_b wrote a placeholder + committed once, then wrote MORE
+    # files that were never committed (the bug case). The dirty file
+    # should be force-committed by premerge before merging.
+    (working / "dev_b_initial.py").write_text("# placeholder\n")
+    runner.git.commit("dev_b", "chore: dev_b initial branch")
+    runner.workspace.git.agent_branches["dev_b"] = "agent/dev_b"
+    (working / "dev_b.py").write_text("dirty = 2\n")  # uncommitted
+    runner.workspace.agent_states["dev_b"] = AgentState.COMPLETE
+
+    reviewer_cfg = next(c for c in runner.project.agents if c.role == "reviewer")
+
+    # Premerge should force-commit dev_b's dirty work first, then merge.
+    all_clean, conflicted = await runner._premerge_upstream_deps(reviewer_cfg)
+    assert all_clean is True
+    assert conflicted == []
+
+    # Both dev files now on the reviewer's branch.
+    runner.git.repo.git.checkout("agent/reviewer")
+    files_on_branch = [
+        b.name for b in runner.git.repo.heads["agent/reviewer"].commit.tree.traverse()
+        if b.type == "blob"
+    ]
+    assert "dev_a.py" in files_on_branch
+    assert "dev_b.py" in files_on_branch  # the previously-dirty file
+
+
+async def test_premerge_skips_auto_commit_for_non_complete_dep(tmp_path: Path):
+    """Race-safety: mid-iteration agents own their own commit cadence.
+    The premerge auto-commit fires ONLY for AgentState.COMPLETE deps
+    so we don't touch a branch the agent is actively working on."""
+    from core.workspace import AgentState
+
+    runner = AgentRunner(
+        project=_project_two_devs_one_reviewer(),
+        run_id="r_premerge_race",
+        run_root=tmp_path / "run",
+        llm=MockLLMClient([]),
+    )
+    working = runner.files.working
+
+    (working / "dev_a.py").write_text("clean = 1\n")
+    runner.git.commit("dev_a", "feat: dev_a clean")
+    runner.workspace.git.agent_branches["dev_a"] = "agent/dev_a"
+    runner.workspace.agent_states["dev_a"] = AgentState.COMPLETE
+
+    (working / "dev_b_initial.py").write_text("# placeholder\n")
+    runner.git.commit("dev_b", "chore: dev_b initial")
+    runner.workspace.git.agent_branches["dev_b"] = "agent/dev_b"
+    (working / "dev_b.py").write_text("mid_iteration = 2\n")
+    # dev_b is mid-iteration, NOT COMPLETE.
+    runner.workspace.agent_states["dev_b"] = AgentState.READY
+
+    # Snapshot dev_b's branch tip BEFORE premerge.
+    dev_b_tip_before = runner.git.repo.heads["agent/dev_b"].commit.hexsha
+
+    reviewer_cfg = next(c for c in runner.project.agents if c.role == "reviewer")
+    await runner._premerge_upstream_deps(reviewer_cfg)
+
+    # dev_b's branch tip MUST NOT have advanced — premerge skipped it
+    # because dev_b is not COMPLETE.
+    dev_b_tip_after = runner.git.repo.heads["agent/dev_b"].commit.hexsha
+    assert dev_b_tip_after == dev_b_tip_before

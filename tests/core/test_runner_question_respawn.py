@@ -149,3 +149,91 @@ async def test_question_mode_cleared_after_completion(tmp_path: Path):
     # Simulate the runner clearing question_mode after the agent's turn ends.
     runner._question_mode_roles.discard("developer")
     assert "developer" not in runner._question_mode_roles
+
+
+# ── Step 3: board-message question-block heuristic ─────────────────────────
+
+
+async def test_board_message_blocks_question_to_completed_agent(tmp_path: Path):
+    """Peer-comms cleanup: a `?`-ending message to a COMPLETE recipient
+    must return an error (nudging the sender to use ask-peer) and NOT
+    post the AGENT_MESSAGE signal — preventing the Track 2a respawn
+    cascade at the source."""
+    from agents.tools.board import BoardMessage
+
+    agents = [AgentConfig(role="developer"), AgentConfig(role="qa")]
+    runner = _runner(tmp_path, agents)
+    runner.workspace.completed_agents.append("developer")
+    runner.workspace.agent_states["developer"] = AgentState.COMPLETE
+
+    tool = BoardMessage("qa", runner.workspace, block_questions_to_completed=True)
+    res = await tool.run({
+        "to": "developer",
+        "message": "Is your branch good?",
+    })
+    assert "error" in res
+    assert "ask-peer" in res["error"].lower()
+
+    # No AGENT_MESSAGE landed on the board.
+    msgs = [s for s in runner.workspace.board if s.type == SignalType.AGENT_MESSAGE]
+    assert msgs == []
+
+
+async def test_board_message_allows_non_question_to_completed_agent(tmp_path: Path):
+    """Fire-and-forget notes (no `?`) still get through to completed agents."""
+    from agents.tools.board import BoardMessage
+
+    agents = [AgentConfig(role="developer"), AgentConfig(role="qa")]
+    runner = _runner(tmp_path, agents)
+    runner.workspace.completed_agents.append("developer")
+    runner.workspace.agent_states["developer"] = AgentState.COMPLETE
+
+    tool = BoardMessage("qa", runner.workspace, block_questions_to_completed=True)
+    res = await tool.run({
+        "to": "developer",
+        "message": "FYI — ran your tests, all green.",
+    })
+    assert res.get("ok") is True
+    msgs = [s for s in runner.workspace.board if s.type == SignalType.AGENT_MESSAGE]
+    assert len(msgs) == 1
+
+
+async def test_board_message_allows_question_to_active_agent(tmp_path: Path):
+    """Mid-iteration recipients can read board-messages naturally on
+    their next turn — the cascade pathology only fires for COMPLETE
+    recipients (which trigger Track 2a respawn). Question-block does
+    NOT fire when the recipient is still active."""
+    from agents.tools.board import BoardMessage
+
+    agents = [AgentConfig(role="developer"), AgentConfig(role="qa")]
+    runner = _runner(tmp_path, agents)
+    # developer is NOT in completed_agents — still active.
+    runner.workspace.agent_states["developer"] = AgentState.READY
+
+    tool = BoardMessage("qa", runner.workspace, block_questions_to_completed=True)
+    res = await tool.run({
+        "to": "developer",
+        "message": "Where did you put the entry point?",
+    })
+    assert res.get("ok") is True
+    msgs = [s for s in runner.workspace.board if s.type == SignalType.AGENT_MESSAGE]
+    assert len(msgs) == 1
+
+
+async def test_board_message_gate_can_be_disabled(tmp_path: Path):
+    """Project opt-out via constructor flag (runner reads
+    approval_gates.block_board_message_questions=False)."""
+    from agents.tools.board import BoardMessage
+
+    agents = [AgentConfig(role="developer"), AgentConfig(role="qa")]
+    runner = _runner(tmp_path, agents)
+    runner.workspace.completed_agents.append("developer")
+    runner.workspace.agent_states["developer"] = AgentState.COMPLETE
+
+    tool = BoardMessage("qa", runner.workspace, block_questions_to_completed=False)
+    res = await tool.run({
+        "to": "developer",
+        "message": "Is your branch good?",
+    })
+    # Old behaviour preserved: question goes through.
+    assert res.get("ok") is True
