@@ -48,7 +48,9 @@ $reloadArgs = if ($NoReload) {
     ""
 } else {
     Write-Host "Starting backend  -> http://localhost:8000  [reload watches api/core/agents/worker]" -ForegroundColor Cyan
-    "--reload --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker"
+    # Explicit --reload-include / --reload-exclude so .pyc writes from
+    # lazy imports during a run can't silently kill the worker.
+    "--reload --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker --reload-include *.py --reload-exclude *.pyc --reload-exclude __pycache__/*"
 }
 Start-Process pwsh -ArgumentList @(
     "-NoExit", "-Command",

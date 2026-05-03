@@ -88,7 +88,10 @@ if [ "${NO_RELOAD}" -eq 1 ]; then
     uvicorn api.main:app --port 8000 > "${LOG_BACK}" 2>&1 &
 else
     info "→ Starting backend  → http://localhost:8000  [reload watches api/core/agents/worker]"
-    uvicorn api.main:app --reload --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker --port 8000 > "${LOG_BACK}" 2>&1 &
+    uvicorn api.main:app --reload \
+        --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker \
+        --reload-include '*.py' --reload-exclude '*.pyc' --reload-exclude '__pycache__/*' \
+        --port 8000 > "${LOG_BACK}" 2>&1 &
 fi
 BACK_PID=$!
 
