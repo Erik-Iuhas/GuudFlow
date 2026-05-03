@@ -69,14 +69,48 @@ SUMMARISE_SUBTASK_SYSTEM = (
 )
 
 
+def _strip_invalid_closes(block_text: str, valid_task_ids: set[str]) -> str:
+    """Remove `closes: task:<id>` lines whose id isn't in valid_task_ids.
+
+    Belt-and-suspenders defence against the cleanup model fabricating task
+    ids from English words in the prose (e.g. 'task:implementation-complete'
+    when no such task exists). The system prompt asks for this; this helper
+    enforces it.
+
+    Returns the block with offending lines removed. Idempotent. Empty
+    valid_task_ids means ALL closes: lines get stripped.
+    """
+    out_lines: list[str] = []
+    for line in block_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("closes:"):
+            value = stripped[len("closes:"):].strip()
+            # Tolerate `closes: task:<id>` and bare `closes: <id>`.
+            if value.startswith("task:"):
+                value = value[len("task:"):].strip()
+            if value not in valid_task_ids:
+                # Drop the line entirely.
+                continue
+        out_lines.append(line)
+    return "\n".join(out_lines)
+
+
 PROTOCOL_CLEANUP_SYSTEM = (
     "You convert prose into AgentFlow protocol blocks.\n"
     "Given raw_response and expected_kind, output exactly one protocol "
     "block of that kind and nothing else. Schema reference:\n"
     "  [COMMIT]\n  summary: <≤12 words>\n  closes: task:<id>\n"
-    "  [VERIFY]\n  result: PASS|FAIL\n  detail: <required if FAIL>\n"
-    "Do not invent task ids. If the raw response cited a task id, "
-    "preserve it; if not, omit the closes: line."
+    "  [VERIFY]\n  result: PASS|FAIL\n  detail: <required if FAIL>\n\n"
+    "RULES — do NOT invent any field values:\n"
+    "- summary: paraphrase ONLY what the prose actually claims was done. "
+    "If the prose is vague, your summary should be vague too.\n"
+    "- closes: ONLY include this line when the prose mentions a SPECIFIC "
+    "task id that ALSO appears in the valid_task_ids list below. NEVER "
+    "fabricate a task id from English words in the prose (e.g. 'task:"
+    "implementation-complete' is invented; reject). When in doubt, "
+    "OMIT the closes: line — a missing closes is harmless; a fake one "
+    "creates a downstream TASK_OUT_OF_SCOPE failure.\n"
+    "- detail: copy the prose's stated reason verbatim; never elaborate."
 )
 
 
@@ -352,6 +386,15 @@ class ProtocolCleanupTool(LlmDispatchTool):
                 "type": "string",
                 "enum": ["COMMIT", "VERIFY", "DELTA", "ACTION", "STATUS"],
             },
+            "valid_task_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Task IDs that genuinely exist on the calling agent's "
+                    "desk. Cleanup will only allow `closes:` lines that "
+                    "reference one of these — fabricated ids get stripped."
+                ),
+            },
             "max_tokens": {
                 "type": "integer",
                 "default": 200,
@@ -369,6 +412,11 @@ class ProtocolCleanupTool(LlmDispatchTool):
         if kind not in {"COMMIT", "VERIFY", "DELTA", "ACTION", "STATUS"}:
             return {"error": f"expected_kind {kind!r} not supported"}
 
+        valid_task_ids_raw = arguments.get("valid_task_ids") or []
+        valid_task_ids: set[str] = set()
+        if isinstance(valid_task_ids_raw, list):
+            valid_task_ids = {str(t).strip() for t in valid_task_ids_raw if str(t).strip()}
+
         try:
             max_tokens = int(arguments.get("max_tokens", 200))
         except (TypeError, ValueError):
@@ -376,8 +424,21 @@ class ProtocolCleanupTool(LlmDispatchTool):
         if max_tokens > MAX_OUTPUT_TOKENS:
             max_tokens = MAX_OUTPUT_TOKENS
 
+        # Tell the cheap model EXACTLY which task ids are real. Empty
+        # list means "no closes line is valid — never emit one."
+        if valid_task_ids:
+            ids_block = "valid_task_ids:\n" + "\n".join(
+                f"  - {t}" for t in sorted(valid_task_ids)
+            ) + "\n\n"
+        else:
+            ids_block = (
+                "valid_task_ids: (none — the agent has no open tasks; "
+                "you MUST omit any closes: line)\n\n"
+            )
+
         user = (
             f"expected_kind: {kind}\n\n"
+            f"{ids_block}"
             f"raw_response:\n{raw}"
         )
 
@@ -385,8 +446,14 @@ class ProtocolCleanupTool(LlmDispatchTool):
         if "error" in result:
             return result
 
+        # Post-validate: strip any `closes: task:<id>` line whose id
+        # isn't in valid_task_ids. The cheap model still hallucinates
+        # ids despite the prompt; this is the load-bearing safety net.
+        block_text = result.get("text", "")
+        block_text = _strip_invalid_closes(block_text, valid_task_ids)
+
         return {
-            "protocol_block": result.get("text", ""),
+            "protocol_block": block_text,
             "model": result.get("model", ""),
             "input_tokens": result.get("input_tokens", 0),
             "output_tokens": result.get("output_tokens", 0),

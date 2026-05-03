@@ -189,12 +189,67 @@ async def test_protocol_cleanup_returns_block():
     sink = _make_sink()
     tool = ProtocolCleanupTool(resolver=_make_resolver(client), metrics_sink=sink)
 
+    # Pass s1 as a valid id so the closes: line survives the strip pass.
     res = await tool.run({
         "raw_response": "I have done the auth route. closes task s1.",
         "expected_kind": "COMMIT",
+        "valid_task_ids": ["s1"],
     })
     assert res["protocol_block"] == block
     assert sink.calls == [("protocol-cleanup", 15, 20)]
+
+
+async def test_protocol_cleanup_strips_fabricated_closes():
+    """The cheap model fabricates `closes: task:implementation-complete`
+    (real bug from logic_dev's run_ab6fcc9f4c). With no matching id in
+    valid_task_ids, the closes line MUST be stripped before the runner
+    accepts the recovered block."""
+    fabricated = (
+        "[COMMIT]\n"
+        "  summary: implement core game logic\n"
+        "  closes: task:implementation-complete"
+    )
+    client = _SpyClient(text=fabricated)
+    tool = ProtocolCleanupTool(resolver=_make_resolver(client))
+    res = await tool.run({
+        "raw_response": "I've completed the implementation.",
+        "expected_kind": "COMMIT",
+        "valid_task_ids": ["abc123", "def456"],  # neither matches
+    })
+    assert "closes:" not in res["protocol_block"]
+    assert "implement core game logic" in res["protocol_block"]
+
+
+async def test_protocol_cleanup_strips_all_closes_when_no_valid_ids():
+    """If the agent's desk is empty, NO closes: line can be valid —
+    strip them all unconditionally."""
+    block = "[COMMIT]\n  summary: tweaked layout\n  closes: task:any-id"
+    client = _SpyClient(text=block)
+    tool = ProtocolCleanupTool(resolver=_make_resolver(client))
+    res = await tool.run({
+        "raw_response": "tweaked layout",
+        "expected_kind": "COMMIT",
+        # valid_task_ids omitted entirely → empty set → strip all closes
+    })
+    assert "closes:" not in res["protocol_block"]
+
+
+async def test_protocol_cleanup_preserves_real_task_ids():
+    """When the cleanup model picks a real id (from prose that genuinely
+    cited it), the closes: line survives."""
+    block = (
+        "[COMMIT]\n"
+        "  summary: implemented player movement\n"
+        "  closes: task:9e217ad00cf64ec"
+    )
+    client = _SpyClient(text=block)
+    tool = ProtocolCleanupTool(resolver=_make_resolver(client))
+    res = await tool.run({
+        "raw_response": "Did task:9e217ad00cf64ec — player movement.",
+        "expected_kind": "COMMIT",
+        "valid_task_ids": ["9e217ad00cf64ec"],
+    })
+    assert "closes: task:9e217ad00cf64ec" in res["protocol_block"]
 
 
 async def test_protocol_cleanup_uses_locked_system_prompt():

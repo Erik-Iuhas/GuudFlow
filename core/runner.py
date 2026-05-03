@@ -2666,10 +2666,23 @@ class AgentRunner:
             return None, "protocol-cleanup tool not granted"
 
         expected_kind = "VERIFY" if is_reviewer else "COMMIT"
+        # Hand the cleanup model the agent's actual desk so it can't
+        # fabricate task ids from English words in the prose. The desk
+        # filters out synthetic `root:*` ids since closing those is a
+        # runner concern, not an agent's commit subject.
+        valid_task_ids: list[str] = []
+        try:
+            for t in self.workspace.desk_for(role) or []:
+                tid = t.task_id
+                if tid and not tid.startswith("root:"):
+                    valid_task_ids.append(tid)
+        except Exception:
+            pass
         try:
             result = await cleanup_tool.run({
                 "raw_response": text,
                 "expected_kind": expected_kind,
+                "valid_task_ids": valid_task_ids,
             })
         except Exception as e:
             return None, f"cleanup dispatch raised: {e}"
