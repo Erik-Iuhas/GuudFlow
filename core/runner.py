@@ -4023,6 +4023,35 @@ class AgentRunner:
         async with self._git_lock:
             return await self._auto_commit_locked(role, workspace)
 
+    def _claimed_paths_for_role(self, role: str) -> list[str]:
+        """All paths this role has ever claimed via FILE_CLAIM signals
+        this run — including ones whose FILE_RELEASE has already fired.
+
+        Used by `_auto_commit_locked` to scope `git add` to just the
+        paths this role wrote, so parallel agents sharing one working
+        tree don't sweep up each other's dirty files. The release
+        ordering (release → commit) means active_claims is empty at
+        commit time; the historical CLAIM record is what proves
+        ownership.
+
+        Empty list means this role hasn't claimed anything — caller
+        falls back to legacy `git add -A` behaviour.
+        """
+        paths: set[str] = set()
+        for sig in self.workspace.board:
+            if sig.type is not SignalType.FILE_CLAIM:
+                continue
+            if sig.from_agent != role:
+                continue
+            try:
+                payload = json.loads(sig.detail or "{}")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            p = payload.get("path")
+            if p:
+                paths.add(str(p))
+        return sorted(paths)
+
     async def _auto_commit_locked(
         self, role: str, workspace: Workspace,
     ) -> str | None:
@@ -4033,6 +4062,20 @@ class AgentRunner:
         lock and deadlocking. Behaviour is otherwise identical to
         `_auto_commit`: returns the new commit sha, or None when the
         working tree was clean / branch creation failed / commit failed.
+
+        Parallel-execution race fix (run_544c0dd23d): in parallel runs
+        all IC devs share one working tree. The previous version called
+        `git.commit(role, message=...)` without `files=`, which made
+        GitWorkspace fall through to `git add -A` — whoever auto-committed
+        first swept up every dirty file from every parallel agent. Symptom:
+        audio_dev's commit grabbed renderer_dev's and game_logic_dev's
+        files, then renderer/logic auto-commits found nothing to commit
+        and posted TASK_OUT_OF_SCOPE.
+
+        Fix: read the FILE_CLAIM signals this role posted this run and
+        stage ONLY those paths. Falls back to legacy `git add -A` when
+        the role has no claims (sequential runs / agents using tools
+        that don't auto-claim).
         """
         try:
             branch = self.git.agent_branch(role)
@@ -4044,23 +4087,46 @@ class AgentRunner:
         if status.clean:
             return None
 
-        changed_files = [e.path for e in status.entries]
+        dirty_paths = [e.path for e in status.entries]
+        claimed_paths = self._claimed_paths_for_role(role)
+
+        # Race-safe scoping: stage only paths this role actually claimed
+        # AND that are dirty in the tree right now. Anything dirty that
+        # this role didn't claim belongs to a parallel agent — leave it
+        # for their auto_commit to grab.
+        files_to_stage: list[str] | None
+        if claimed_paths:
+            owned = sorted(set(dirty_paths) & set(claimed_paths))
+            if not owned:
+                # The role has claims but nothing they own is dirty here
+                # — likely a parallel agent already swept the working tree
+                # OR this role's writes were rolled back. Either way: no
+                # work to commit, no error.
+                return None
+            files_to_stage = owned
+        else:
+            # No claims at all — sequential / legacy behaviour. Stage
+            # everything dirty. This preserves existing single-agent
+            # runs where auto-claim isn't relevant.
+            files_to_stage = None
 
         try:
             info = self.git.commit(
                 role,
                 message=f"feat: {role} iteration {workspace.iteration}",
+                files=files_to_stage,
             )
         except Exception:
             return None
 
+        committed_files = files_to_stage if files_to_stage is not None else dirty_paths
         workspace.git.commits.append(CommitRecord(
             hash=info.hash,
             branch=info.branch,
             agent=role,
             message=info.message,
             iteration=workspace.iteration,
-            files=changed_files,
+            files=committed_files,
         ))
         # Post a GIT_COMMIT signal attributed to the agent role so the
         # board (and the Studio git-activity tab) can surface it.
