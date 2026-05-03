@@ -1824,6 +1824,38 @@ class AgentRunner:
                 if agent._current_metrics is not None:
                     agent._current_metrics.failed = True
                     agent._current_metrics.cancelled = True
+                # Forensic dump: who cancelled us? Drop diagnostics next
+                # to the run so we can finally see the trigger pattern.
+                try:
+                    import traceback as _tb
+                    cancel_log = self.run_root / "cancellations.log"
+                    current_task = asyncio.current_task()
+                    cancel_msg = ""
+                    if current_task is not None:
+                        # Newer Python: `cancelling()` count + `_cancel_message`.
+                        try:
+                            cancelling_count = current_task.cancelling()
+                        except AttributeError:
+                            cancelling_count = "n/a"
+                        cancel_msg = getattr(current_task, "_cancel_message", "<none>")
+                    with open(cancel_log, "a", encoding="utf-8") as _f:
+                        _f.write(
+                            f"--- {cfg.role} iter {agent.iteration} "
+                            f"@ {_time.time():.3f} ---\n"
+                            f"task={current_task!r}\n"
+                            f"cancelling_count={cancelling_count}\n"
+                            f"cancel_message={cancel_msg!r}\n"
+                            f"workspace.pending_human={workspace.pending_human!r}\n"
+                            f"scheduler._force_stopped="
+                            f"{getattr(self._scheduler, '_force_stopped', 'no-scheduler')}\n"
+                            f"stack:\n{_tb.format_exc()}\n"
+                            f"asyncio task list:\n"
+                        )
+                        for t in asyncio.all_tasks():
+                            _f.write(f"  - {t!r} done={t.done()} cancelled={t.cancelled()}\n")
+                        _f.write("\n")
+                except Exception:
+                    pass
                 raise
             except Exception as e:
                 workspace.agent_states[cfg.role] = AgentState.FAILED
@@ -1902,6 +1934,7 @@ class AgentRunner:
                             "tools_called": _m.tools_called if _m else [],
                             "completed": _m.completed if _m else False,
                             "failed": _m.failed if _m else True,
+                            "cancelled": _m.cancelled if _m else False,
                             "messages": [_serialise_msg(msg) for msg in self._current_agent_messages],
                             "final_output": final_output,
                         }

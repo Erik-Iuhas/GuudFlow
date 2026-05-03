@@ -203,7 +203,35 @@ class RunStore:
             return None
 
     async def get_board(self, run_id: str) -> list[dict[str, Any]] | None:
-        board_path = self.runs_root / run_id / "board.json"
+        """Return the board as a list of serialised signals.
+
+        Reads `board.jsonl` (the live append-only log) FIRST and only
+        falls back to `board.json` (the end-of-run consolidated snapshot)
+        when the JSONL doesn't exist. Previous code preferred the
+        snapshot, which meant any run whose worker died before
+        `_persist_run` finalised showed an empty board to the API even
+        though every signal was on disk in the JSONL. (run_c806d84d4b
+        symptom: dashboard "0 signals" while board.jsonl had 20 lines.)
+        """
+        run_dir = self.runs_root / run_id
+        jsonl_path = run_dir / "board.jsonl"
+        if jsonl_path.is_file():
+            signals: list[dict[str, Any]] = []
+            try:
+                for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        signals.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        # Skip malformed lines so a partially-corrupted
+                        # tail doesn't lose the whole trail.
+                        continue
+                return signals
+            except OSError:
+                pass  # fall through to the snapshot
+
+        board_path = run_dir / "board.json"
         if not board_path.exists():
             return None
         try:
