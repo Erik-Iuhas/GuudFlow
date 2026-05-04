@@ -363,7 +363,10 @@ loaded and injected so each run is aware of the project's larger arc
 
 ## What the diagrams **don't** cover yet
 
-These are intentionally future / deferred per `ROADMAP.md`:
+These are intentionally future / deferred. When any of them land, add a
+diagram or update the relevant existing one.
+
+### Phase-level (per `ROADMAP.md`)
 
 - **Phase E** — production deploy + multi-tenant admin (k8s migration).
 - **Phase I** — headless service mode (webhooks, structured
@@ -374,4 +377,52 @@ These are intentionally future / deferred per `ROADMAP.md`:
 - **UICanvas** (DESIGN §15).
 - Persona sharing / marketplace (DESIGN §26).
 
-When those land, add a diagram or update the relevant existing one.
+### Active execution queue (`.claude/plan_agent_buff/`)
+
+Specced, ready to pick up — these are PR-sized chunks with code-cited
+plans and acceptance criteria:
+
+- **Track 3d** (remaining sub-deliverables) — agent I/O hygiene + drift
+  fixes (3d.2 was superseded by Track 1b).
+- **Track 6** — peer-rework redispatch loop.
+- **Track 3g** — strip duplicate `description` fields from the API
+  tools array (~2–3K token savings per request).
+
+Deferred from the queue but kept for reference:
+
+- **Track 3f** — cross-reference graph via tree-sitter (Python / JS /
+  TS / C++) inspired by the 2026 Codebase-Memory paper. Gated on real
+  runs showing repeated cross-file reference failures that
+  `repo_map` + grep can't satisfy.
+- **Track 2c** — Kanban task display (needs UI reproduction first).
+- **Track 3b** — doc-diff over `.flow/docs/` (depends on Track 4 doc
+  directory landing).
+- **Track 5** — Doc Manager (memory_writer extension; depends on
+  Track 4).
+- **Track 10** — operator settings UI exposing per-role default model,
+  per-run wall-clock deadlines, per-agent max-iterations, max-protocol-
+  retries, max-tool-calls, and a live read of those values during a
+  run.
+
+### Strategic / longer-horizon (`.claude/future_buff/`)
+
+Items captured during strategic discussion but explicitly not on the
+immediate queue. Pull when the active queue is clear or when one
+becomes blocking:
+
+| File | What it captures | When to elevate |
+|---|---|---|
+| `cost_ceiling.md` | `max_dollars_per_run` on `ProjectConfig`. Sums `iteration_metrics.estimated_cost_usd` per agent step; emits `BUDGET_WARNING` at 80%, halts cleanly at 100% (same exit path as `DEADLINE_EXCEEDED`). | First time a real run unexpectedly costs >2× budget. |
+| `runner_refactor.md` | Extract persisters, RBAC, escalation, repo-map rebuild, tool registry building, continuation loading, auto-commit, quip dispatch out of `core/runner.py` (~4150 LOC, becoming a god-class). Pure refactor. | When runner edits start regularly causing unrelated test failures. |
+| `production_sandbox.md` | Stage 9 from the original CLAUDE.md plan. Container per `code-exec`, `network_mode: none`, resource caps, `workspace/working` r/w only, zero host env / secrets passthrough. | Before running against any non-toy / untrusted repo, or for multi-tenant. |
+| `functional_verification.md` | Automated reference-project run after meaningful infra changes; assertions for clean imports, entry-point exit code, test suite, spec-adherence greps. | When a refactor silently degrades output quality. |
+| `recalibration_notes.md` | Lesson: token-efficiency metrics ≠ output quality. Captured 2026-05-02 after `run_70dc78f9bb` review. | Re-read before recommending any "we need to measure quality" track. |
+| `cli_v1.md` | Headless `aflow run "..."` terminal surface. Reuses the in-process engine; `rich`-based live UI replaces BoardFeed / QuipFeed; skip React + WebSocket. | When a real distribution / scripted-CI use case appears. Lowest priority in the folder. |
+
+### Bug backlog (`.claude/future_buff/bugs/`)
+
+Captured real-run failure patterns waiting for a fix:
+
+- `run_632863526b_circular_ask_cascade.md` — Diana / Sarah handshake
+  tangle. **Live** — corrupts continuation runs, produces silently-
+  empty answers.

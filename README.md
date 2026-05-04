@@ -265,8 +265,27 @@ Shipped:
 - ✅ M5 — backend pass (reject loop, escalation, desk API, hierarchy graph endpoint)
 - ✅ M5.5 — task completion records + in-flight compaction
 - ✅ M6 — Studio UI pass 2 (hierarchy graph edges, GitGraph, KanbanBoard, file preview, desk files UI, WorkerCard refactor, quip avatars)
+- ✅ Track 1 / 1b / 1c / 1d — iteration metrics + repo_map prompt-layer wiring + cache-stable rebuilds + task-aware relevance
+- ✅ Track 3a / 3c / 3d.4 / 3e — outline-first funnel, RTK-style tool output compression, manifest auto-render with priority/when_to_use, batch tool calls (`fs-edit-batch`, `fs-write-batch`, `code-outline-batch`)
+- ✅ Track 4 / 4.2 / 4.3 / 4.4 — `.flow/`-in-repo storage mode, per-project `pr_mode` (manual vs auto), in-place working tree via Source Repo, settings hot-reload + gitignore-aware fs-list/repo_map
+- ✅ Track 7 / 8 / 9 — subtask decomposition with active-subtask prompt layer, per-subtask context hot-swap + `recall-subtask`, protocol cleaner sidecar that auto-fires on `PROTOCOL_PARSE_FAIL`
+- ✅ Track 11 — Workers cognition view (live per-agent thinking snapshot)
+- ✅ Track 12 — sub-LLM dispatch primitive (`llm-dispatch`, `summarise-subtask`, `protocol-cleanup`) with per-use-case + per-agent model picker
 
-Future:
+Active execution queue (`.claude/plan_agent_buff/`) — small, scoped tracks ready to pick up:
+- Track 3d (parts) — agent I/O hygiene + drift fixes
+- Track 6 — peer rework redispatch loop
+- Track 3g — strip duplicate `description` fields from the API tools array (~2–3K token savings)
+
+Strategic / longer-horizon (`.claude/future_buff/`) — items captured but not on the immediate queue:
+- **Cost ceiling** — `max_dollars_per_run` on `ProjectConfig`. `estimated_cost_usd` already tracked per iteration; this turns it from telemetry into a guardrail (BUDGET_WARNING at 80%, halt at 100%).
+- **Runner refactor** — `core/runner.py` is ~4150 lines and growing. Pure refactor to extract persisters, RBAC enforcement, escalation logic, signal subscribers, repo-map rebuild, tool registry building, continuation loading, auto-commit, quip dispatch into focused modules.
+- **Production sandbox** — Stage 9 from the original plan. Container per `code-exec` invocation, `network_mode: none`, resource limits, `workspace/working` mounted r/w, no host env vars or secrets in the container. Required before running against any non-toy / untrusted repo.
+- **Functional verification gate** — automated "does the produced game actually run?" checks (imports clean, entry point runs, tests pass, spec-adherence greps). Captured for regression safety, deprioritised because manual verification is currently catching everything.
+- **CLI v1** — headless terminal surface (`aflow run "..."`), reuses the engine in-process. Skip the React/WebSocket layer; `rich`-based live terminal UI replaces BoardFeed/QuipFeed. Lowest priority in the future folder.
+- **Bug backlog** — `.claude/future_buff/bugs/` holds captured failure patterns from real runs (e.g. `run_632863526b_circular_ask_cascade.md`).
+
+Phase-level future work (per `ROADMAP.md`):
 - Phase F.5 — persona author depth (publish, scaffolding, curated reference URLs, sandboxed pytest checks)
 - Phase E — production deploy + multi-tenant admin
 - Phase I — headless service (webhooks, structured deliverables, per-consumer API keys)
@@ -274,4 +293,5 @@ Future:
 
 ## License
 
-TBD — pick before sharing.
+[Apache License 2.0](LICENSE). Copy, modify, and redistribute under
+the terms in `LICENSE`. Commit `2d46bb1` landed the license file.
