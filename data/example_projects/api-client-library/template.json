@@ -1,0 +1,77 @@
+{
+  "id": "example-api-client-library",
+  "title": "API client library",
+  "category": "Coding",
+  "icon": "🔌",
+  "summary": "Research a real API on the web, design, build, test, document — five-stage pipeline.",
+  "details": "A five-stage research-to-shipped pipeline that produces a small Python client library wrapping a real public REST API. The researcher uses `web-search` and `web-fetch` to read the actual API docs; the architect drafts a design doc; the implementer writes the client; the test_writer adds mocked tests so the suite runs offline; the doc_writer ships a README with copy-pasteable examples.\n\nShows off: web-search + web-fetch for genuine research, design-doc-first flow, mocked HTTP for hermetic tests, full pip-installable package layout.",
+  "default_project_id": "api-client",
+  "default_goal": "Build a small Python client library for the public API described below.\n\nAPI: <replace this with the API name, the base URL, a link to its docs, and which endpoints you want wrapped — e.g. 'cat-facts: https://catfact.ninja, wrap /fact and /facts'>.\n\nDeliverables: a pip-installable package under `src/<package>/` with a typed client class, mocked pytest tests covering each wrapped endpoint, a `pyproject.toml`, and a `README.md` with install + usage. The test suite must run offline (no real HTTP).",
+  "requires": {
+    "source_repo": false,
+    "hints": [
+      "Edit the goal to name the API and the endpoints you want wrapped.",
+      "The researcher needs internet access (web-search + web-fetch are baseline)."
+    ]
+  },
+  "project_template": {
+    "max_iterations": 5,
+    "approval_gates": {
+      "pre_run_cost_preview": false,
+      "heavy_tier_mid_run_dispatch": false,
+      "iteration_breach_at": 3,
+      "per_iteration": false,
+      "token_budget_usd": null
+    },
+    "rbac": {
+      "researcher": { "allowed_scopes": ["fs-write"] },
+      "architect": { "allowed_scopes": ["fs-write"] },
+      "implementer": { "allowed_scopes": ["fs-write", "fs-edit", "fs-write-batch", "fs-edit-batch"] },
+      "test_writer": { "allowed_scopes": ["fs-write", "fs-edit", "code-exec"] },
+      "doc_writer": { "allowed_scopes": ["fs-write", "fs-edit"] }
+    },
+    "agents": [
+      {
+        "role": "researcher",
+        "description": "Reads the actual API docs on the web.",
+        "system_prompt": "You read the actual API docs and produce notes the rest of the team can build from. Use `web-search` to locate the official docs (prefer the API's own domain over third-party tutorials), then `web-fetch` to pull the relevant pages. Output `docs/api_notes.md` covering: base URL, auth model (none / API key / OAuth), each endpoint we'll wrap (path, method, params, response shape) with one real example response copy-pasted from the docs, rate limits, and any quirks the docs flag. Cite source URLs inline. Do NOT write client code — that's the implementer's job.",
+        "declared_local_tools": ["web-search", "web-fetch", "fs-read", "fs-write"],
+        "model_tier": "solid"
+      },
+      {
+        "role": "architect",
+        "description": "Designs the client API surface.",
+        "depends_on": ["researcher"],
+        "system_prompt": "You design the client's Python API surface. Read `docs/api_notes.md`, then write `docs/design.md` covering: the package structure (one or two files is fine), the main client class signature (constructor params, public methods one-per-endpoint with type hints), how errors map to exceptions (e.g. 4xx → `ClientError`, 5xx → `ServerError`), and how auth is passed in (env var? constructor arg?). Don't over-engineer — match the surface area of the API. No code, just the contract.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write"],
+        "model_tier": "solid"
+      },
+      {
+        "role": "implementer",
+        "description": "Builds the client per the design.",
+        "depends_on": ["architect"],
+        "system_prompt": "You implement the client per `docs/design.md`. Lay out a real package: `pyproject.toml` with `requests` (or `httpx`) as the only runtime dep beyond stdlib, source under `src/<package>/`. Type-hint every public signature. Don't catch-and-swallow HTTP errors — raise the exceptions the design doc specifies. If you need to deviate from the design, write the deviation into `docs/design.md` first, then implement to the updated doc. Hand off via a COMMIT naming the client class.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "fs-write-batch", "fs-edit-batch", "code-outline"],
+        "persona_id": "sarah-backend-v1",
+        "model_tier": "solid"
+      },
+      {
+        "role": "test_writer",
+        "description": "Writes mocked tests so the suite runs offline.",
+        "depends_on": ["implementer"],
+        "system_prompt": "You write mocked tests so the suite runs offline. Use `responses` or `respx` (depending on whether the client uses requests or httpx — read the code with `code-outline` to find out). Each wrapped endpoint gets at least one happy-path test using a sample response copied from `docs/api_notes.md`, plus one error-path test (4xx or 5xx) per endpoint. Run `pytest -q` via `code-exec` and confirm green. Tests land under `tests/`.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "code-exec", "code-outline"],
+        "model_tier": "fast"
+      },
+      {
+        "role": "doc_writer",
+        "description": "Writes the README with copy-pasteable examples.",
+        "depends_on": ["test_writer"],
+        "system_prompt": "You write the README. Read the actual code with `code-outline` plus `docs/api_notes.md`. Structure: one-paragraph pitch (what does this API do, in plain language), install snippet, a 'Quickstart' code block that constructs the client and calls the most useful endpoint, then one short example per remaining endpoint. End with a 'Development' section pointing at the test command. Examples must be copy-paste-runnable — match the real method names and signatures you find in the code.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "code-outline", "code-outline-batch"],
+        "persona_id": "mike-frontend-v1",
+        "model_tier": "fast"
+      }
+    ]
+  }
+}

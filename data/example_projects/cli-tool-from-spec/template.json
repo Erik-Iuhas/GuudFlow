@@ -1,0 +1,82 @@
+{
+  "id": "example-cli-tool-from-spec",
+  "title": "CLI tool from a spec",
+  "category": "Coding",
+  "icon": "⌨️",
+  "summary": "Designer → (impl ∥ tests) → docs → final reviewer. Pip-installable CLI.",
+  "details": "A five-stage pipeline that turns a one-paragraph CLI spec into a real pip-installable Python tool with `--help`, tests, and a README. The designer drafts a spec doc the rest of the team works from; implementer and test_writer run in parallel against that spec; doc_writer reads the actual code with `code-outline` to write the README; the final reviewer runs the CLI through `code-exec` to verify it actually works.\n\nShows off: spec-driven pipeline, parallel impl + tests, code-exec verification, doc generation from real code.",
+  "default_project_id": "cli-tool",
+  "default_goal": "Build the CLI tool described below as a pip-installable Python package.\n\nSpec: <replace this with what the CLI should do — the commands, the flags, the input/output formats, and one or two usage examples>.\n\nDeliverables: a `pyproject.toml` (or `setup.py`) that installs a console script, the implementation under `src/<package>/`, pytest tests under `tests/`, and a `README.md` with install + usage examples. `--help` must work.",
+  "requires": {
+    "source_repo": false,
+    "hints": [
+      "Edit the goal to describe the CLI's commands, flags, and I/O.",
+      "Optionally upload sample input files via Inputs."
+    ]
+  },
+  "project_template": {
+    "max_iterations": 5,
+    "approval_gates": {
+      "pre_run_cost_preview": false,
+      "heavy_tier_mid_run_dispatch": false,
+      "iteration_breach_at": 0,
+      "per_iteration": false,
+      "token_budget_usd": null
+    },
+    "rbac": {
+      "designer": { "allowed_scopes": ["fs-write"] },
+      "implementer": { "allowed_scopes": ["fs-write", "fs-edit", "fs-write-batch", "fs-edit-batch", "code-exec"] },
+      "test_writer": { "allowed_scopes": ["fs-write", "fs-edit", "code-exec"] },
+      "doc_writer": { "allowed_scopes": ["fs-write", "fs-edit"] },
+      "final_reviewer": { "allowed_scopes": ["code-exec"] }
+    },
+    "agents": [
+      {
+        "role": "designer",
+        "description": "Turns the project goal into a precise CLI spec.",
+        "system_prompt": "You translate the project goal into a precise CLI spec the rest of the team works from. Output a single file: `docs/cli_spec.md`. Include: command tree (subcommands and aliases), every flag with type/default/required, expected stdin / stdout / stderr / exit codes, and one worked example per command. Resolve ambiguity in the goal by making explicit choices in the doc — don't ASK unless something is structurally undecidable. Do not write implementation code.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write"],
+        "model_tier": "solid"
+      },
+      {
+        "role": "implementer",
+        "description": "Implements the CLI per the spec.",
+        "depends_on": ["designer"],
+        "system_prompt": "You implement the CLI per `docs/cli_spec.md`. Lay out a real pip-installable package: `pyproject.toml` with `[project.scripts]` registering the entry point, source under `src/<package>/`, `__main__.py` for `python -m`. Use `argparse` from the stdlib unless the spec explicitly calls for `click` or `typer`. After landing the code, run `pip install -e .` and `<your-command> --help` via `code-exec` to confirm the binary actually works. Hand off via a COMMIT that names the entry point.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "fs-write-batch", "fs-edit-batch", "code-exec", "code-outline"],
+        "persona_id": "sarah-backend-v1",
+        "model_tier": "solid"
+      },
+      {
+        "role": "test_writer",
+        "description": "Writes pytest tests covering each command in the spec.",
+        "depends_on": ["designer"],
+        "system_prompt": "You write pytest tests against the spec in `docs/cli_spec.md`. Cover every command and the main flag combinations. Prefer testing the CLI as a subprocess (use `subprocess.run` with the installed entry point) rather than calling internal functions directly — that way the tests catch packaging mistakes too. Run `pytest -q` via `code-exec` and confirm green before completing. Tests land under `tests/`.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "code-exec", "code-outline"],
+        "model_tier": "fast"
+      },
+      {
+        "role": "doc_writer",
+        "description": "Writes the README from real code, not guesses.",
+        "depends_on": ["implementer", "test_writer"],
+        "system_prompt": "You write the README. Read the actual code with `code-outline` and `fs-read` — never invent flags. Structure: one-paragraph pitch, install snippet (`pip install -e .` from a clone), one usage example per command (copy-paste-runnable), a 'Development' section pointing at the test command. Cross-check every flag mentioned against the implementation; mismatches go in the README, not in your head.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "code-outline", "code-outline-batch"],
+        "persona_id": "mike-frontend-v1",
+        "model_tier": "fast"
+      },
+      {
+        "role": "final_reviewer",
+        "description": "Architect reviewer — runs the CLI to verify it works.",
+        "depends_on": ["doc_writer"],
+        "system_prompt": "You are the final architect reviewer. Verify three things by actually running them via `code-exec`: (1) `pip install -e .` succeeds in a clean environment, (2) every example in the README runs cleanly and matches the documented output, (3) `pytest -q` is green. On any failure, emit [VERIFY] FAIL with the exact command and the unexpected output. Otherwise APPROVE.",
+        "declared_local_tools": ["fs-read", "fs-list", "git-diff", "git-log", "code-outline", "code-exec"],
+        "persona_id": "alex-code_reviewer-v1",
+        "model_tier": "solid",
+        "agent_class_role_type": "code_reviewer",
+        "is_reviewer": true,
+        "is_final_reviewer": true,
+        "max_tool_iterations": 12
+      }
+    ]
+  }
+}
