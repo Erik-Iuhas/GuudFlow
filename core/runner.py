@@ -75,6 +75,7 @@ from core.credentials_broker import CredentialsBroker
 from core.file_workspace import FileWorkspace
 from core.git_workspace import GitWorkspace
 from core.llm import LLMClient, LLMMessage, ToolCall
+from core.text_tools import parse_text_tool_calls
 from core.task_summarizer import TaskSummarizer
 from core.llm.registry import ModelRegistry
 from core.loop_guard import LoopGuard, LoopGuardConfig
@@ -256,6 +257,62 @@ def _split_paths(raw: str) -> list[str]:
     if not raw:
         return []
     return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+# Synthetic tool name used to surface text-mode parse failures to the
+# model as if they were tool execution errors. Intercepted in the
+# tool-call execution loop before call_tool() routes through the
+# manifest, so the model gets a useful repair message ("body is not
+# valid JSON: ...") instead of "tool not found".
+_TEXT_PARSE_ERROR_TOOL = "__text_parse_error__"
+
+
+def _normalize_text_mode_response(response: Any) -> None:
+    """When an agent runs in `tool_format == "text"`, the LLM emits tool
+    calls as `[TOOL <name>] {...} [/TOOL]` blocks in plain text, not as
+    structured `tool_calls`. This helper rewrites the response IN PLACE
+    so the rest of the iteration loop processes it identically to a
+    structured-mode response:
+
+      - extracts each `[TOOL ...]` block from response.text
+      - synthesizes a ToolCall for each successful parse
+      - synthesizes a ToolCall against `_TEXT_PARSE_ERROR_TOOL` for each
+        parse failure (intercepted in the call-tool loop to produce a
+        useful error tool_result instead of a 'tool not found' message)
+      - strips block markers from response.text so the protocol parser
+        only sees prose + the closing [COMMIT]/[VERIFY]/etc block
+      - flips stop_reason to "tool_use" if any calls (real or synthetic)
+        are present, so the existing tool_use branch fires
+
+    Synthetic ToolCall ids use the prefix `text_tc_` (success) or
+    `text_pe_` (parse error) so log dumps make it obvious where a call
+    came from.
+    """
+    parsed = parse_text_tool_calls(response.text or "")
+
+    if not parsed.tool_calls and not parsed.failures:
+        # Nothing to normalize — the model emitted prose only (likely a
+        # closing protocol block). Leave response untouched so the
+        # protocol-block branch runs.
+        return
+
+    synthesized: list[ToolCall] = []
+    for idx, call in enumerate(parsed.tool_calls):
+        synthesized.append(ToolCall(
+            id=f"text_tc_{idx}",
+            name=call.name,
+            arguments=call.arguments,
+        ))
+    for idx, fail in enumerate(parsed.failures):
+        synthesized.append(ToolCall(
+            id=f"text_pe_{idx}",
+            name=_TEXT_PARSE_ERROR_TOOL,
+            arguments={"reason": fail.reason, "raw": fail.raw},
+        ))
+
+    response.tool_calls = synthesized
+    response.text = parsed.text
+    response.stop_reason = "tool_use"
 
 
 def _extract_input_summary(rel_path: str, content: str) -> str:
@@ -3447,6 +3504,14 @@ class AgentRunner:
             iteration += 1
             response = await self._llm_with_backoff(agent, messages)
 
+            # Text-mode normalization — when the agent's resolved model is
+            # text-mode (Aider-style), the LLM emits tool calls as plain-text
+            # `[TOOL <name>] {...} [/TOOL]` blocks instead of structured
+            # tool_calls. Rewrite response in place so the rest of this loop
+            # processes it identically. No-op for structured-mode agents.
+            if getattr(agent, "_tool_format", "structured") == "text":
+                _normalize_text_mode_response(response)
+
             # Detect output-cap truncation. Anthropic returns stop_reason
             # "max_tokens", OpenAI/Mistral return "length" (mapped to
             # "max_tokens" by the adapter) when the model's response
@@ -3579,12 +3644,29 @@ class AgentRunner:
                     if tc_idx == 0 and not cfg.is_reviewer:
                         self._maybe_auto_start_task(cfg.role, tc.arguments)
 
-                    try:
-                        result = await agent.call_tool(self.workspace, tc.name, tc.arguments)
-                        is_error = bool(result.get("error")) or result.get("ok") is False
-                    except (ToolNotAvailable, Exception) as e:
-                        result = {"error": f"{type(e).__name__}: {e}"}
+                    # Text-mode parse failures are surfaced as synthetic
+                    # tool_calls (see _normalize_text_mode_response).
+                    # Intercept before call_tool so the model gets a useful
+                    # repair message instead of "tool not found".
+                    if tc.name == _TEXT_PARSE_ERROR_TOOL:
+                        result = {
+                            "error": tc.arguments.get(
+                                "reason", "text-mode tool block parse error",
+                            ),
+                            "raw": tc.arguments.get("raw", ""),
+                            "hint": (
+                                "fix the [TOOL ...] block format and re-issue "
+                                "this call on your next turn"
+                            ),
+                        }
                         is_error = True
+                    else:
+                        try:
+                            result = await agent.call_tool(self.workspace, tc.name, tc.arguments)
+                            is_error = bool(result.get("error")) or result.get("ok") is False
+                        except (ToolNotAvailable, Exception) as e:
+                            result = {"error": f"{type(e).__name__}: {e}"}
+                            is_error = True
 
                     # Peer-comms cleanup — ask-peer (and any future tool
                     # that wants to emit a protocol block instead of
