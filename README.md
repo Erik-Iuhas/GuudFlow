@@ -5,16 +5,22 @@ proposes a team, you approve it, and the team runs — with a shared
 workspace, a shared git repo, structured inter-agent communication, and a
 sandboxed code-execution surface.
 
-**Status: phases A, B, C, D-prime, D, F, G-prime, G, K and milestones
-M0–M6 shipped — backend tests + studio typecheck/build green.**
-M4 (Studio UI Pass 1): `/api/tools`, `/api/dashboard`, `meta_model` on
-propose, `WorkerCard` (all 4 modes), `ToolsMultiSelect` (RBAC-aware),
-`WorkerSettingsPanel`, `Dashboard` view (5s poll), `RunWsContext` +
-`useDesks` + `ActiveTaskChip`, `PersonaSlideOver`; `AgentCard` deleted.
-Phases E (production deploy + multi-tenant), I (headless service), F.5
-(persona author depth), J (knowledge surface) registered as future
-work; see [ROADMAP.md](ROADMAP.md). User stories driving priorities are
-in [docs/USER_STORIES.md](docs/USER_STORIES.md).
+**Status: phases A, B, C, D-prime, D, F, G-prime, G, K, milestones
+M0–M6, and Tracks 1, 3, 4, 7, 8, 9, 11, 12 shipped — backend tests +
+studio typecheck/build green.**
+Recent: subtask decomposition with active-subtask prompt layer
+(Track 7), per-subtask context hot-swap + recall (Track 8), protocol
+cleaner sidecar that auto-fires on parse failure (Track 9), live
+per-agent Workers cognition view (Track 11), sub-LLM dispatch for
+cheap-model use cases (Track 12), explicit `manages` / `escalates_to`
+hierarchy with a conditional DISPATCH RULE prompt layer, ask-peer
+wrapper around the M1 [ASK] protocol, `CONTEXT BEFORE OUTPUT` prompt
+layer, `estimated_cost_usd` per iteration, four Mistral models added
+(9 models total across 7 providers). Phases E (production deploy +
+multi-tenant), I (headless service), F.5 (persona author depth), J
+(knowledge surface) registered as future work; see
+[ROADMAP.md](ROADMAP.md). User stories driving priorities are in
+[docs/USER_STORIES.md](docs/USER_STORIES.md).
 
 **Architecture diagrams** — ASCII UML, sequence, state, deployment, and
 prompt-stack diagrams reflecting the current (post-M4) shape of the
@@ -29,21 +35,27 @@ live picture; read `DESIGN.md` for original intent + rationale.
 You              "Add JWT auth to my web app, with refresh tokens"
    ↓
 Meta-agent       proposes a team: developer + reviewer + tech_lead-on-escalation
-                 with model tiers, tools, RBAC scopes
+                 with model tiers, tools, RBAC scopes, manages /
+                 escalates_to hierarchy
    ↓
 You approve      tweak agents, model tiers, see live cost estimate
    ↓
-Run starts       agents work in parallel where deps allow, share a board,
-                 commit to per-agent git branches, escalate on conflicts,
-                 ask you for input when genuinely blocked. Live pipeline
-                 graph + agent state cards in the studio.
+Run starts       agents work in parallel where deps allow, share a
+                 board, commit to per-agent git branches, escalate on
+                 conflicts, ask you (or each other via `ask-peer`) for
+                 input when genuinely blocked. Planners decompose work
+                 into subtasks (Track 7); each agent sees only its
+                 active subtask's context (Track 8). Live pipeline
+                 graph, Kanban-style task desks, per-agent cognition
+                 view, and a quip stream in the studio.
    ↓
 Reviewer         approves → branches merge → memory_writer records what
                  worked into the personas' files for next time. Each
                  APPROVED merge is auto-tagged as a review point.
    ↓
 If a run fails   Resume from the persisted state — completed agents
-                 don't re-run.
+                 don't re-run. Per-iteration cost + token telemetry is
+                 written to `iteration_metrics.jsonl` for postmortems.
 ```
 
 **Beyond the run loop:** training camp (toy scenarios + tournaments
@@ -61,10 +73,17 @@ The scheduler enforces one-outstanding-ASK and parks agents via
 confirmations have wall-clock deadlines (`PEER_TIMEOUT`,
 `SKIP_TIMEOUT`).
 
-**Multi-model.** Five models across Anthropic, Groq, DeepSeek + 6
-providers — see `data/models.json`. Tier resolution (`heavy` /
-`solid` / `fast`) plus per-agent preference. Anthropic prompt-cache
-hits across iterations on the stable system-prompt prefix.
+**Multi-model.** Nine models across Anthropic (Opus 4.7 / Sonnet 4.6 /
+Haiku 4.5), Groq (Llama 3.1), DeepSeek, Mistral (Large / Medium /
+Small / Codestral) — see `data/models.json`, seven providers total
+including local endpoints (Ollama, LM Studio). Tier resolution
+(`heavy` / `solid` / `fast`) plus per-agent `model_id` override
+(persisted by the studio's ModelPicker). Sub-LLM dispatch (Track 12)
+routes cheap-model use cases like protocol-cleanup and
+summarise-subtask through their own model picks. Anthropic prompt-
+cache hits across iterations on the stable system-prompt prefix; the
+Anthropic `max_tokens` default was bumped 4096 → 8192 to make
+batched tool calls survive `stop_reason="max_tokens"`.
 
 The high-level architecture is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (ASCII diagrams,

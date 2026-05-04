@@ -22,28 +22,58 @@ Two parallel hierarchies that hang off `BaseAgent`:
    ┌───────────────────┼─────────────────────────┐
    │                   │                         │
    ▼ fs:*              ▼ git:*                   ▼ code:*
-┌──────────────┐   ┌─────────────────┐   ┌──────────────────────┐
-│ FsRead       │   │ GitDiff         │   │ CodeExec             │
-│ FsList       │   │ GitChangedFiles │   │  «sandbox in prod»   │
-│ FsExists     │   │ GitLog          │   │ CodeOutline          │
-│ FsReadRange  │   │ GitStatus       │   └──────────────────────┘
-│ FsGrep       │   │ GitRead         │
-│ FsWrite      │   └─────────────────┘
-│ FsCreate     │
-│ FsEdit       │   ┌────────────────┐    ┌──────────────────────┐
-│  «claiming · │   │ WebSearch      │    │ DocRead · DocWrite   │
-│   SEARCH/    │   │ WebFetch       │    └──────────────────────┘
-│   REPLACE»   │   └────────────────┘
-│ FsDelete     │
-│ FsRename     │   ┌────────────────┐    ┌──────────────────────┐
-└──────────────┘   │ DeskSearch     │    │ BoardMessage         │
-                   │ DeskPush       │    │  «inter-agent        │
-                   └────────────────┘    │   AGENT_MESSAGE»     │
-                                          └──────────────────────┘
+┌──────────────────┐ ┌─────────────────┐  ┌──────────────────────┐
+│ FsRead           │ │ GitDiff         │  │ CodeExec             │
+│ FsList           │ │ GitChangedFiles │  │  «sandbox in prod»   │
+│ FsExists         │ │ GitLog          │  │ CodeOutline          │
+│ FsReadRange      │ │ GitStatus       │  │ CodeOutlineBatch     │
+│ FsGrep           │ │ GitRead         │  └──────────────────────┘
+│ FsDiff           │ └─────────────────┘
+│ _ClaimingTool ◄─ base for write-class
+│ FsWrite           ┌────────────────┐    ┌──────────────────────┐
+│ FsWriteAppend     │ WebSearch      │    │ DocRead · DocWrite   │
+│ FsCreate          │ WebFetch       │    │  (doc-markdown)      │
+│ FsEdit            └────────────────┘    └──────────────────────┘
+│  «claiming ·
+│   SEARCH/REPLACE»
+│ FsDelete          ┌────────────────┐    ┌──────────────────────┐
+│ FsRename          │ DeskSearch     │    │ BoardMessage         │
+│ FsWriteBatch      │ DeskPush       │    │  «inter-agent        │
+│ FsEditBatch       └────────────────┘    │   AGENT_MESSAGE»     │
+│  (Track 3e —                            └──────────────────────┘
+│   batch tool calls)
+└──────────────────┘
 
-   ┌────────────────────────────────────────┐
-   │ TextTool · DataTool · MathTool · TimeTool│  (utility tools)
-   └────────────────────────────────────────┘
+   ┌──────────────────────────────────────────────────────────────────┐
+   │ Coordination & control tools                                     │
+   │ ──────────────────────────────────────────────────────────────── │
+   │ AskPeer                  (ask-peer)         M1 [ASK] wrapper     │
+   │ DecomposeTask            (decompose-task)   Track 7              │
+   │ RecallSubtask            (recall-subtask)   Track 8 hot-swap     │
+   │ AssignTask               (assign-task)      M3.5 task desks      │
+   │ StoryOpen · StoryComplete (story-*)         M1 §7b lifecycle     │
+   └──────────────────────────────────────────────────────────────────┘
+
+   ┌──────────────────────────────────────────────────────────────────┐
+   │ Sub-LLM dispatch (Track 12)                                      │
+   │ ──────────────────────────────────────────────────────────────── │
+   │ LlmDispatchTool   ─┐                                              │
+   │ ├─ SummariseSubtask     (summarise-subtask)                       │
+   │ └─ ProtocolCleanupTool  (protocol-cleanup)  Track 9 sidecar       │
+   └──────────────────────────────────────────────────────────────────┘
+
+   ┌──────────────────────────────────────────────────────────────────┐
+   │ Utility tools (granular, not single classes)                     │
+   │ ──────────────────────────────────────────────────────────────── │
+   │ text:   TextDiff · TextEstimateTokens                            │
+   │ data:   DataJson · DataCsv · DataYaml · DataXml                  │
+   │ math:   MathEval                                                 │
+   │ time:   TimeNow · TimeDiff                                       │
+   └──────────────────────────────────────────────────────────────────┘
+
+   output_compress.py is a runner-side helper (CompressedResult
+   dataclass + summariser) — it runs in BaseAgent._post_process_tool_result,
+   not as an exposed tool the LLM can call directly.
 ```
 
 ### Manifest layer
@@ -86,10 +116,12 @@ Two parallel hierarchies that hang off `BaseAgent`:
        ┌───────┼────────────────────┐
        ▼       ▼                    ▼
 ┌─────────────────────┐ ┌────────────────────┐ ┌─────────────────────┐
-│ AnthropicLLMClient  │ │ OpenAILLMClient    │ │ MockLLMClient       │
+│ AnthropicClient     │ │ OpenAIClient       │ │ MockLLMClient       │
 │ + cache_system: bool│ │ + complete(...)    │ │ + scripted_responses│
-│ + complete(...)     │ └────────────────────┘ └─────────────────────┘
-└─────────────────────┘
+│ + complete(...)     │ │  (also covers Groq │ └─────────────────────┘
+└─────────────────────┘ │   DeepSeek Mistral │
+                        │   Ollama LM-Studio)│
+                        └────────────────────┘
 
 ┌──────────────────────────────────────┐    ┌────────────────────┐
 │ LLMResponse                          │ * │ ToolCall           │

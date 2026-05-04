@@ -217,6 +217,122 @@ loaded and injected so each run is aware of the project's larger arc
   persisted `tasks.jsonl`.
 - `worker/job_runner.py::serialise_task` — canonical Task → dict.
 
+### Track 7 — Subtask decomposition (commits `89a3bff`, `6050e34`, `7af5fab`)
+
+- New `decompose-task` tool (`agents/tools/decompose_task.py`). Cheap
+  smart-parent gate uses an LLM to reject coupled subtask sets — keeps
+  agents from forking unrelated work into a chain that doesn't parallelise.
+- `assign-task` accepts subtasks atomically, so the parent task and its
+  children land in one call.
+- `Workspace.active_subtask: dict[str, str]` records which subtask each
+  role is currently advancing.
+- Runner advances `active_subtask` automatically when a subtask closes
+  (`_handle_task_closures` keys off `closes:` trailers in COMMIT messages).
+- New prompt **Layer 4.7 — ACTIVE SUBTASK** in `effective_system_prompt`
+  injects the current subtask so the agent stays focused.
+
+### Track 8 — Subtask context hot-swap + recall (commit `dfa8958`)
+
+- New `recall-subtask` tool (`agents/tools/recall_subtask.py`) — per-
+  subtask scoped memory recall instead of global persona memory.
+- Layer 4.5b (task-relevant files) is rebuilt when the active subtask
+  changes, so the prompt swaps the relevance window automatically.
+
+### Track 9 — Protocol cleaner sidecar (commit `f4c2710`)
+
+- New `PROTOCOL_CLEANUP_AUTO` signal type. The runner watches for
+  `PROTOCOL_PARSE_FAIL` and auto-fires a cheap `protocol-cleanup`
+  sub-LLM call that re-renders the malformed trailing block instead of
+  re-prompting the whole agent.
+- New `ProtocolCleanupTool` in `agents/tools/llm_dispatch.py`,
+  registered as a Track-12 sub-LLM use case.
+
+### Track 11 — Workers cognition view (commit `e450535`)
+
+- New `WorkerCognitionView` component (`studio/src/components/`) — live
+  per-agent snapshot showing the current iteration, last tool call
+  summary, recall hits, and budget. Wires into the existing
+  `RunWsContext`.
+- `BaseAgent._summarise_tool_result` produces the ≤120-char one-liner
+  the panel displays.
+
+### Track 12 — Sub-LLM dispatch (commit `dfa8958`)
+
+- `LlmDispatchTool` base + concrete `SummariseSubtaskTool`,
+  `ProtocolCleanupTool` in `agents/tools/llm_dispatch.py`.
+- `ProjectConfig.sub_llm_models: dict[use_case, model_id]` and
+  `AgentConfig.sub_llm_models_override` per-use-case overrides; both
+  fall back to `ModelRegistry.cheapest_tool_capable()` at dispatch time.
+- Used internally by Track 8 (subtask summarisation) and Track 9
+  (protocol cleanup) — kept off the main reasoning model to save spend.
+
+### Track 1 — Iteration metrics + cost tracking
+
+- `Workspace.iteration_metrics: list[IterationMetrics]` — one row per
+  full `BaseAgent.run()` invocation, with input/output tokens, cache
+  hit/creation tokens, recall counts, repo-map / relevant-files /
+  diff token breakdown.
+- `Workspace.context_log: list[ContextSnapshot]` — per-`get_context()`
+  budget vs. used.
+- Track 3d.5: `IterationMetrics.estimated_cost_usd` populated from
+  `ModelRegistry.cost_per_1k`. `RunAnalytics` view shows a live cost
+  column.
+- `Workspace.add_iteration_metrics()` and persistence hooks dump
+  `iteration_metrics.jsonl`, `agent_turns.jsonl`,
+  `llm_calls.jsonl`, `context_log.jsonl` per run.
+
+### ask-peer wrapper (commits `ee0c7f2`, `7e8aa68`, `20ebecb`, `753840a`)
+
+- New `ask-peer` tool (`agents/tools/ask_peer.py`) — a discoverable
+  wrapper around the M1 `[ASK]` protocol. Most agents would never
+  guess the raw protocol path; the tool gives them an obvious one.
+- `board-message` (the non-blocking sibling) was tightened: priority
+  demoted, question-shaped messages to completed agents are now
+  rejected to stop "ASK cascades".
+- `_generic_peer_answer` runs in a bounded tool-use loop so the
+  responder can read 1–2 files before answering, with a fallback
+  synthesised ANSWER if the budget elapses.
+
+### Hierarchy: `manages` + `escalates_to` (commits `abd0ee4`, `919bbba`)
+
+- `AgentConfig.manages: list[str]` — explicit "I dispatch to these
+  roles" list. Replaces the old derived-from-RBAC behaviour.
+- `AgentConfig.escalates_to: list[str]` — explicit escalation handler
+  list (defaults to `tech_lead` when empty).
+- New conditional **Layer 6.7 — DISPATCH RULE** in
+  `effective_system_prompt`: only injected when an agent has
+  `assign-task` AND `manages` lists ≥ 2 teammates. Forces "one
+  `assign-task` per teammate" — fixes the architect anti-pattern of
+  bundling all downstream work into a single dev's task.
+
+### CONTEXT BEFORE OUTPUT layer (commit `0b2b4f0`)
+
+- New **Layer 6.6** in `effective_system_prompt` after the autonomy
+  block: "read every reference in your task brief; inventory before
+  reads; arch describes shape, design describes behaviour — both
+  required before code lands." Diagnosed in `run_f741ea78ba` where
+  devs read 3 architecture docs but skipped 26 design docs and wrote
+  `ghost_ai_system.py` without reading `ghost_ai.md`.
+
+### Tool-call-adverse runtime fixes (commits `b04105f`, `2841f9b`, `efedf9f`, `242fedc`, `696c483`, `561f9a8`)
+
+- `max_tokens` default bumped 4096 → 8192 across `LLMClient`,
+  `AnthropicClient`, `BaseAgent`.
+- `fs-write-append` chunked-write primitive for files larger than
+  `max_tokens` of output.
+- `fs_batch.py`: `FsWriteBatch` and `FsEditBatch` with per-file +
+  per-batch byte caps so the LLM picks the right tool.
+- Runner handles `stop_reason == "max_tokens"` by recovering truncated
+  batched tool calls (and salvaging text-as-tool patterns).
+- Cleanup model rejects kind-mismatch (specialist VERIFY loop).
+
+### Provider expansion + model picker (commits `fbd8621`, `b2e16f1`)
+
+- 4 Mistral models added to `data/models.json`; provider key typo
+  fixed (`mitsral` → `mistral`).
+- `AgentConfig.model_id` was added so the studio's ModelPicker can
+  persist non-Anthropic selections across saves.
+
 ### M4 — Studio UI Pass 1
 
 - `GET /api/tools` — catalog from `LOCAL_TOOL_CLASSES` with baseline +

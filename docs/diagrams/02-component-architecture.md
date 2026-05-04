@@ -9,10 +9,20 @@ and **agents reach the outside world only through tools and the broker**.
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  studio/  — React frontend                                              │
 │  ─────────────────────────────────────────────────────────────────────  │
-│  RunView · BoardFeed · QuipFeed · GraphView                             │
-│  Persona Roster · Chat · Rankings                                       │
-│  Training Camp · Tournaments                                            │
-│  Onboarding · Demo · Project Wizard                                     │
+│  views   Dashboard · Projects · Propose · Run · Roster · Training ·     │
+│          Tournament · Studio · Settings · Inputs                        │
+│  components                                                             │
+│    run     BoardFeed · QuipFeed · PipelineGraph · GitGraph ·            │
+│            KanbanBoard · RunAnalytics · CommentBox · ScreenshotPane ·   │
+│            ApprovalCard · ResumeButton · CostStrip · TagsPanel ·        │
+│            ActiveTaskChip · WorkerCognitionView (Track 11)              │
+│    files   FileTreeTab · FilePreviewPanel · DeskFilesSection ·          │
+│            UploadDropzone · GitDiffSideOver                             │
+│    config  WorkerCard (4 modes) · WorkerSettingsPanel ·                 │
+│            ToolsMultiSelect · SettingsDrawer · SourceRepoField ·        │
+│            FolderPicker · PriorRunPicker                                │
+│    roster  PersonaSlideOver · PersonaChatBox · RankingsPanel ·          │
+│            ScenarioCard · AgentStateCard · RoadmapTab · Toaster         │
 └────────────────────────────────┬─────────────────────────────────────────┘
                                  │ HTTP / WS
                                  ▼
@@ -41,15 +51,18 @@ and **agents reach the outside world only through tools and the broker**.
 │  core/  — orchestration kernel                                          │
 │  ─────────────────────────────────────────────────────────────────────  │
 │  scheduler.py     Scheduler · InterruptToken                            │
-│  runner.py        AgentRunner · ProjectConfig                           │
+│  runner.py        AgentRunner · ProjectConfig · AgentConfig             │
 │  workspace.py     Workspace · Artifact          ◄────┐ posts signals    │
 │  signals.py / protocol.py                            │                  │
 │  credentials_broker.py    CredentialsBroker          │                  │
 │  tool_manifest.py         ToolManifest               │                  │
-│  context_manager.py · repo_map.py · edit_blocks.py   │                  │
+│  context_manager.py · repo_map.py · repo_walk.py ·   │                  │
+│  edit_blocks.py · secret_scan.py                     │                  │
 │  run_initializer · run_loader · source_repo ·        │                  │
 │  meta_proposal · cost_estimate · loop_guard ·        │                  │
-│  quip_engine                                         │                  │
+│  quip_engine · task_summarizer · story_tags ·        │                  │
+│  archetype_doc · file_workspace · git_workspace      │                  │
+│  storage · flow_dir · user_settings                  │                  │
 │  training/    scenario · tournament                  │                  │
 └────────────┬─────────────────────────────────────────┘                  │
              │                                                            │
@@ -69,12 +82,18 @@ and **agents reach the outside world only through tools and the broker**.
 ┌────────────────────────────────────┐  ┌────────────────────────────────┐
 │  agents/tools/                     │  │  core/llm/  — provider plane   │
 │  ────────────────────────────────  │  │  ────────────────────────────  │
-│  fs · git · code · doc · web ·     │  │  registry.py    ModelRegistry  │
-│  data · text · math · time ·       │  │  client.py      LLMClient ·    │
-│  board · desk_search · desk_push   │  │                 MockLLMClient  │
-└────────┬───────────────────────────┘  │  anthropic.py · openai.py      │
-         │ mediated by manifest          │  errors.py      taxonomy       │
-         ▼                                └─────────▲──────────────────────┘
+│  fs (+ fs_batch · output_compress) │  │  registry.py    ModelRegistry  │
+│  git · code (+ code_batch) · doc   │  │  client.py      LLMClient ·    │
+│  web · data · text · math · time   │  │                 MockLLMClient  │
+│  board · ask_peer (M1 wrapper)     │  │  anthropic.py    AnthropicClient│
+│  desk_search · desk_push           │  │  openai.py       OpenAIClient   │
+│  decompose_task · recall_subtask   │  │   (covers Groq · DeepSeek ·    │
+│  story · llm_dispatch              │  │    Mistral · Ollama · LM-Studio)│
+│   (sub-LLM: summarise-subtask ·    │  │  errors.py       taxonomy       │
+│    protocol-cleanup ─ Track 9)     │  │                                │
+└────────┬───────────────────────────┘  └─────────▲──────────────────────┘
+         │ mediated by manifest                    │
+         ▼                                          │
 ┌────────────────────────────────────┐              │
 │  CredentialsBroker                 │──────────────┘ credentialed calls
 │  RBAC default-deny · MCP transport │

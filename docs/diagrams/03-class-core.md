@@ -20,22 +20,31 @@ modules for the full dataclasses.
 │ + hired_personas : dict[str, str]                      │
 │ + pending_human : HumanRequest                         │
 │ + pending_screenshots : list[PendingScreenshot]        │
+│ + pending_package_requests : list[PackageRequest]      │
 │ + pending_approvals : list[ApprovalRequest]            │
 │ + git : GitState                                       │
 │ + stories : dict[str, StoryState]                      │
 │ + active_story : dict[str, str]                        │
+│ + active_subtask : dict[str, str]   ◄─ Track 7         │
 │ + deadline_at : float                                  │
 │ + iteration : int                                      │
 │ + completed_agents : list[str]                         │
 │ + repo_map : RepoMap                                   │
 │ + tasks : dict[str, Task]                              │
 │ + task_queues : dict[str, list[TaskRef]]               │
+│ + iteration_metrics : list[IterationMetrics]           │
+│ + context_log : list[ContextSnapshot]                  │
+│ + embeddings_enabled : bool                            │
 ├────────────────────────────────────────────────────────┤
 │ + post_signal(signal)                                  │
 │ + set_artifact(role, artifact)                         │
 │ + mark_seen(signal_id, agent)                          │
 │ + subscribe(callback)                                  │
 │ + add_task(...) · mutate_task(...)                     │
+│ + record_approval(...) · find_pending_approval(...)    │
+│ + add_iteration_metrics(m) · record_context_snapshot() │
+│ + signals_of_type(type) · unseen_user_comments()       │
+│ + child_tasks(parent_id) · desk_for(role)              │
 └──────────┬─────────────────────────────────────────────┘
            │  1
            │
@@ -73,25 +82,28 @@ modules for the full dataclasses.
 │ + target_role : str                              │
 └──────────────────────────────────────────────────┘
 
-┌─────────────────────────────────────────────────────┐
-│ SignalType  «enum»                                  │
-├─────────────────────────────────────────────────────┤
-│   STARTED · THINKING · COMPLETE · FAILED · BLOCKED  │
-│   APPROVED · REJECTED · ESCALATION                  │
-│   HUMAN_NEEDED · HUMAN_RESPONDED                    │
-│   APPROVAL_NEEDED · _GRANTED · _DENIED              │
-│   USER_COMMENT · USER_VISUAL_FEEDBACK               │
-│   GIT_COMMIT · GIT_MERGE · GIT_CONFLICT             │
-│   PACKAGE_REQUEST · _APPROVED · _REJECTED           │
-│   CREDENTIAL_REQUEST · _GRANTED · _DENIED           │
-│   FILE_CLAIM · FILE_RELEASE                         │
-│   MANIFEST_INVALIDATED                              │
-│   TASK_ASSIGNED · TASK_STARTED · TASK_COMPLETED     │
-│   TASK_BLOCKED · TASK_CANCELLED · TASK_OUT_OF_SCOPE │
-│   RUBRIC_SCORE · TOURNAMENT_RESULT                  │
-│   PROTOCOL · PROTOCOL_PARSE_FAIL · AGENT_MESSAGE    │
-│   PEER_TIMEOUT · SKIP_TIMEOUT · PR_READY            │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│ SignalType  «enum»                                      │
+├─────────────────────────────────────────────────────────┤
+│   STARTED · THINKING · COMPLETE · FAILED · BLOCKED      │
+│   APPROVED · REJECTED · ESCALATION                      │
+│   HUMAN_NEEDED · HUMAN_RESPONDED                        │
+│   APPROVAL_NEEDED · _GRANTED · _DENIED                  │
+│   USER_COMMENT · USER_COMMENT_PRIORITY                  │
+│   SCREENSHOT_READY · USER_VISUAL_FEEDBACK               │
+│   GIT_COMMIT · GIT_MERGE · GIT_CONFLICT                 │
+│   PACKAGE_REQUEST · _APPROVED · _REJECTED               │
+│   CREDENTIAL_REQUEST · _GRANTED · _DENIED               │
+│   FILE_CLAIM · FILE_RELEASE                             │
+│   MANIFEST_INVALIDATED                                  │
+│   TASK_ASSIGNED · TASK_STARTED · TASK_COMPLETED         │
+│   TASK_BLOCKED · TASK_CANCELLED · TASK_OUT_OF_SCOPE     │
+│   RUBRIC_SCORE · TOURNAMENT_RESULT                      │
+│   PROTOCOL · PROTOCOL_PARSE_FAIL ·                      │
+│   PROTOCOL_CLEANUP_AUTO          ◄─ Track 9 sidecar     │
+│   AGENT_MESSAGE                                         │
+│   PEER_TIMEOUT · SKIP_TIMEOUT · PR_READY                │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### Scheduler + AgentRunner
@@ -124,8 +136,9 @@ modules for the full dataclasses.
 ┌────────────────────────────────────────┐
 │ SchedulerStatus  «enum»                │
 │ COMPLETE · MAX_ITERATIONS · STUCK ·    │
-│ DEADLINE_EXCEEDED                      │
+│ DEADLINE_EXCEEDED · STOPPED            │
 └────────────────────────────────────────┘
+   STOPPED ─ user pressed Stop / force_cancel()
 
 ┌──────────────────────────────────────────────────┐
 │ AgentRunner   (core/runner.py)                   │
@@ -147,20 +160,32 @@ modules for the full dataclasses.
 └─────┬────────────────────────────────────────────┘
       │ configured by
       ▼
-┌──────────────────────────────────────────┐    ┌─────────────────────────┐
-│ ProjectConfig                            │    │ AgentConfig             │
-├──────────────────────────────────────────┤  * ├─────────────────────────┤
-│ + project_id : str                       │◄───│ + role : str            │
-│ + run_id : str                           │  1 │ + archetype : str       │
-│ + goal : str                             │    │ + persona_id : str      │
-│ + agents : list[AgentConfig]             │    │ + depends_on : list     │
-│ + max_iterations : int                   │    │ + model_tier : tier     │
-│ + deadline_seconds : float               │    │ + model_preference : str│
-│ + run_profile : BUDGET/BALANCED/QUALITY  │    │ + tools : list[str]     │
-│ + source_repo : SourceRepoSpec           │    │ + mcp_servers : list    │
-│ + inputs : list[Path]                    │    │ + rbac_scopes : list    │
-└──────────────────────────────────────────┘    │ + system_prompt_overrides│
-                                                └─────────────────────────┘
+┌──────────────────────────────────────────┐    ┌──────────────────────────────────┐
+│ ProjectConfig                            │    │ AgentConfig                      │
+├──────────────────────────────────────────┤  * ├──────────────────────────────────┤
+│ + project_id : str                       │◄───│ + role : str                     │
+│ + goal : str                             │  1 │ + description : str              │
+│ + agents : list[AgentConfig]             │    │ + depends_on : list[str]         │
+│ + rbac : dict[str, RoleRBAC]             │    │ + system_prompt : str            │
+│ + mcp_servers : list[dict]               │    │ + declared_local_tools : list    │
+│ + max_iterations : int                   │    │ + declared_mcp_servers : list    │
+│ + escalation_thresholds : dict[str, int] │    │ + persona_id : str | None        │
+│ + approval_gates : dict[str, Any]        │    │ + persona_goal : str             │
+│   pre_run_cost_preview · iter_breach_at  │    │ + model_tier : heavy/solid/fast  │
+│ + mode : production | training           │    │ + model_id : str   ◄─ explicit   │
+│ + stories : list[dict]    (M1 §7b seeds) │    │ + agent_class_role_type :        │
+│ + desk_seeds : dict[id, list[seed]] (M2) │    │    str | None                    │
+│ + training_scenario_id : str | None      │    │ + is_reviewer : bool             │
+│ + consecutive_fail_threshold : int (M5)  │    │ + is_final_reviewer : bool       │
+│ + pr_mode : manual | auto  (Track 4.2)   │    │ + max_tool_iterations : int      │
+│ + sub_llm_models : dict[use_case, model] │    │ + loop_guard : LoopGuardConfig   │
+│   (Track 12)                             │    │ + max_protocol_retries : int     │
+└──────────────────────────────────────────┘    │ + sub_llm_models_override : dict │
+                                                │   (Track 12 per-agent)           │
+                                                │ + excluded_baseline_tools : list │
+                                                │ + manages : list[str]    ◄── §23 │
+                                                │ + escalates_to : list[str]       │
+                                                └──────────────────────────────────┘
 ```
 
 ### Broker, manifest, context, file/git, helpers
@@ -208,6 +233,49 @@ modules for the full dataclasses.
 │ + verdict_for(agent, calls)          │  │ + on_signal(signal)          │
 │ + classify_error(exc)                │  │ + finalize_run(result)       │
 └──────────────────────────────────────┘  └──────────────────────────────┘
+```
+
+### Workspace sub-records
+
+```
+┌────────────────────────────┐    ┌─────────────────────────────────────┐
+│ IterationMetrics           │    │ ContextSnapshot                     │
+│ (Track 1 — per-iteration)  │    │ (Track 1d — per get_context() call) │
+├────────────────────────────┤    ├─────────────────────────────────────┤
+│ + run_id · role            │    │ + role · iteration                  │
+│ + iteration · model        │    │ + repo_map_tokens                   │
+│ + input_tokens             │    │ + relevant_files_tokens             │
+│ + output_tokens            │    │ + git_diff_tokens                   │
+│ + cache_read_tokens        │    │ + total_tokens                      │
+│ + cache_creation_tokens    │    │ + budget · used                     │
+│ + llm_calls                │    └─────────────────────────────────────┘
+│ + final_message_tokens     │
+│ + recall_episodes_count    │    ┌─────────────────────────────────────┐
+│ + recall_patterns_count    │    │ Task / TaskRef  (M3.5 desks)        │
+│ + repo_map_tokens          │    ├─────────────────────────────────────┤
+│ + relevant_files_tokens    │    │ + id · parent_id · assignee_role    │
+│ + git_diff_tokens          │    │ + goal · acceptance_criteria        │
+│ + context_tokens_total     │    │ + state : pending/in_progress/      │
+│ + direct_file_read_tokens  │    │           done/blocked/cancelled    │
+│ + tool_token_breakdown     │    │ + closed_by_commit · iteration      │
+│ + estimated_cost_usd       │    │ + created_by · created_at           │
+│   (Track 3d.5)             │    └─────────────────────────────────────┘
+│ + started_at · ended_at    │
+│ + elapsed_seconds          │    ┌─────────────────────────────────────┐
+└────────────────────────────┘    │ StoryState  (M1 §7b)                │
+                                  │ + id · name · goal · owner_role     │
+┌────────────────────────────┐    │ + parent_story_id                   │
+│ CommitRecord               │    │ + opened_at · closed_at             │
+│ + hash · branch · agent    │    │ + state : open/closed               │
+│ + message · iteration      │    └─────────────────────────────────────┘
+│ + files · timestamp        │
+└────────────────────────────┘    ┌─────────────────────────────────────┐
+                                  │ ApprovalRequest  (Phase C.0.5)      │
+┌────────────────────────────┐    │ + id · gate_name · created_at       │
+│ PackageRequest             │    │ + payload : dict (cost preview,     │
+│ + name · reason            │    │              tier upgrade, etc.)    │
+│ + iteration · status       │    │ + state : pending/granted/denied    │
+└────────────────────────────┘    └─────────────────────────────────────┘
 ```
 
 ## Key invariants encoded above

@@ -145,13 +145,19 @@ every builtin agent is a concrete subclass of one of them.
 
 ## Persona = persistent specialist
 
-A `Persona` exists across runs in `data/personas/{id}/` (six files —
+A `Persona` exists across runs in `data/personas/{id}/` (seven files —
 `profile.json`, `episodes.jsonl`, `patterns.json`, `antipatterns.json`,
 `style.json`, `reputation.json`, `history.json`). When an agent slot has
 `persona_id` in its `AgentConfig`, the runner loads and binds a `Persona`
 to the `BaseAgent` instance for that run; `effective_system_prompt()`
 then injects the persona's identity / character / stake layers and the
 contextually recalled memory.
+
+`agents/persona_chat.py` is a thin helper that powers
+`POST /api/personas/{id}/chat` — one-off consultation that hydrates the
+persona without spinning up a run. It is not modelled in the class
+diagram because it has no runtime relationship with the scheduler or
+the workspace.
 
 ## Agents never read raw memory
 
