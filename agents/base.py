@@ -997,11 +997,13 @@ class BaseAgent:
         if self._manifest is None or not self._manifest.descriptors:
             return ""
 
-        tool_lines: list[str] = []
-        for d in self._manifest.descriptors:
+        def _signature(d: Any) -> str:
             schema = d.input_schema or {}
             props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
-            required = set(schema.get("required") or []) if isinstance(schema, dict) else set()
+            required = (
+                set(schema.get("required") or [])
+                if isinstance(schema, dict) else set()
+            )
             arg_summary: list[str] = []
             for arg_name, arg_spec in props.items():
                 arg_type = ""
@@ -1010,9 +1012,40 @@ class BaseAgent:
                 marker = "" if arg_name in required else "?"
                 arg_summary.append(f"{arg_name}{marker}:{arg_type}".rstrip(":"))
             sig = ", ".join(arg_summary) if arg_summary else "(no args)"
-            tool_lines.append(f"  - {d.name}({sig}) — {d.description}")
+            return f"  - {d.name}({sig}) — {d.description}"
 
-        catalog = "\n".join(tool_lines)
+        # Phase 5 — split the catalog into action tools (writes, commits,
+        # delegation) and context tools (reads, searches, listings).
+        # Aider's bet: weaker models burn turns thrashing through file reads
+        # they don't need because the harness pre-loaded the relevant
+        # context. Layer 4.5 (repo_map) and 4.5b (task-relevant entries)
+        # are already injected by effective_system_prompt; Layer 4 is the
+        # recalled persona memory. Most agents can do their work from
+        # those alone. Listing read tools second under a softer label nudges
+        # the model to skip the round trip when context already covers it.
+        action_lines: list[str] = []
+        context_lines: list[str] = []
+        for d in self._manifest.descriptors:
+            line = _signature(d)
+            if d.name in READ_CLASS_TOOLS:
+                context_lines.append(line)
+            else:
+                action_lines.append(line)
+
+        sections: list[str] = []
+        if action_lines:
+            sections.append(
+                "Action tools (writes, commits, delegation, work emission):\n\n"
+                + "\n".join(action_lines)
+            )
+        if context_lines:
+            sections.append(
+                "Context tools (reads, searches — prefer pre-loaded context "
+                "from layers above; only call these when the answer is NOT "
+                "already in your prompt):\n\n"
+                + "\n".join(context_lines)
+            )
+        catalog = "\n\n".join(sections)
 
         return (
             "## TOOL CALLING — TEXT FORMAT (no structured tool_calls)\n\n"
