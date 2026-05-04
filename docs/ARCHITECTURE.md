@@ -10,19 +10,38 @@ For high-level context, see [`README.md`](../README.md). For the full
 intent + rationale, see [`DESIGN.md`](../DESIGN.md). For deviations from
 the original design, see the [refactor log](#refactor-log) below.
 
+> **Diagram format.** All diagrams in `docs/diagrams/` are **ASCII art**
+> (box-drawing characters + plain arrows) so they render cleanly on
+> phones, terminals, plain-text viewers, and any markdown frontend —
+> no Mermaid runtime required.
+
 ---
 
 ## How GuudFlow runs
 
 A run goes through six big phases. Each phase has at least one diagram.
 
-```mermaid
-flowchart LR
-    A["1 · Propose<br/>meta-agent + roster"] --> B["2 · Approve<br/>user signs off team"]
-    B --> C["3 · Init<br/>seed workspace + git + personas"]
-    C --> D["4 · Loop<br/>scheduler · agents · reviews · escalation"]
-    D --> E["5 · Merge<br/>branches → main on APPROVED"]
-    E --> F["6 · Synthesize<br/>memory_writer + reputation"]
+```
+   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+   │ 1 · Propose  │───►│ 2 · Approve  │───►│ 3 · Init     │
+   │ meta-agent + │    │ user signs   │    │ seed         │
+   │ roster       │    │ off team     │    │ workspace +  │
+   │              │    │              │    │ git +        │
+   │              │    │              │    │ personas     │
+   └──────────────┘    └──────────────┘    └──────┬───────┘
+                                                   │
+                       ┌──────────────┐    ┌───────▼──────┐
+                       │ 6 · Synth.   │◄───│ 5 · Merge    │
+                       │ memory_writer│    │ branches →   │
+                       │ + reputation │    │ main on      │
+                       └──────────────┘    │ APPROVED     │
+                                           └──────▲───────┘
+                                                  │
+                                           ┌──────┴────────────────┐
+                                           │ 4 · Loop              │
+                                           │ scheduler · agents ·  │
+                                           │ reviews · escalation  │
+                                           └───────────────────────┘
 ```
 
 | Phase | Diagrams |
@@ -37,7 +56,9 @@ flowchart LR
 
 ## Diagram index
 
-All diagrams use Mermaid and render natively on GitHub.
+All diagrams use **ASCII art** so they render anywhere — including on
+phones, in terminals, and in any markdown viewer. No Mermaid runtime
+required.
 
 | # | Title | What it answers |
 |---|-------|-----------------|

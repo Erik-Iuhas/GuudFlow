@@ -16,11 +16,12 @@ Phases E (production deploy + multi-tenant), I (headless service), F.5
 work; see [ROADMAP.md](ROADMAP.md). User stories driving priorities are
 in [docs/USER_STORIES.md](docs/USER_STORIES.md).
 
-**Architecture diagrams** — Mermaid UML, sequence, state, deployment,
-and prompt-stack diagrams reflecting the current (post-M4) shape of the
-codebase live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Read
-that before `DESIGN.md` if you want the live picture; read `DESIGN.md`
-for original intent + rationale.
+**Architecture diagrams** — ASCII UML, sequence, state, deployment, and
+prompt-stack diagrams reflecting the current (post-M4) shape of the
+codebase live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Diagrams
+render anywhere — phones, terminals, plain markdown viewers — without
+needing a Mermaid runtime. Read that before `DESIGN.md` if you want the
+live picture; read `DESIGN.md` for original intent + rationale.
 
 ## What it actually is
 
@@ -66,7 +67,7 @@ providers — see `data/models.json`. Tier resolution (`heavy` /
 hits across iterations on the stable system-prompt prefix.
 
 The high-level architecture is in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (Mermaid diagrams,
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (ASCII diagrams,
 current-state). The full intent / rationale is in
 [DESIGN.md](DESIGN.md) (37 sections, plus a refactor addendum at the
 end). Build plan and stage-by-stage progress is in

@@ -8,241 +8,164 @@ Two parallel hierarchies that hang off `BaseAgent`:
 - **LLM clients** — abstracted behind `LLMClient`, dispatched per agent
   by `ModelRegistry` based on tier + preference.
 
-```mermaid
-classDiagram
-    direction LR
+```
+┌─────────────────────────────────────────────────────┐
+│ «abstract» BaseTool                                 │
+├─────────────────────────────────────────────────────┤
+│ + name : str                                        │
+│ + description : str                                 │
+│ + rbac_scope : str                                  │
+│ + spec() → dict                                     │
+│ + invoke(args, workspace, context) → str            │
+└──────────────────────┬──────────────────────────────┘
+                       │
+   ┌───────────────────┼─────────────────────────┐
+   │                   │                         │
+   ▼ fs:*              ▼ git:*                   ▼ code:*
+┌──────────────┐   ┌─────────────────┐   ┌──────────────────────┐
+│ FsRead       │   │ GitDiff         │   │ CodeExec             │
+│ FsList       │   │ GitChangedFiles │   │  «sandbox in prod»   │
+│ FsExists     │   │ GitLog          │   │ CodeOutline          │
+│ FsReadRange  │   │ GitStatus       │   └──────────────────────┘
+│ FsGrep       │   │ GitRead         │
+│ FsWrite      │   └─────────────────┘
+│ FsCreate     │
+│ FsEdit       │   ┌────────────────┐    ┌──────────────────────┐
+│  «claiming · │   │ WebSearch      │    │ DocRead · DocWrite   │
+│   SEARCH/    │   │ WebFetch       │    └──────────────────────┘
+│   REPLACE»   │   └────────────────┘
+│ FsDelete     │
+│ FsRename     │   ┌────────────────┐    ┌──────────────────────┐
+└──────────────┘   │ DeskSearch     │    │ BoardMessage         │
+                   │ DeskPush       │    │  «inter-agent        │
+                   └────────────────┘    │   AGENT_MESSAGE»     │
+                                          └──────────────────────┘
 
-    class BaseTool {
-        <<abstract>>
-        +name: str
-        +description: str
-        +rbac_scope: str
-        +spec() dict
-        +invoke(args, workspace, context) str
-    }
+   ┌────────────────────────────────────────┐
+   │ TextTool · DataTool · MathTool · TimeTool│  (utility tools)
+   └────────────────────────────────────────┘
+```
 
-    class FsRead
-    class FsList
-    class FsExists
-    class FsReadRange
-    class FsGrep
-    class FsWrite {
-        <<claiming>>
-    }
-    class FsCreate {
-        <<claiming>>
-    }
-    class FsEdit {
-        <<claiming · SEARCH/REPLACE>>
-    }
-    class FsDelete {
-        <<claiming>>
-    }
-    class FsRename {
-        <<claiming>>
-    }
+### Manifest layer
 
-    BaseTool <|-- FsRead
-    BaseTool <|-- FsList
-    BaseTool <|-- FsExists
-    BaseTool <|-- FsReadRange
-    BaseTool <|-- FsGrep
-    BaseTool <|-- FsWrite
-    BaseTool <|-- FsCreate
-    BaseTool <|-- FsEdit
-    BaseTool <|-- FsDelete
-    BaseTool <|-- FsRename
+```
+┌──────────────────────────────────────┐    ┌──────────────────────┐
+│ ToolManifest                         │  * │ ToolDescriptor       │
+├──────────────────────────────────────┤◄───├──────────────────────┤
+│ + role : str                         │    │ + name : str         │
+│ + tools : list[ToolDescriptor]       │    │ + rbac_scope : str   │
+│ + mcp   : list[MCPToolEntry]         │    │ + description : str  │
+├──────────────────────────────────────┤    │ + schema : dict      │
+│ + has(name) → bool                   │    └──────────┬───────────┘
+│ + descriptor(name) → ToolDescriptor  │               │ refers to
+│ + render_for_prompt() → str          │               ▼
+└────────┬─────────────────────────────┘    ┌──────────────────────┐
+         │ 1                                │ BaseTool subclass    │
+         │                                  └──────────────────────┘
+         │ *
+         ▼
+┌──────────────────────┐
+│ MCPToolEntry         │
+│ + server : str       │
+│ + tool   : str       │
+│ + rbac_scope : str   │
+└──────────────────────┘
+```
 
-    class GitDiff
-    class GitChangedFiles
-    class GitLog
-    class GitStatus
-    class GitRead
+### LLM plane
 
-    BaseTool <|-- GitDiff
-    BaseTool <|-- GitChangedFiles
-    BaseTool <|-- GitLog
-    BaseTool <|-- GitStatus
-    BaseTool <|-- GitRead
+```
+┌────────────────────────────────────────────────────────┐
+│ «protocol» LLMClient                                   │
+├────────────────────────────────────────────────────────┤
+│ + complete(messages, tools, system, cache_system)      │
+│   → LLMResponse                                        │
+│ + stream(messages, tools)                              │
+└──────────────┬─────────────────────────────────────────┘
+               │ implemented by
+       ┌───────┼────────────────────┐
+       ▼       ▼                    ▼
+┌─────────────────────┐ ┌────────────────────┐ ┌─────────────────────┐
+│ AnthropicLLMClient  │ │ OpenAILLMClient    │ │ MockLLMClient       │
+│ + cache_system: bool│ │ + complete(...)    │ │ + scripted_responses│
+│ + complete(...)     │ └────────────────────┘ └─────────────────────┘
+└─────────────────────┘
 
-    class CodeExec {
-        <<sandbox in production>>
-    }
-    class CodeOutline
-    BaseTool <|-- CodeExec
-    BaseTool <|-- CodeOutline
+┌──────────────────────────────────────┐    ┌────────────────────┐
+│ LLMResponse                          │ * │ ToolCall           │
+├──────────────────────────────────────┤◄──├────────────────────┤
+│ + text : str                         │  1 │ + id : str         │
+│ + tool_calls : list[ToolCall]        │    │ + name : str       │
+│ + stop_reason : str                  │    │ + input : dict     │
+│ + usage : dict                       │    └────────────────────┘
+│ + cache_read_tokens : int            │
+│ + cache_creation_tokens : int        │
+└──────────────────────────────────────┘
 
-    class WebSearch
-    class WebFetch
-    BaseTool <|-- WebSearch
-    BaseTool <|-- WebFetch
+┌──────────────────────────────────────┐
+│ LLMMessage                           │
+│ + role : user/assistant/tool         │
+│ + content : list                     │
+└──────────────────────────────────────┘
 
-    class DocRead
-    class DocWrite
-    BaseTool <|-- DocRead
-    BaseTool <|-- DocWrite
+   LLMClient  ─── raises ──►  LLMError
+                                    │
+                ┌───────────────────┼───────────────────┐
+                ▼                   ▼                   ▼
+       RateLimitError        AuthError         ContextLengthError
+       InvalidRequestError   ServerError       NetworkError
+                                                TimeoutError
 
-    class DeskSearch
-    class DeskPush
-    BaseTool <|-- DeskSearch
-    BaseTool <|-- DeskPush
-
-    class BoardMessage {
-        <<inter-agent AGENT_MESSAGE>>
-    }
-    BaseTool <|-- BoardMessage
-
-    class TextTool
-    class DataTool
-    class MathTool
-    class TimeTool
-    BaseTool <|-- TextTool
-    BaseTool <|-- DataTool
-    BaseTool <|-- MathTool
-    BaseTool <|-- TimeTool
-
-    class ToolManifest {
-        +role: str
-        +tools: list~ToolDescriptor~
-        +mcp: list~MCPToolEntry~
-        +has(name) bool
-        +descriptor(name) ToolDescriptor
-        +render_for_prompt() str
-    }
-
-    class ToolDescriptor {
-        +name: str
-        +rbac_scope: str
-        +description: str
-        +schema: dict
-    }
-
-    class MCPToolEntry {
-        +server: str
-        +tool: str
-        +rbac_scope: str
-    }
-
-    ToolManifest "1" o-- "*" ToolDescriptor
-    ToolManifest "1" o-- "*" MCPToolEntry
-    ToolDescriptor ..> BaseTool
-
-    %% LLM plane
-    class LLMClient {
-        <<protocol>>
-        +complete(messages, tools, system, cache_system) LLMResponse
-        +stream(messages, tools)
-    }
-
-    class AnthropicLLMClient {
-        +cache_system: bool
-        +complete(...)
-    }
-
-    class OpenAILLMClient {
-        +complete(...)
-    }
-
-    class MockLLMClient {
-        +scripted_responses: list
-    }
-
-    LLMClient <|.. AnthropicLLMClient
-    LLMClient <|.. OpenAILLMClient
-    LLMClient <|.. MockLLMClient
-
-    class LLMResponse {
-        +text: str
-        +tool_calls: list~ToolCall~
-        +stop_reason: str
-        +usage: dict
-        +cache_read_tokens: int
-        +cache_creation_tokens: int
-    }
-    class ToolCall {
-        +id: str
-        +name: str
-        +input: dict
-    }
-    class LLMMessage {
-        +role: user/assistant/tool
-        +content: list
-    }
-
-    LLMClient ..> LLMResponse
-    LLMResponse "1" o-- "*" ToolCall
-    LLMClient ..> LLMMessage
-
-    class ModelRegistry {
-        +models: dict~str, ModelInfo~
-        +providers: dict~str, ProviderInfo~
-        +resolve(tier, preference) ModelInfo
-        +client_for(model) LLMClient
-        +cost_per_1k(model) tuple~float, float~
-    }
-
-    class ModelInfo {
-        +id: str
-        +tier: heavy/solid/fast
-        +provider: str
-        +cost_per_1k_input: float
-        +cost_per_1k_output: float
-        +deprecated: bool
-    }
-
-    class ProviderInfo {
-        +name: str
-        +base_url: str
-        +api_key_env: str
-        +supports_caching: bool
-    }
-
-    ModelRegistry "1" o-- "*" ModelInfo
-    ModelRegistry "1" o-- "*" ProviderInfo
-    ModelRegistry ..> LLMClient : caches per provider
-
-    class LLMError {
-        <<base>>
-    }
-    class RateLimitError
-    class AuthError
-    class ContextLengthError
-    class InvalidRequestError
-    class ServerError
-    class NetworkError
-    class TimeoutError
-
-    LLMError <|-- RateLimitError
-    LLMError <|-- AuthError
-    LLMError <|-- ContextLengthError
-    LLMError <|-- InvalidRequestError
-    LLMError <|-- ServerError
-    LLMError <|-- NetworkError
-    LLMError <|-- TimeoutError
-
-    LLMClient ..> LLMError : raises
+┌──────────────────────────────────────────────────────┐
+│ ModelRegistry                                        │
+├──────────────────────────────────────────────────────┤
+│ + models    : dict[str, ModelInfo]                   │
+│ + providers : dict[str, ProviderInfo]                │
+├──────────────────────────────────────────────────────┤
+│ + resolve(tier, preference) → ModelInfo              │
+│ + client_for(model) → LLMClient                      │
+│ + cost_per_1k(model) → tuple[float, float]           │
+└────────┬───────────────────────────┬─────────────────┘
+         │ 1                       1 │
+         │                           │ caches per provider
+         │ * ModelInfo               ▼
+         ▼                       LLMClient
+   ┌──────────────────────┐
+   │ ModelInfo            │       ┌──────────────────────┐
+   │ + id : str           │       │ ProviderInfo         │
+   │ + tier : heavy/solid/│       │ + name : str         │
+   │   fast               │       │ + base_url : str     │
+   │ + provider : str     │       │ + api_key_env : str  │
+   │ + cost_per_1k_in/out │       │ + supports_caching   │
+   │ + deprecated : bool  │       └──────────────────────┘
+   └──────────────────────┘
 ```
 
 ## How an agent reaches a tool
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Agent as BaseAgent
-    participant Manifest as ToolManifest
-    participant Tool as BaseTool subclass
-    participant Broker as CredentialsBroker
-
-    Agent->>Manifest: descriptor("fs-write")
-    alt tool is local
-        Manifest-->>Agent: ToolDescriptor
-        Agent->>Tool: invoke(args, workspace, ctx)
-        Tool-->>Agent: result
-    else tool is MCP
-        Manifest-->>Agent: MCPToolEntry
-        Agent->>Broker: invoke_mcp(server, tool, args)
-        Broker-->>Agent: result (redacted)
-    end
+```
+   BaseAgent          ToolManifest        BaseTool subclass        Broker
+       │                   │                      │                    │
+       │ descriptor("fs-write")                   │                    │
+       ├──────────────────►│                      │                    │
+       │                   │                      │                    │
+       │   ┌── if local tool ────────────────────────────┐             │
+       │   │ ToolDescriptor                              │             │
+       │   ◄─────────────────                            │             │
+       │   │                  │ invoke(args, ws, ctx)    │             │
+       │   ├─────────────────────────────────────────────►             │
+       │   │                  │                          │ result      │
+       │   ◄─────────────────────────────────────────────┤             │
+       │   └─────────────────────────────────────────────┘             │
+       │                                                               │
+       │   ┌── if MCP tool ────────────────────────────────────────┐   │
+       │ MCPToolEntry                                              │   │
+       │   ◄────────────────                                       │   │
+       │   │                  invoke_mcp(server, tool, args)       │   │
+       │   ├──────────────────────────────────────────────────────►│   │
+       │   │                  result (redacted)                    │   │
+       │   ◄──────────────────────────────────────────────────────┤   │
+       │   └──────────────────────────────────────────────────────┘
 ```
 
 ## Hyphenated names everywhere

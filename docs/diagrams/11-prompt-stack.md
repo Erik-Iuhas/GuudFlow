@@ -6,33 +6,61 @@ DESIGN §20) — the live shape is captured here. Cache boundary matters: a
 provider that supports caching (Anthropic) caches everything **above**
 the volatile suffix.
 
-```mermaid
-flowchart TB
-    classDef cache fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
-    classDef vol fill:#fff3e0,stroke:#e65100,color:#bf360c
-
-    L1["1 · IDENTITY<br/>persona.identity_layer() or `You are the {role} agent.`"]:::cache
-    L2["2 · CHARACTER<br/>working style — methodical, terse, etc."]:::cache
-    L3["3 · STAKE FRAMING<br/>one-sentence why-this-matters"]:::cache
-    L35["3.5 · TEAMMATE BRIEF (M1)<br/>roster + reputation snippet"]:::cache
-    L36["3.6 · MANIFESTO (M2)<br/>data/manifestos/default.md or per-project"]:::cache
-    L37["3.7 · PROJECT RULES (§36)<br/>data/projects/{id}/persona_rules/{persona_id}.md + _shared.md"]:::cache
-    L38["3.8 · PROJECT CONTEXT (Phase K)<br/>roadmap.md — the team's shared understanding"]:::cache
-    L4["4 · RECALLED MEMORY<br/>persona.recall(task).render_for_prompt()"]:::vol
-    L5["5 · BASE PROMPT + TOOL CATALOG<br/>system_prompt + ToolManifest.render_for_prompt()"]:::cache
-    L55["5.5 · PROTOCOL VOICE (M1)<br/>verbatim ≤12-word rules for COMMIT/VERIFY/etc."]:::cache
-    L6["6 · CHAIN-OF-THOUGHT PRIMER"]:::cache
-    L65["6.5 · AUTONOMY RULES (commit d2cdfb1)<br/>'START WORKING NOW. Make at least one tool call.'"]:::cache
-    L7["7 · POSITIVE FRAMING<br/>'Make this something you are proud of.'"]:::cache
-
-    Vol["VOLATILE SUFFIX<br/>current task · upstream context block ·<br/>iteration encouragement · pending AGENT_MESSAGE"]:::vol
-
-    L1 --> L2 --> L3 --> L35 --> L36 --> L37 --> L38 --> L4 --> L5 --> L55 --> L6 --> L65 --> L7 --> Vol
 ```
+   ┌──────────────────────────────────────────────────────────────────┐
+   │ 1 · IDENTITY                                            [cache]  │
+   │   persona.identity_layer() or "You are the {role} agent."        │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 2 · CHARACTER                                           [cache]  │
+   │   working style — methodical, terse, etc.                        │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 3 · STAKE FRAMING                                       [cache]  │
+   │   one-sentence why-this-matters                                  │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 3.5 · TEAMMATE BRIEF (M1)                               [cache]  │
+   │   roster + reputation snippet                                    │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 3.6 · MANIFESTO (M2)                                    [cache]  │
+   │   data/manifestos/default.md or per-project                      │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 3.7 · PROJECT RULES (§36)                               [cache]  │
+   │   data/projects/{id}/persona_rules/{persona_id}.md +             │
+   │   _shared.md                                                     │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 3.8 · PROJECT CONTEXT (Phase K)                         [cache]  │
+   │   roadmap.md — the team's shared understanding                   │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 4 · RECALLED MEMORY                                  [VOLATILE]  │
+   │   persona.recall(task).render_for_prompt()                       │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 5 · BASE PROMPT + TOOL CATALOG                          [cache]  │
+   │   system_prompt + ToolManifest.render_for_prompt()               │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 5.5 · PROTOCOL VOICE (M1)                               [cache]  │
+   │   verbatim ≤12-word rules for COMMIT/VERIFY/etc.                 │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 6 · CHAIN-OF-THOUGHT PRIMER                             [cache]  │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 6.5 · AUTONOMY RULES (commit d2cdfb1)                   [cache]  │
+   │   "START WORKING NOW. Make at least one tool call."              │
+   ├──────────────────────────────────────────────────────────────────┤
+   │ 7 · POSITIVE FRAMING                                    [cache]  │
+   │   "Make this something you are proud of."                        │
+   ╞══════════════════════════════════════════════════════════════════╡
+   │ VOLATILE SUFFIX                                      [VOLATILE]  │
+   │   current task · upstream context block ·                        │
+   │   iteration encouragement · pending AGENT_MESSAGE                │
+   └──────────────────────────────────────────────────────────────────┘
+```
+
+**Legend:**
+`[cache]` — the layer is sent with `cache_control: ephemeral` and reused
+across iterations. `[VOLATILE]` — the layer changes per call and forces
+a (small) cache miss for the suffix.
 
 ## Caching boundary
 
-Layers shaded green are **cacheable** because they are stable across an
+Layers marked `[cache]` are **cacheable** because they are stable across an
 iteration and across runs that hire the same persona on the same
 project. The Anthropic client opts in via `cache_system=True` (commit
 `7b1c54f`). Layer 4 (memory) is the only "stable but per-call" insertion
