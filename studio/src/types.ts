@@ -212,6 +212,37 @@ export interface SecretFinding {
   reason: string;
 }
 
+// ── Example projects (one-click templates) ─────────────────────────────────
+
+export type ExampleProjectCategory =
+  | "Coding"
+  | "Documentation"
+  | "Refactor"
+  | "Research";
+
+export interface ExampleProjectRequires {
+  source_repo: boolean;
+  hints: string[];
+}
+
+export interface ExampleProjectSummary {
+  id: string;
+  title: string;
+  category: ExampleProjectCategory;
+  icon: string;
+  summary: string;
+  details: string;
+  default_project_id: string;
+  default_goal: string;
+  requires: ExampleProjectRequires;
+  has_seed_inputs: boolean;
+}
+
+export interface InstantiateExampleProjectResponse {
+  project: ProjectConfig;
+  from_template: string;
+}
+
 // ── Task desks (M3.5 §38.12) ───────────────────────────────────────────────
 
 export interface TaskRef {

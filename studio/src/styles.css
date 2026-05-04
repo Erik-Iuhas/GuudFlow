@@ -577,6 +577,17 @@ button.small { padding: 2px 8px; font-size: 12px; }
 .scenario-card { transition: border-color 0.15s; }
 .scenario-card.selected { border-color: #2563eb; }
 
+/* ─── Example project gallery (one-click templates) ───────────────────── */
+
+.example-card:hover {
+  border-color: #2563eb;
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.12);
+}
+.example-card:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 .persona-pick-list {
   display: flex; flex-direction: column; gap: 4px;
   max-height: 320px; overflow-y: auto;
