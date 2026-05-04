@@ -10,34 +10,42 @@ review architecture cooperate:
 
 ## 7a · ASK / ANSWER with timeout
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Dev as developer
-    participant Sched as Scheduler
-    participant WS as Workspace
-    participant Reqs as requirements_writer
-    participant Watch as deadline watcher
-
-    Dev->>Dev: needs clarification on auth requirement
-    Dev->>WS: emit_ask(ask_id, target=requirements_writer, question, deadline)
-    Dev->>Sched: interrupt(role=developer, kind="peer", payload=WaitingForPeer)
-    Note over Sched: developer parked.<br/>scheduler keeps running<br/>other unblocked agents.
-
-    Sched->>Watch: arm timeout(ask_id, deadline_ts)
-
-    alt requirements_writer answers in time
-      Reqs->>WS: read_protocol([ASK])
-      Reqs->>WS: emit_answer(ask_id, body)
-      WS-->>Sched: ANSWER signal observed
-      Sched->>Dev: resume(token, value=answer)
-      Dev->>WS: continue work
-    else deadline elapses
-      Watch->>WS: post PEER_TIMEOUT(ask_id, reason)
-      WS-->>Sched: PEER_TIMEOUT observed
-      Sched->>Dev: resume(token, value=None)
-      Dev->>WS: emit_request_skip(reason="PEER_UNRESPONSIVE")
-    end
+```
+Dev      Sched        WS        Reqs        Watch
+ │         │           │          │           │
+ │ needs clarification on auth requirement
+ │
+ │ emit_ask(ask_id, target=requirements_writer, question, deadline)
+ ├──────────────────► │           │           │
+ │ interrupt(role=developer, kind="peer", payload=WaitingForPeer)
+ ├────────► │         │           │           │
+ │          │  developer parked.  │           │
+ │          │  scheduler keeps running other unblocked agents.
+ │          │
+ │          │ arm timeout(ask_id, deadline_ts)
+ │          ├────────────────────────────────►│
+ │
+ ├─ requirements_writer answers in time ─────────────────────────┐
+ │          │           │          │           │                  │
+ │          │           │ read_protocol([ASK])                    │
+ │          │           ◄──────────┤                              │
+ │          │           │ emit_answer(ask_id, body)               │
+ │          │           ◄──────────┤                              │
+ │          │ ANSWER signal observed                              │
+ │          ◄───────────┤                                         │
+ │ resume(token, value=answer)                                    │
+ ◄──────────┤                                                     │
+ │ continue work                                                  │
+ │          │           │          │           │                  │
+ ├─ deadline elapses ────────────────────────────────────────────┐│
+ │          │ post PEER_TIMEOUT(ask_id, reason)                  ││
+ │          │           ◄──────────────────────────────────────┤ ││
+ │          │ PEER_TIMEOUT observed                              ││
+ │          ◄───────────┤                                         │
+ │ resume(token, value=None)                                      │
+ ◄──────────┤                                                     │
+ │ emit_request_skip(reason="PEER_UNRESPONSIVE")                  │
+ │          │           │          │           │
 ```
 
 Rules from `core/scheduler.py` and `core/protocol.py`:
@@ -52,75 +60,99 @@ Rules from `core/scheduler.py` and `core/protocol.py`:
 
 ## 7b · REQUEST_SKIP escalation to tech_lead
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Dev as developer
-    participant Sched as Scheduler
-    participant WS as Workspace
-    participant TL as tech_lead
-    participant Watch as deadline watcher
-    participant Human as user
-
-    Dev->>WS: emit_request_skip(skip_id, reason, deadline)
-    Dev->>Sched: interrupt(role=developer, kind="skip", payload=WaitingForSkipConfirm)
-    Sched->>WS: notify tech_lead (event-driven, no depends_on)
-    Sched->>Watch: arm timeout(skip_id)
-    WS->>TL: spawn
-
-    alt tech_lead grants skip
-      TL->>WS: emit_skip_granted(skip_id, justification)
-      Sched->>Dev: resume(token, value=GRANTED)
-      Dev->>WS: continue with skip applied
-    else tech_lead denies
-      TL->>WS: emit_skip_denied(skip_id, reason)
-      Sched->>Dev: resume(token, value=DENIED)
-      Dev->>WS: re-attempt without skip
-    else SKIP_TIMEOUT — escalate to human
-      Watch->>WS: post SKIP_TIMEOUT(skip_id)
-      Sched->>WS: post HUMAN_NEEDED(question, context)
-      Human-->>WS: HUMAN_RESPONDED
-      Sched->>Dev: resume
-    end
+```
+Dev       Sched        WS        TL        Watch       Human
+ │          │           │          │          │           │
+ │ emit_request_skip(skip_id, reason, deadline)
+ ├──────────────────────►          │          │           │
+ │ interrupt(role=developer, kind="skip", payload=WaitingForSkipConfirm)
+ ├────────► │           │          │          │           │
+ │          │ notify tech_lead (event-driven, no depends_on)
+ │          ├──────────►│          │          │           │
+ │          │ arm timeout(skip_id) │          │           │
+ │          ├──────────────────────────────────►          │
+ │          │           │ spawn TL │          │           │
+ │          │           ├─────────►│          │           │
+ │
+ ├─ tech_lead grants skip ──────────────────────────────────────┐
+ │          │           │ emit_skip_granted(skip_id, …)         │
+ │          │           ◄──────────┤                            │
+ │ resume(token, value=GRANTED)                                 │
+ ◄──────────┤                                                   │
+ │ continue with skip applied                                   │
+ │
+ ├─ tech_lead denies ────────────────────────────────────────────┐
+ │          │           │ emit_skip_denied(skip_id, reason)      │
+ │          │           ◄──────────┤                             │
+ │ resume(token, value=DENIED)                                   │
+ ◄──────────┤                                                    │
+ │ re-attempt without skip                                       │
+ │
+ ├─ SKIP_TIMEOUT — escalate to human ────────────────────────────┐
+ │          │ post SKIP_TIMEOUT(skip_id)                         │
+ │          │           ◄────────────────────────────────────────┤
+ │          │ post HUMAN_NEEDED(question, context)               │
+ │          │           ◄──────────┤                             │
+ │          │           │ HUMAN_RESPONDED                        │
+ │          │           ◄────────────────────────────────────────┤ (user)
+ │ resume                                                         │
+ ◄──────────┤                                                    │
 ```
 
 ## 7c · Review rejection escalation
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Dev as developer
-    participant Rev as code_reviewer
-    participant WS as Workspace
-    participant Runner as AgentRunner
-    participant TL as tech_lead
+```
+Dev       Rev       WS        Runner       TL
+ │         │         │           │           │
+ │── iteration n ───────────────────────────────────────┐
+ │         │         │           │           │          │
+ │ emit_commit(...) + COMPLETE                         │
+ ├────────────────► │           │           │          │
+ │         │ read git-changed-files (capped diff)      │
+ │         ├────────►          │           │          │
+ │         │ emit_verify(PASS|FAIL per file)           │
+ │         ├────────►          │           │          │
+ │         │                                            │
+ │         ├─ all PASS ─────────────────────────────┐  │
+ │         │ │ APPROVED                              │  │
+ │         │ ├────────►                              │  │
+ │         │ │            merge agent/developer → main  │
+ │         │ │            ├──────────────►            │  │
+ │         │ └─────────────────────────────────────┘  │
+ │         │                                            │
+ │         ├─ any FAIL ─────────────────────────────┐  │
+ │         │ │ REJECTED + detail                     │  │
+ │         │ ├────────►                              │  │
+ │         │ │            increment rejection count │  │
+ │         │ │            ├────────►                 │  │
+ │         │ └─────────────────────────────────────┘  │
+ │         │                                            │
+ └─────────┴───────────────────────────────────────────┘ (loop until threshold)
 
-    loop iteration n
-      Dev->>WS: emit_commit(...) + COMPLETE
-      Rev->>WS: read git-changed-files (capped diff)
-      Rev->>WS: emit_verify(PASS|FAIL per file)
-      alt all PASS
-        Rev->>WS: APPROVED
-        Runner->>WS: merge agent/developer → main
-      else any FAIL
-        Rev->>WS: REJECTED + detail
-        Runner->>WS: increment rejection count
-      end
-    end
+  ── rejection threshold reached (default 2 — project config) ──
 
-    Note over Runner: rejection threshold reached<br/>(default 2 — project config)
-
-    Runner->>WS: post ESCALATION
-    WS->>TL: tech_lead spawns event-driven
-    TL->>WS: read prior REJECTED + commits
-    TL->>WS: emit_action(target=developer, FIX|REVISIT|APPROVE)
-    alt tech_lead approves
-      TL->>WS: APPROVED
-      Runner->>WS: force-merge to main
-    else tech_lead requires fix
-      TL->>WS: REJECTED + specific guidance
-      Runner->>Dev: respawn iteration n+1
-    end
+           │         │ post ESCALATION                │
+           │         ◄──────────────┤                 │
+           │         │ tech_lead spawns event-driven  │
+           │         ├──────────────────────────────► │
+           │         │ read prior REJECTED + commits  │
+           │         ◄──────────────────────────────┤
+           │         │ emit_action(target=developer, FIX|REVISIT|APPROVE)
+           │         ◄──────────────────────────────┤
+           │
+           ├─ tech_lead approves ──────────────────────┐
+           │ │ APPROVED                                │
+           │ ◄──────────────────────────────────────┤  │
+           │ │           force-merge to main          │
+           │ │           ├────────►                   │  │
+           │ └────────────────────────────────────────┘
+           │
+           ├─ tech_lead requires fix ──────────────────┐
+           │ │ REJECTED + specific guidance            │
+           │ ◄──────────────────────────────────────┤  │
+           │ │           respawn iteration n+1        │  │
+           │ │           ├──────► (Dev)               │  │
+           │ └────────────────────────────────────────┘
 ```
 
 ## Why event-driven `tech_lead` and `IT` are not in `depends_on`

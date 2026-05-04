@@ -6,25 +6,35 @@ confidence is recency-weighted, and reconciliation runs after every run.
 
 ## 8a · Memory injection at run start
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Runner as AgentRunner
-    participant Disk as data/personas/{id}/
-    participant P as Persona
-    participant Agent as BaseAgent
-    participant LLM as LLMClient
-
-    Runner->>Disk: read profile.json, episodes.jsonl, patterns.json,<br/>antipatterns.json, style.json, reputation.json, history.json
-    Runner->>P: Persona.from_files(...)
-    Runner->>Agent: bind persona → agent slot
-    Agent->>P: identity_layer / character_layer / stake_layer
-    Agent->>P: recall(current_task)
-    P->>P: tag-overlap + recency-weighted confidence<br/>(compute_confidence, half_life)
-    P-->>Agent: MemoryRecall(patterns, antipatterns, episodes)
-    Agent->>Agent: effective_system_prompt() composes layers<br/>1 identity · 2 character · 3 stake ·<br/>3.5 teammate brief · 3.6 manifesto ·<br/>3.7 project_rules · 3.8 project_context ·<br/>4 memory · 5 base + tools · 5.5 protocol voice ·<br/>6 CoT primer · 7 positive framing
-    Agent->>LLM: complete(system, messages, tools, cache_system=True)
-    LLM-->>Agent: response (cache_read_tokens > 0 on iter 2+)
+```
+Runner         Disk            Persona         BaseAgent         LLM
+  │             │                 │                │              │
+  │ read profile.json, episodes.jsonl, patterns.json,
+  │      antipatterns.json, style.json, reputation.json, history.json
+  ├────────────►│                 │                │              │
+  │ Persona.from_files(...)                        │              │
+  ├────────────────────────────►│                  │              │
+  │ bind persona → agent slot                      │              │
+  ├────────────────────────────────────────────────►              │
+  │             │                 │ identity_layer / character_layer / stake_layer
+  │             │                 ◄──────────────┤                │
+  │             │                 │ recall(current_task)
+  │             │                 ◄──────────────┤                │
+  │             │                 │ tag-overlap + recency-weighted confidence
+  │             │                 │   (compute_confidence, half_life)
+  │             │                 │ MemoryRecall(patterns, antipatterns, episodes)
+  │             │                 ├──────────────►                │
+  │             │                 │ effective_system_prompt() composes layers
+  │             │                 │   1 identity · 2 character · 3 stake ·
+  │             │                 │   3.5 teammate brief · 3.6 manifesto ·
+  │             │                 │   3.7 project_rules · 3.8 project_context ·
+  │             │                 │   4 memory · 5 base + tools · 5.5 protocol voice ·
+  │             │                 │   6 CoT primer · 6.5 autonomy · 7 positive framing
+  │             │                 │ complete(system, messages, tools, cache_system=True)
+  │             │                 │                ├─────────────►│
+  │             │                 │                │ response (cache_read_tokens > 0
+  │             │                 │                │            on iter 2+)
+  │             │                 │                ◄─────────────┤
 ```
 
 The system prompt is sent with `cache_system=True`. Because the stable
@@ -35,56 +45,76 @@ every iteration after the first.
 
 ## 8b · Post-run synthesis (memory_writer)
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Runner as AgentRunner
-    participant MW as memory_writer
-    participant WS as Workspace
-    participant P as Persona
-    participant LLM as LLMClient (SOLID tier)
-    participant Disk as data/personas/{id}/
-
-    Runner->>MW: spawn at end-of-run with run summary
-    MW->>WS: read board (commits, verifies, approvals, rejects, scores)
-    MW->>WS: read git log + final artifacts
-
-    MW->>LLM: distil patterns (DESIGN §F.3.0)
-    LLM-->>MW: candidate Pattern objects with source_episodes
-
-    MW->>LLM: detect pattern flips (§F.3.2)
-    LLM-->>MW: patterns to flip → anti-patterns
-
-    MW->>P: append Episode(run_id, outcome, files, score)
-    MW->>P: update Pattern.confidence by lifecycle rules<br/>+0.05 applied&succeeded · -0.15 applied&failed
-    MW->>P: WorkingStyle drift from observed behaviour
-    MW->>P: Reputation bucket update (production vs training)
-    MW->>P: history.json append (atomic + rotation)
-
-    P->>Disk: persist all six files
-    MW-->>Runner: synthesis complete signal
+```
+Runner       MW         WS         Persona        LLM (SOLID)        Disk
+  │           │          │            │                │                │
+  │ spawn at end-of-run with run summary
+  ├──────────►│          │            │                │                │
+  │           │ read board (commits, verifies, approvals, rejects, scores)
+  │           ├─────────►│            │                │                │
+  │           │ read git log + final artifacts
+  │           ├─────────►│            │                │                │
+  │           │ distil patterns (DESIGN §F.3.0)
+  │           ├──────────────────────────────────────►│                │
+  │           │ candidate Pattern objects with source_episodes
+  │           ◄──────────────────────────────────────┤                │
+  │           │ detect pattern flips (§F.3.2)
+  │           ├──────────────────────────────────────►│                │
+  │           │ patterns to flip → anti-patterns
+  │           ◄──────────────────────────────────────┤                │
+  │           │ append Episode(run_id, outcome, files, score)
+  │           ├─────────────────────►│                │                │
+  │           │ update Pattern.confidence by lifecycle rules
+  │           │   +0.05 applied & succeeded
+  │           │   −0.15 applied & failed
+  │           ├─────────────────────►│                │                │
+  │           │ WorkingStyle drift from observed behaviour
+  │           ├─────────────────────►│                │                │
+  │           │ Reputation bucket update (production vs training)
+  │           ├─────────────────────►│                │                │
+  │           │ history.json append (atomic + rotation)
+  │           ├─────────────────────►│                │                │
+  │           │            │ persist all six files                    │
+  │           │            ├───────────────────────────────────────►│
+  │ synthesis complete signal
+  ◄──────────┤
 ```
 
 ## 8c · Pattern lifecycle states
 
-```mermaid
-stateDiagram-v2
-    [*] --> emerging: first observation
-
-    emerging --> active: 3+ source_episodes,<br/>confidence ≥ 0.6
-    emerging --> archived: no reinforcement<br/>after N runs
-
-    active --> declining: confidence drops below 0.5<br/>(after recency decay or contradictions)
-    active --> superseded: a more specific pattern<br/>covers same applies_when
-
-    declining --> active: regains confidence<br/>(applied & succeeded)
-    declining --> archived: stays below 0.4 for M runs
-
-    superseded --> [*]
-    archived --> [*]
-
-    active --> antipattern: flip detected<br/>(§F.3.2 LLM-driven)
-    antipattern --> [*]
+```
+                         ┌── first observation ──┐
+                         ▼                       │
+                    ┌───────────┐                │
+                    │ emerging  │                │
+                    └─────┬─────┘                │
+              3+ source_episodes,                │
+              confidence ≥ 0.6 │                 │
+                              ▼                  │
+   ┌─── no reinforcement ──┐ ┌───────────┐       │
+   │   after N runs        ├►│  active   │◄──────┤
+   ▼                       │ └─────┬─────┘ regains confidence
+┌──────────┐               │       │ confidence < 0.5 (after recency
+│ archived │               │       │ decay or contradictions)
+└──────────┘               │       ▼
+       ▲                   │ ┌───────────┐
+       │ stays below       │ │ declining │
+       │ 0.4 for M runs    │ └─────┬─────┘
+       │                   │       │
+       │                   │       │ a more specific pattern covers
+       │                   │       │ same applies_when
+       │                   │       ▼
+       │                   │ ┌────────────┐
+       │                   │ │ superseded │
+       │                   │ └────────────┘
+       │                   │
+       │                   │ flip detected (§F.3.2 LLM-driven)
+       │                   ▼
+       │             ┌────────────┐
+       │             │ antipattern│
+       │             └────────────┘
+       │
+       └─── (terminal) end-state for archived/superseded/antipattern
 ```
 
 States are stored on `Pattern.state`. Confidence is decayed using a
@@ -93,26 +123,24 @@ recency half-life (90d default — see `compute_confidence` in
 
 ## 8d · Two reputation buckets, one episode log
 
-```mermaid
-classDiagram
-    class Reputation {
-        +production: ReputationBucket
-        +training: TrainingReputation
-    }
-    class ReputationBucket {
-        +runs: int
-        +approvals: int
-        +rejections: int
-        +avg_iterations: float
-        +per_domain: dict~str, score~
-    }
-    class TrainingReputation {
-        +scenarios_completed: int
-        +tournament_wins: int
-        +graduated: bool
-    }
-    Reputation --> ReputationBucket
-    ReputationBucket <|-- TrainingReputation
+```
+   ┌───────────────────────────────┐
+   │ Reputation                    │
+   ├───────────────────────────────┤
+   │ + production : ReputationBucket │
+   │ + training   : TrainingReputation│
+   └────┬──────────────────────┬───┘
+        │                      │
+        ▼                      ▼
+   ┌──────────────────┐   ┌──────────────────────┐
+   │ ReputationBucket │   │ TrainingReputation   │
+   │ + runs           │   │  (extends bucket)    │
+   │ + approvals      │   │ + scenarios_completed│
+   │ + rejections     │   │ + tournament_wins    │
+   │ + avg_iterations │   │ + graduated : bool   │
+   │ + per_domain :   │   └──────────────────────┘
+   │   dict[str,score]│
+   └──────────────────┘
 ```
 
 Production runs and training runs **share** `episodes.jsonl` (the raw

@@ -9,28 +9,62 @@ thing that needs to know about it.
 
 The values come straight from `core/workspace.py::AgentState`.
 
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING: configured
+```
+                          ┌──────────────────┐
+                ┌─────────► PENDING          │
+                │         └────────┬─────────┘
+                │      depends_on  │
+                │      satisfied   ▼
+                │         ┌──────────────────┐
+                │         │ READY            │
+                │         └────────┬─────────┘
+                │      scheduler.  │
+                │      _spawn      ▼
+                │         ┌──────────────────┐
+                │         │ RUNNING          │◄──┐
+                │         └─┬──┬──┬──┬──┬───┘   │
+                │           │  │  │  │  │       │
+                │           │  │  │  │  │ post  │
+                │           │  │  │  │  │ COMPLETE
+                │           │  │  │  │  │
+                │           │  │  │  │  ▼ rejection respawn (iter += 1)
+                │           │  │  │  │  ┌────────────┐
+                │           │  │  │  │  │ COMPLETE   │
+                │           │  │  │  │  └─────┬──────┘
+                │           │  │  │  │        │
+                │           │  │  │  │ unhandled exception
+                │           │  │  │  │ or post FAILED
+                │           │  │  │  ▼
+                │           │  │  │  ┌────────────┐
+                │           │  │  │  │ FAILED     │
+                │           │  │  │  └────────────┘
+                │           │  │  │
+                │           │  │  │ ask_human() / request_visual_feedback()
+                │           │  │  ▼
+                │           │  │  ┌─────────────────────┐
+                │           │  │  │ WAITING_FOR_HUMAN   │── HUMAN_RESPONDED ──┐
+                │           │  │  └─────────────────────┘                     │
+                │           │  │                                              │
+                │           │  │ emit_ask + interrupt(peer)                   │
+                │           │  ▼                                              │
+                │           │  ┌────────────────────┐                         │
+                │           │  │ WAITING_FOR_PEER   │── ANSWER received ──┐  │
+                │           │  └────────────────────┘   or PEER_TIMEOUT   │  │
+                │           │                                              │  │
+                │           │ emit_request_skip                            │  │
+                │           ▼                                              ▼  ▼
+                │   ┌──────────────────────────┐                ┌──────────────┐
+                │   │ WAITING_FOR_SKIP_CONFIRM │── GRANTED/   ─►│  RUNNING     │
+                │   └────────────┬─────────────┘   DENIED       └──────────────┘
+                │                │ GRANTED + opts to step out
+                │                ▼
+                │           ┌──────────┐
+                │           │ SAT_OUT  │── counts as complete for downstream
+                │           └──────────┘
+                │
+                └─── (transition flow loops back through respawns)
 
-    PENDING --> READY: depends_on satisfied
-    READY --> RUNNING: scheduler._spawn
-
-    RUNNING --> COMPLETE: post COMPLETE
-    RUNNING --> FAILED: unhandled exception<br/>or post FAILED
-    RUNNING --> WAITING_FOR_HUMAN: ask_human()<br/>or request_visual_feedback()
-    RUNNING --> WAITING_FOR_PEER: emit_ask + interrupt(peer)
-    RUNNING --> WAITING_FOR_SKIP_CONFIRM: emit_request_skip
-
-    WAITING_FOR_HUMAN --> RUNNING: HUMAN_RESPONDED
-    WAITING_FOR_PEER --> RUNNING: ANSWER received<br/>or PEER_TIMEOUT
-    WAITING_FOR_SKIP_CONFIRM --> RUNNING: SKIP_GRANTED / SKIP_DENIED
-    WAITING_FOR_SKIP_CONFIRM --> SAT_OUT: SKIP_GRANTED + opts to step out
-
-    COMPLETE --> RUNNING: rejection respawn (iter += 1)
-    SAT_OUT --> [*]: counts as complete for downstream
-    COMPLETE --> [*]
-    FAILED --> [*]
+   Terminal states: COMPLETE, FAILED, SAT_OUT
 ```
 
 ### Notes
@@ -44,50 +78,102 @@ stateDiagram-v2
 
 ## 9b · Run state machine (top-level orchestration)
 
-```mermaid
-stateDiagram-v2
-    [*] --> PROPOSAL: POST /api/meta/propose
+```
+                      POST /api/meta/propose
+                              ▼
+                    ┌──────────────────┐
+                    │ PROPOSAL         │
+                    └─────────┬────────┘
+              meta-agent emits TeamProposal
+                              ▼
+                    ┌────────────────────┐  user discards   ┌───────────┐
+                    │ AWAITING_APPROVAL  │─────────────────►│ CANCELLED │
+                    └─────────┬──────────┘                  └───────────┘
+              POST /api/invoke (approved)
+                              ▼
+                    ┌──────────────────┐
+                    │ QUEUED           │
+                    └─────────┬────────┘
+              JobRunner picks up job
+                              ▼
+                    ┌──────────────────┐
+                    │ INITIALIZING     │
+                    └─────────┬────────┘
+              run_initializer.seed_run done
+                              ▼
+                    ┌──────────────────┐◄──────────────────┐
+        ┌──────────►│ RUNNING          │                   │
+        │           └─┬──┬──┬──┬──┬───┘                    │
+        │             │  │  │  │  │                        │
+        │             │  │  │  │  │ HUMAN_NEEDED set       │
+        │             │  │  │  │  ▼                        │
+        │             │  │  │  │  ┌─────────┐              │
+        │             │  │  │  │  │ PAUSED  ├── HUMAN_RESPONDED
+        │             │  │  │  │  └─────────┘              │
+        │             │  │  │  │                            │
+        │             │  │  │  │ rate-limit retry exhausted │
+        │             │  │  │  ▼                            │
+        │             │  │  │  ┌─────────┐  backoff complete │
+        │             │  │  │  │ BLOCKED ├──────────────────┘
+        │             │  │  │  └─────────┘
+        │             │  │  │
+        │             │  │  │ rejection threshold tripped
+        │             │  │  ▼
+        │             │  │  ┌────────────┐  tech_lead resolves
+        │             │  │  │ ESCALATED  ├───────────────────┘
+        │             │  │  └─┬──────┬───┘
+        │             │  │    │      │ tech_lead can't resolve
+        │             │  │    │      ▼
+        │             │  │    │     ┌────────┐
+        │             │  │    │     │ FAILED │
+        │             │  │    │     └────────┘
+        │             │  │    │ tech_lead approves
+        │             │  │    ▼
+        │             │  │   ┌──────────┐
+        │             │  │   │ APPROVED │
+        │             │  │   └────┬─────┘
+        │             │  │        │
+        │             │  ▼ deadline_at passed
+        │             │  ┌────────────────────┐
+        │             │  │ DEADLINE_EXCEEDED  │
+        │             │  └──────┬─────────────┘
+        │             ▼         │ cap hit
+        │      ┌─────────────────┐
+        │      │ MAX_ITERATIONS  │
+        │      └─────┬───────────┘
+        │            │ nothing spawnable + nothing running
+        │            ▼
+        │     ┌──────────┐
+        │     │ STUCK    │── FAILED (terminal)
+        │     └──────────┘
+        │
+        │     reviewer or tech_lead → APPROVED
+        ▼
+   ┌──────────┐
+   │ APPROVED │── merge branches → main ─► POSTPROCESS
+   └──────────┘
+                                          ▼
+                                ┌────────────────┐
+                                │ POSTPROCESS    │ (also entered from
+                                └─────┬──────────┘  DEADLINE_EXCEEDED,
+                                      │             MAX_ITERATIONS)
+                                      ▼ spawn memory_writer
+                                ┌────────────────┐
+                                │ MEMORY_WRITE   │
+                                └─────┬──────────┘
+                                      │ episodes / patterns / reputation persisted
+                                      ▼
+                                ┌────────────────┐
+                                │ COMPLETE (end) │
+                                └────────────────┘
 
-    PROPOSAL --> AWAITING_APPROVAL: meta-agent emits TeamProposal
-    AWAITING_APPROVAL --> QUEUED: POST /api/invoke (approved)
-    AWAITING_APPROVAL --> CANCELLED: user discards proposal
-
-    QUEUED --> INITIALIZING: JobRunner picks up job
-    INITIALIZING --> RUNNING: run_initializer.seed_run done
-
-    RUNNING --> PAUSED: HUMAN_NEEDED set
-    PAUSED --> RUNNING: HUMAN_RESPONDED
-    RUNNING --> BLOCKED: rate-limit retry exhausted
-    BLOCKED --> RUNNING: backoff complete (BLOCKED signal cleared)
-
-    RUNNING --> APPROVED: reviewer or tech_lead → APPROVED
-    RUNNING --> ESCALATED: rejection threshold tripped
-    ESCALATED --> RUNNING: tech_lead resolves
-    ESCALATED --> APPROVED: tech_lead approves
-    ESCALATED --> FAILED: tech_lead can't resolve
-
-    RUNNING --> DEADLINE_EXCEEDED: workspace.deadline_at passed
-    RUNNING --> MAX_ITERATIONS: cap hit
-    RUNNING --> STUCK: nothing spawnable + nothing running
-
-    APPROVED --> POSTPROCESS: merge branches → main
-    POSTPROCESS --> MEMORY_WRITE: spawn memory_writer
-    MEMORY_WRITE --> COMPLETE: episodes / patterns / reputation persisted
-
-    DEADLINE_EXCEEDED --> POSTPROCESS
-    MAX_ITERATIONS --> POSTPROCESS
-    STUCK --> FAILED
-    FAILED --> [*]
-    COMPLETE --> [*]
-    CANCELLED --> [*]
-
-    state RUNNING {
-        [*] --> ResumePending
-        ResumePending --> RUN_LOOP: run_loader.restore_workspace<br/>(if continuation)
-        ResumePending --> FRESH: new run
-        FRESH --> RUN_LOOP
-        RUN_LOOP --> [*]
-    }
+   RUNNING (resume detail):
+     ┌── ResumePending ──┐
+     │   ├─ continuation: run_loader.restore_workspace
+     │   └─ FRESH (new run)
+     │       ▼
+     │     RUN_LOOP
+     └────────────────────┘
 ```
 
 ### Notes
@@ -105,13 +191,23 @@ stateDiagram-v2
 
 ## 9c · Approval gate (per-deliverable)
 
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING: ApprovalRequest pushed by agent
-    PENDING --> GRANTED: user clicks Approve in studio
-    PENDING --> DENIED: user rejects with reason
-    GRANTED --> [*]: APPROVAL_GRANTED signal
-    DENIED --> [*]: APPROVAL_DENIED signal
+```
+                ApprovalRequest pushed by agent
+                          ▼
+                  ┌───────────────┐
+                  │ PENDING       │
+                  └─┬─────────────┘
+                    │
+        ┌───────────┼───────────────┐
+        │ user clicks Approve       │ user rejects
+        ▼                           ▼
+   ┌──────────┐               ┌──────────┐
+   │ GRANTED  │               │ DENIED   │
+   └─────┬────┘               └─────┬────┘
+         │ APPROVAL_GRANTED         │ APPROVAL_DENIED signal
+         │ signal                   │
+         ▼                          ▼
+       (end)                       (end)
 ```
 
 Approval gates exist independently of reviewer agents — a user can be
