@@ -1,7 +1,9 @@
 // Thin API client. Handles auth + JSON shape so views can stay focused.
 
 import type {
+  ExampleProjectSummary,
   InputsState,
+  InstantiateExampleProjectResponse,
   InvokeOutcome,
   InvokeResponse,
   MetaProposal,
@@ -109,6 +111,27 @@ export const projectsApi = {
       "PUT",
       `/api/projects/${encodeURIComponent(id)}/roadmap`,
       { content },
+      true,
+    ),
+};
+
+// ── Example projects (one-click templates) ────────────────────────────────
+
+export const exampleProjectsApi = {
+  list: () =>
+    request<ExampleProjectSummary[]>("GET", "/api/example-projects"),
+  /** Create a real project from a template. Pass `project_id` to use an
+   *  explicit slug (collisions return 409); otherwise the backend
+   *  auto-suffixes the template's default. Pass `goal` to override the
+   *  template's default goal. */
+  instantiate: (
+    templateId: string,
+    body: { project_id?: string; goal?: string } = {},
+  ) =>
+    request<InstantiateExampleProjectResponse>(
+      "POST",
+      `/api/example-projects/${encodeURIComponent(templateId)}/instantiate`,
+      body,
       true,
     ),
 };

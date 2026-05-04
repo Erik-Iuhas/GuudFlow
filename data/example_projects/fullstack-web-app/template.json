@@ -1,0 +1,72 @@
+{
+  "id": "example-fullstack-web-app",
+  "title": "Full-stack web app",
+  "category": "Coding",
+  "icon": "🌐",
+  "summary": "Backend + frontend + tests in parallel, then architect review.",
+  "details": "A four-agent team that splits a small full-stack web app three ways. The backend dev and frontend dev work in parallel on their own git branches; the test writer drafts integration tests against the contract they agree on; a final architect reviewer integrates and signs off. Edit the project goal to describe what you want built — anything from a kanban board to a polls app to a markdown notes tool.\n\nShows off: parallel fan-out + join, working group, architect (final) reviewer pattern, code-exec for running tests.",
+  "default_project_id": "fullstack-web-app",
+  "default_goal": "Build a small full-stack web app described as follows: <replace this with a one-paragraph spec — what the app does, the main views, and the data model>. Use a Python backend (FastAPI by default) and a vanilla HTML/JS/CSS frontend. Ship with at least one integration test that exercises the running app end-to-end.",
+  "requires": {
+    "source_repo": false,
+    "hints": [
+      "Edit the goal to describe the app you want built.",
+      "Optionally upload mockups or a spec via Inputs."
+    ]
+  },
+  "project_template": {
+    "max_iterations": 5,
+    "approval_gates": {
+      "pre_run_cost_preview": false,
+      "heavy_tier_mid_run_dispatch": false,
+      "iteration_breach_at": 0,
+      "per_iteration": false,
+      "token_budget_usd": null
+    },
+    "rbac": {
+      "backend_dev": { "allowed_scopes": ["fs-write", "fs-edit", "fs-write-batch", "fs-edit-batch", "code-exec"] },
+      "frontend_dev": { "allowed_scopes": ["fs-write", "fs-edit", "fs-write-batch", "fs-edit-batch"] },
+      "test_writer": { "allowed_scopes": ["fs-write", "fs-edit", "code-exec"] },
+      "final_reviewer": { "allowed_scopes": [] }
+    },
+    "agents": [
+      {
+        "role": "backend_dev",
+        "description": "Implements the server side and the JSON contract.",
+        "system_prompt": "You implement the server side of whatever app the project goal describes. Default stack: Python + FastAPI, with `pyproject.toml` or a minimal `requirements.txt`. Define the JSON contract early (routes, request/response shapes) and write it to `docs/api_contract.md` before frontend_dev starts hand-coding against guesses. Land code under `backend/`. Run the server with `code-exec` to sanity-check that imports succeed and the app boots. Hand off via a clear COMMIT message naming the endpoints you shipped.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "fs-write-batch", "fs-edit-batch", "code-exec", "code-outline"],
+        "persona_id": "sarah-backend-v1",
+        "model_tier": "solid"
+      },
+      {
+        "role": "frontend_dev",
+        "description": "Implements the UI against the backend's JSON contract.",
+        "system_prompt": "You implement the client side. Default stack: a single static page (HTML + vanilla JS + CSS) under `frontend/`. Read `docs/api_contract.md` before writing fetch calls — never invent endpoints. If the contract is missing, ASK backend_dev rather than guessing. Keep the build trivial: no bundler unless the goal explicitly requires one. Hand off via a COMMIT that names the views you shipped.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "fs-write-batch", "fs-edit-batch"],
+        "persona_id": "mike-frontend-v1",
+        "model_tier": "solid"
+      },
+      {
+        "role": "test_writer",
+        "description": "Writes integration tests that exercise the running app.",
+        "depends_on": ["backend_dev"],
+        "system_prompt": "You write integration tests that exercise the running app end-to-end (HTTP requests against a live server is fine — start it inside the test fixture). Use `pytest` + `httpx` or `requests`. Tests land under `tests/` and must run cleanly via `pytest -q` invoked through `code-exec`. Don't write unit tests for individual functions — that's the dev's job, not yours. Cover the golden path plus one error case per endpoint.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "code-exec", "code-outline"],
+        "model_tier": "fast"
+      },
+      {
+        "role": "final_reviewer",
+        "description": "Architect reviewer — integrates and signs off.",
+        "depends_on": ["backend_dev", "frontend_dev", "test_writer"],
+        "system_prompt": "You are the final architect reviewer. By the time you run, the three branches have merged. Verify three things: (1) the contract in `docs/api_contract.md` matches what the backend actually serves, (2) the frontend talks to real endpoints (no hard-coded mocks left in), (3) `pytest -q` passes. If any of these fail, emit a [VERIFY] FAIL with a specific detail string pointing at the file and line. Otherwise APPROVE.",
+        "declared_local_tools": ["fs-read", "fs-list", "git-diff", "git-log", "code-outline", "code-exec"],
+        "persona_id": "alex-code_reviewer-v1",
+        "model_tier": "solid",
+        "agent_class_role_type": "code_reviewer",
+        "is_reviewer": true,
+        "is_final_reviewer": true,
+        "max_tool_iterations": 10
+      }
+    ]
+  }
+}

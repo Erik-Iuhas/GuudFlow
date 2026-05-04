@@ -1,0 +1,81 @@
+{
+  "id": "example-algorithm-with-benchmarks",
+  "title": "Algorithm with benchmarks",
+  "category": "Coding",
+  "icon": "📈",
+  "summary": "Implement, test, and benchmark an algorithm — with real timing measurements.",
+  "details": "A four-agent team that takes an algorithm spec to a tested + benchmarked implementation. The implementer writes the algorithm and a clean reference API; the test writer drives correctness with edge cases; the benchmarker runs real timing measurements via `code-exec` and produces a results table comparing your implementation against a baseline (often the stdlib equivalent). The reviewer checks both correctness and performance — if the benchmark regresses the spec's complexity claim, escalation kicks in.\n\nShows off: code-exec heavy workflow, parallel test+benchmark, math-eval for complexity sanity checks, iteration loop on test fail, performance escalation.",
+  "default_project_id": "algorithm-impl",
+  "default_goal": "Implement the algorithm described below in Python with a full pytest suite and a benchmark script.\n\nSpec: <replace this with the algorithm — what it computes, the input/output contract, the expected time/space complexity, and any reference (paper, Wikipedia link, prior implementation)>.\n\nDeliverables: implementation under `src/`, pytest suite under `tests/` covering edge cases (empty input, single element, worst case), `bench/benchmark.py` that runs and prints a results table comparing your implementation against the obvious baseline, and a `RESULTS.md` interpreting the numbers.",
+  "requires": {
+    "source_repo": false,
+    "hints": [
+      "Edit the goal to describe the algorithm and its contract.",
+      "Cite a reference implementation if you want one to benchmark against."
+    ]
+  },
+  "project_template": {
+    "max_iterations": 6,
+    "approval_gates": {
+      "pre_run_cost_preview": false,
+      "heavy_tier_mid_run_dispatch": false,
+      "iteration_breach_at": 3,
+      "per_iteration": false,
+      "token_budget_usd": null
+    },
+    "escalation_thresholds": { "tech_lead": 2 },
+    "rbac": {
+      "implementer": { "allowed_scopes": ["fs-write", "fs-edit", "fs-write-batch", "fs-edit-batch", "code-exec"] },
+      "test_writer": { "allowed_scopes": ["fs-write", "fs-edit", "code-exec"] },
+      "benchmarker": { "allowed_scopes": ["fs-write", "fs-edit", "code-exec"] },
+      "code_reviewer": { "allowed_scopes": [] },
+      "tech_lead": { "allowed_scopes": ["fs-write", "fs-edit"] }
+    },
+    "agents": [
+      {
+        "role": "implementer",
+        "description": "Implements the algorithm with a clean reference API.",
+        "system_prompt": "You implement the algorithm. Land the code under `src/<module>.py` with type hints throughout and a clean reference API — one public function or class as the entry point. Write a 5-10 line docstring on the entry point covering the contract, complexity, and any non-obvious invariants. Sanity-check with `code-exec` (import the module, run on a tiny input) before completing. Do NOT write the test suite or the benchmark — those are separate roles. Hand off via a COMMIT naming the entry point.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "code-exec", "code-outline", "math-eval"],
+        "model_tier": "solid"
+      },
+      {
+        "role": "test_writer",
+        "description": "Drives correctness with edge cases.",
+        "depends_on": ["implementer"],
+        "system_prompt": "You drive correctness. Read the implementer's entry-point docstring for the contract, then write a pytest suite that covers: (1) the empty / degenerate case, (2) a single-element case, (3) two or three normal cases with hand-computed expected output, (4) the worst case described in the spec. Where the spec cites a reference implementation, parametrize against it for randomized fuzzing (small sizes only). Run `pytest -q` via `code-exec` and confirm green.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "code-exec", "code-outline"],
+        "model_tier": "fast"
+      },
+      {
+        "role": "benchmarker",
+        "description": "Measures actual runtime and writes the results table.",
+        "depends_on": ["implementer"],
+        "system_prompt": "You measure actual runtime. Write `bench/benchmark.py` that times the entry point at three or four input sizes spanning ~2 orders of magnitude. Use `time.perf_counter` and the median of 5 runs per size. Compare against the obvious baseline — usually the Python stdlib equivalent (e.g. `sorted` for a sort, `bisect` for binary search) — or a brute-force reference. Run the benchmark via `code-exec` and write the actual numbers into `RESULTS.md` as a markdown table, with one paragraph interpreting them: does the measured curve match the spec's stated complexity? Use `math-eval` if you need to fit a curve.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "code-exec", "code-outline", "math-eval"],
+        "model_tier": "solid"
+      },
+      {
+        "role": "code_reviewer",
+        "description": "Reviews correctness and performance together.",
+        "depends_on": ["test_writer", "benchmarker"],
+        "system_prompt": "Review correctness and performance together. Check: (1) `pytest -q` passes, (2) the entry-point docstring describes the same complexity that `RESULTS.md` actually measured, (3) the implementation doesn't have obvious quadratic surprises (read it with `code-outline`). On a complexity mismatch (docstring says O(n log n) but the table shows linear scaling 10x worse than baseline), FAIL and ask the implementer to either fix the algorithm or correct the docstring. After two consecutive rejections this run escalates to the tech_lead.",
+        "declared_local_tools": ["fs-read", "fs-list", "git-diff", "git-log", "code-outline", "math-eval"],
+        "persona_id": "alex-code_reviewer-v1",
+        "model_tier": "solid",
+        "agent_class_role_type": "code_reviewer",
+        "is_reviewer": true,
+        "max_tool_iterations": 10
+      },
+      {
+        "role": "tech_lead",
+        "description": "Escalation handler — wakes only on repeated rejection.",
+        "system_prompt": "You wake when the code_reviewer has rejected twice in a row — usually on a performance mismatch the implementer can't resolve. Read the implementation, the test suite, and `RESULTS.md`. Either: (a) propose a concrete algorithmic change in `docs/tech_lead_plan.md` (cite the data structure or technique by name), or (b) loosen the spec's complexity claim with reasoning. The implementer iterates one more time after you write the plan.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-grep", "fs-write", "code-outline", "code-outline-batch", "git-diff", "git-log", "math-eval"],
+        "model_tier": "heavy",
+        "agent_class_role_type": "tech_lead",
+        "max_tool_iterations": 12
+      }
+    ]
+  }
+}

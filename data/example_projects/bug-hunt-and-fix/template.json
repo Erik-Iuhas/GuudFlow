@@ -1,0 +1,83 @@
+{
+  "id": "example-bug-hunt-and-fix",
+  "title": "Bug hunt & fix",
+  "category": "Coding",
+  "icon": "🐛",
+  "summary": "Investigate a real codebase, fix the bug, add a regression test, write an ADR.",
+  "details": "Attach a source repo (git URL or local path) under Inputs, then describe the symptom or paste a stack trace into the goal field. The investigator agent reads the actual code with `fs-grep`, `code-outline`, and `git-log` to localize the bug; the fixer makes the smallest change that resolves it; the test writer adds a regression test that fails before the fix and passes after; the reviewer signs off. Two consecutive rejections escalate to the tech_lead (Opus tier) for genuine reasoning.\n\nShows off: real source repo as input, investigation tooling, iteration loop, escalation to tech_lead, ADR output.",
+  "default_project_id": "bug-hunt",
+  "default_goal": "Investigate and fix the issue described below. The codebase is attached at `inputs/source_repo/`.\n\nSymptom / repro: <replace this with the symptom — error message, stack trace, or unexpected behaviour and the steps to reproduce>.\n\nDeliverables: (1) the smallest fix that resolves it, (2) a regression test that fails on `main` and passes after your fix, (3) a short ADR under `docs/adr/` explaining the root cause.",
+  "requires": {
+    "source_repo": true,
+    "hints": [
+      "Attach a source repo via Inputs → Git URL or Local path.",
+      "Paste the symptom / stack trace / repro into the goal."
+    ]
+  },
+  "project_template": {
+    "max_iterations": 6,
+    "consecutive_fail_threshold": 2,
+    "approval_gates": {
+      "pre_run_cost_preview": true,
+      "heavy_tier_mid_run_dispatch": true,
+      "iteration_breach_at": 3,
+      "per_iteration": false,
+      "token_budget_usd": null
+    },
+    "escalation_thresholds": { "tech_lead": 2 },
+    "rbac": {
+      "investigator": { "allowed_scopes": [] },
+      "fixer": { "allowed_scopes": ["fs-write", "fs-edit", "fs-write-batch", "fs-edit-batch"] },
+      "test_writer": { "allowed_scopes": ["fs-write", "fs-edit", "code-exec"] },
+      "code_reviewer": { "allowed_scopes": [] },
+      "tech_lead": { "allowed_scopes": ["fs-write", "fs-edit"] }
+    },
+    "agents": [
+      {
+        "role": "investigator",
+        "description": "Localizes the bug in the source repo.",
+        "system_prompt": "You localize bugs without touching code. Read the symptom from the project goal, then explore `inputs/source_repo/` with `fs-grep`, `code-outline`, `code-outline-batch`, `git-log`, and `git-read`. Produce `docs/investigation.md` with: (1) the symptom restated in your own words, (2) the suspected root cause with file/line references, (3) a one-paragraph reproduction recipe, (4) a list of files the fixer should touch. Do NOT write any fix code yourself — that's the fixer's job.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-grep", "fs-read_range", "code-outline", "code-outline-batch", "git-log", "git-read", "fs-write"],
+        "model_tier": "solid"
+      },
+      {
+        "role": "fixer",
+        "description": "Implements the minimal fix.",
+        "depends_on": ["investigator"],
+        "system_prompt": "You make the smallest change that resolves the bug. Read `docs/investigation.md` first — it tells you which files to touch. Resist the urge to refactor surrounding code. If the fix would touch files outside the investigator's list, ASK the investigator before expanding scope. Land your change as a focused commit; the message should reference the symptom, not the implementation.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "fs-write-batch", "fs-edit-batch", "code-outline", "git-diff"],
+        "persona_id": "sarah-backend-v1",
+        "model_tier": "solid"
+      },
+      {
+        "role": "test_writer",
+        "description": "Writes a regression test that pins the fix.",
+        "depends_on": ["fixer"],
+        "system_prompt": "You write the regression test that proves the bug stays fixed. Use whatever test framework the source repo already uses (pytest, unittest, jest — whatever you find). The test MUST: (1) fail when run against the pre-fix code (sanity-check by reverting the fix mentally — describe in a comment why it would fail), (2) pass against the current tree. Run the suite via `code-exec` and confirm green before completing.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-write", "fs-edit", "code-exec", "code-outline", "git-diff"],
+        "model_tier": "fast"
+      },
+      {
+        "role": "code_reviewer",
+        "description": "Reviews fix + test for correctness and scope.",
+        "depends_on": ["test_writer"],
+        "system_prompt": "Review the fix and the regression test. Check three things: (1) the fix is minimal and addresses the root cause from `docs/investigation.md`, not a symptom, (2) the regression test actually exercises the failure mode, (3) no unrelated changes snuck in (use `git-diff` aggressively). On FAIL, give a specific file/line; the fixer iterates. After two consecutive rejections this run escalates to the tech_lead automatically.",
+        "declared_local_tools": ["fs-read", "fs-list", "git-diff", "git-log", "code-outline"],
+        "persona_id": "alex-code_reviewer-v1",
+        "model_tier": "solid",
+        "agent_class_role_type": "code_reviewer",
+        "is_reviewer": true,
+        "max_tool_iterations": 8
+      },
+      {
+        "role": "tech_lead",
+        "description": "Escalation handler — wakes only when reviewer keeps rejecting.",
+        "system_prompt": "You wake when the code_reviewer has rejected the fix twice in a row — the team is stuck. Read `docs/investigation.md`, the latest fixer commit, and the reviewer's rejection details. You can either: (a) confirm the reviewer is right and direct the fixer to a different approach via a clear written plan in `docs/tech_lead_plan.md`, or (b) overrule the reviewer with explicit reasoning recorded in the same file. After this, the run resumes one more iteration.",
+        "declared_local_tools": ["fs-read", "fs-list", "fs-grep", "fs-write", "code-outline", "code-outline-batch", "git-diff", "git-log", "git-read"],
+        "model_tier": "heavy",
+        "agent_class_role_type": "tech_lead",
+        "max_tool_iterations": 12
+      }
+    ]
+  }
+}

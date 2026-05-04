@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ApiError, projectsApi, runsApi } from "../api";
-import type { ProjectConfig, RunMeta } from "../types";
+import { ApiError, exampleProjectsApi, projectsApi, runsApi } from "../api";
+import type { ExampleProjectSummary, ProjectConfig, RunMeta } from "../types";
 
 export function Projects() {
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
   const [activeRuns, setActiveRuns] = useState<RunMeta[]>([]);
+  const [examples, setExamples] = useState<ExampleProjectSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -14,15 +15,38 @@ export function Projects() {
   const [blankGoal, setBlankGoal] = useState("");
   const [blankBusy, setBlankBusy] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
+  const [openTemplate, setOpenTemplate] =
+    useState<ExampleProjectSummary | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     void load();
     void loadActiveRuns();
+    void loadExamples();
     const timer = setInterval(() => void loadActiveRuns(), 5000);
     return () => clearInterval(timer);
   }, []);
+
+  async function loadExamples() {
+    try {
+      setExamples(await exampleProjectsApi.list());
+    } catch {
+      // Non-fatal — gallery just won't render.
+    }
+  }
+
+  async function handleTemplateInstantiated(
+    project: ProjectConfig,
+  ): Promise<void> {
+    setProjects((prev) =>
+      prev.find((p) => p.project_id === project.project_id)
+        ? prev
+        : [...prev, project],
+    );
+    setOpenTemplate(null);
+    navigate(`/projects/${project.project_id}`);
+  }
 
   async function loadActiveRuns() {
     try {
@@ -242,7 +266,17 @@ export function Projects() {
       {loading ? (
         <p className="muted">loading…</p>
       ) : projects.length === 0 ? (
-        <OnboardingPanel onTryDemo={() => void createDemo()} busy={demoBusy} />
+        <>
+          <OnboardingPanel onTryDemo={() => void createDemo()} busy={demoBusy} />
+          {examples.length > 0 && (
+            <ExampleProjectGallery
+              examples={examples}
+              onPick={setOpenTemplate}
+              heading="Or start from a template"
+              subheading="Six example projects covering the platform's headline patterns. Each ships with a pre-designed agent team — you just edit the goal."
+            />
+          )}
+        </>
       ) : (
         <table className="list">
           <thead>
@@ -282,6 +316,26 @@ export function Projects() {
             ))}
           </tbody>
         </table>
+      )}
+
+      {!loading && projects.length > 0 && examples.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <ExampleProjectGallery
+            examples={examples}
+            onPick={setOpenTemplate}
+            heading="Start from a template"
+            subheading="One-click pre-designed agent teams. Edit the goal and run."
+          />
+        </div>
+      )}
+
+      {openTemplate && (
+        <ExampleTemplateModal
+          template={openTemplate}
+          onClose={() => setOpenTemplate(null)}
+          onCreated={handleTemplateInstantiated}
+          existingIds={new Set(projects.map((p) => p.project_id))}
+        />
       )}
 
       {blankOpen && (
@@ -388,6 +442,227 @@ function OnboardingPanel({
         </a>{" "}
         for the full architecture.
       </p>
+    </div>
+  );
+}
+
+
+/**
+ * One-click example project gallery. Each card pops the
+ * ExampleTemplateModal so the user can edit the goal before
+ * instantiating.
+ */
+function ExampleProjectGallery({
+  examples,
+  onPick,
+  heading,
+  subheading,
+}: {
+  examples: ExampleProjectSummary[];
+  onPick: (t: ExampleProjectSummary) => void;
+  heading: string;
+  subheading?: string;
+}) {
+  return (
+    <section className="example-gallery" style={{ marginTop: 16 }}>
+      <h2 style={{ marginBottom: 4 }}>{heading}</h2>
+      {subheading && (
+        <p className="muted small" style={{ marginTop: 0, marginBottom: 12 }}>
+          {subheading}
+        </p>
+      )}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+          gap: 12,
+        }}
+      >
+        {examples.map((t) => (
+          <button
+            key={t.id}
+            className="card example-card"
+            onClick={() => onPick(t)}
+            style={{
+              textAlign: "left",
+              cursor: "pointer",
+              background: "white",
+              padding: 16,
+              border: "1px solid #e2e8f0",
+              borderRadius: 8,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              fontFamily: "inherit",
+              fontSize: "inherit",
+              transition: "border-color 0.15s, box-shadow 0.15s",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 22 }}>{t.icon}</span>
+              <strong style={{ flex: 1 }}>{t.title}</strong>
+              <span className="tag" style={{ fontSize: "0.75em" }}>
+                {t.category}
+              </span>
+            </div>
+            <p
+              className="small"
+              style={{ margin: "4px 0 0", color: "#475569" }}
+            >
+              {t.summary}
+            </p>
+            {t.requires.source_repo && (
+              <p
+                className="small"
+                style={{
+                  margin: "4px 0 0",
+                  color: "#9333ea",
+                  fontWeight: 500,
+                }}
+              >
+                Requires source repo
+              </p>
+            )}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+
+/**
+ * Modal shown after picking a template. Lets the user override the
+ * project_id (auto-suggests free slug from the default + a counter)
+ * and edit the goal before submitting. On success, the parent
+ * navigates to the new project.
+ */
+function ExampleTemplateModal({
+  template,
+  onClose,
+  onCreated,
+  existingIds,
+}: {
+  template: ExampleProjectSummary;
+  onClose: () => void;
+  onCreated: (project: ProjectConfig) => void;
+  existingIds: Set<string>;
+}) {
+  const initialId = (() => {
+    if (!existingIds.has(template.default_project_id))
+      return template.default_project_id;
+    for (let i = 2; i < 100; i++) {
+      const candidate = `${template.default_project_id}-${i}`;
+      if (!existingIds.has(candidate)) return candidate;
+    }
+    return template.default_project_id;
+  })();
+
+  const [projectId, setProjectId] = useState(initialId);
+  const [goal, setGoal] = useState(template.default_goal);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await exampleProjectsApi.instantiate(template.id, {
+        project_id: projectId.trim() || undefined,
+        goal: goal.trim() || undefined,
+      });
+      onCreated(res.project);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div
+        className="modal"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 640 }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 28 }}>{template.icon}</span>
+          <div style={{ flex: 1 }}>
+            <h3 style={{ margin: 0 }}>{template.title}</h3>
+            <p className="small muted" style={{ margin: 0 }}>
+              {template.category} · {template.summary}
+            </p>
+          </div>
+        </div>
+
+        {template.details && (
+          <p className="small" style={{ marginTop: 12, whiteSpace: "pre-wrap" }}>
+            {template.details}
+          </p>
+        )}
+
+        {template.requires.hints.length > 0 && (
+          <ul
+            className="small muted"
+            style={{ marginTop: 8, paddingLeft: 18 }}
+          >
+            {template.requires.hints.map((h, i) => (
+              <li key={i}>{h}</li>
+            ))}
+          </ul>
+        )}
+
+        {template.requires.source_repo && (
+          <p
+            className="small"
+            style={{
+              marginTop: 8,
+              color: "#9333ea",
+              background: "#faf5ff",
+              border: "1px solid #e9d5ff",
+              padding: "6px 10px",
+              borderRadius: 4,
+            }}
+          >
+            This template expects a source repo. After creating the
+            project, attach one via Inputs → Git URL or Local path
+            before running.
+          </p>
+        )}
+
+        {error && <div className="error">{error}</div>}
+
+        <label style={{ marginTop: 12 }}>Project ID</label>
+        <input
+          type="text"
+          value={projectId}
+          onChange={(e) => setProjectId(e.target.value)}
+          disabled={busy}
+        />
+
+        <label style={{ marginTop: 8 }}>Goal</label>
+        <textarea
+          rows={8}
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          disabled={busy}
+          style={{ fontFamily: "inherit" }}
+        />
+
+        <div className="row" style={{ marginTop: 12, gap: 8 }}>
+          <button
+            className="primary"
+            onClick={() => void submit()}
+            disabled={busy || !projectId.trim() || !goal.trim()}
+          >
+            {busy ? "Creating…" : "Create project"}
+          </button>
+          <button onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
