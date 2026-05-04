@@ -41,7 +41,7 @@ class OpenAIClient:
         self,
         base_url: str = "https://api.openai.com/v1",
         api_key: str | None = None,
-        timeout: float = 60.0,
+        timeout: float = 300.0,
         http_client: Any = None,
         extra_headers: dict[str, str] | None = None,
     ):
