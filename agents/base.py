@@ -164,6 +164,13 @@ class BaseAgent:
     # tried to emit work + closing protocol block in one turn and ran out.
     # 0 / unset means "use the agent.llm() default" (8192).
     _max_output_tokens: int = 0
+    # "structured" — pass tools=[...] to the LLM, consume tool_calls.
+    # "text" — Aider-style: skip the structured tools layer entirely.
+    # The agent emits `[TOOL <name>]\n<json>\n[/TOOL]` blocks in plain
+    # text; the runner parses them back. Robust on weak/OpenAI-compat
+    # models that mangle JSON tool schemas. Injected by the runner from
+    # the resolved ModelInfo.tool_format.
+    _tool_format: str = "structured"
     # M1 §9 — scheduler handle so ask_human / request_visual_feedback can
     # park via interrupt() instead of mutating workspace.pending_human.
     # Injected by the runner immediately after Scheduler construction.
@@ -876,12 +883,25 @@ class BaseAgent:
         # Use the runner-injected brief if caller doesn't supply one.
         effective_brief = teammate_brief or self._teammate_brief
         system = await self.effective_system_prompt(teammate_brief=effective_brief)
-        tools = self._tool_schemas_for_llm()
+
+        # Tool routing — structured = native tool_calls, text = Aider-style
+        # text protocol. In text mode we deliberately pass `tools=None` so
+        # the LLM API doesn't emit structured tool_calls; the model invokes
+        # tools by writing `[TOOL <name>]` blocks which the runner parses
+        # back via core.text_tools.parse_text_tool_calls(). The format is
+        # explained to the model in `_text_tool_format_primer()` (Layer
+        # 6.4 of effective_system_prompt).
+        if self._tool_format == "text":
+            tools: list[dict[str, Any]] = []
+            tools_param: list[dict[str, Any]] | None = None
+        else:
+            tools = self._tool_schemas_for_llm()
+            tools_param = tools or None
 
         resp = await self._llm.complete(
             system=system,
             messages=messages,
-            tools=tools or None,
+            tools=tools_param,
             max_tokens=max_tokens,
             model=self._model,
             cache_system=True,
@@ -947,6 +967,78 @@ class BaseAgent:
             }
             for d in self._manifest.descriptors
         ]
+
+    # ── Text-mode tool-call primer (Aider-style) ───────────────────────────
+
+    def _text_tool_format_primer(self) -> str:
+        """When `_tool_format == "text"`, the runner does NOT pass `tools=[...]`
+        to the LLM — the model is expected to invoke tools by emitting plain-text
+        blocks. The runner then parses the response and routes each block through
+        `call_tool()` exactly as if it had come back as a structured tool_use.
+
+        Why: weak/OpenAI-compatible models routinely mangle structured tool
+        schemas (Codestral writing `fs-list {"path":"x"}` as text, partial JSON
+        in tool_calls deltas, missing indices). Aider proved that grounding
+        agents in text formats — which models have seen ten thousand times in
+        their training data — is dramatically more reliable than the thin RLHF
+        tool-call layer.
+
+        Format the model is asked to emit:
+
+            [TOOL <name>]
+            {"arg": "value", ...}
+            [/TOOL]
+
+        One block per call; multiple blocks per turn are allowed and run in
+        order. Arguments are a single JSON object on the lines between the
+        markers. The runner is lenient about whitespace and trailing commas,
+        and feeds back parse errors as a tool_result so the model can repair.
+        """
+        if self._manifest is None or not self._manifest.descriptors:
+            return ""
+
+        tool_lines: list[str] = []
+        for d in self._manifest.descriptors:
+            schema = d.input_schema or {}
+            props = (schema.get("properties") or {}) if isinstance(schema, dict) else {}
+            required = set(schema.get("required") or []) if isinstance(schema, dict) else set()
+            arg_summary: list[str] = []
+            for arg_name, arg_spec in props.items():
+                arg_type = ""
+                if isinstance(arg_spec, dict):
+                    arg_type = arg_spec.get("type") or ""
+                marker = "" if arg_name in required else "?"
+                arg_summary.append(f"{arg_name}{marker}:{arg_type}".rstrip(":"))
+            sig = ", ".join(arg_summary) if arg_summary else "(no args)"
+            tool_lines.append(f"  - {d.name}({sig}) — {d.description}")
+
+        catalog = "\n".join(tool_lines)
+
+        return (
+            "## TOOL CALLING — TEXT FORMAT (no structured tool_calls)\n\n"
+            "You do NOT have structured tool calling. Invoke a tool by writing "
+            "this exact format somewhere in your response:\n\n"
+            "    [TOOL <tool-name>]\n"
+            "    {\"arg\": \"value\", ...}\n"
+            "    [/TOOL]\n\n"
+            "Rules:\n"
+            "- The opening marker `[TOOL <name>]` must be on its own line.\n"
+            "- The body between markers is a single JSON object — one argument map.\n"
+            "- The closing marker `[/TOOL]` must be on its own line.\n"
+            "- Multiple `[TOOL ...]` blocks per turn are allowed; they run in order.\n"
+            "- Use proper JSON: double-quoted keys and strings, no trailing commas, "
+            "escape newlines inside string values as `\\n`.\n"
+            "- For multi-line file content, prefer one big string with `\\n` escapes "
+            "rather than literal newlines in the JSON.\n"
+            "- After all tool calls, emit your closing protocol block "
+            "(`[COMMIT]` / `[VERIFY]` / `[ACTION]` / `[STATUS]`) on a new line.\n\n"
+            "Available tools (suffix `?` = optional arg):\n\n"
+            f"{catalog}\n\n"
+            "If a `[TOOL ...]` block fails to parse or the named tool doesn't "
+            "exist, the runner will reply with an error tool_result and you "
+            "should correct it on the next turn — same repair loop as a "
+            "structured tool error."
+        )
 
     # ── Protocol output primer (§18) ───────────────────────────────────────
 
@@ -1332,6 +1424,14 @@ class BaseAgent:
                 "If a teammate genuinely has no work this run, skip them — "
                 "but the default is one assign-task call per teammate above."
             )
+
+        # Text-mode tool primer (Layer 6.4 — between role guidance and the
+        # protocol output primer). Only injected when the resolved model is
+        # in text mode; for structured mode this is a no-op.
+        if self._tool_format == "text":
+            text_primer = self._text_tool_format_primer()
+            if text_primer:
+                parts.append(text_primer)
 
         parts.append(self._protocol_output_primer())
         parts.append("Make this something you are proud of.")
