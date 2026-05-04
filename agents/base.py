@@ -885,6 +885,7 @@ class BaseAgent:
             max_tokens=max_tokens,
             model=self._model,
             cache_system=True,
+            cache_ttl="1h",
         )
         m = self._current_metrics
         if m is not None:

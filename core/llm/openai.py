@@ -60,6 +60,7 @@ class OpenAIClient:
         max_tokens: int = 4096,
         model: str = "gpt-4o-mini",
         cache_system: bool = False,  # no-op: OpenAI auto-prefix-caches
+        cache_ttl: str = "5m",  # no-op: OpenAI cache TTL is server-managed
     ) -> LLMResponse:
         if self._client is None:
             import httpx

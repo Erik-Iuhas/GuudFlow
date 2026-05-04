@@ -35,6 +35,7 @@ class LLMResponse:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    request_id: str = ""
     raw: Any = None
 
 
@@ -49,6 +50,7 @@ class LLMClient(Protocol):
         max_tokens: int = 8192,
         model: str = "claude-sonnet-4-6",
         cache_system: bool = False,
+        cache_ttl: str = "5m",
     ) -> LLMResponse: ...
 
 
@@ -88,6 +90,7 @@ class MockLLMClient:
         max_tokens: int = 8192,
         model: str = "claude-sonnet-4-6",
         cache_system: bool = False,
+        cache_ttl: str = "5m",
     ) -> LLMResponse:
         self.calls.append({
             "system": system,

@@ -24,6 +24,8 @@ class AnthropicClient:
     Pass cache_system=True to complete() to add Anthropic cache_control
     to the system prompt — keeps the stable system layer cached across
     turns for agents that call repeatedly with the same persona prompt.
+    cache_ttl accepts "5m" (default) or "1h" — use "1h" for persona
+    prompts that stay stable across an entire agent loop.
     """
 
     def __init__(self, api_key: str | None = None):
@@ -38,6 +40,7 @@ class AnthropicClient:
         max_tokens: int = 8192,
         model: str = "claude-sonnet-4-6",
         cache_system: bool = False,
+        cache_ttl: str = "5m",
     ) -> LLMResponse:
         if self._client is None:
             from anthropic import AsyncAnthropic
@@ -49,8 +52,11 @@ class AnthropicClient:
 
         # System prompt: plain string or cache-enabled block list
         if cache_system and system:
+            cache_control: dict[str, Any] = {"type": "ephemeral"}
+            if cache_ttl != "5m":
+                cache_control["ttl"] = cache_ttl
             system_param: Any = [
-                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+                {"type": "text", "text": system, "cache_control": cache_control}
             ]
         else:
             system_param = system
@@ -147,5 +153,6 @@ def _api_to_response(resp: Any) -> LLMResponse:
         output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
         cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) if usage else 0,
         cache_creation_tokens=getattr(usage, "cache_creation_input_tokens", 0) if usage else 0,
+        request_id=getattr(resp, "_request_id", "") or "",
         raw=resp,
     )
