@@ -1348,6 +1348,7 @@ class AgentRunner:
                 cfg.model_tier, preference=cfg.model_id or None,
             )
             agent._max_output_tokens = self._max_output_tokens_for(agent._model)
+            agent._tool_format = self._tool_format_for(agent._model)
             agent._broker = self.broker
             agent._context_manager = self.context_manager
             agent._llm_call_dump_sink = self._llm_call_dump_sink
@@ -1618,6 +1619,11 @@ class AgentRunner:
                 agent._llm, agent._model = self._resolve_llm_for_tier(
                     cfg.model_tier, preference=cfg.model_id or None,
                 )
+                # Re-resolve tool_format too — switching from a structured
+                # model to a text-mode one (or vice versa) mid-run must
+                # re-route the agent, otherwise the next iteration would
+                # send the wrong shape of prompt.
+                agent._tool_format = self._tool_format_for(agent._model)
             except Exception:
                 # Resolution failure (missing API key, etc.) leaves the
                 # existing client in place — the next iteration logs the
@@ -3216,6 +3222,21 @@ class AgentRunner:
             return int(getattr(mi, "max_output_tokens", 0) or 0) if mi else 0
         except Exception:
             return 0
+
+    def _tool_format_for(self, model_id: str) -> str:
+        """Look up the registered model's tool_format. Defaults to "structured"
+        when the registry is absent or the model is unknown — i.e. unchanged
+        behavior for every existing run. A model entry with `tool_format:
+        "text"` in data/models.json switches its agents to Aider-style text
+        protocol: no structured tool_calls passed to the LLM, [TOOL ...]
+        blocks parsed back from the response text."""
+        if self._model_registry is None:
+            return "structured"
+        try:
+            mi = self._model_registry.get(model_id)
+            return getattr(mi, "tool_format", "structured") if mi else "structured"
+        except Exception:
+            return "structured"
 
     def _persona_name(self, role: str) -> str:
         agent = self.agents.get(role)
@@ -5517,6 +5538,7 @@ class AgentRunner:
             cfg.model_tier, preference=cfg.model_id or None,
         )
         agent._max_output_tokens = self._max_output_tokens_for(agent._model)
+        agent._tool_format = self._tool_format_for(agent._model)
         agent._broker = self.broker
         agent._context_manager = self.context_manager
         agent._llm_call_dump_sink = self._llm_call_dump_sink
