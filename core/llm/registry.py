@@ -27,6 +27,12 @@ class ModelInfo:
     cache_read_per_1k: float = 0.0
     deprecated: bool = False
     replacement: str | None = None
+    # "structured" routes through native tool_calls (Anthropic tool_use, OpenAI
+    # function calling). "text" disables tools and asks the agent to emit work
+    # as protocol text (DELTA blocks, COMMIT/VERIFY/etc) which the runner
+    # parses back. Aider-style — much more robust on weak models that mangle
+    # structured tool schemas. Flip a model here to opt it into text mode.
+    tool_format: str = "structured"
 
 
 @dataclass
@@ -64,7 +70,14 @@ class ModelRegistry:
                 cache_read_per_1k=m.get("cache_read_per_1k", 0.0),
                 deprecated=m.get("deprecated", False),
                 replacement=m.get("replacement"),
+                tool_format=m.get("tool_format", "structured"),
             )
+            if info.tool_format not in ("structured", "text"):
+                raise ValueError(
+                    f"models.json: model {info.id!r} has invalid "
+                    f"tool_format={info.tool_format!r}; expected "
+                    f"'structured' or 'text'"
+                )
             self._models[info.id] = info
 
         self._providers: dict[str, ProviderInfo] = {}
