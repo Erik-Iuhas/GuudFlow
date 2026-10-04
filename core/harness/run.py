@@ -21,7 +21,7 @@ import shutil
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
@@ -39,23 +39,35 @@ from core.harness.event_bridge import EventBridge
 from core.harness.git_roles import RoleClones
 from core.harness.mcp_server import McpIdentity, McpServer, McpTool, RunningHttpServer, ToolResult, serve_app
 from core.harness.opencode_client import OpencodeClient
+from core.harness import mcp_browser, mcp_tools, mcp_visual, mcp_web
 from core.harness.approvals import PermissionGate
+from core.harness.artifacts import ArtifactRegistry
 from core.harness.opencode_runner import EventHook, PermissionHook, PermissionReply, TurnStats, drive_turn
 from core.harness.result_inbox import ResultInbox
 from core.harness.results import AgentResult, ReviewResult
 from core.harness.server import OpencodeServer
+from core.harness.tool_context import RunToolContext
 from core.llm.registry import ModelRegistry
 from core.scheduler import AgentSpec, Scheduler, SchedulerResult
 from core.signals import Signal, SignalType
 from core.workspace import AgentState, Artifact, Workspace
+from gateway.app import Gateway, Price, Upstream
 
 if TYPE_CHECKING:
     from core.runner import AgentConfig, AgentRunner
+    from worker.sandbox_manager import RunNetwork, Sandbox, SandboxManager
 
 log = logging.getLogger(__name__)
 
 BindingFactory = Callable[["AgentConfig"], ProviderBinding]
 RolePermissionHook = Callable[[str, dict[str, Any]], Awaitable[PermissionReply]]
+SandboxMode = Literal["auto", "host", "docker"]
+
+DEFAULT_PROVIDER_URLS = {"anthropic": "https://api.anthropic.com/v1"}
+
+
+# Host secrets the web tools may read (search API keys); nothing else is exposed.
+_TOOL_SECRETS = frozenset({"BRAVE_API_KEY", "TAVILY_API_KEY"})
 
 
 class TurnFailed(RuntimeError):
@@ -78,6 +90,11 @@ class HarnessSettings:
     keep_servers: bool = False  # tests: keep servers between spawns of the same run
     max_parallel: int = 3       # concurrent roles (each sandbox costs ~1 GB, plan §5.6)
     max_spawns_per_role: int = 12
+    # "docker": every role in a hardened container (plan §5.3); "host": host_dev for
+    # trusted local demos only (refused in production); "auto": docker when available.
+    sandbox: SandboxMode = "auto"
+    # Host-side tool overrides for tests (see each module's `tools()` signature).
+    tool_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -88,6 +105,7 @@ class _Role:
     compiled: CompiledCapabilities
     binding: ProviderBinding
     server: OpencodeServer | None = None
+    sandbox: "Sandbox | None" = None
     client: OpencodeClient | None = None
     token: str = ""
 
@@ -114,15 +132,30 @@ class OpencodeRun:
         self._delivered_notes: set[str] = set()
         self._roles: dict[str, _Role] = {}
         self._http: RunningHttpServer | None = None
+        self._gw_http: RunningHttpServer | None = None
         self._registry: ModelRegistry | None = runner._model_registry  # noqa: SLF001
+        self.mode: Literal["host", "docker"] = "host"
+        self.sandboxes: "SandboxManager | None" = None
+        self.network: "RunNetwork | None" = None
+        self.gateway: Gateway | None = None
+        self.artifacts = ArtifactRegistry(runner.run_root, self._artifact_post)
+        gates = runner.project.approval_gates
+        self.tool_ctx = RunToolContext(
+            run_id=self.run_id, workspace=self.workspace, run_root=runner.run_root,
+            clone_for=self.clones.path, sandbox_host_for=self._sandbox_host,
+            tool_dir_for=self.clones.tool_dir,
+            settings={"package_allow": gates.get("package_allow") or {},
+                      "web": gates.get("web") or {}},
+            secret=lambda name: os.environ.get(name) if name in _TOOL_SECRETS else None)
 
     # ── lifecycle ──────────────────────────────────────────────────────────
     async def run(self) -> SchedulerResult:
         """Run every role through the scheduler and tear everything down after."""
+        self.mode = await self._resolve_mode()
         for cfg in self.runner.project.agents:
             self._roles[cfg.role] = self._prepare_role(cfg)
-        self._http = await serve_app(self.mcp.app())
         try:
+            await self._start_services()
             specs = [AgentSpec(role=cfg.role, runner=self._runner_for(cfg),
                                depends_on=list(cfg.depends_on),
                                max_review_rounds=cfg.max_review_rounds)
@@ -137,14 +170,93 @@ class OpencodeRun:
             await self.shutdown()
 
     async def shutdown(self) -> None:
-        """Stop every opencode server and the MCP server; revoke tokens."""
+        """Stop every opencode server/sandbox, the MCP server and gateway; revoke tokens."""
         for role in self._roles.values():
             await self._stop_server(role)
         self.mcp.revoke_run(self.run_id)
         self.inbox.close_run(self.run_id)
-        if self._http is not None:
-            await self._http.stop()
-            self._http = None
+        if self.gateway is not None:
+            self.gateway.revoke_run(self.run_id)
+        for server in (self._http, self._gw_http):
+            if server is not None:
+                await server.stop()
+        self._http = self._gw_http = None
+        if self.gateway is not None:
+            await self.gateway.aclose()
+        if self.sandboxes is not None and self.network is not None:
+            await asyncio.to_thread(self.sandboxes.remove_host_port_rules, self.network)
+            await self.sandboxes.stop_run(self.run_id)
+            self.network = None
+
+    async def _resolve_mode(self) -> Literal["host", "docker"]:
+        """Pick host or docker. Production never runs agents on the host."""
+        wanted = self.settings.sandbox
+        if wanted in ("auto", "docker"):
+            from worker.sandbox_manager import SandboxManager
+            if SandboxManager.available():
+                self.sandboxes = SandboxManager()
+                await self.sandboxes.ensure_image()
+                return "docker"
+            if wanted == "docker" or self.settings.production:
+                raise TurnFailed("Docker is required for sandboxed agents but is not available")
+        if self.settings.production:
+            raise TurnFailed("sandbox 'host_dev' is refused in production")
+        return "host"
+
+    async def _start_services(self) -> None:
+        """MCP server + LLM gateway, bound where the agents can reach them (plan §5.4)."""
+        bind = "127.0.0.1"
+        if self.mode == "docker":
+            assert self.sandboxes is not None
+            self.network = await self.sandboxes.create_run_network(self.run_id)
+            bind = self.network.gateway_ip
+        for tool in self._host_tools():
+            self.mcp.register(tool)
+        self._http = await serve_app(self.mcp.app(), host=bind)
+        self.gateway = Gateway(self._upstreams(), self._price,
+                               cost_log=self.runner.run_root / "llm_costs.jsonl")
+        budget = self.runner.project.approval_gates.get("token_budget_usd")
+        if isinstance(budget, (int, float)):
+            self.gateway.set_run_budget(self.run_id, float(budget))
+        self._gw_http = await serve_app(self.gateway.app(), host=bind)
+        if self.mode == "docker":
+            assert self.sandboxes is not None and self.network is not None
+            # Containers may reach the host ONLY on these two ports.
+            await asyncio.to_thread(self.sandboxes.restrict_host_ports, self.network,
+                                    [self._http.port, self._gw_http.port])
+
+    def _host_tools(self) -> list[McpTool]:
+        overrides = self.settings.tool_overrides
+        return [*mcp_tools.tools(self.tool_ctx, **overrides.get("mcp_tools", {})),
+                *mcp_web.tools(self.tool_ctx, **overrides.get("mcp_web", {})),
+                *mcp_browser.tools(self.tool_ctx, **overrides.get("mcp_browser", {})),
+                *mcp_visual.tools(self.tool_ctx)]
+
+    def _upstreams(self) -> dict[str, Upstream]:
+        upstreams: dict[str, Upstream] = {}
+        for role in self._roles.values():
+            b = role.binding
+            kind = "anthropic" if b.client == "anthropic" else "openai_compatible"
+            base = b.base_url or DEFAULT_PROVIDER_URLS.get(b.provider_key, "")
+            upstreams[b.provider_key] = Upstream(name=b.provider_key, kind=kind,  # type: ignore[arg-type]
+                                                 base_url=base.rstrip("/"),
+                                                 api_key=b.api_key or "")
+        return upstreams
+
+    def _price(self, model_id: str) -> Price | None:
+        for role in self._roles.values():
+            m = role.binding.model
+            if m.id == model_id:
+                return Price(m.cost_per_1k_input, m.cost_per_1k_output, m.cache_read_per_1k)
+        return None
+
+    def _sandbox_host(self, role: str) -> str:
+        r = self._roles.get(role)
+        return r.sandbox.ip if r is not None and r.sandbox is not None else "127.0.0.1"
+
+    def _artifact_post(self, kind: SignalType, role: str, summary: str,
+                       detail: Any = None, **_: Any) -> None:
+        self.tool_ctx.post(kind, role, summary, detail)
 
     def _runner_for(self, cfg: "AgentConfig") -> Callable[[Workspace], Any]:
         async def run_role(workspace: Workspace) -> None:
@@ -157,9 +269,11 @@ class OpencodeRun:
         binding = self._binding(cfg)
         requested = gate_vision(Capabilities.from_dict(cfg.capabilities, base=defaults_for(role_type)),
                                 binding.model.supports_images)
-        # P1/P2: no sandbox manager yet, so every role runs on the host (host_dev).
-        # compile_capabilities refuses host_dev in production, which is the gate.
-        effective = replace(requested, sandbox="host_dev")
+        # Host mode runs every role as host_dev (refused in production by
+        # compile_capabilities); docker mode keeps the requested sandbox level.
+        effective = (replace(requested, sandbox="host_dev") if self.mode == "host"
+                     else replace(requested, sandbox="standard")
+                     if requested.sandbox == "host_dev" else requested)
         compiled = compile_capabilities(effective, role_type, production=self.settings.production)
         return _Role(cfg=cfg, role_type=role_type, requested=requested, compiled=compiled,
                      binding=binding)
@@ -173,8 +287,8 @@ class OpencodeRun:
         provider = registry.provider(model.provider)
         if provider is None:
             raise TurnFailed(f"no provider config for {model.provider!r}")
-        # host_dev only: the provider key is handed to this one opencode process
-        # explicitly. Container mode (P3) routes through the gateway instead.
+        # The real key stays on the host: it is only given to the gateway upstream
+        # (see _upstreams); opencode gets a per-role virtual key.
         return ProviderBinding(provider_key=model.provider, model=model, client=provider.client,
                                base_url=provider.base_url or None,
                                api_key=os.environ.get(provider.api_key_env) or None)
@@ -183,22 +297,48 @@ class OpencodeRun:
         if role.client is not None:
             return role.client
         assert self._http is not None
-        identity = McpIdentity(self.run_id, role.cfg.role,
-                               role.compiled.mcp_tools | {"submit_result", "changes", "history"})
+        assert self._gw_http is not None and self.gateway is not None
+        name = role.cfg.role
+        identity = McpIdentity(self.run_id, name, role.compiled.mcp_tools
+                               | {"submit_result", "changes", "history", "post_note"})
         role.token = self.mcp.issue_token(identity)
-        agent = agent_entry(role.compiled, model_ref=role.binding.model_ref,
+        virtual_key = self.gateway.issue_key(self.run_id, name, [role.binding.model.id],
+                                             budget_usd=self._role_budget(role))
+        via_gateway = replace(role.binding,
+                              base_url=f"{self._gw_http.url}/{role.binding.provider_key}",
+                              api_key=virtual_key)
+        agent = agent_entry(role.compiled, model_ref=via_gateway.model_ref,
                             prompt=self._system_prompt(role), description=role.cfg.description,
                             steps=self.settings.steps)
-        config = build_config(role=role.cfg.role, agent=agent, binding=role.binding,
+        config = build_config(role=name, agent=agent, binding=via_gateway,
                               mcp_url=self._http.url + "/", mcp_token=role.token,
                               extra_providers=self.settings.extra_providers)
-        home = self.runner.run_root / "opencode_home" / role.cfg.role
+        timeout = self.settings.turn_timeout + 60
+        if self.mode == "docker":
+            from worker.sandbox_manager import SandboxSpec
+            assert self.sandboxes is not None and self.network is not None
+            import secrets as _secrets
+            password = _secrets.token_urlsafe(24)
+            inputs = self.runner.run_root / "inputs"
+            role.sandbox = await self.sandboxes.start(SandboxSpec(
+                run_id=self.run_id, role=name, workdir=workdir,
+                inputs_dir=inputs if inputs.is_dir() else None,
+                profile=role.compiled.container, config=config, password=password,
+                network=self.network, tool_dir=self.clones.tool_dir(name)))
+            role.client = OpencodeClient(role.sandbox.base_url, "/work", password=password,
+                                         timeout=timeout)
+            return role.client
+        home = self.runner.run_root / "opencode_home" / name
         role.server = OpencodeServer(config=config, home=home, workdir=workdir)
         await role.server.start()
         role.client = OpencodeClient(role.server.base_url, str(workdir),
-                                     password=role.server.password,
-                                     timeout=self.settings.turn_timeout + 60)
+                                     password=role.server.password, timeout=timeout)
         return role.client
+
+    def _role_budget(self, role: _Role) -> float | None:
+        budgets = self.runner.project.approval_gates.get("role_budget_usd") or {}
+        value = budgets.get(role.cfg.role) if isinstance(budgets, dict) else None
+        return float(value) if isinstance(value, (int, float)) else None
 
     async def _stop_server(self, role: _Role) -> None:
         if role.client is not None:
@@ -207,6 +347,9 @@ class OpencodeRun:
         if role.server is not None:
             await role.server.stop()
             role.server = None
+        if role.sandbox is not None and self.sandboxes is not None:
+            await self.sandboxes.stop(role.sandbox)
+            role.sandbox = None
         if role.token:
             self.mcp.revoke(role.token)
             role.token = ""
@@ -222,7 +365,8 @@ class OpencodeRun:
         role = self._roles[role_name]
         cfg = role.cfg
         workdir = self.clones.ensure(role_name, self._author(cfg))
-        self._link_tool_dir(role_name, workdir)
+        if self.mode == "host":
+            self._link_tool_dir(role_name, workdir)
         if not self.clones.sync_from_main(role_name):
             self._post(SignalType.FAILED, role_name, "could not merge main into the branch")
             raise TurnFailed(f"{role_name}: merge conflict syncing with main")
@@ -260,6 +404,10 @@ class OpencodeRun:
             raise TurnFailed(f"{name}: {reason}")
         summary = getattr(result, "summary", "") or ""
         collected = self.clones.collect(name, summary)
+        self.artifacts.scan(name, self.clones.path(name), collected.changed_files,
+                            tool_dir=self.clones.tool_dir(name))
+        if self.gateway is not None:
+            stats.cost = self.gateway.spend(self.run_id, name)
         self.results[name] = result
         self._post(SignalType.AGENT_RESULT, name, _result_line(name, result),
                    json.dumps({"result": result.model_dump(), "cost": stats.cost,

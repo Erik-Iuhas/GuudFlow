@@ -18,7 +18,7 @@ from core.runner import AgentConfig, AgentRunner, ProjectConfig
 from core.scheduler import SchedulerStatus
 from core.signals import SignalType
 from tests.harness.conftest import requires_opencode
-from tests.harness.fake_llm import FakeLLM, ToolCall, fake_provider_config
+from tests.harness.fake_llm import FakeLLM, ToolCall
 
 pytestmark = requires_opencode
 
@@ -28,9 +28,11 @@ FAKE_MODEL = ModelInfo(id="fake-model", provider="fake", tier="solid", supports_
 def _settings(fake: FakeLLM, **kw: Any) -> HarnessSettings:
     return HarnessSettings(
         production=False, turn_timeout=60,
+        sandbox="host",
+        # Upstream for the gateway: model traffic flows opencode → gateway → FakeLLM.
         binding_factory=lambda cfg: ProviderBinding("fake", FAKE_MODEL, "openai_compatible",
                                                     base_url=fake.base_url, api_key="fake"),
-        extra_providers=fake_provider_config(fake.base_url)["provider"], **kw)
+        **kw)
 
 
 def _runner(tmp_path: Path, agents: list[AgentConfig], fake: FakeLLM) -> AgentRunner:

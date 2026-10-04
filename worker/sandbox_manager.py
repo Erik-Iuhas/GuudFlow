@@ -85,6 +85,9 @@ class SandboxSpec:
     image: str = DEFAULT_IMAGE
     # Defaults to the host uid:gid so files written in /work keep host ownership.
     user: str | None = None
+    # Host-only tool output (screenshots, installed packages), mounted READ-ONLY at
+    # /work/.guudflow so the agent can read it but never redirect host writes (O8).
+    tool_dir: Path | None = None
 
 
 @dataclass
@@ -258,6 +261,8 @@ class SandboxManager:
             "OPENCODE_CONFIG_CONTENT": json.dumps(spec.config),
             "OPENCODE_SERVER_PASSWORD": spec.password,
             "PATH": _CONTAINER_PATH,
+            "PYTHONPATH": "/work/.guudflow/site-packages",
+            "NODE_PATH": "/work/.guudflow/node_modules",
             # git's dubious-ownership check: /work is owned by the host uid.
             "GIT_CONFIG_COUNT": "1",
             "GIT_CONFIG_KEY_0": "safe.directory",
@@ -278,6 +283,8 @@ class SandboxManager:
         }
         if spec.inputs_dir is not None:
             volumes[str(spec.inputs_dir)] = {"bind": "/inputs", "mode": "ro"}
+        if spec.tool_dir is not None:
+            volumes[str(spec.tool_dir)] = {"bind": "/work/.guudflow", "mode": "ro"}
         kwargs: dict[str, Any] = {
             "image": spec.image,
             "name": _container_name(spec.run_id, spec.role),

@@ -155,7 +155,7 @@ def test_env_is_built_from_scratch(manager: SandboxManager, tmp_path: Path,
     for key, value in LOCKED_FLAGS.items():
         assert env[key] == value
     expected = {"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
-                "OPENCODE_CONFIG_CONTENT", "OPENCODE_SERVER_PASSWORD", "PATH",
+                "OPENCODE_CONFIG_CONTENT", "OPENCODE_SERVER_PASSWORD", "PATH", "PYTHONPATH", "NODE_PATH",
                 "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", *LOCKED_FLAGS}
     assert set(env) == expected
 
