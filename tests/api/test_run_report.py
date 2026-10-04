@@ -65,6 +65,8 @@ async def test_report_sections(client, run_root) -> None:
     body = r.json()
     assert body["meta"]["project_id"] == "p1"
     assert body["signal_count"] == 5
+    assert body["first_signal_at"].endswith("10:00:01+00:00")
+    assert body["last_signal_at"].endswith("10:00:05+00:00")
     rows = {c["role"]: c for c in body["costs"]["rows"]}
     assert rows["dev"]["calls"] == 2 and rows["dev"]["input_tokens"] == 150
     assert rows["dev"]["cost_usd"] == 0.75 and rows["dev"]["images"] == 1
@@ -126,7 +128,7 @@ async def test_report_refuses_symlinked_run(client, data_root, tmp_path) -> None
     assert (await client.get("/api/runs/evil/report")).status_code == 404
 
 
-async def test_runs_metrics_and_playbook(client, data_root) -> None:
+async def test_runs_metrics(client, data_root) -> None:
     pb = Playbook.load(data_root, "p1")
     pb.record_run_metrics("run_1", {"stall_minutes": 4.0, "interventions": 2.0})
     pb.record_run_metrics("run_2", {"stall_minutes": 1.0, "interventions": 1.0})
@@ -137,13 +139,10 @@ async def test_runs_metrics_and_playbook(client, data_root) -> None:
     runs = r.json()["runs"]
     assert [x["run_id"] for x in runs] == ["run_1", "run_2"]
     assert runs[0]["metrics"]["stall_minutes"] == 4.0
-    entries = (await client.get("/api/projects/p1/playbook")).json()["entries"]
-    assert entries[0]["section"] == "known_pitfalls" and entries[0]["evidence_runs"] == ["run_1"]
 
 
 async def test_metrics_for_project_without_playbook_is_empty(client) -> None:
     assert (await client.get("/api/projects/none/runs-metrics")).json()["runs"] == []
-    assert (await client.get("/api/projects/none/playbook")).json()["entries"] == []
 
 
 async def test_metrics_path_unsafe_project_is_404(client) -> None:

@@ -256,6 +256,11 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
               </Button>
             </>
           )}
+          {terminal && (
+            <Button size="sm" variant="outline" asChild>
+              <Link to={`/runs/${encodeURIComponent(runId)}/report`}>Run report</Link>
+            </Button>
+          )}
           <Button size="sm" variant="ghost" asChild>
             <Link to="?legacy=1">Legacy view</Link>
           </Button>

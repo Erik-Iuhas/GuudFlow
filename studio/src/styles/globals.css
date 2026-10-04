@@ -20,3 +20,17 @@
 .react-flow__attribution { background: transparent; font-size: 10px; }
 .react-flow__attribution a { color: hsl(var(--muted-foreground)); }
 .react-flow__node:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+
+/* Run report diff viewer (U3): react-diff-view colours from the design tokens. */
+.diff-viewer {
+  --diff-background-color: hsl(var(--card));
+  --diff-text-color: hsl(var(--foreground));
+  --diff-font-family: var(--font-mono);
+  --diff-gutter-insert-background-color: hsl(var(--status-complete) / 0.25);
+  --diff-gutter-delete-background-color: hsl(var(--status-failed) / 0.25);
+  --diff-code-insert-background-color: hsl(var(--status-complete) / 0.12);
+  --diff-code-delete-background-color: hsl(var(--status-failed) / 0.12);
+  --diff-code-insert-edit-background-color: hsl(var(--status-complete) / 0.3);
+  --diff-code-delete-edit-background-color: hsl(var(--status-failed) / 0.3);
+  --diff-selection-background-color: hsl(var(--accent));
+}

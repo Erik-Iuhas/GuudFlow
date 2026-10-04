@@ -8,8 +8,8 @@ the merged commits per `agent/{role}` branch. Nothing here writes. Run ids resol
 `<data_root>/runs` with `safe_resolve`, and git is only ever run with fixed arguments in the
 run's own repo (branch names are matched against a strict pattern before use).
 
-`GET /api/projects/{id}/runs-metrics` returns the playbook's per-run metrics history and
-`GET /api/projects/{id}/playbook` its entries (a missing playbook is empty, not an error).
+`GET /api/projects/{id}/runs-metrics` returns the playbook's per-run metrics history (a
+missing playbook is empty, not an error). The playbook entries come from projects.py.
 """
 
 from __future__ import annotations
@@ -178,6 +178,8 @@ async def get_run_report(request: Request, run_id: str) -> dict[str, Any]:  # An
         "run_id": run_id,
         "meta": meta,
         "signal_count": len(board),
+        "first_signal_at": board[0].get("timestamp") if board else None,
+        "last_signal_at": board[-1].get("timestamp") if board else None,
         "retrospective": retro,
         "carry_forward": carry.get("text") if carry else None,
         "costs": cost_rows(root),
@@ -201,11 +203,3 @@ def _playbook(request: Request, project_id: str) -> Playbook:
 async def get_runs_metrics(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
     """The playbook's per-run metrics history, oldest first (the overseer's trend line)."""
     return {"project_id": project_id, "runs": _playbook(request, project_id).metrics_history()}
-
-
-@router.get("/api/projects/{project_id}/playbook")
-async def get_playbook(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
-    """The project playbook: evidence-backed entries (empty when none exists yet)."""
-    pb = _playbook(request, project_id)
-    return {"project_id": project_id,
-            "entries": [e.to_json() for e in pb.entries(include_archived=True)]}

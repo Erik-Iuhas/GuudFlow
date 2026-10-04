@@ -288,17 +288,17 @@ describe("OverseerPanel", () => {
     ]);
     wrap(store, <OverseerPanel />);
     const items = screen.getAllByTestId("intervention");
-    expect(items[0]).toHaveTextContent("propose_team_change");
-    expect(items[0]).toHaveTextContent("needs human");
-    expect(items[1]).toHaveTextContent("rebrief");
-    expect(items[1]).toHaveTextContent("dev · card T2");
-    expect(items[1]).toHaveTextContent("Same issue twice");
-    expect(items[1]).not.toHaveTextContent("needs human");
+    expect(items[1]).toHaveTextContent("propose team change");
+    expect(items[1]).toHaveTextContent("needs human");
+    expect(items[0]).toHaveTextContent("rebrief");
+    expect(items[0]).toHaveTextContent("dev · card T2");
+    expect(items[0]).toHaveTextContent("Same issue twice");
+    expect(items[0]).not.toHaveTextContent("needs human");
   });
 
   it("has an empty state", () => {
     wrap(createRunStore("r1"), <OverseerPanel />);
-    expect(screen.getByText(/No interventions/)).toBeInTheDocument();
+    expect(screen.getByText(/No wakes/)).toBeInTheDocument();
   });
 });
 
