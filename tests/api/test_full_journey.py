@@ -139,6 +139,9 @@ async def test_full_user_journey(
             # after the reviewer approves; default flipped to "manual" so we
             # opt back into the legacy auto-merge for this assertion.
             "pr_mode": "auto",
+            # This journey drives the legacy in-process loop with a mocked LLM;
+            # opencode is now the default harness (O15).
+            "harness": "legacy",
         },
         headers=auth_header,
     )

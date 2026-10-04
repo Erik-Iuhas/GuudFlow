@@ -45,6 +45,7 @@ def test_serialise_project_full():
         "project_id": "p1",
         "goal": "build x",
         "max_iterations": 7,
+        "harness": "legacy",  # legacy loop with a mocked LLM (opencode is the default)
         "agents": [
             {
                 "role": "developer",
@@ -126,6 +127,7 @@ def test_serialise_project_carries_is_final_reviewer():
     """Phase C.4: is_final_reviewer round-trips through the JSON layer."""
     p = serialise_project({
         "project_id": "p", "goal": "x",
+        "harness": "legacy",  # legacy loop with a mocked LLM (opencode is the default)
         "agents": [
             {"role": "dev"},
             {
@@ -162,6 +164,7 @@ async def test_job_runner_runs_one_job_to_completion(tmp_path: Path, monkeypatch
     project = {
         "project_id": "p1",
         "goal": "write hello.py",
+        "harness": "legacy",  # legacy loop with a mocked LLM (opencode is the default)
         "agents": [
             {
                 "role": "developer",
@@ -287,6 +290,7 @@ async def test_job_runner_registers_with_run_registry(tmp_path: Path, monkeypatc
 
     project = {
         "project_id": "p1", "goal": "x",
+        "harness": "legacy",  # legacy loop with a mocked LLM (opencode is the default)
         "agents": [{
             "role": "developer", "description": "no-op",
             "declared_local_tools": ["fs-read"],
@@ -323,6 +327,7 @@ async def test_run_forever_drains_then_stops(tmp_path: Path, monkeypatch):
 
     project = {
         "project_id": "p1", "goal": "x",
+        "harness": "legacy",  # legacy loop with a mocked LLM (opencode is the default)
         "agents": [{
             "role": "developer", "description": "dev",
             "declared_local_tools": ["fs-read"],
@@ -511,6 +516,7 @@ async def test_production_mode_wires_container_runner_for_code_exec(
     project = serialise_project({
         "project_id": "p_prod",
         "goal": "exec something",
+        "harness": "legacy",  # legacy loop with a mocked LLM (opencode is the default)
         "agents": [{
             "role": "developer",
             "description": "runs code",
@@ -571,6 +577,7 @@ async def test_dev_mode_keeps_host_runner_even_with_docker_manager(
     project = serialise_project({
         "project_id": "p_dev",
         "goal": "x",
+        "harness": "legacy",  # legacy loop with a mocked LLM (opencode is the default)
         "agents": [{
             "role": "developer",
             "description": "runs code",
@@ -619,6 +626,7 @@ async def test_production_without_docker_manager_falls_back_to_host(
     project = serialise_project({
         "project_id": "p_misconfig",
         "goal": "x",
+        "harness": "legacy",  # legacy loop with a mocked LLM (opencode is the default)
         "agents": [{
             "role": "developer",
             "description": "runs code",
@@ -657,6 +665,7 @@ async def test_run_one_initializes_inputs_for_real_run(tmp_path: Path, monkeypat
     project = {
         "project_id": "p_seeded",
         "goal": "extend the existing app",
+        "harness": "legacy",  # legacy loop with a mocked LLM (opencode is the default)
         "agents": [{
             "role": "developer", "description": "no-op",
             "declared_local_tools": ["fs-read"],

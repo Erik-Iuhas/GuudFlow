@@ -60,6 +60,7 @@ async def test_resume_does_not_rerun_completed_agents(tmp_path: Path):
     project_data = {
         "project_id": "proj_resume",
         "goal": "Add hello.py",
+        "harness": "legacy",  # legacy loop with a mocked LLM (opencode is the default)
         "agents": [
             {
                 "role": "developer",

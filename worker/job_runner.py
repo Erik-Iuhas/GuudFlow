@@ -205,7 +205,8 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         stories=stories,
         pr_mode=pr_mode,  # type: ignore[arg-type]
         sub_llm_models=sub_llm_models,
-        harness="opencode" if data.get("harness") == "opencode" else "legacy",
+        # opencode is the default harness (plan P6, O15); "legacy" only on request.
+        harness="legacy" if data.get("harness") == "legacy" else "opencode",
     )
 
 

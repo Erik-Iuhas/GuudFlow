@@ -204,9 +204,9 @@ async def propose(
 
     # Harness: the stored project decides. Greenfield proposals have no project
     # yet, so the request body may name it (default legacy).
-    # QUESTION: should the Propose view always send `harness` for greenfield runs?
+    # opencode is the default harness (plan P6, O15); "legacy" only on request.
     raw_harness = (project or {}).get("harness") or body.get("harness")
-    harness = "opencode" if raw_harness == "opencode" else "legacy"
+    harness = "legacy" if raw_harness == "legacy" else "opencode"
     playbook_text = ""
     if project_id is not None:
         try:
