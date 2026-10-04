@@ -586,6 +586,11 @@ async def post_approval_decision(
     note = body.get("note")
     if note is not None and not isinstance(note, str):
         raise HTTPException(status_code=400, detail="note must be a string")
+    # opencode harness tool permissions (kind "tool_permission"): a grant may be
+    # for this call only ("once") or for the rest of the run ("run").
+    scope = str(body.get("scope") or "once").lower()
+    if scope not in ("once", "run"):
+        raise HTTPException(status_code=400, detail="scope must be 'once' or 'run'")
 
     registry = request.app.state.run_registry
     workspace = await registry.get(run_id)
@@ -610,7 +615,8 @@ async def post_approval_decision(
     signal = Signal(
         type=sig_type,
         summary=f"approval {decision_word}: {req.summary}",
-        detail=f"approval_id={req.id}; kind={req.kind}",
+        detail=(f"approval_id={req.id}; kind={req.kind}"
+                + (f"; scope={scope}" if decision_word == "granted" else "")),
         from_agent="user",
         iteration=workspace.iteration,
     )
@@ -619,6 +625,7 @@ async def post_approval_decision(
         "ok": True,
         "approval_id": req.id,
         "decision": decision_word,
+        "scope": scope if decision_word == "granted" else None,
         "type": sig_type.value,
     }
 

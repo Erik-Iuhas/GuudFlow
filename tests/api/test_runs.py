@@ -226,6 +226,22 @@ async def test_post_approval_grant_records_decision_and_signals(client, app, aut
     assert "approval_id=appr_xyz" in (granted.detail or "")
 
 
+async def test_post_approval_grant_with_run_scope(client, app, auth_header):
+    ws = _register_workspace_with_approval(app, "run_appr", "appr_scope", kind="tool_permission")
+    r = await client.post("/api/runs/run_appr/approval/appr_scope",
+                          json={"decision": "grant", "scope": "run"}, headers=auth_header)
+    assert r.status_code == 200 and r.json()["scope"] == "run"
+    granted = next(s for s in ws.board if s.type.value == "APPROVAL_GRANTED")
+    assert "scope=run" in (granted.detail or "")
+
+
+async def test_post_approval_rejects_bad_scope(client, app, auth_header):
+    _register_workspace_with_approval(app, "run_appr", "appr_scope")
+    r = await client.post("/api/runs/run_appr/approval/appr_scope",
+                          json={"decision": "grant", "scope": "forever"}, headers=auth_header)
+    assert r.status_code == 400
+
+
 async def test_post_approval_deny(client, app, auth_header):
     ws = _register_workspace_with_approval(app, "run_appr", "appr_xyz")
     r = await client.post(

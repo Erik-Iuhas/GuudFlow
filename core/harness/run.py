@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -34,10 +34,12 @@ from core.harness.capabilities import (
     infer_role_type,
 )
 from core.harness.config_gen import ProviderBinding, agent_entry, build_config
+from core.harness.event_bridge import EventBridge
 from core.harness.git_roles import RoleClones
 from core.harness.mcp_server import McpIdentity, McpServer, McpTool, RunningHttpServer, ToolResult, serve_app
 from core.harness.opencode_client import OpencodeClient
-from core.harness.opencode_runner import EventHook, PermissionHook, TurnStats, drive_turn, reject_all
+from core.harness.approvals import PermissionGate
+from core.harness.opencode_runner import EventHook, PermissionHook, PermissionReply, TurnStats, drive_turn
 from core.harness.result_inbox import ResultInbox
 from core.harness.results import AgentResult, ReviewResult
 from core.harness.server import OpencodeServer
@@ -52,6 +54,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 BindingFactory = Callable[["AgentConfig"], ProviderBinding]
+RolePermissionHook = Callable[[str, dict[str, Any]], Awaitable[PermissionReply]]
 
 
 class TurnFailed(RuntimeError):
@@ -67,7 +70,9 @@ class HarnessSettings:
     steps: int = 60
     binding_factory: BindingFactory | None = None
     extra_providers: dict[str, dict[str, Any]] | None = None
-    on_permission: PermissionHook = reject_all
+    # None → the run's PermissionGate (approval cards in Studio, allow-list, sticky
+    # "always"). Tests pass a hook taking (role, ask).
+    on_permission: RolePermissionHook | None = None
     on_event: Callable[[str, dict[str, Any]], None] | None = None
     keep_servers: bool = False  # tests: keep servers between spawns of the same run
 
@@ -97,6 +102,9 @@ class OpencodeRun:
         self.mcp.register(self.inbox.tool())
         self.mcp.register(self._post_note_tool())
         self.clones = RoleClones(runner.git, runner.run_root / "roles")
+        allow = runner.project.approval_gates.get("tool_permission_allow") or {}
+        self.gate = PermissionGate(self.workspace, allow_list={
+            str(k): [str(p) for p in v] for k, v in allow.items() if isinstance(v, list)})
         self.results: dict[str, BaseModel] = {}
         self._delivered_notes: set[str] = set()
         self._roles: dict[str, _Role] = {}
@@ -215,15 +223,16 @@ class OpencodeRun:
 
         session = await client.create_session(title=f"{self.run_id}:{role_name}")
         on_event = self._event_hook(role_name)
+        on_permission = self._permission_hook(role_name)
         stats = await drive_turn(client, session["id"], self._brief(role), agent=role_name,
-                                 on_event=on_event, on_permission=self.settings.on_permission,
+                                 on_event=on_event, on_permission=on_permission,
                                  timeout=self.settings.turn_timeout)
         result = self.inbox.take(self.run_id, role_name)
         if result is None and not stats.timed_out:
             _, last_error = self.inbox.status(self.run_id, role_name)
             more = await drive_turn(client, session["id"], retry_brief(last_error),
                                     agent=role_name, on_event=on_event,
-                                    on_permission=self.settings.on_permission, timeout=300)
+                                    on_permission=on_permission, timeout=300)
             _merge_stats(stats, more)
             result = self.inbox.take(self.run_id, role_name)
         if not self.settings.keep_servers:
@@ -339,11 +348,22 @@ class OpencodeRun:
                    f"shell {role.requested.shell}, web {role.requested.web}",
                    json.dumps(detail))
 
-    def _event_hook(self, role: str) -> EventHook | None:
-        hook = self.settings.on_event
-        if hook is None:
-            return None
-        return lambda event: hook(role, event)
+    def _permission_hook(self, role: str) -> PermissionHook:
+        hook = self.settings.on_permission
+        if hook is not None:
+            return lambda ask: hook(role, ask)
+        return lambda ask: self.gate.decide(role, ask)
+
+    def _event_hook(self, role: str) -> EventHook:
+        """Board signals via the event bridge, plus any extra hook from settings."""
+        bridge = EventBridge(role, self.workspace.post_signal)
+        extra = self.settings.on_event
+
+        def on_event(event: dict[str, Any]) -> None:
+            bridge.handle(event)
+            if extra is not None:
+                extra(role, event)
+        return on_event
 
     def _post(self, kind: SignalType, role: str, summary: str, detail: str | None = None) -> None:
         self.workspace.post_signal(Signal(type=kind, summary=summary, from_agent=role,

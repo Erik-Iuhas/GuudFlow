@@ -145,3 +145,45 @@ async def test_host_dev_refused_in_production(tmp_path: Path, fake_llm: FakeLLM,
     runner.harness_settings.production = production
     with pytest.raises(Exception, match="host_dev"):
         await runner.run()
+
+
+async def test_bridge_posts_tool_calls_and_narration(tmp_path: Path, fake_llm: FakeLLM) -> None:
+    from tests.harness.fake_llm import Turn
+    fake_llm.route("Your turn: builder",
+                   Turn(calls=[ToolCall("write", {"filePath": "a.py", "content": "x = 1\n"})],
+                        text="Creating a.py first."),
+                   _done("Created a.py with the constant."))
+    runner = _runner(tmp_path, [AgentConfig(role="builder")], fake_llm)
+    assert (await runner.run()).status is SchedulerStatus.COMPLETE
+    board = runner.workspace.board
+    assert any(s.type is SignalType.TOOL_CALL and "a.py" in s.summary for s in board)
+    assert any(s.type is SignalType.THINKING and "Creating a.py first." in s.summary for s in board)
+
+
+async def test_shell_ask_goes_through_the_approval_gate(tmp_path: Path, fake_llm: FakeLLM) -> None:
+    import asyncio
+    from core.signals import Signal
+    fake_llm.route("Your turn: builder",
+                   ToolCall("bash", {"command": "touch made_by_ask.txt", "description": "x"}),
+                   ToolCall("bash", {"command": "touch second.txt", "description": "y"}),
+                   _done("Created two files through approved shell commands."))
+    runner = _runner(tmp_path, [AgentConfig(role="builder", capabilities={"shell": "ask"})],
+                     fake_llm)
+    ws = runner.workspace
+    asked: list[str] = []
+
+    def approve(sig: Signal) -> None:
+        if sig.type is not SignalType.APPROVAL_NEEDED:
+            return
+        approval_id = (sig.detail or "").split(";")[0].split("=")[1]
+        asked.append(approval_id)
+        ws.record_approval(approval_id, "granted")
+        asyncio.get_running_loop().call_soon(ws.post_signal, Signal(
+            type=SignalType.APPROVAL_GRANTED, summary="ok", from_agent="user",
+            detail=f"approval_id={approval_id}; kind=tool_permission; scope=run"))
+
+    ws.subscribe(approve)
+    assert (await runner.run()).status is SchedulerStatus.COMPLETE
+    assert len(asked) == 1, "an 'always this run' grant covers the second touch"
+    main = runner.git.working_dir
+    assert (main / "made_by_ask.txt").exists() and (main / "second.txt").exists()
