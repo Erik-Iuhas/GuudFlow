@@ -208,7 +208,7 @@ Today a rejection re-runs the author from a board subscriber
 (`_on_signal_for_rejection_redispatch`). Instead, the scheduler gets a declared
 **review edge**: `review_of: <author_role>, max_rounds: 3`. When the reviewer returns
 `fail`, the scheduler re-arms the author with the issues as its brief, then re-arms the
-reviewer. When rounds run out → escalation (tech lead) → human. All of it is visible to,
+reviewer. When rounds run out → escalation (the overseer, §11) → human. All of it is visible to,
 and counted by, the scheduler. Scheduler tests are extended for it (§8).
 
 ### 4.6 The task board is the backbone
@@ -760,21 +760,9 @@ Each phase ends in a demo-able state. Follow CLAUDE.md: commit per change, tests
 - Flip `harness` default to `opencode`; retire §6.3 code in small commits; update
   DESIGN.md, CLAUDE.md, and the docs/diagrams.
 
-The additions from §5.7–§5.9 and §10 slot in as follows (task-level detail is in
-`OPENCODE_WORK_BREAKDOWN.md`):
-- **P0:** capability compile table; `permissions.py` builds from capabilities; contract
-  tests for the `explore` restriction and `subagent_depth`.
-- **P2:** capability switches on the Studio approval screen; `CAPABILITIES` board
-  signal; sticky approvals.
-- **P3:** host-side `web_search` / `web_fetch` and `screenshot` MCP tools; escape-suite
-  cases for web and capability bypass.
-- **P5:** the one-shot entry point, the default team, and the `api-client-library` demo.
-
-- **P3:** artifact registry, `.guudflow/screens/`, `visual_diff` (§5.10).
-- **P4:** task-board scheduling: tasks as the unit of work, column transitions, file-overlap guard, WIP limits (§4.6); stuck detectors (including card aging) and the overseer's in-run interventions (§11.1–§11.3).
-- **P5:** visual review loop on a real frontend example; continuations carry open cards forward.
-- **P5:** retrospectives, the project playbook, and carry-forward briefs for re-runs (§11.4).
-- **Parallel UI track U0–U4** (§12.4).
+The later additions (capabilities §5.7, web §5.8, harness features §5.9, visuals §5.10,
+task board §4.6, one-shot §10, overseer §11, UI §12) are scheduled task by task in
+`OPENCODE_WORK_BREAKDOWN.md`, which is the source of truth for ordering and ownership.
 
 Rough total: 4–5 weeks of focused work with the overseer and the UI track included;
 P0–P2 alone already gives a watchable demo.
@@ -816,12 +804,16 @@ P0–P2 alone already gives a watchable demo.
 | Injection or XSS through visuals | Untrusted-image handling, SVG sanitizing, sandboxed iframes, EXIF stripping (§5.10) |
 | UI rewrite stalls feature work | Parallel track, view by view, behind existing routes (§12.4) |
 
-**Open questions for you:**
+**Open questions** (defaults taken on 2026-10-04 so implementation can proceed; change any of them later):
 1. Is one container per agent acceptable for the demo (memory), or should P1–P2 start in
-   host mode and add containers in P3, as planned?
+   host mode and add containers in P3, as planned? **Default: as planned** (host mode in
+   P1–P2, containers from P3; `host_dev` stays available for trusted local demos).
 2. Which models should be the floor for the demo roles (e.g. Sonnet-class for builders,
-   Haiku-class for quips)?
+   Haiku-class for quips)? **Default:** heavy = Opus-class (overseer), solid = Sonnet-class
+   (planner, builders, reviewer, researcher), fast = Haiku-class (quips). Configurable in
+   `data/models.json`.
 3. OK to retire the ASK/ANSWER handshake entirely (§4.4)? It is the biggest behaviour change.
+   **Default: yes** for the opencode harness; the legacy harness keeps it until P6.
 
 ---
 
