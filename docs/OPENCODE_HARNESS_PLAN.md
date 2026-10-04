@@ -726,6 +726,39 @@ read from this registry.
 
 ---
 
+### 5.11 Personas compile into opencode agents (O13)
+
+A persona-backed role becomes one opencode agent whose `prompt` (the system prompt) is built
+by `core/harness/persona_prompt.py: build_agent_prompt()`. It reuses the persona layers and
+helpers the legacy `BaseAgent.effective_system_prompt()` uses, and drops the layers opencode
+or the harness now owns. The prompt is built when the role's server starts; servers are
+restarted per spawn by default, so memory recall is per spawn.
+
+| Layer | Source | In the opencode prompt? |
+|---|---|---|
+| 1 identity | `persona.identity_layer()`; no persona → "You are the {role} on a small software team." + description | yes |
+| 2 character | `persona.character_layer()` | yes |
+| 3 stake framing | `persona.stake_layer()` | yes |
+| 3.5 teammate brief | `AgentRunner._build_teammate_brief(role)` (reputation stats only) | yes |
+| 3.6 manifesto | `BaseAgent.load_manifesto(project_id)` | yes |
+| 3.7 project rules | `BaseAgent.load_project_rules(project_id, persona_id)`; above memory, rules win | yes |
+| 3.8 project context | runner's `_project_context` (roadmap.md) | yes |
+| continuation brief | carry-forward (§11.4) | **no**: goes in the turn brief (`BriefInputs.carry_forward`) |
+| 4 memory | `await persona.recall(goal + role description [+ card title])` → `render_for_prompt()`; only when the persona has memory | yes |
+| 4.5/4.7 repo map, relevance, subtask | legacy context manager | **no**: opencode reads files itself (§5.9) |
+| 5 base prompt | `cfg.system_prompt` with legacy protocol instructions stripped (lines mentioning `[COMMIT]`, `[VERIFY]`, `[ASK]`, `[ANSWER]`, `fs-read`, `fs-list`, `ask-peer`, `board-message`) | yes |
+| 5 tool catalog | legacy `ToolManifest` | **no**: opencode lists its tools; MCP tools describe themselves |
+| 5.5 protocol voice, autonomy rules, context-before-output | legacy loop nudges | **no**: replaced by the brief's "How to work" and `submit_result` |
+| 6 CoT primer | the legacy primer sentence | yes |
+| 7 positive framing | "Make this something you are proud of." | yes, always the last line |
+
+Model tier: the role's `model_id`, else `model_tier` resolved by the registry (already in
+`_binding`). Escalation upgrades a tier on the next spawn when the overseer rebriefs a role
+whose card failed twice (recorded in the `OVERSEER_INTERVENTION` signal); agents never change
+their own model. Roles without a persona get layers 1, 5, 6 and 7 only. The prompt is
+recorded on the board once per spawn as a hash plus the layer names it included, never the
+memory text itself.
+
 ## 6. What changes in the codebase
 
 ### 6.1 New
