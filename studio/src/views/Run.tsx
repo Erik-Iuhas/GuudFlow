@@ -17,7 +17,11 @@ import { WorkerCognitionView } from "../components/WorkerCognitionView";
 import { FilePreviewPanel } from "../components/FilePreviewPanel";
 import { GitGraph } from "../components/GitGraph";
 import { GitDiffSideOver } from "../components/GitDiffSideOver";
-import { KanbanBoard } from "../components/KanbanBoard";
+import { TaskBoard } from "../features/board";
+import { useRunCards } from "../api/queries";
+import { createRunStore } from "../stores/runEvents";
+import { RunStoreProvider } from "../stores/runStoreContext";
+import type { RawSignal } from "../lib/runEvents.gen";
 import { PipelineGraph } from "../components/PipelineGraph";
 import { useRunGraph } from "../hooks/useRunGraph";
 import { useDesks } from "../hooks/useDesks";
@@ -414,16 +418,7 @@ export function Run() {
           )}
           {boardTab === "kanban" && runId && (
             <>
-              <KanbanBoard
-                runId={runId}
-                agents={(project?.agents ?? []).map((a) => ({ role: a.role, persona_id: a.persona_id }))}
-                onCardClick={(role) => {
-                  setBoardTab("signals");
-                  // Smooth scroll to role in board feed is handled by BoardFeed itself
-                  const el = document.querySelector(`[data-role="${role}"]`);
-                  el?.scrollIntoView({ behavior: "smooth" });
-                }}
-              />
+              <LegacyTaskBoard runId={runId} signals={signals} />
               <div style={{ borderTop: "1px solid #e2e8f0", padding: "8px 0 0", marginTop: "auto" }}>
                 <CommentBox runId={runId} />
               </div>
@@ -608,5 +603,22 @@ export function Run() {
       )}
     </div>
     </RunWsProvider>
+  );
+}
+
+/** The task board inside the legacy view: it needs a run store, fed here from the view's own signal list. */
+function LegacyTaskBoard({ runId, signals }: { runId: string; signals: Signal[] }) {
+  const store = useMemo(() => createRunStore(runId), [runId]);
+  const cards = useRunCards(runId);
+  useEffect(() => {
+    store.getState().ingest(signals as unknown as RawSignal[]);
+  }, [store, signals]);
+  useEffect(() => {
+    if (cards.data) store.getState().seedCards(cards.data);
+  }, [store, cards.data]);
+  return (
+    <RunStoreProvider store={store}>
+      <TaskBoard runId={runId} />
+    </RunStoreProvider>
   );
 }

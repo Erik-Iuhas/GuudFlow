@@ -21,7 +21,7 @@ import type { ProjectConfig, RunMeta } from "../../types";
 import { AgentLane } from "./AgentLane";
 import { ApprovalsBar } from "./ApprovalsBar";
 import { BudgetMeter } from "./BudgetMeter";
-import { CardsPanel } from "./CardsPanel";
+import { TaskBoard } from "../board";
 import { OVERSEER_ROLE, formatElapsed, mergeRoles, parseTimestamp, roleSpecs } from "./model";
 import { OverseerPanel } from "./OverseerPanel";
 import { PipelineGraph } from "./PipelineGraph";
@@ -207,6 +207,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
 
   const sidePanel = (
     <SidePanel
+      runId={runId}
       tab={tab}
       onTab={setTab}
       quips={quips}
@@ -365,8 +366,9 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
 }
 
 function SidePanel({
-  tab, onTab, quips, interventionCount, cardCount,
+  runId, tab, onTab, quips, interventionCount, cardCount,
 }: {
+  runId: string;
   tab: PanelTab;
   onTab: (t: PanelTab) => void;
   quips: QuipStream;
@@ -391,7 +393,7 @@ function SidePanel({
         <OverseerPanel />
       </TabsContent>
       <TabsContent value="cards" className="mt-0 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
-        <CardsPanel />
+        <TaskBoard runId={runId} />
       </TabsContent>
     </Tabs>
   );

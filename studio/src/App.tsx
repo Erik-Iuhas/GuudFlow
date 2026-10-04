@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { GlobalErrorHandler, ToastProvider } from "./components/Toaster";
+import { BoardPage } from "./features/board";
 import { Dashboard } from "./views/Dashboard";
 import { Projects } from "./views/Projects";
 import { Propose } from "./views/Propose";
@@ -74,6 +75,7 @@ function AppShell({
           <Route path="/projects/:id" element={<Studio />} />
           <Route path="/propose" element={<Propose />} />
           <Route path="/runs/:runId" element={<RunRoute />} />
+          <Route path="/runs/:runId/board" element={<BoardPage />} />
           <Route path="/roster" element={<Roster />} />
           <Route path="/roster/:id" element={<Roster />} />
           <Route path="/training" element={<Training />} />
