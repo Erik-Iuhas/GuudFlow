@@ -75,6 +75,8 @@ class HarnessSettings:
     on_permission: RolePermissionHook | None = None
     on_event: Callable[[str, dict[str, Any]], None] | None = None
     keep_servers: bool = False  # tests: keep servers between spawns of the same run
+    max_parallel: int = 3       # concurrent roles (each sandbox costs ~1 GB, plan §5.6)
+    max_spawns_per_role: int = 12
 
 
 @dataclass
@@ -119,9 +121,13 @@ class OpencodeRun:
         self._http = await serve_app(self.mcp.app())
         try:
             specs = [AgentSpec(role=cfg.role, runner=self._runner_for(cfg),
-                               depends_on=list(cfg.depends_on))
+                               depends_on=list(cfg.depends_on),
+                               max_review_rounds=cfg.max_review_rounds)
                      for cfg in self.runner.project.agents]
-            scheduler = Scheduler(specs, self.workspace, scope="pipeline")
+            scheduler = Scheduler(specs, self.workspace, scope="pipeline",
+                                  max_iterations=self.settings.max_spawns_per_role,
+                                  transition_rules=False,
+                                  max_parallel=self.settings.max_parallel)
             self.runner._scheduler = scheduler  # noqa: SLF001 — lets force_stop() reach it
             return await scheduler.run()
         finally:
@@ -266,15 +272,58 @@ class OpencodeRun:
                                                    iteration=self._spawns(name)))
         if isinstance(result, AgentResult) and result.status == "blocked":
             assert result.blocked_on is not None
-            self._post(SignalType.BLOCKED, name,
-                       f"{name} is blocked on {result.blocked_on.role}", result.blocked_on.need)
-            raise TurnFailed(f"{name}: blocked on {result.blocked_on.role}")
+            self._handle_blocked(name, result.blocked_on.role, result.blocked_on.need)
+            return
+        if isinstance(result, ReviewResult) and result.verdict == "fail":
+            if self._handle_review_fail(role, result):
+                return
         if isinstance(result, AgentResult) and result.status == "failed":
             self._post(SignalType.FAILED, name, f"{name} reported failure", result.summary)
             raise TurnFailed(f"{name}: {result.summary}")
         self.workspace.completed_agents.append(name)
         self.workspace.agent_states[name] = AgentState.COMPLETE
         self._post(SignalType.COMPLETE, name, f"{name} complete", summary or None)
+
+    # ── review edges and blocking (plan §4.4, §4.5) ────────────────────────
+    def _scheduler(self) -> Scheduler:
+        scheduler = self.runner._scheduler  # noqa: SLF001
+        assert isinstance(scheduler, Scheduler)
+        return scheduler
+
+    def _handle_blocked(self, name: str, on_role: str, need: str) -> None:
+        outcome = self._scheduler().block(name, on_role, {"kind": "need", "from": name,
+                                                           "need": need})
+        if outcome.action == "unknown_role":
+            self._post(SignalType.FAILED, name, f"{name} is blocked on unknown role {on_role!r}",
+                       need)
+            raise TurnFailed(f"{name}: blocked on unknown role {on_role!r}")
+        if outcome.action == "cycle":
+            self._post(SignalType.HUMAN_NEEDED, name,
+                       f"blocked-on cycle: {' → '.join(outcome.cycle + (name,))}", need)
+            return
+        self._post(SignalType.BLOCKED, name, f"{name} is blocked on {on_role}", need)
+
+    def _handle_review_fail(self, role: _Role, result: ReviewResult) -> bool:
+        """Send work back to the reviewed roles. False when rounds are used up."""
+        name = role.cfg.role
+        authors = role.cfg.review_of or [d for d in role.cfg.depends_on
+                                         if d in self._roles
+                                         and self._roles[d].role_type != "reviewer"]
+        issues = [{"file": i.file, "detail": i.detail} for i in result.issues]
+        payload = {"kind": "review", "reviewer": name, "issues": issues}
+        if authors and self._scheduler().request_rework(name, authors, payload):
+            rounds = max(self._scheduler().review_rounds(name, a) for a in authors)
+            self._post(SignalType.REJECTED, name,
+                       f"{name} sent work back to {', '.join(authors)} (round {rounds})",
+                       json.dumps({"authors": authors, "issues": issues, "round": rounds}))
+            return True
+        self._escalate(name, f"review rounds exhausted for {', '.join(authors) or name}",
+                       json.dumps({"issues": issues}))
+        return False
+
+    def _escalate(self, role: str, summary: str, detail: str | None = None) -> None:
+        """Escalation path (the overseer replaces this in P4, plan §11)."""
+        self._post(SignalType.ESCALATION, role, summary, detail)
 
     # ── briefs, notes, signals ─────────────────────────────────────────────
     def _brief(self, role: _Role) -> str:
@@ -284,15 +333,22 @@ class OpencodeRun:
                            files_changed=tuple(getattr(self.results[dep], "files_changed", ())))
             for dep in cfg.depends_on if dep in self.results)
         issues: tuple[ReviewIssue, ...] = ()
-        for other in self.results.values():
-            if isinstance(other, ReviewResult) and other.verdict == "fail":
-                issues += tuple(ReviewIssue(i.file, i.detail) for i in other.issues)
-        notes = self._take_notes(cfg.role)
+        review_round = 0
+        needs: list[tuple[str, str]] = []
+        for item in self._scheduler().drain_pending_input(cfg.role):
+            if isinstance(item, dict) and item.get("kind") == "review":
+                issues += tuple(ReviewIssue(str(i["file"]), str(i["detail"]))
+                                for i in item.get("issues", []))
+                review_round = self._scheduler().review_rounds(str(item["reviewer"]), cfg.role)
+            elif isinstance(item, dict) and item.get("kind") == "need":
+                needs.append((str(item["from"]), str(item["need"])))
+        notes = self._take_notes(cfg.role) + tuple(needs)
         research = self.clones.path(cfg.role) / "research" / "notes.md"
         return build_brief(BriefInputs(
             goal=self.runner.project.goal, role=cfg.role, description=cfg.description,
             is_reviewer=role.role_type == "reviewer", upstream=upstream, notes=notes,
             review_issues=issues if role.role_type != "reviewer" else (),
+            review_round=review_round,
             research_notes=(research.read_text(encoding="utf-8", errors="replace")
                             if role.role_type != "researcher" and research.is_file() else None),
         ))

@@ -176,6 +176,10 @@ class AgentConfig:
     # `capabilities` holds per-role overrides of the seven toggles.
     role_type: str = ""
     capabilities: dict[str, str] = field(default_factory=dict)
+    # Review edge (plan §4.5): which roles a reviewer sends work back to (default:
+    # its depends_on) and how many rework rounds before escalation.
+    review_of: list[str] = field(default_factory=list)
+    max_review_rounds: int = 2
 
 
 @dataclass

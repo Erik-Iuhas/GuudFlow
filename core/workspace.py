@@ -34,6 +34,9 @@ class AgentState(str, Enum):
     WAITING_FOR_PEER = "waiting_for_peer"          # blocked on ASK/ANSWER
     WAITING_FOR_SKIP_CONFIRM = "waiting_for_skip_confirm"  # REQUEST_SKIP pending
     SAT_OUT = "sat_out"                            # skip confirmed; counts as complete
+    # opencode harness (plan §4.4–§4.6)
+    BLOCKED = "blocked"                            # waiting on another role's rework
+    PARKED = "parked"                              # nothing ready for this role yet
 
 
 # ── Typed sub-records ───────────────────────────────────────────────────────

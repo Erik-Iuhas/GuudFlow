@@ -111,6 +111,8 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             escalates_to=list(a.get("escalates_to") or []),
             role_type=str(a.get("role_type") or ""),
             capabilities={str(k): str(v) for k, v in (a.get("capabilities") or {}).items()},
+            review_of=[str(r) for r in (a.get("review_of") or [])],
+            max_review_rounds=int(a.get("max_review_rounds", 2)),
         ))
 
     rbac: dict[str, RoleRBAC] = {}
