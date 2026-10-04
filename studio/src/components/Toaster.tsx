@@ -1,9 +1,16 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import {
+  Toast as UiToast,
+  ToastClose,
+  ToastDescription,
+  ToastProvider as UiToastProvider,
+  ToastViewport,
+} from "./ui/toast";
 
 /**
- * Phase G.6 — minimal toast system. Replaces inline `<div className="error">`
- * blocks scattered through views. Useful for async API failures that
+ * Phase G.6 — minimal toast system, rendered with the ui/toast Radix primitives.
+ * Replaces inline `<div className="error">` blocks scattered through views. Useful for async API failures that
  * happen out-of-band (network blips, background polling errors).
  *
  * Inline errors are still fine for form validation — toasts are for
@@ -33,32 +40,33 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = useCallback((message: string, kind: ToastKind = "info") => {
     const id = nextId++;
     setToasts((prev) => [...prev, { id, kind, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, TOAST_DURATION_MS);
   }, []);
 
   function dismiss(id: number) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }
 
+  const value = useMemo(() => ({ push }), [push]);
+
   return (
-    <ToastContext.Provider value={{ push }}>
-      {children}
-      <div className="toaster">
+    <ToastContext.Provider value={value}>
+      <UiToastProvider duration={TOAST_DURATION_MS} swipeDirection="right">
+        {children}
         {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.kind}`}>
-            <span>{t.message}</span>
-            <button
-              className="toast-close"
-              onClick={() => dismiss(t.id)}
-              aria-label="dismiss"
-            >
-              ×
-            </button>
-          </div>
+          <UiToast
+            key={t.id}
+            variant={t.kind}
+            duration={TOAST_DURATION_MS}
+            onOpenChange={(open) => {
+              if (!open) dismiss(t.id);
+            }}
+          >
+            <ToastDescription>{t.message}</ToastDescription>
+            <ToastClose />
+          </UiToast>
         ))}
-      </div>
+        <ToastViewport />
+      </UiToastProvider>
     </ToastContext.Provider>
   );
 }

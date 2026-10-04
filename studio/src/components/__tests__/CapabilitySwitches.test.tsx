@@ -57,16 +57,37 @@ describe("CapabilitySwitches", () => {
     expect(onChange).toHaveBeenCalledWith({ ...builder, web: "search" });
   });
 
-  it("disables vision with a tooltip when the model has no image input", () => {
+  it("renders two-level off/on toggles as switches and the rest as selects", () => {
+    setup();
+    for (const name of ["packages", "browser", "vision"]) {
+      expect(screen.getByRole("switch", { name: `dev ${name}` })).toBeInTheDocument();
+    }
+    for (const name of ["sandbox", "web", "shell", "subagents"]) {
+      expect(screen.getByLabelText(`dev ${name}`).tagName).toBe("SELECT");
+    }
+    expect(screen.getByRole("switch", { name: "dev packages" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "dev vision" })).not.toBeChecked();
+  });
+
+  it("switching on selects the non-off level, switching off selects off", () => {
+    const onChange = setup();
+    fireEvent.click(screen.getByRole("switch", { name: "dev vision" }));
+    expect(onChange).toHaveBeenLastCalledWith({ ...builder, vision: "on" });
+    fireEvent.click(screen.getByRole("switch", { name: "dev packages" }));
+    expect(onChange).toHaveBeenLastCalledWith({ ...builder, packages: "off" });
+  });
+
+  it("disables vision with a tooltip when the model has no image input", async () => {
     setup({ visionAvailable: false });
-    const vision = screen.getByLabelText("dev vision") as HTMLSelectElement;
-    expect(vision.disabled).toBe(true);
-    expect(vision.title).toBe("Model has no image input");
+    expect(screen.getByRole("switch", { name: "dev vision" })).toBeDisabled();
+    fireEvent.focus(screen.getByTestId("switch-hint-trigger"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Model has no image input");
   });
 
   it("keeps vision enabled when available", () => {
     setup({ visionAvailable: true });
-    expect((screen.getByLabelText("dev vision") as HTMLSelectElement).disabled).toBe(false);
+    expect(screen.getByRole("switch", { name: "dev vision" })).not.toBeDisabled();
+    expect(screen.queryByTestId("switch-hint-trigger")).toBeNull();
   });
 
   it("offers host_dev outside production and shows the warning once selected", () => {

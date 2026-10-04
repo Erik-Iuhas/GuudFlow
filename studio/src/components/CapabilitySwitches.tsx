@@ -3,6 +3,10 @@ import {
   VISION_DISABLED_TITLE,
   type CapabilityBlock,
 } from "../lib/capabilities";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Switch } from "./ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 
 interface CapabilitySwitchesProps {
   /** Role name, used for accessible labels. */
@@ -27,8 +31,9 @@ interface CapabilitySwitchesProps {
 }
 
 /**
- * The seven capability toggles for one role (plan §5.7), as a compact grid of
- * selects. Controlled: the parent owns `value` and persists it.
+ * The seven capability toggles for one role (plan §5.7), as a compact grid. Two-level
+ * toggles whose first level is "off" render as switches; the rest stay selects.
+ * Controlled: the parent owns `value` and persists it.
  */
 export function CapabilitySwitches({
   role,
@@ -50,82 +55,131 @@ export function CapabilitySwitches({
   }
 
   return (
-    <div className="capability-switches" data-testid={`capabilities-${role}`}>
-      <div
-        className="row"
-        style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}
-      >
-        <span className="small">
-          Capabilities <span className="tag mono">{roleType}</span>
-        </span>
-        {defaults && (
-          <button
-            type="button"
-            className="link small"
-            disabled={disabled}
-            onClick={() => onChange({ ...defaults })}
-            style={{ background: "none", border: "none", padding: 0, color: "#2563eb", cursor: "pointer" }}
+    <TooltipProvider delayDuration={150}>
+      <div data-testid={`capabilities-${role}`}>
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="text-xs">
+            Capabilities <Badge variant="secondary" className="font-mono">{roleType}</Badge>
+          </span>
+          {defaults && (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto p-0 text-xs"
+              disabled={disabled}
+              onClick={() => onChange({ ...defaults })}
+            >
+              reset to defaults
+            </Button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2">
+          {toggles.map((name) => {
+            const visionOff = name === "vision" && !visionAvailable;
+            const isDisabled = disabled || visionOff;
+            const current = value[name] ?? levels[name][0];
+            const binary = isBinary(levels[name]);
+            return (
+              <div key={name} className="flex flex-col gap-0.5 text-xs">
+                <span className="font-medium text-muted-foreground">{name}</span>
+                {binary ? (
+                  <SwitchField
+                    label={`${role} ${name}`}
+                    levels={levels[name]}
+                    current={current}
+                    disabled={isDisabled}
+                    hint={visionOff ? VISION_DISABLED_TITLE : undefined}
+                    onChange={(level) => set(name, level)}
+                  />
+                ) : (
+                  <select
+                    aria-label={`${role} ${name}`}
+                    value={current}
+                    disabled={isDisabled}
+                    onChange={(e) => set(name, e.target.value)}
+                  >
+                    {levels[name].map((level) => {
+                      const hostDev = name === "sandbox" && level === "host_dev";
+                      const blocked = hostDev && production;
+                      return (
+                        <option
+                          key={level}
+                          value={level}
+                          disabled={blocked}
+                          title={hostDev ? hostDevWarning : undefined}
+                        >
+                          {blocked ? `${level} (not in production)` : level}
+                        </option>
+                      );
+                    })}
+                  </select>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {value.sandbox === "host_dev" && hostDevWarning && (
+          <div
+            role="alert"
+            className="mt-1.5 rounded-md border border-status-blocked/40 bg-status-blocked/10 p-2 text-xs text-status-blocked"
           >
-            reset to defaults
-          </button>
+            {hostDevWarning}
+          </div>
+        )}
+        {error && (
+          <div
+            role="alert"
+            className="mt-1.5 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive"
+          >
+            {error}
+          </div>
         )}
       </div>
+    </TooltipProvider>
+  );
+}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-          gap: 8,
-        }}
-      >
-        {toggles.map((name) => {
-          const visionOff = name === "vision" && !visionAvailable;
-          const isDisabled = disabled || visionOff;
-          return (
-            <label
-              key={name}
-              className="small"
-              title={visionOff ? VISION_DISABLED_TITLE : undefined}
-              style={{ display: "flex", flexDirection: "column", gap: 2 }}
-            >
-              <span className="muted">{name}</span>
-              <select
-                aria-label={`${role} ${name}`}
-                value={value[name] ?? levels[name][0]}
-                disabled={isDisabled}
-                title={visionOff ? VISION_DISABLED_TITLE : undefined}
-                onChange={(e) => set(name, e.target.value)}
-              >
-                {levels[name].map((level) => {
-                  const hostDev = name === "sandbox" && level === "host_dev";
-                  const blocked = hostDev && production;
-                  return (
-                    <option
-                      key={level}
-                      value={level}
-                      disabled={blocked}
-                      title={hostDev ? hostDevWarning : undefined}
-                    >
-                      {blocked ? `${level} (not in production)` : level}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-          );
-        })}
-      </div>
+/** A toggle with exactly two levels, the first being "off", is an on/off switch. */
+function isBinary(levels: string[]): boolean {
+  return levels.length === 2 && levels[0] === "off";
+}
 
-      {value.sandbox === "host_dev" && hostDevWarning && (
-        <div className="warn small" role="alert" style={{ marginTop: 6 }}>
-          {hostDevWarning}
-        </div>
-      )}
-      {error && (
-        <div className="error small" role="alert" style={{ marginTop: 6 }}>
-          {error}
-        </div>
-      )}
-    </div>
+function SwitchField({
+  label,
+  levels,
+  current,
+  disabled,
+  hint,
+  onChange,
+}: {
+  label: string;
+  levels: string[];
+  current: string;
+  disabled: boolean;
+  /** Why the switch is unavailable; shown as a tooltip. */
+  hint?: string;
+  onChange: (level: string) => void;
+}) {
+  const [off, on] = levels;
+  const field = (
+    <span className="inline-flex items-center gap-2" tabIndex={hint ? 0 : undefined} data-testid={hint ? "switch-hint-trigger" : undefined}>
+      <Switch
+        aria-label={label}
+        checked={current !== off}
+        disabled={disabled}
+        onCheckedChange={(checked) => onChange(checked ? on : off)}
+      />
+      <span className="font-mono">{current}</span>
+    </span>
+  );
+  if (!hint) return field;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{field}</TooltipTrigger>
+      <TooltipContent>{hint}</TooltipContent>
+    </Tooltip>
   );
 }

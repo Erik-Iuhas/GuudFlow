@@ -2,6 +2,7 @@
 // that the role's ruleset marks `ask`. Three answers instead of grant/deny.
 
 import { ApiError, getToken } from "../../api";
+import { Button } from "../ui/button";
 import { parseToolPermissionContext } from "./parse";
 
 export type ToolPermissionChoice = "once" | "run" | "reject";
@@ -53,7 +54,7 @@ export function ToolPermissionSummary({ detail }: { detail: string | null | unde
   const ctx = parseToolPermissionContext(detail);
   if (!ctx.role && !ctx.permission && ctx.patterns.length === 0) return null;
   return (
-    <p className="small" data-testid="tool-permission-context" style={{ margin: "4px 0" }}>
+    <p className="small my-1" data-testid="tool-permission-context">
       {ctx.role && (
         <>
           <strong className="mono">{ctx.role}</strong> wants{" "}
@@ -81,16 +82,21 @@ export function ToolPermissionButtons({
   onChoose: (choice: ToolPermissionChoice) => void;
 }) {
   return (
-    <div className="row" style={{ marginTop: 8, gap: 8 }}>
-      <button className="primary" onClick={() => onChoose("once")} disabled={busy !== null}>
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <Button onClick={() => onChoose("once")} disabled={busy !== null}>
         {busy === "once" ? "Allowing…" : "Allow once"}
-      </button>
-      <button onClick={() => onChoose("run")} disabled={busy !== null} title="Stop asking for this permission for the rest of this run">
+      </Button>
+      <Button
+        variant="outline"
+        onClick={() => onChoose("run")}
+        disabled={busy !== null}
+        title="Stop asking for this permission for the rest of this run"
+      >
         {busy === "run" ? "Allowing…" : "Always (this run)"}
-      </button>
-      <button className="danger" onClick={() => onChoose("reject")} disabled={busy !== null}>
+      </Button>
+      <Button variant="destructive" onClick={() => onChoose("reject")} disabled={busy !== null}>
         {busy === "reject" ? "Rejecting…" : "Reject"}
-      </button>
+      </Button>
     </div>
   );
 }

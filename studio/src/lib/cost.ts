@@ -57,6 +57,7 @@ export function formatCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-export function tierColor(tier: ModelTier): string {
-  return { heavy: "#a855f7", solid: "#3b82f6", fast: "#10b981" }[tier];
+/** Token text-colour class for a model tier (replaces the old hex `tierColor`). */
+export function tierClass(tier: ModelTier): string {
+  return { heavy: "text-status-waiting", solid: "text-status-running", fast: "text-status-complete" }[tier];
 }

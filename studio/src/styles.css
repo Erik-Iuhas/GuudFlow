@@ -310,13 +310,6 @@ table.list tr:hover td { background: #fafbfc; }
 }
 .agent-card .remove:hover { color: #dc2626; background: #fef2f2; }
 
-.cost-strip {
-  background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px;
-  padding: 8px 14px; font-size: 13px; color: #0c4a6e;
-  display: flex; gap: 16px; align-items: center;
-}
-.cost-strip .total { font-weight: 600; font-size: 14px; }
-
 /* ─── persona roster ───────────────────────────────────────────────────── */
 
 .persona-card .name { font-weight: 600; font-size: 14px; }
@@ -524,32 +517,6 @@ button.small { padding: 2px 8px; font-size: 12px; }
   max-height: 220px; overflow-y: auto;
 }
 
-.agent-state-cards {
-  display: flex; flex-direction: column; gap: 4px; margin-top: 8px;
-}
-.agent-state-card {
-  border: 1px solid #e2e8f0; border-left-width: 3px;
-  border-radius: 6px; padding: 8px 12px; background: white;
-}
-.agent-state-pending { border-left-color: #cbd5e1; }
-.agent-state-running { border-left-color: #f59e0b; }
-.agent-state-complete { border-left-color: #10b981; }
-.agent-state-failed { border-left-color: #ef4444; }
-.agent-state-waiting_for_human { border-left-color: #3b82f6; }
-
-.agent-state-detail {
-  margin-top: 8px; padding-top: 8px; border-top: 1px solid #f1f5f9;
-}
-.agent-iteration-list {
-  list-style: none; padding: 0; margin: 0;
-  font-size: 12px; color: #475569;
-}
-.agent-iteration-list li { padding: 3px 0; }
-
-.tag-comments { background: #fef3c7; color: #92400e; }
-.tag-status-pending { background: #f1f5f9; color: #475569; }
-.tag-status-waiting_for_human { background: #dbeafe; color: #1e3a8a; }
-
 /* ─── Phase G.2 — onboarding ─────────────────────────────────────────── */
 
 .onboarding-card {
@@ -613,37 +580,6 @@ button.small { padding: 2px 8px; font-size: 12px; }
   font-size: 13px;
 }
 .tags-list li:last-child { border-bottom: none; }
-
-/* ─── Phase G.6 — toasts ─────────────────────────────────────────────── */
-
-.toaster {
-  position: fixed; bottom: 16px; right: 16px;
-  display: flex; flex-direction: column; gap: 8px;
-  z-index: 1000; pointer-events: none;
-  max-width: 420px;
-}
-.toast {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 14px; border-radius: 6px;
-  background: white; border: 1px solid #e2e8f0;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
-  font-size: 13px; pointer-events: auto;
-  animation: toast-slide-in 0.2s ease-out;
-}
-@keyframes toast-slide-in {
-  from { transform: translateY(8px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-.toast-info { border-left: 3px solid #2563eb; }
-.toast-success { border-left: 3px solid #10b981; }
-.toast-warn { border-left: 3px solid #f59e0b; }
-.toast-error { border-left: 3px solid #ef4444; }
-.toast-close {
-  background: none; border: none; padding: 0;
-  font-size: 20px; line-height: 1; color: #94a3b8; cursor: pointer;
-  margin-left: auto;
-}
-.toast-close:hover { color: #1f2937; background: none; }
 
 /* ─── Phase K.2 — roadmap tab ────────────────────────────────────────── */
 
