@@ -1,3 +1,8 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Team graph edges (features/team): colours come from the design tokens. */
+.react-flow__edge.team-edge-dep .react-flow__edge-path { stroke: hsl(var(--muted-foreground)); stroke-width: 1.5; }
+.react-flow__edge.team-edge-review .react-flow__edge-path { stroke: hsl(var(--status-waiting)); stroke-dasharray: 5 4; }
+.react-flow__edge.team-edge-review .react-flow__edge-text { fill: hsl(var(--status-waiting)); font-size: 11px; }
