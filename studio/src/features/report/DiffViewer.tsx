@@ -7,7 +7,7 @@ import { fetchCommitDiff } from "./api";
 /** Parse a unified diff; a body git could not render (or empty) yields no files. */
 export function safeParseDiff(text: string): ReturnType<typeof parseDiff> {
   try {
-    return parseDiff(text);
+    return parseDiff(text).filter((f) => f.hunks.length > 0);
   } catch {
     return [];
   }

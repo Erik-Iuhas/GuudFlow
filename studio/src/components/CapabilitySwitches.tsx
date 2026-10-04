@@ -1,5 +1,6 @@
 import {
   TOGGLE_ORDER,
+  TOGGLE_TOOLTIPS,
   VISION_DISABLED_TITLE,
   type CapabilityBlock,
 } from "../lib/capabilities";
@@ -83,7 +84,18 @@ export function CapabilitySwitches({
             const binary = isBinary(levels[name]);
             return (
               <div key={name} className="flex flex-col gap-0.5 text-xs">
-                <span className="font-medium text-muted-foreground">{name}</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      tabIndex={0}
+                      className="w-fit cursor-help font-medium text-muted-foreground underline decoration-dotted underline-offset-2"
+                      data-testid={`toggle-label-${role}-${name}`}
+                    >
+                      {name}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>{TOGGLE_TOOLTIPS[name]}</TooltipContent>
+                </Tooltip>
                 {binary ? (
                   <SwitchField
                     label={`${role} ${name}`}

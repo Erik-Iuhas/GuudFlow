@@ -8,7 +8,10 @@ import type {
   InvokeOutcome,
   InvokeResponse,
   MetaProposal,
+  OneShotRequestBody,
+  OneShotResponse,
   PersonaSummary,
+  PlaybookResponse,
   PriorRunAttachment,
   ProjectConfig,
   RunMeta,
@@ -109,6 +112,14 @@ export const projectsApi = {
   /** Phase K.0 — read the project's roadmap.md. Returns content="" +
    *  exists=false when the file doesn't exist (default state for new
    *  projects). */
+  /** Playbook entries (plan 11.4) and run-metrics history; read-only. */
+  playbook: (id: string) =>
+    request<PlaybookResponse>(
+      "GET",
+      `/api/projects/${encodeURIComponent(id)}/playbook`,
+      undefined,
+      true,
+    ),
   getRoadmap: (id: string) =>
     request<RoadmapResponse>("GET", `/api/projects/${encodeURIComponent(id)}/roadmap`),
   /** Phase K.0 — write the project's roadmap.md. Empty content
@@ -651,6 +662,12 @@ export const metaApi = {
       },
       true,
     ),
+};
+
+export const oneshotApi = {
+  /** POST /api/oneshot. 202 either enqueues the run or asks for approval. */
+  start: (body: OneShotRequestBody) =>
+    request<OneShotResponse>("POST", "/api/oneshot", body, true),
 };
 
 export const invokeApi = {

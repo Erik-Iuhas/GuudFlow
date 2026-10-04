@@ -208,12 +208,17 @@ async def propose(
     raw_harness = (project or {}).get("harness") or body.get("harness")
     harness = "legacy" if raw_harness == "legacy" else "opencode"
     playbook_text = ""
+    playbook_entries_used: list[str] = []
     if project_id is not None:
         try:
             from core.playbook import Playbook
-            playbook_text = Playbook.load(
-                request.app.state.data_root, project_id,
-            ).render_for_meta()
+            playbook = Playbook.load(request.app.state.data_root, project_id)
+            playbook_text = playbook.render_for_meta()
+            # render_for_meta shows active entries only; report the same ids so
+            # Studio can show which lessons shaped the team (nothing is applied).
+            playbook_entries_used = [
+                e.id for e in playbook.entries() if e.state == "active"
+            ] if playbook_text else []
         except Exception as e:  # a corrupt playbook must not break proposals
             _logger.warning("playbook for %s unreadable: %s", project_id, e)
 
@@ -241,4 +246,8 @@ async def propose(
         skeleton["warnings"] = [f"meta-agent crashed: {e}"]
         return skeleton
 
-    return proposal.to_dict()
+    result = proposal.to_dict()
+    # Ids of the active playbook entries rendered into the prompt. The proposal
+    # carries no machine-readable playbook diff, so this is "what the model saw".
+    result["playbook_entries_used"] = playbook_entries_used
+    return result

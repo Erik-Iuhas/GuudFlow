@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { ArtifactsPage } from "./features/artifacts/ArtifactsPage";
 import { GlobalErrorHandler, ToastProvider } from "./components/Toaster";
+import { OneShotLauncher } from "./features/oneshot/OneShotLauncher";
 import { BoardPage } from "./features/board";
 import { RunReport } from "./features/report/RunReport";
 import { Dashboard } from "./views/Dashboard";
@@ -49,6 +50,9 @@ function AppShell({
           <NavLink to="/projects" className={({ isActive }) => (isActive ? "active" : "")}>
             Projects
           </NavLink>
+          <NavLink to="/oneshot" className={({ isActive }) => (isActive ? "active" : "")}>
+            One-shot
+          </NavLink>
           <NavLink to="/propose" className={({ isActive }) => (isActive ? "active" : "")}>
             Propose
           </NavLink>
@@ -76,6 +80,7 @@ function AppShell({
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:id" element={<Studio />} />
           <Route path="/propose" element={<Propose />} />
+          <Route path="/oneshot" element={<OneShotLauncher />} />
           <Route path="/runs/:runId" element={<RunRoute />} />
           <Route path="/runs/:runId/board" element={<BoardPage />} />
           <Route path="/runs/:id/artifacts" element={<ArtifactsPage />} />

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError, harnessApi, metaApi, projectsApi } from "../api";
+import { PlaybookPanel } from "../features/team/PlaybookPanel";
+import { TeamGraph } from "../features/team/TeamGraph";
 import { CapabilitySwitches } from "../components/CapabilitySwitches";
 import { CostStrip } from "../components/CostStrip";
 import { WorkerCard } from "../components/WorkerCard";
@@ -10,12 +12,14 @@ import type {
   HarnessAgentConfig,
   HarnessKind,
   HarnessProjectConfig,
+  RoleCapState,
 } from "../lib/capabilities";
 import type {
   AgentConfig,
   MetaProposal,
   ModelTier,
   PersonaHire,
+  PlaybookEntry,
   RoleDelta,
 } from "../types";
 
@@ -47,14 +51,6 @@ function highlightPaths(text: string): React.ReactNode[] {
   return parts;
 }
 
-/** Per-role capability state kept alongside the proposal (opencode harness). */
-interface RoleCapState {
-  roleType: string;
-  capabilities: CapabilityBlock;
-  visionAvailable: boolean;
-  error: string | null;
-}
-
 function errorText(e: unknown): string {
   return e instanceof ApiError ? e.detail : String(e);
 }
@@ -73,11 +69,13 @@ export function Propose() {
   // string — the meta-agent reads inputs/ from data/projects/{id}/
   const [projectId, setProjectId] = useState(initialProjectId);
   const navigate = useNavigate();
-  // Harness selector: "legacy" stays the default; "opencode" reveals the
+  // Harness selector: "opencode" is the default (O15) and shows the
   // per-role capability switches (plan §5.7).
-  const [harness, setHarness] = useState<HarnessKind>("legacy");
+  const [harness, setHarness] = useState<HarnessKind>("opencode");
   const [capMeta, setCapMeta] = useState<CapabilitiesMeta | null>(null);
   const [roleCaps, setRoleCaps] = useState<Record<string, RoleCapState>>({});
+  const [view, setView] = useState<"graph" | "list">("graph");
+  const [playbookUsed, setPlaybookUsed] = useState<PlaybookEntry[]>([]);
   const capSeq = useRef<Record<string, number>>({});
 
   // Load the toggle levels once the opencode harness is chosen.
@@ -153,6 +151,8 @@ export function Propose() {
       capSeq.current = {};
       setRoleCaps({});
       setProposal(p);
+      setPlaybookUsed([]);
+      void loadPlaybook(p);
       // Suggest a project id from the goal slug ONLY when this is a
       // greenfield proposal. Continuation flow keeps the existing id.
       if (!initialProjectId) {
@@ -163,6 +163,32 @@ export function Propose() {
     } finally {
       setLoading(false);
     }
+  }
+
+  /** Entries the meta-agent was shown; empty when there is no project or playbook yet. */
+  async function loadPlaybook(p: MetaProposal) {
+    const ids = p.playbook_entries_used ?? [];
+    if (!initialProjectId || ids.length === 0) return;
+    try {
+      const pb = await projectsApi.playbook(initialProjectId);
+      setPlaybookUsed(pb.entries.filter((e) => ids.includes(e.id)));
+    } catch {
+      // The playbook panel is informational; a failed fetch must not block approval.
+      setPlaybookUsed([]);
+    }
+  }
+
+  function handleTierChange(role: string, tier: ModelTier) {
+    setProposal((prev) =>
+      prev
+        ? {
+            ...prev,
+            agents: prev.agents.map((a) =>
+              a.role === role ? { ...a, model_tier: tier, model_id: undefined } : a,
+            ),
+          }
+        : prev,
+    );
   }
 
   async function handleApprove() {
@@ -179,7 +205,7 @@ export function Propose() {
       agents,
       rbac: proposal.rbac,
       max_iterations: 5,
-      ...(harness === "opencode" ? { harness } : {}),
+      harness, // always explicit: a missing field means opencode (O15)
     };
     try {
       if (initialProjectId) {
@@ -194,6 +220,10 @@ export function Propose() {
     }
   }
 
+  const capsByRole: Record<string, CapabilityBlock> = {};
+  if (harness === "opencode") {
+    for (const [role, rc] of Object.entries(roleCaps)) capsByRole[role] = rc.capabilities;
+  }
   const isContinuation = !!initialPriorRunId;
   const hires = proposal?.persona_hires ?? [];
   const deltas = proposal?.deltas ?? [];
@@ -261,16 +291,6 @@ export function Propose() {
             </div>
           )}
 
-          <CostStrip
-            project={{
-              project_id: projectId,
-              goal,
-              agents: proposal.agents,
-              rbac: proposal.rbac,
-              max_iterations: 5,
-            }}
-          />
-
           {deltas.length > 0 && <DeltaTable deltas={deltas} />}
 
           <div style={{ margin: "12px 0" }}>
@@ -291,7 +311,50 @@ export function Propose() {
             )}
           </div>
 
-          <hr />
+          <div className="my-3 flex gap-1" role="group" aria-label="Team view">
+            <button
+              type="button"
+              className={view === "graph" ? "primary" : ""}
+              aria-pressed={view === "graph"}
+              onClick={() => setView("graph")}
+            >
+              Graph
+            </button>
+            <button
+              type="button"
+              className={view === "list" ? "primary" : ""}
+              aria-pressed={view === "list"}
+              onClick={() => setView("list")}
+            >
+              List
+            </button>
+          </div>
+
+          {view === "graph" ? (
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <TeamGraph
+                projectId={projectId}
+                goal={goal}
+                agents={proposal.agents}
+                roleCaps={harness === "opencode" ? roleCaps : {}}
+                capMeta={harness === "opencode" ? capMeta : null}
+                onCapabilityChange={handleCapChange}
+                onTierChange={handleTierChange}
+              />
+              <PlaybookPanel entries={playbookUsed} />
+            </div>
+          ) : (
+            <>
+              <CostStrip
+                project={{
+                  project_id: projectId,
+                  goal,
+                  agents: proposal.agents,
+                  rbac: proposal.rbac,
+                  max_iterations: 5,
+                }}
+                capsByRole={capsByRole}
+              />
           <div className="grid-2">
             {proposal.agents.map((a) => {
               const rc = roleCaps[a.role];
@@ -316,6 +379,9 @@ export function Propose() {
               );
             })}
           </div>
+
+            </>
+          )}
 
           <hr />
           <div className="row">

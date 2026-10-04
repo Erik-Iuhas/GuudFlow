@@ -38,7 +38,7 @@ describe("RunReportView", () => {
     expect(rows[0]).toHaveTextContent("dev");
     expect(rows[0]).toHaveTextContent("12");
     expect(rows[0]).toHaveTextContent("120k");
-    expect(rows[0]).toHaveTextContent("$1.2345");
+    expect(rows[0]).toHaveTextContent("$1.23");
     expect(screen.getByTestId("cost-table")).toHaveTextContent("$1.38");
 
     expect(screen.getByTestId("branch")).toHaveTextContent("agent/dev");
@@ -78,7 +78,7 @@ describe("RunReportView", () => {
   });
 
   it("loads a commit diff on demand and renders it", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ sha: "a".repeat(40), diff: SAMPLE_DIFF }), {
+    const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify({ sha: "a".repeat(40), diff: SAMPLE_DIFF }), {
       status: 200, headers: { "content-type": "application/json" },
     }));
     vi.stubGlobal("fetch", fetchMock);
