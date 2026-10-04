@@ -462,6 +462,14 @@ class Workspace:
         default=None, repr=False,
     )
 
+    # Board listeners — zero-argument callables fired by
+    # `core.harness.card_ops.notify_board_changed` after a human edits the task
+    # board (add card / priority / comment). The run registers one to re-arm
+    # roles. Not serialised.
+    board_listeners: list[Callable[[], None]] = field(
+        default_factory=list, repr=False, compare=False,
+    )
+
     # In-memory log lists (always populated; persister is optional).
     iteration_metrics: list["IterationMetrics"] = field(default_factory=list)
     context_log: list["ContextSnapshot"] = field(default_factory=list)
