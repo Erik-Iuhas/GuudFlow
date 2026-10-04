@@ -36,7 +36,7 @@ at the end). Opus reviews each one before it merges.
 | O16 | **Opus** | `core/harness/capabilities.py`: `Capabilities` dataclass, role-type defaults, and the compile table (§5.7) to permission rules, container/network profile and MCP grants. Security-relevant, so Opus writes it | — | Table-driven tests for every toggle value and every role default |
 | S2 | Sonnet | `core/harness/permissions.py`: compiled capabilities → opencode ruleset for every profile in §5.1, the common base, last-match ordering, `StructuredOutput` always allowed + tests | O16 | One test per role default; ordering test; deny-all base test |
 | S3 | Sonnet | `core/harness/opencode_client.py`: typed async httpx client for session create, `prompt_async`, message get, abort, permission reply, diff, `/event` SSE iterator, Basic auth + unit tests with mocked HTTP | — | Unit tests green; every method typed and documented |
-| O2 | **Opus** | Contract tests that run S3 against O1's real opencode: structured output (valid, invalid, plain text), permission deny, `permission.asked` round-trip, "always" reply, abort, `task` restricted to `explore` with `subagent_depth: 1`. Confirms gotcha #9 and the MCP permission key | O1, S3 | Contract suite green; plan §2.2 updated with results |
+| O2 | **Opus** | Contract tests that run S3 against O1's real opencode: structured output (valid, invalid, plain text), permission deny, `permission.asked` round-trip, "always" reply, abort, `task` restricted to `explore` with `subagent_depth: 1`, `read` on a PNG returning an attachment, and how MCP image results reach the model. Confirms gotcha #9 and the MCP permission key | O1, S3 | Contract suite green; plan §2.2 updated with results |
 
 S1 and S3 run in parallel while Opus builds O1 and O16; S2 starts as soon as O16 lands.
 
@@ -68,7 +68,9 @@ S1 and S3 run in parallel while Opus builds O1 and O16; S2 starts as soon as O16
 | S9 | Sonnet | `api/mcp_server.py`: `post_note`, `read_board`, `ask_human`, `request_package`, `request_visual_feedback`, `report_progress`; role taken from the bearer token only; RBAC via `CredentialsBroker` + tests | — | Tests prove a token for role A cannot act as role B |
 | S18 | Sonnet | `api/mcp_web.py`: `web_search` / `web_fetch` on the host (§5.8): domain allow/deny, private-IP blocking, per-run and per-role budgets, per-run cache, `WEB_REQUEST` signals, untrusted-content delimiters + size cap, search key via `CredentialsBroker` | S9 | Tests cover deny-listed domain, private IP, budget exhausted, cache hit, delimiter wrapping |
 | S19 | Sonnet | `api/mcp_browser.py`: host-side Playwright `screenshot` tool reaching the role's dev server over the run network; saves to the run folder and serves via the static endpoint (§5.9) | S7, S9 | Screenshot of a sample app served from a sandbox; no browser binary in the agent image |
-| O8 | **Opus** | Security review of S8, S9, S18 and S19 (key handling, token binding, default-deny, SSRF, injection delimiters, host → sandbox route) | S8, S9, S18, S19 | Review notes fixed |
+| S30 | Sonnet | `core/harness/artifacts.py`: artifact registry, `ARTIFACT` signal, card-thread entry; `.guudflow/screens/` (git-ignored) as the screenshot target; EXIF stripping + tests (§5.10) | O9, S19 | Registry picks up new SVG/PNG/PDF/HTML after a turn; screenshots land where `read` can reach them |
+| S31 | Sonnet | `api/mcp_visual.py`: host-side `visual_diff` (pixel diff + Playwright element-box comparison), per-task baselines, diff image output + tests (§5.10) | S19 | Tests on fixture images: identical, small shift, large regression |
+| O8 | **Opus** | Security review of S8, S9, S18, S19, S30 and S31 (key handling, token binding, default-deny, SSRF, injection delimiters, host → sandbox route) | S8, S9, S18, S19, S30, S31 | Review notes fixed |
 | O9 | **Opus** | Git ownership (§5.5): bare run repo, per-role clones, runner-side fetch and ref checks, protected paths, secret scan, auto-commit of leftovers | O3 | Tests: touching another branch, `main`, or `inputs/` fails the turn |
 | O10 | **Opus** | Security escape suite: replays every escape from §2.2 plus host reads, internet access, cross-sandbox calls, MCP impersonation, protected-path edits, plus: a role without `web` calling web tools, a deny-listed or private-IP fetch, the sandbox reaching out over the screenshot route, an agent trying to widen its own capabilities; runs in CI | S7–S9, S18, S19, O9 | Every case contained, with assertions made on the host |
 
@@ -78,8 +80,10 @@ S1 and S3 run in parallel while Opus builds O1 and O16; S2 starts as soon as O16
 |---|---|---|---|---|
 | O11 | **Opus** | Scheduler: review edges with `max_rounds` (§4.5), blocked re-arm, A↔B cycle → `HUMAN_NEEDED` (§4.4), `max_parallel_sandboxes`; new tests alongside the existing six; no concurrency outside `core/scheduler.py` | O3 | All scheduler tests green, old and new |
 | S10 | Sonnet | Studio PipelineGraph: draw review edges, round counters and blocked-on arrows | O11 | vitest green |
+| S28 | Sonnet | `core/harness/tasks.py` schemas: `PlannedTask`, `PlanResult` and their validators (owners exist, no cycles, acceptance required, no `L`), `AgentResult.task_id` + per-item `acceptance`, per-item `ReviewResult`, typed card-thread entries; extend the existing `Task` dataclass and persister + tests (§4.6) | S1 | One pass and one fail test per rule |
+| O23 | **Opus** | Task-board scheduling (§4.6): tasks as the unit of work, task dependencies, column transitions from scheduler events only, file-overlap guard, WIP limits, definition of done per `kind`; cards created by the runner from the validated plan | O11, S28 | Scheduler tests: card flow end to end, overlap serialised, WIP respected, review fail returns the card with its issues |
 | S21 | Sonnet | `core/harness/overseer.py`: `OverseerResult` / `Intervention` schemas and validators for the menu in plan §11.3, `OVERSEER_INTERVENTION` signal + tests | — | One pass and one fail test per intervention type; caps enforced |
-| O18 | **Opus** | Stuck detectors + situation report (§11.2) and scheduler-side application of each intervention (§11.3), with dedupe, cooldown and per-run caps; the overseer replaces the tech lead as escalation handler | O11, S21 | Fake-LLM scenarios for every detector: the stall is detected, the intervention is applied by the scheduler, the run recovers or reaches `HUMAN_NEEDED` |
+| O18 | **Opus** | Stuck detectors (including card aging) + situation report (§11.2) and scheduler-side application of each intervention (§11.3), with dedupe, cooldown and per-run caps; the overseer replaces the tech lead as escalation handler | O11, O23, S21 | Fake-LLM scenarios for every detector: the stall is detected, the intervention is applied by the scheduler, the run recovers or reaches `HUMAN_NEEDED` |
 | O19 | **Opus** | Overseer prompt and real-model tuning on forced stalls (blocked cycle, repeated review issue, burn without output) | O18 | Overseer picks a sensible intervention in each scripted stall; results noted in the plan |
 | O12 | **Opus** | Real multi-agent demo: planner → (backend ‖ frontend) → reviewer on `fullstack-web-app`, including one forced review loop | O11, P3 | Recorded run that completes; findings fed back into the briefs |
 
@@ -93,7 +97,9 @@ S1 and S3 run in parallel while Opus builds O1 and O16; S2 starts as soon as O16
 | S13 | Sonnet | `memory_writer` adapter that reads opencode transcripts (`GET /session/{id}/message`) instead of the old turn logs | O3 | Memory-writer tests green on recorded transcripts |
 | S14 | Sonnet | Quality gate: `tests/quality/`, `scripts/run_quality_gate.sh`, per-project assertions (`.claude/future_buff/functional_verification.md`) | O12 | Runs against a recorded workspace offline |
 | S22 | Sonnet | `core/playbook.py`: playbook storage, evidence runs, recency-weighted confidence, lifecycle states (reuse the persona-memory pattern code) + tests | — | Tests for add, reinforce, contradict/decay, archive |
-| O20 | **Opus** | Retrospective + carry-forward brief (§11.4); the meta-agent starts from the playbook and shows changes as a diff; regression test that replays the `run_632863526b` continuation scenario | O18, S22, S11 | Continuation test no longer spirals; the second run of a project shows playbook changes on the approval screen |
+| O20 | **Opus** | Retrospective + carry-forward brief (§11.4); the meta-agent starts from the playbook and shows changes as a diff; regression test that replays the `run_632863526b` continuation scenario; open cards carried forward with their threads | O18, S22, S11, O23 | Continuation test no longer spirals; the second run of a project shows playbook changes on the approval screen |
+| O24 | **Opus** | Visual review loop (§5.10): builder self-check, `visual_diff` pre-check, vision-gated reviewer, baselines, human annotation → card; real-model run on a frontend example | O23, S30, S31 | A visual card goes through one fail-and-fix round driven by the screenshot; image tokens reported per agent |
+| S32 | Sonnet | Optional `agent-opencode-viz` image variant (matplotlib, plotly, kaleido) + chart-rendering smoke test | S7 | Headless chart renders in the sandbox with no network |
 | S20 | Sonnet | One-shot (§10): `cli/oneshot.py` (`guudflow oneshot GOAL --web --budget --demo`), `POST /api/oneshot` reusing the invoke 202 job path, `data/teams/default_oneshot.json`, demo auto-approve, deliverables incl. per-agent cost from the gateway | O11, S8, S11 | API returns 202; fake-LLM end-to-end test of the default team; CLI prints the summary and cost table |
 | O14 | **Opus** | Run all six example projects for real; triage; tune role profiles and briefs | S11–S14 | All six complete; quality gate passes on two |
 | O17 | **Opus** | The demo: tune the default team and briefs on `api-client-library` with a real model; check the §10 exit criteria; record it | S20, O14 | `guudflow oneshot … --demo` completes under budget, the client's tests pass offline, Studio plays it live |
@@ -118,6 +124,8 @@ Plan §12. Mostly Sonnet: it's well-specified front-end work once the contracts 
 | S25 | Sonnet | U2: one-shot launcher; team approval as a graph with the playbook diff (S17's capability switches move onto the new components) | S23, S17, S20 | Playwright: launch a one-shot, approve a team with a capability change |
 | S26 | Sonnet | U3: overseer panel, run report (cost per agent, branch diffs, screenshots, web log, capability record, retrospective), project page with trends and playbook | S24, O18, O20 | Playwright: read a run report; overseer interventions render with rationale |
 | S27 | Sonnet | U4: migrate the remaining views; delete `styles.css` and all inline styles; Playwright visual snapshot suite | S26 | `grep "style={{"` finds nothing; visual suite green |
+| S29 | Sonnet | Task board UI: rebuilt `KanbanBoard` with role swimlanes, scheduler-driven columns, card drawer (checklist, thread, diffs, artifacts), drag to reprioritise, add a human card, comment | S23, O23 | Playwright: add a card, drag it, comment, see it in the next brief |
+| S33 | Sonnet | Artifact gallery: registry view filtered by task/role, before/after slider across rounds, diff images, annotate-to-comment; DOMPurify for SVG, sandboxed iframe + CSP for HTML | S23, S30 | Playwright flow; a malicious SVG/HTML fixture can't run script or reach the network |
 | O22 | **Opus** | UX review passes at U1 and U4: information hierarchy, accessibility, empty and error states | S24, S27 | Review notes fixed |
 
 ---
@@ -126,7 +134,7 @@ Plan §12. Mostly Sonnet: it's well-specified front-end work once the contracts 
 
 | | Opus | Sonnet |
 |---|---|---|
-| Tasks | 22 | 27 |
+| Tasks | 24 | 33 |
 | Share of new code (rough) | ~30% | ~70% |
 | Nature | Foundation, scheduler, security, overseer logic, real-model runs, specs, every review | Modules, adapters, schemas, the UI track, infra from spec, cleanup, docs |
 

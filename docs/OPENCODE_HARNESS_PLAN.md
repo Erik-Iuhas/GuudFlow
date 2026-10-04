@@ -211,6 +211,90 @@ Today a rejection re-runs the author from a board subscriber
 reviewer. When rounds run out → escalation (tech lead) → human. All of it is visible to,
 and counted by, the scheduler. Scheduler tests are extended for it (§8).
 
+### 4.6 The task board is the backbone
+
+**Why the kanban never worked:** cards were created and closed only when agents wrote
+free-text commands correctly (`assign-task`, `decompose-task`, `closes: task:<id>` inside
+a `[COMMIT]` block). Whenever a model skipped or garbled one, the board drifted from
+reality. The scheduler also worked per role, not per task, so cards were a side view,
+not the work queue.
+
+**The new rule: the board is the queue, and only the scheduler moves cards.**
+
+**1. The planner's structured result *is* the task list.** It reuses the existing
+`Task` dataclass (`core/workspace.py:239`) and `TASK_*` signals, with a few fields added:
+
+```python
+class PlannedTask(BaseModel):
+    id: str                                  # "T3"
+    title: str
+    owner_role: str                          # must exist in the approved team
+    acceptance: list[str] = Field(min_length=1)   # checklist, each item testable
+    depends_on: list[str] = []               # other task ids
+    files_hint: list[str] = []               # where the work will likely land
+    size: Literal["S", "M", "L"]
+    kind: Literal["code", "test", "docs", "research", "visual"]
+    visual_refs: list[str] = []              # mockups or screenshots to match (§5.10)
+
+class PlanResult(BaseModel):
+    tasks: list[PlannedTask]
+    notes: str
+```
+
+Validation rejects unknown owners, dependency cycles, missing acceptance criteria, and
+tasks sized `L` (the planner must split those). The runner, not the agent, creates the
+cards from the validated list.
+
+**2. Tasks are the unit of work.**
+- Each agent turn handles **one task**. The brief contains the card: title, acceptance
+  checklist, dependency results, the card's thread, and `visual_refs`.
+- A role is re-armed while it still has open, unblocked tasks. Task dependencies are
+  resolved by the scheduler the same way role dependencies are today.
+- `AgentResult` gains a required `task_id` and `acceptance: list[{item, met, evidence}]`.
+- `ReviewResult` reviews one task and returns a verdict **per acceptance item**. A fail
+  names the unmet items.
+
+**3. Columns move only on scheduler events, never on agent text.**
+
+| Event | Card moves to |
+|---|---|
+| Card created from a validated plan | To do |
+| Scheduler starts a turn for the task | In progress |
+| Result `done` and branch checks passed (§5.5) | Review |
+| Reviewer passes every acceptance item | Done |
+| Reviewer fails any item | In progress (issues added to the thread; round counter +1) |
+| Result `blocked` | Blocked (with `blocked_on` shown on the card) |
+| Result `failed`, or rounds exhausted | Needs attention (overseer wakes) |
+
+**4. Communication lives on the cards.** Every message between agents is a typed entry in
+a card's thread: `note`, `blocked_on`, `review_issue`, `decision`, `intervention`,
+`human_comment`, `artifact` (§5.10). Agents post through `post_note(task_id, …)`. Each
+brief includes the thread for its card, plus decisions from the cards it depends on.
+Nobody waits on anybody: the board is the conversation.
+
+**Suggested improvements built in:**
+- **File-overlap guard:** two tasks whose `files_hint` overlap aren't run in parallel by
+  different roles; the scheduler runs them in sequence. This replaces the old advisory
+  file claims and removes most merge conflicts before they happen.
+- **WIP limits:** at most one in-progress task per role, and a column cap on Review so
+  reviewers don't fall behind.
+- **Definition of done per `kind`:**
+  - `code`: tests pass in the sandbox plus reviewer pass;
+  - `test`: the new tests fail on the base branch and pass on the task branch;
+  - `docs`, `research`: reviewer pass;
+  - `visual`: visual check passes (§5.10) plus reviewer pass.
+- **Card aging:** a card stuck in one column past its size-based limit
+  (S: 10 min, M: 25 min) is a new stuck detector for the overseer (§11.2).
+- **Overseer moves are card operations:** `split`, `reassign` and `rebrief` act on cards,
+  so every intervention is visible where the work is.
+- **Humans work the same board:** in Studio you can add a card, drag one to change
+  priority, or comment on it. A human card or comment shows up in the next brief for that
+  task, the same way the old `USER_COMMENT` absorption worked.
+- **Continuations carry open cards forward,** with their threads, so a re-run picks up
+  where the last one stopped instead of re-planning from scratch.
+- **The playbook learns task templates:** for example, "API client goals split well into
+  models / transport / endpoints / tests" (§11.4).
+
 ---
 
 ## 5. RBAC and sandboxing — defence in depth
@@ -392,18 +476,26 @@ what an agent may do. GuudFlow compiles it into three outputs:
 | | `full` | `task` allow, `subagent_depth: 1` | — | — |
 | `browser` | `off` | — | — | none |
 | | `screenshot` | — | host may reach the sandbox's dev-server port (§5.9) | `screenshot` |
+| `vision` *(added)* | `off` | images are not attached | — | — |
+| | `on` | `read` returns images/PDFs as attachments (§5.10) | — | `visual_diff` |
+
+`vision: on` is only offered when the role's model declares image input
+(`modalities.input` contains `image`, or `attachment: true`, in opencode's model config).
+Otherwise the switch is disabled with a tooltip explaining why.
 
 Defaults per role type (each can be overridden on the approval screen):
 
-| Role | sandbox | web | shell | packages | subagents | browser |
-|---|---|---|---|---|---|---|
-| researcher | strict | search+fetch | readonly | off | off | off |
-| planner / architect | strict | off | readonly | off | explore_only | off |
-| builder | standard | off | project | via_it_agent | explore_only | off |
-| frontend builder | standard | off | project | via_it_agent | explore_only | screenshot |
-| tester | standard | off | project | via_it_agent | explore_only | off |
-| reviewer | strict | off | readonly + test runners | off | explore_only | off |
-| IT agent | standard | off | installers only (§5.1) | — | off | off |
+| Role | sandbox | web | shell | packages | subagents | browser | vision |
+|---|---|---|---|---|---|---|---|
+| researcher | strict | search+fetch | readonly | off | off | off | off |
+| planner / architect | strict | off | readonly | off | explore_only | off | on (reads mockups) |
+| builder | standard | off | project | via_it_agent | explore_only | off | off |
+| frontend builder | standard | off | project | via_it_agent | explore_only | screenshot | on |
+| tester | standard | off | project | via_it_agent | explore_only | off | off |
+| reviewer | strict | off | readonly + test runners | off | explore_only | screenshot | on |
+| IT agent | standard | off | installers only (§5.1) | — | off | off | off |
+
+(`vision: on` defaults apply only where the model supports images.)
 
 Rules:
 - **Set before the run.** Capabilities show as switches per role on Studio's team
@@ -472,6 +564,83 @@ against the notes.
   outside is not). Screenshots are saved under the run and served by the existing static
   endpoint, never sent as base64 over the websocket.
 
+### 5.10 Visual artifacts: making and reading images
+
+**What opencode already does** (checked in the 1.18.34 binary and API spec):
+- Its `read` tool returns images and PDFs to the model as attachments ("Image read
+  successfully" / "PDF read successfully"), resized according to
+  `attachment.image {auto_resize, max_width, max_height, max_base64_bytes}`.
+- Prompts accept file parts (`FilePartInput {mime, url, filename}`), so an image can go
+  straight into a brief.
+- Tool results can carry file attachments (`ToolStateCompleted.attachments`).
+- Model configs declare `attachment` and `modalities.input` (`image`, `pdf`, …), which is
+  what the `vision` capability checks.
+
+**Making visuals (inside the sandbox, no network needed):**
+
+| Kind | How |
+|---|---|
+| Diagrams | Mermaid or SVG written as files |
+| Charts | matplotlib (Agg backend) or plotly static export, run with Python |
+| UI | HTML/CSS/JS served by the role's dev server, captured with the host `screenshot` tool (§5.9) |
+| Documents | Markdown → HTML/PDF |
+
+*Suggestion:* ship an optional `agent-opencode-viz` image variant with matplotlib, plotly
+and kaleido preinstalled, so chart-heavy runs don't go through the IT agent every time.
+Photo-style image generation isn't included. It could later be another host-side MCP
+tool, like web search.
+
+**Where files live:**
+- Agents write visuals under `artifacts/` in their clone (committed when they are
+  deliverables, such as diagrams in docs).
+- Host screenshots are written into the role's clone at `.guudflow/screens/`
+  (git-ignored). That keeps them inside the folder the agent may read
+  (`external_directory` stays denied).
+- Human mockups go in `inputs/mockups/`, which is mounted read-only. The planner links
+  them to cards through `visual_refs` (§4.6).
+
+**Artifact registry:** after each turn the runner indexes new image, SVG, PDF and HTML
+files (path, type, producing role, `task_id`, size, hash), posts an `ARTIFACT` signal,
+and adds an `artifact` entry to the card's thread. Studio's gallery and the run report
+read from this registry.
+
+**Visual review loop** (for cards of `kind: visual`):
+1. The builder implements the card, takes a screenshot through the host tool, `read`s
+   it, and fixes what it sees, up to N self-checks per turn (default 2).
+2. **Cheap pre-check on the host:** `visual_diff(screenshot, ref)` runs a deterministic
+   pixel and layout diff (for example pixelmatch, plus an element-box comparison from
+   Playwright) against the card's `visual_refs` or the previous round's baseline. It
+   returns a diff image and a score with no LLM cost. A large regression goes straight
+   back to the builder without spending reviewer tokens.
+3. The reviewer (with `vision: on`) gets the mockup, the screenshot and the diff image,
+   and judges each acceptance item.
+4. Each round's screenshot is kept as that task's **baseline**, so later rounds and
+   continuations can catch visual regressions.
+5. A human can annotate any screenshot in Studio (the existing visual-feedback mode).
+   The annotated image becomes a `human_comment` on the card and is attached to the
+   next brief.
+
+**Budgets and gating:**
+- `vision: on` only for models that declare image input (§5.7); visual cards are
+  assigned only to such roles.
+- Images are resized by opencode's `attachment.image` caps (default target ≤ 1280 px on
+  the long side), with a per-turn image cap (default 6) and a per-run cap. Roughly
+  1–1.5k tokens per screenshot; the gateway reports image tokens per agent.
+
+**Safety:**
+- Screenshots of external pages and fetched images are untrusted: text inside an image
+  can carry prompt injection. Only the researcher and visual reviewers see such images,
+  and their briefs say so.
+- Agent-made SVG is sanitized (DOMPurify, with scripts and external references removed)
+  before Studio renders it. Agent-made HTML is rendered only in a sandboxed `iframe`
+  (`sandbox` attribute, CSP with no network), never inline.
+- Image metadata (EXIF) is stripped before files are served.
+
+> To verify in P0: that `read` on a PNG returns an attachment for a model configured with
+> `attachment: true`, and how an MCP tool's image result reaches the model (as an
+> attachment, or text only). If MCP images arrive as text only, `screenshot` writes the
+> file and the agent `read`s it, as above.
+
 ---
 
 ## 6. What changes in the codebase
@@ -491,6 +660,9 @@ against the notes.
 | `data/teams/default_oneshot.json` | Default one-shot team (§10) |
 | `core/harness/detectors.py` | Stuck detectors + situation report, called from the scheduler (§11.2) |
 | `core/harness/overseer.py` | `OverseerResult`/`Intervention` schemas, validation, and how the scheduler applies each intervention (§11.3) |
+| `core/harness/tasks.py` | `PlannedTask`/`PlanResult` validation, card creation, column transitions, file-overlap guard, WIP limits (§4.6) |
+| `core/harness/artifacts.py` | Artifact registry + `ARTIFACT` signal (§5.10) |
+| `api/mcp_visual.py` | Host-side `visual_diff` (pixel + layout diff, baselines) (§5.10) |
 | `core/playbook.py` | Project playbook storage, confidence and lifecycle; carry-forward brief (§11.4) |
 | `core/harness/results.py` | `AgentResult` / `ReviewResult` + validation + retry prompt |
 | `core/harness/config_gen.py` | Generates `OPENCODE_CONFIG_CONTENT` (provider → gateway, agent defs from personas) |
@@ -511,7 +683,7 @@ against the notes.
 
 `_generic_tool_use_loop` and the peer/skip/escalation side tasks in `core/runner.py`;
 most of `core/protocol.py` (ASK/ANSWER/SKIP parsing); `core/loop_guard.py`;
-`agents/builtin/tech_lead.py` (folded into the overseer, §11); `core/edit_blocks.py`; `core/context_manager.py` + `core/repo_map.py` (opencode has its
+`agents/builtin/tech_lead.py` (folded into the overseer, §11); the `assign-task` / `decompose-task` tools and `closes:` parsing (cards now come from the planner's validated result, §4.6); `core/edit_blocks.py`; `core/context_manager.py` + `core/repo_map.py` (opencode has its
 own context handling and LSP); most of `agents/tools/` (fs, code, git, board are replaced
 by opencode built-ins + MCP); `core/llm/` (replaced by the gateway). Expect `core/runner.py`
 to drop from ~5.5k lines to roughly 1k.
@@ -598,7 +770,9 @@ The additions from §5.7–§5.9 and §10 slot in as follows (task-level detail 
   cases for web and capability bypass.
 - **P5:** the one-shot entry point, the default team, and the `api-client-library` demo.
 
-- **P4:** stuck detectors and the overseer's in-run interventions (§11.1–§11.3).
+- **P3:** artifact registry, `.guudflow/screens/`, `visual_diff` (§5.10).
+- **P4:** task-board scheduling: tasks as the unit of work, column transitions, file-overlap guard, WIP limits (§4.6); stuck detectors (including card aging) and the overseer's in-run interventions (§11.1–§11.3).
+- **P5:** visual review loop on a real frontend example; continuations carry open cards forward.
 - **P5:** retrospectives, the project playbook, and carry-forward briefs for re-runs (§11.4).
 - **Parallel UI track U0–U4** (§12.4).
 
@@ -637,6 +811,9 @@ P0–P2 alone already gives a watchable demo.
 | `host_dev` has no isolation | Refused in production; warning on every spawn and in Studio; demo mode only |
 | The overseer becomes a new source of churn | Fixed intervention menu, caps per wake and per run, deterministic detectors, structural changes need a human (§11) |
 | Playbook learns the wrong lesson | Evidence runs required, recency-weighted confidence with decay, never auto-applied outside demo mode (§11.4) |
+| Planner produces poor task lists | Schema rules (owners exist, no cycles, acceptance required, no `L` tasks); overseer `split`/`reassign`; playbook task templates (§4.6, §11.4) |
+| Image tokens add up | Resize caps, per-turn and per-run image caps, `visual_diff` pre-check before any LLM review (§5.10) |
+| Injection or XSS through visuals | Untrusted-image handling, SVG sanitizing, sandboxed iframes, EXIF stripping (§5.10) |
 | UI rewrite stalls feature work | Parallel track, view by view, behind existing routes (§12.4) |
 
 **Open questions for you:**
@@ -836,6 +1013,12 @@ current Vite major are candidates, checked for compatibility first).
     detector that fired);
   - bottom bar: pending approvals (permission asks with once/always/reject), budget meter
     with per-agent cost, and the always-visible comment box.
+- **Task board** (rebuilt `KanbanBoard`): swimlanes per role, columns driven by scheduler
+  events, card drawer with the acceptance checklist, thread, diffs and artifacts; drag to
+  reprioritise, add a human card, comment on a card.
+- **Artifact gallery:** every visual from the registry, filterable by task and role; a
+  before/after slider across review rounds; diff images; annotate a screenshot to
+  comment on its card. SVG sanitized, HTML in sandboxed iframes (§5.10).
 - **Team approval:** the proposed team as a graph; per-role capability switches (§5.7)
   with plain-language tooltips; playbook changes highlighted as a diff (§11.4); a cost
   estimate that updates as models and capabilities change.
