@@ -60,6 +60,13 @@ def write_persona(data_root: Path):
     def _write(persona_id: str, **profile_overrides) -> Path:
         d = data_root / "personas" / persona_id
         d.mkdir(parents=True, exist_ok=True)
+        # `reputation` belongs in reputation.json, not profile.json.
+        reputation = {
+            "production": {"total_runs": 0},
+            "training": {"total_runs": 0, "graduation_status": "ungraduated"},
+        }
+        for scope, values in (profile_overrides.pop("reputation", None) or {}).items():
+            reputation.setdefault(scope, {}).update(values)
         profile = {
             "persona_id": persona_id,
             "name": "Test",
@@ -69,10 +76,7 @@ def write_persona(data_root: Path):
             **profile_overrides,
         }
         (d / "profile.json").write_text(json.dumps(profile), encoding="utf-8")
-        (d / "reputation.json").write_text(json.dumps({
-            "production": {"total_runs": 0},
-            "training": {"total_runs": 0, "graduation_status": "ungraduated"},
-        }), encoding="utf-8")
+        (d / "reputation.json").write_text(json.dumps(reputation), encoding="utf-8")
         (d / "episodes.jsonl").write_text("", encoding="utf-8")
         return d
     return _write
