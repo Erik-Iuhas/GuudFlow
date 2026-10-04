@@ -21,6 +21,7 @@ import type { ProjectConfig, RunMeta } from "../../types";
 import { AgentLane } from "./AgentLane";
 import { ApprovalsBar } from "./ApprovalsBar";
 import { BudgetMeter } from "./BudgetMeter";
+import { ArtifactGallery } from "../artifacts/ArtifactGallery";
 import { TaskBoard } from "../board";
 import { OVERSEER_ROLE, formatElapsed, mergeRoles, parseTimestamp, roleSpecs } from "./model";
 import { OverseerPanel } from "./OverseerPanel";
@@ -29,7 +30,7 @@ import { VirtualBoardFeed, VirtualQuipFeed, useQuipStream, type QuipStream } fro
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
 
-type PanelTab = "board" | "quips" | "overseer" | "cards";
+type PanelTab = "board" | "quips" | "overseer" | "cards" | "artifacts";
 
 // ── Data wrapper ─────────────────────────────────────────────────────────────
 
@@ -377,11 +378,12 @@ function SidePanel({
 }) {
   return (
     <Tabs value={tab} onValueChange={(v) => onTab(v as PanelTab)} className="flex min-h-0 flex-1 flex-col">
-      <TabsList className="m-2 shrink-0 justify-start">
+      <TabsList className="m-2 shrink-0 justify-start overflow-x-auto">
         <TabsTrigger value="board">Board</TabsTrigger>
         <TabsTrigger value="quips">Quips</TabsTrigger>
         <TabsTrigger value="overseer">Overseer{interventionCount > 0 ? ` (${interventionCount})` : ""}</TabsTrigger>
         <TabsTrigger value="cards">Cards{cardCount > 0 ? ` (${cardCount})` : ""}</TabsTrigger>
+        <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
       </TabsList>
       <TabsContent value="board" className="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <VirtualBoardFeed />
@@ -394,6 +396,9 @@ function SidePanel({
       </TabsContent>
       <TabsContent value="cards" className="mt-0 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
         <TaskBoard runId={runId} />
+      </TabsContent>
+      <TabsContent value="artifacts" className="mt-0 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
+        <ArtifactGallery runId={runId} />
       </TabsContent>
     </Tabs>
   );

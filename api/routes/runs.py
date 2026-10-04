@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from api.auth import require_bearer
 from core.signals import Signal, SignalType
@@ -676,6 +677,35 @@ async def post_user_comment(
         "type": sig_type.value,
         "iteration": workspace.iteration,
     }
+
+
+class VisualFeedback(BaseModel):
+    """Body of POST /{run_id}/visual_feedback."""
+
+    request_id: str = Field(min_length=1)
+    feedback: str = Field(min_length=1)
+
+
+@router.post("/{run_id}/visual_feedback", dependencies=[Depends(require_bearer)])
+async def post_visual_feedback(request: Request, run_id: str, body: VisualFeedback) -> dict:
+    """Answer an agent's `request_visual_feedback` with a USER_VISUAL_FEEDBACK signal.
+
+    The `request_id` comes from the SCREENSHOT_READY signal the agent posted. The waiting
+    agent resumes with `feedback`; the task flow also files it on the requester's card.
+    410 if the run is not active (nobody is waiting).
+    """
+    text = body.feedback.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="feedback is required")
+    workspace = await request.app.state.run_registry.get(run_id)
+    if workspace is None:
+        raise HTTPException(status_code=410, detail=f"run {run_id!r} is not active")
+    signal = Signal(
+        type=SignalType.USER_VISUAL_FEEDBACK, summary=text, from_user=True,
+        detail=json.dumps({"request_id": body.request_id, "feedback": text}),
+        iteration=workspace.iteration)
+    workspace.post_signal(signal)
+    return {"ok": True, "signal_id": str(signal.id), "type": signal.type.value}
 
 
 @router.get("/{run_id}/tags")
