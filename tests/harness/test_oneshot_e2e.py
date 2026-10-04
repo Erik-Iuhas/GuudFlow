@@ -74,7 +74,8 @@ async def test_default_team_runs_end_to_end_without_web(tmp_path: Path, fake_llm
     result = await runner.run()
     assert result.status is SchedulerStatus.COMPLETE, [
         f"{s.type.value} {s.summary}" for s in runner.workspace.board][-15:]
-    assert sorted(result.completed) == ["builder_a", "builder_b", "planner", "reviewer"]
+    # The overseer is added to task-board runs and counts as complete unless woken.
+    assert sorted(result.completed) == ["builder_a", "builder_b", "overseer", "planner", "reviewer"]
 
     summary = oneshot_summary(runner.run_root, result)
     assert summary["status"] == "complete"
