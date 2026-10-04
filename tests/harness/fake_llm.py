@@ -148,6 +148,7 @@ class FakeLLM:
                 with fake._lock:
                     fake.requests.append({
                         "tools": tools,
+                        "tool_specs": body.get("tools") or [],
                         "tool_choice": body.get("tool_choice"),
                         "messages": body.get("messages", []),
                         "turn": turn,

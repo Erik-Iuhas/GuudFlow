@@ -95,6 +95,26 @@ or memory.
    deny.** They don't use tools, so this should be harmless; P0 must confirm that
    auto-compaction still works under the locked config.
 
+10. **Listing messages breaks once `format` is used** (found in O2). After any prompt that
+    sent `format` (even `{"type": "text"}`), `GET /session/{id}/message` returns
+    `400 Expected OutputFormatJsonSchema` because the server fails to re-encode the stored
+    user message. The `/api/session/...` endpoints return empty lists (separate store).
+    **Design consequence:** GuudFlow builds each session's transcript from the `/event`
+    stream (the event bridge records every part), never from the message list. A contract
+    test pins the bug so an upgrade that fixes it is noticed.
+11. **`subagent_depth: 1` does not stop nesting, and subagents inherit the role's rules**
+    (found in O2). An `explore` subagent could spawn another explore and was offered `edit`.
+    **Mitigation (verified):** `agent.explore.permission = {task: deny, edit: deny, bash:
+    read-only}` in the generated config. config_gen always emits it.
+
+**Verified in O2 (contract tests in `tests/harness/test_opencode_contract_o2.py`):**
+`permission.asked` → reply `once`/`reject` round-trip; `always` covers repeat prompts for
+the session; abort stops a running bash call; edit patterns are project-relative and a later
+deny wins; `task: {"*": deny, explore: allow}` denies other subagent types; `read` on a PNG
+reaches the model as an image; MCP tools are named `<server>_<tool>`, the `guudflow_*`
+permission key works, deny-all hides them, and **MCP image results reach the model as
+images**; manual compaction works under deny-all (gotcha #9 resolved).
+
 ---
 
 ## 3. Target architecture
@@ -330,8 +350,7 @@ supplying defaults and the existing RBAC scopes (`AgentConfig` + `core/tool_mani
   "question": "deny",              // humans are reached via the ask_human MCP tool instead
   "doom_loop": "deny",             // a looping agent fails fast; the scheduler handles it
   "guudflow_*": "allow" }          // MCP tools; real RBAC is enforced server-side (layer 6).
-                                   // Not yet verified: the exact permission key opencode uses
-                                   // for MCP tools. P0 confirms it.
+                                   // Verified in O2: MCP tools are named guudflow_<tool>.
 ```
 
 | Role type | `edit` | `bash` (last match wins) | Extra |
@@ -510,8 +529,9 @@ Rules:
 - **Narrowing only, at runtime.** A running agent can never widen its own capabilities.
   Widening needs a human through the approval gate and applies from the next spawn.
 
-> To verify in P0: that a `task` pattern of `"explore"` restricts subagents by name, and
-> that `subagent_depth: 1` stops an explore subagent from spawning further agents.
+> Verified in O2: a `task` pattern of `"explore"` restricts subagents by name. `subagent_depth: 1`
+> alone does **not** stop an explore subagent spawning another (gotcha #11), so the generated
+> config also sets `agent.explore.permission` to read-only with `task: deny`.
 
 ### 5.8 Web access via the host
 
@@ -639,10 +659,9 @@ read from this registry.
   (`sandbox` attribute, CSP with no network), never inline.
 - Image metadata (EXIF) is stripped before files are served.
 
-> To verify in P0: that `read` on a PNG returns an attachment for a model configured with
-> `attachment: true`, and how an MCP tool's image result reaches the model (as an
-> attachment, or text only). If MCP images arrive as text only, `screenshot` writes the
-> file and the agent `read`s it, as above.
+> Verified in O2: `read` on a PNG reaches an `attachment: true` model as an image, and an
+> MCP tool's image result reaches the model as an image too, so `screenshot` can return
+> the image inline as well as writing the file.
 
 ---
 
