@@ -51,6 +51,7 @@ from core.harness.task_flow import TaskFlow, TurnPlan
 from core.harness.detectors import DetectorConfig, RunView
 from core.harness.overseer import OverseerCaps, OverseerResult
 from core.harness.overseer_flow import OverseerFlow
+from core.harness.retrospective import load_prior_carry_forward
 from core.harness.tasks import PlanResult
 from core.harness.tool_context import RunToolContext
 from core.llm.registry import ModelRegistry
@@ -148,6 +149,7 @@ class OpencodeRun:
         self.overseer: OverseerFlow | None = None
         self.agents: list["AgentConfig"] = list(runner.project.agents)
         self._started = 0.0
+        self._carry_text = ""
         self._delivered_notes: set[str] = set()
         self._roles: dict[str, _Role] = {}
         self._http: RunningHttpServer | None = None
@@ -181,6 +183,7 @@ class OpencodeRun:
                 post=lambda kind, role, summary, detail: self._post(kind, role, summary, detail),
                 escalate=lambda role, summary, detail: self._escalate(role, summary, detail))
         self._setup_overseer()
+        carried = self._load_carry_forward()
         flow = self.flow
         try:
             await self._start_services()
@@ -194,6 +197,13 @@ class OpencodeRun:
             if self.overseer is not None:
                 # Event-driven: complete until a stall re-arms it (plan §11.1).
                 self._mark_complete(self.overseer.overseer_role)
+            if flow is not None and carried:
+                # Continuation with open cards: pick up where the last run stopped
+                # instead of re-planning from scratch (§11.4).
+                self._mark_complete(flow.planner)
+                self._post(SignalType.COMPLETE, flow.planner,
+                           f"{flow.planner} complete: carried {carried} open card(s) forward",
+                           None)
             scheduler = Scheduler(specs, self.workspace, scope="pipeline",
                                   max_iterations=self.settings.max_spawns_per_role,
                                   transition_rules=False,
@@ -233,6 +243,38 @@ class OpencodeRun:
             post=lambda kind, role, summary, detail: self._post(kind, role, summary, detail),
             clones=self.clones, main_dir=self.runner.git.working_dir,
             caps=self.settings.overseer_caps, detector_cfg=self.settings.detectors)
+
+    def _load_carry_forward(self) -> int:
+        """Read the carry-forward of the run(s) this one continues; returns cards carried.
+
+        Its text goes into every brief, so files seeded from the previous run are
+        attributed ("previous run, commit X") and nobody distrusts or redoes them.
+        """
+        docs = load_prior_carry_forward(self.runner.run_root)
+        if not docs:
+            return 0
+        self._carry_text = "\n\n".join(str(d.get("text") or "") for d in docs).strip()
+        if self.flow is None:
+            return 0
+        owners = self.flow.owners()
+        carried = 0
+        for doc in docs:
+            for old in doc.get("open_cards") or []:
+                owner = old.get("owner") if old.get("owner") in owners else (owners or [""])[0]
+                acceptance = [str(a) for a in old.get("acceptance") or []] or [
+                    str(old.get("title") or "finish the carried card")]
+                card = self.flow.board.add_card(
+                    owner=owner, title=str(old.get("title") or "carried card")[:120],
+                    acceptance=acceptance, created_by="carry_forward",
+                    kind=str(old.get("kind") or "code"))
+                for entry in old.get("thread") or []:
+                    if isinstance(entry, dict) and entry.get("kind") and entry.get("text"):
+                        card.thread.append({**entry, "task_id": card.task_id})
+                self.flow.board.note(card.task_id, "note", "carry_forward",
+                                     f"carried from run {doc.get('run_id')} "
+                                     f"(card {old.get('task_id')}, was {old.get('column')})")
+                carried += 1
+        return carried
 
     def _is_overseer(self, role: str) -> bool:
         return self.overseer is not None and role == self.overseer.overseer_role
@@ -653,6 +695,7 @@ class OpencodeRun:
             research_notes=(research.read_text(encoding="utf-8", errors="replace")
                             if role.role_type != "researcher" and research.is_file() else None),
             task=plan.task_text if plan is not None else None,
+            carry_forward=self._carry_text or None,
             extra_sections=(plan.extra_sections if plan is not None else ())
             + (self.overseer.brief_addenda(cfg.role) if self.overseer is not None
                and not self._is_overseer(cfg.role) else ()),

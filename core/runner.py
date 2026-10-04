@@ -1771,6 +1771,14 @@ class AgentRunner:
                 await self.quip_engine.on_run_complete(self.workspace, result)
             except Exception:
                 logging.getLogger(__name__).exception("quip engine failed at run end")
+        # Retrospective, carry-forward and playbook update (plan §11.4). The
+        # playbook lives under the data root; runs outside <data>/runs/ (tests,
+        # ad-hoc CLI dirs) write their retrospective but touch no playbook.
+        from core.harness.retrospective import finalize_run
+
+        data_root = (self.run_root.parent.parent
+                     if self.run_root.parent.name == "runs" else None)
+        finalize_run(self.run_root, self.run_id, self.project.project_id, data_root)
         return result
 
     def _ensure_synthetic_task(self, role: str, cfg: "AgentConfig") -> None:
