@@ -447,8 +447,16 @@ Extends what `worker/docker_manager.py` already does for `code:exec`:
   `provider.<id>.options.baseURL = http://gateway:4000/v1` and `apiKey = <virtual key>`.
   Keys are revoked at run end. This keeps the existing rule that real API keys never
   enter containers, and gives exact per-agent cost accounting.
-- **IT agent only**: additional egress to a package mirror/proxy that enforces the
-  project allow-list (pinned versions). No other role has any internet egress.
+- **Packages (revised in P3):** no sandbox gets internet egress, not even the IT agent's.
+  `request_package(manager, name, version)` is a host-side MCP tool: packages on the
+  project allow-list (pinned versions) are installed **on the host** into the role's
+  clone (`pip install --target .guudflow/site-packages --only-binary=:all:`,
+  `npm install --ignore-scripts`), so no install script ever runs; anything else becomes
+  an approval card. The clone's `.git/info/exclude` keeps installed files out of commits.
+- **Network model (verified in P3):** one Docker network per run, `--internal` and with
+  inter-container traffic disabled. Host → container works; container → host services
+  bound to the network's gateway IP works; container → container and container →
+  internet (even DNS) fail. The gateway and MCP server bind to that gateway IP only.
 - opencode's `webfetch`/`websearch` stay denied for every role. Web access is a
   host-side MCP tool (§5.8), so no sandbox ever needs internet egress for it.
 
