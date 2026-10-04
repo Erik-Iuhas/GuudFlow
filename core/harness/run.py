@@ -52,6 +52,7 @@ from core.harness.detectors import DetectorConfig, RunView
 from core.harness.overseer import OverseerCaps, OverseerResult
 from core.harness.overseer_flow import OverseerFlow
 from core.harness.retrospective import load_prior_carry_forward
+from core.harness.visual_review import ImageBudget, capped
 from core.harness.tasks import PlanResult
 from core.harness.tool_context import RunToolContext
 from core.llm.registry import ModelRegistry
@@ -150,6 +151,7 @@ class OpencodeRun:
         self.agents: list["AgentConfig"] = list(runner.project.agents)
         self._started = 0.0
         self._carry_text = ""
+        self.images = ImageBudget()
         self._delivered_notes: set[str] = set()
         self._roles: dict[str, _Role] = {}
         self._http: RunningHttpServer | None = None
@@ -185,6 +187,13 @@ class OpencodeRun:
         self._setup_overseer()
         carried = self._load_carry_forward()
         flow = self.flow
+        if flow is not None:
+            flow.tool_dir_for = self.clones.tool_dir
+            flow.ref_roots = [self.runner.run_root / "inputs", self.runner.git.working_dir]
+            flow.run_root = self.runner.run_root
+            flow.vision_for = lambda r: (r in self._roles and
+                                         self._roles[r].compiled.capabilities.vision == "on")
+            self._unsubscribe_flow = self.workspace.subscribe(flow.on_signal)
         try:
             await self._start_services()
             specs = [AgentSpec(role=cfg.role, runner=self._runner_for(cfg),
@@ -219,6 +228,9 @@ class OpencodeRun:
         finally:
             if self.flow is not None and self.flow.settle in self.workspace.board_listeners:
                 self.workspace.board_listeners.remove(self.flow.settle)
+            unsubscribe = getattr(self, "_unsubscribe_flow", None)
+            if unsubscribe is not None:
+                unsubscribe()
             await self.shutdown()
 
     def _setup_overseer(self) -> None:
@@ -363,10 +375,11 @@ class OpencodeRun:
 
     def _host_tools(self) -> list[McpTool]:
         overrides = self.settings.tool_overrides
+        browser = [capped(t, self.images)  # image caps per turn / per run (§5.10)
+                   for t in mcp_browser.tools(self.tool_ctx, **overrides.get("mcp_browser", {}))]
         return [*mcp_tools.tools(self.tool_ctx, **overrides.get("mcp_tools", {})),
                 *mcp_web.tools(self.tool_ctx, **overrides.get("mcp_web", {})),
-                *mcp_browser.tools(self.tool_ctx, **overrides.get("mcp_browser", {})),
-                *mcp_visual.tools(self.tool_ctx)]
+                *browser, *mcp_visual.tools(self.tool_ctx)]
 
     def _upstreams(self) -> dict[str, Upstream]:
         upstreams: dict[str, Upstream] = {}
@@ -533,6 +546,7 @@ class OpencodeRun:
                    f"{role_name} started" + (f" on {plan.card_id}" if plan and plan.card_id else ""))
         self._post_capabilities(role)
 
+        self.images.new_turn(role_name)
         session = await client.create_session(title=f"{self.run_id}:{role_name}")
         on_event = self._event_hook(role_name)
         on_permission = self._permission_hook(role_name)

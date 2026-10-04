@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
@@ -28,7 +29,9 @@ from core.harness.result_inbox import ResultCheck
 from core.harness.results import AgentResult, ReviewResult
 from core.harness.task_board import BoardLimits, TaskBoard
 from core.harness.tasks import PlanResult, check_plan, check_task_result
-from core.signals import SignalType
+from core.harness import visual_review
+from core.harness.visual_review import PrecheckResult
+from core.signals import Signal, SignalType
 from core.workspace import AgentState, HumanRequest, Workspace
 
 if TYPE_CHECKING:
@@ -78,6 +81,15 @@ class TaskFlow:
     post: Callable[[SignalType, str, str, str | None], None]
     escalate: Callable[[str, str, str | None], None]
     _done_posted: set[str] = field(default_factory=set)
+    # Visual review (§5.10, O24); set by the run. Without tool_dir_for, visual
+    # cards are reviewed like any other card.
+    tool_dir_for: Callable[[str], Path] | None = None
+    ref_roots: list[Path] = field(default_factory=list)
+    run_root: Path | None = None
+    vision_for: Callable[[str], bool] = lambda role: False
+    _visual: dict[str, PrecheckResult] = field(default_factory=dict)
+    _precheck_fails: dict[str, int] = field(default_factory=dict)
+    _feedback_roles: dict[str, str] = field(default_factory=dict)   # request id → role
 
     @classmethod
     def build(cls, agents: Sequence["AgentConfig"], role_types: dict[str, str],
@@ -151,9 +163,10 @@ class TaskFlow:
                 return TurnPlan(model=ReviewResult, skip=True)
             self.board.start(role, card.task_id)
             criteria = list(card.acceptance_criteria)
+            visual = self._visual_review_text(role, card.task_id)
             return TurnPlan(
                 model=ReviewResult, card_id=card.task_id,
-                task_text=self.board.brief_for(card.task_id, reviewer=True)
+                task_text=self.board.brief_for(card.task_id, reviewer=True) + visual
                 + f"\n\nThe card's work was done by **{card.assigned_to}** and is merged into "
                   f"your working copy. Call `guudflow_changes` with `task_id` "
                   f"\"{card.task_id}\" to see exactly what it changed.",
@@ -164,9 +177,11 @@ class TaskFlow:
             return TurnPlan(model=AgentResult, skip=True)
         self.board.start(role, card.task_id)
         criteria = list(card.acceptance_criteria)
+        self_check = ("\n\n" + visual_review.self_check_text(card)
+                      if card.kind == "visual" and self.tool_dir_for is not None else "")
         return TurnPlan(
             model=AgentResult, card_id=card.task_id,
-            task_text=self.board.brief_for(card.task_id),
+            task_text=self.board.brief_for(card.task_id) + self_check,
             check=lambda r, tid=card.task_id: (_check_done(r, tid, criteria)
                                                if isinstance(r, AgentResult) else []))
 
@@ -197,6 +212,9 @@ class TaskFlow:
             self.board.record_merge(card_id, role, *merged)
         if isinstance(result, ReviewResult):
             outcome = self.board.reviewed(card_id, role, result)
+            if outcome.passed and card_id in self._visual and self.run_root is not None:
+                visual_review.save_baseline(self._visual[card_id].screenshot, self.run_root,
+                                            card_id)
             if outcome.exhausted:
                 self.escalate(role, f"review rounds exhausted on {card_id}",
                               json.dumps({"task_id": card_id, "round": outcome.round}))
@@ -210,6 +228,8 @@ class TaskFlow:
             return
         assert isinstance(result, AgentResult)
         if result.status == "done":
+            if not self._visual_precheck(role, card_id):
+                return
             self.board.submitted(card_id, result, commit=commit)
         elif result.status == "blocked":
             assert result.blocked_on is not None
@@ -234,6 +254,53 @@ class TaskFlow:
         self.post(SignalType.BLOCKED, role, f"{role} is blocked on {on_role} ({card_id})",
                   json.dumps({"task_id": card_id, "on": on_role, "need": need,
                               "unblock_card": unblock.task_id}))
+
+    # ── visual review (§5.10, O24) ────────────────────────────────────────
+    def _visual_precheck(self, role: str, card_id: str) -> bool:
+        """False when the card goes straight back to its owner (no reviewer turn)."""
+        card = self.board.card(card_id)
+        if card.kind != "visual" or self.tool_dir_for is None or self.run_root is None:
+            return True
+        result = visual_review.precheck(card, self.tool_dir_for(role), self.ref_roots,
+                                        self.run_root / "visual" / card_id)
+        self._visual[card_id] = result
+        if result.passed:
+            self.board.note(card_id, "artifact", "runner", f"visual pre-check passed: {result.detail}",
+                            {"fractions": result.fractions})
+            return True
+        fails = self._precheck_fails.get(card_id, 0) + 1
+        self._precheck_fails[card_id] = fails
+        if fails > visual_review.MAX_PRECHECK_FAILS:
+            self.board.note(card_id, "note", "runner",
+                            f"visual pre-check still failing ({result.detail}); the reviewer decides")
+            return True
+        self.board.note(card_id, "review_issue", "visual-check", result.detail,
+                        {"item": "visual match", "fractions": result.fractions})
+        self.post(SignalType.REJECTED, "visual-check",
+                  f"visual pre-check sent {card_id} back to {role}",
+                  json.dumps({"task_id": card_id, "authors": [role], "round": card.review_round,
+                              "detail": result.detail}))
+        return False
+
+    def _visual_review_text(self, reviewer: str, card_id: str) -> str:
+        result = self._visual.get(card_id)
+        if result is None or self.tool_dir_for is None:
+            return ""
+        staged = visual_review.stage_for_reviewer(result, self.tool_dir_for(reviewer), card_id)
+        return "\n\n" + visual_review.reviewer_text(result, staged, self.vision_for(reviewer))
+
+    def on_signal(self, sig: "Signal") -> None:
+        """Human visual feedback lands on the card its requester is working on."""
+        detail = _json_detail(sig.detail)
+        if sig.type is SignalType.SCREENSHOT_READY and detail.get("request_id") and sig.from_agent:
+            self._feedback_roles[str(detail["request_id"])] = sig.from_agent
+        elif sig.type is SignalType.USER_VISUAL_FEEDBACK:
+            role = self._feedback_roles.get(str(detail.get("request_id")))
+            card_id = self.board.active.get(role or "")
+            text = str(detail.get("feedback") or sig.summary or "").strip()
+            if card_id and text:
+                self.board.note(card_id, "human_comment", "human", text,
+                                {"request_id": detail.get("request_id"), "visual": True})
 
     # ── completion ────────────────────────────────────────────────────────
     def settle(self, current: str | None = None) -> None:
@@ -260,6 +327,14 @@ class TaskFlow:
                           f"{role} complete ({len(cards)} card(s) done)" if cards
                           else f"{role} complete (no cards)", None)
         scheduler.notify()
+
+
+def _json_detail(detail: str | None) -> dict[str, object]:
+    try:
+        value = json.loads(detail or "{}")
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _check_done(result: AgentResult, task_id: str, criteria: list[str]) -> list[str]:
