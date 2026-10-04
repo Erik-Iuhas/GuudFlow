@@ -50,6 +50,9 @@ or memory.
 | Agent definitions | `agent.<name>: {model, prompt, permission, steps, temperature, mode}` | Personas compile to these |
 | Any model | `provider.<id>.options.baseURL` + any AI-SDK provider | Point it at GuudFlow's LLM gateway (see §5.4) |
 | Server auth | `OPENCODE_SERVER_PASSWORD` → HTTP Basic (verified: 401 without creds) | |
+| Cheap codebase search | Built-in read-only `explore` subagent (listed by `GET /agent`), `subagent_depth` config key, `task` permission | Used by builders under `subagents: explore_only` (§5.9) |
+| Sticky approvals | Permission reply `once \| always \| reject`; `GET /api/permission/saved` | "always" answers stop repeat prompts (§5.9) |
+| Built-in web search | Env flags `OPENCODE_ENABLE_EXA`, `OPENCODE_WEBSEARCH_PROVIDER` exist in the binary | **Not tested.** Not used: web access goes through GuudFlow's host-side MCP tools instead (§5.8) |
 
 ### 2.2 Gotchas that the design must handle (all reproduced)
 
@@ -227,9 +230,9 @@ Each layer assumes the ones above it have failed.
 
 ### 5.1 Role permission profiles (layer 1)
 
-Profiles are generated from the role's existing RBAC scopes (`AgentConfig` +
-`core/tool_manifest.py` `allowed_scopes`), so the RBAC vocabulary stays the same.
-Every profile starts deny-all and adds:
+Profiles are compiled from the role's **capabilities** (§5.7), with the role type
+supplying defaults and the existing RBAC scopes (`AgentConfig` + `core/tool_manifest.py`
+`allowed_scopes`) still naming the MCP grants. Every profile starts deny-all and adds:
 
 ```jsonc
 // common base, all roles
@@ -238,8 +241,8 @@ Every profile starts deny-all and adds:
   "read": "allow", "glob": "allow", "grep": "allow", "list": "allow", "lsp": "allow",
   "todowrite": "allow",
   "external_directory": "deny",
-  "webfetch": "deny", "websearch": "deny",
-  "task": "deny",                  // no opencode subagents in v1; GuudFlow owns fan-out
+  "webfetch": "deny", "websearch": "deny",   // always: web goes through host MCP (§5.8)
+  "task": "deny",                  // overridden by the `subagents` capability (§5.7)
   "question": "deny",              // humans are reached via the ask_human MCP tool instead
   "doom_loop": "deny",             // a looping agent fails fast; the scheduler handles it
   "guudflow_*": "allow" }          // MCP tools; real RBAC is enforced server-side (layer 6).
@@ -312,8 +315,8 @@ Extends what `worker/docker_manager.py` already does for `code:exec`:
   enter containers, and gives exact per-agent cost accounting.
 - **IT agent only**: additional egress to a package mirror/proxy that enforces the
   project allow-list (pinned versions). No other role has any internet egress.
-- `webfetch`/`websearch` stay denied in v1. A later version can route them through a
-  gateway endpoint with a URL allow-list.
+- opencode's `webfetch`/`websearch` stay denied for every role. Web access is a
+  host-side MCP tool (§5.8), so no sandbox ever needs internet egress for it.
 
 ### 5.5 Git ownership (layer 7)
 
@@ -337,7 +340,9 @@ branch. Instead:
 ### 5.6 MCP RBAC and budgets (layers 6 and 8)
 
 - The **GuudFlow MCP server** (remote MCP over HTTP) exposes `post_note`, `read_board`,
-  `ask_human`, `request_package`, `request_visual_feedback`, `report_progress`. Each
+  `ask_human`, `request_package`, `request_visual_feedback`, `report_progress`, and,
+  only for roles whose capabilities grant them, `web_search`, `web_fetch` (§5.8) and
+  `screenshot` (§5.9). Each
   sandbox's MCP config carries a bearer token bound to `(run_id, role)`. The server
   derives the caller's role **from the token, never from arguments**, and checks the
   role's existing RBAC scopes (default-deny, same `CredentialsBroker` rules as DESIGN §30).
@@ -346,6 +351,126 @@ branch. Instead:
   deadline; a per-turn wall clock that calls `POST /session/{id}/abort`.
 - Parallelism cap: `max_parallel_sandboxes` (default 3), enforced by the scheduler,
   because each sandbox costs about 1 GB.
+
+### 5.7 Capabilities: per-role toggles
+
+Each role carries a small `capabilities` block. It is the one place a human decides
+what an agent may do. GuudFlow compiles it into three outputs:
+
+1. the role's **opencode permission ruleset** (§5.1),
+2. the sandbox's **container and network profile** (§5.3, §5.4),
+3. the role's **MCP tool grants** (§5.6).
+
+```jsonc
+"capabilities": {
+  "sandbox":   "strict" | "standard" | "host_dev",
+  "web":       "off" | "search" | "search+fetch",
+  "shell":     "readonly" | "project" | "ask",
+  "packages":  "off" | "via_it_agent",
+  "subagents": "off" | "explore_only" | "full",
+  "browser":   "off" | "screenshot"
+}
+```
+
+**Compile table** (`core/harness/capabilities.py`):
+
+| Toggle | Value | opencode rules | Container / network | MCP grants |
+|---|---|---|---|---|
+| `sandbox` | `strict` | deny-all base | read-only root, no network except gateway + MCP, no test runners | — |
+| | `standard` | `strict` + test-runner bash allows (`pytest*`, `npm test*`, `npm run *`) | same as strict, plus `/work/.venv` and `node_modules` writable | — |
+| | `host_dev` | same rules as `standard` | **no container**; warning on every spawn and in Studio; refused when `GUUDFLOW_ENV=production` | — |
+| `web` | `off` | `webfetch`/`websearch` deny (always) | no change (never opens egress) | none |
+| | `search` | same | same | `web_search` |
+| | `search+fetch` | same | same | `web_search`, `web_fetch` |
+| `shell` | `readonly` | bash: `git status/diff/log/show*`, `ls*`, `cat *` allow; rest deny | — | — |
+| | `project` | `readonly` + the sandbox level's test runners + `git add/commit*`; installers (`pip`, `npm install`, `curl`, `wget`) deny | — | — |
+| | `ask` | `project` + `"*": "ask"` for anything else (routed to the approval gate) | — | — |
+| `packages` | `off` | installers deny | — | none |
+| | `via_it_agent` | installers deny | — | `request_package` |
+| `subagents` | `off` | `task` deny | — | — |
+| | `explore_only` | `task: {"*": "deny", "explore": "allow"}`, `subagent_depth: 1` | — | — |
+| | `full` | `task` allow, `subagent_depth: 1` | — | — |
+| `browser` | `off` | — | — | none |
+| | `screenshot` | — | host may reach the sandbox's dev-server port (§5.9) | `screenshot` |
+
+Defaults per role type (each can be overridden on the approval screen):
+
+| Role | sandbox | web | shell | packages | subagents | browser |
+|---|---|---|---|---|---|---|
+| researcher | strict | search+fetch | readonly | off | off | off |
+| planner / architect | strict | off | readonly | off | explore_only | off |
+| builder | standard | off | project | via_it_agent | explore_only | off |
+| frontend builder | standard | off | project | via_it_agent | explore_only | screenshot |
+| tester | standard | off | project | via_it_agent | explore_only | off |
+| reviewer | strict | off | readonly + test runners | off | explore_only | off |
+| IT agent | standard | off | installers only (§5.1) | — | off | off |
+
+Rules:
+- **Set before the run.** Capabilities show as switches per role on Studio's team
+  approval screen. The human approves the capabilities together with the team.
+- **Recorded on the board.** At each spawn the runner posts a `CAPABILITIES` signal with
+  the effective block and a hash of the compiled ruleset. Any change mid-run (only via the
+  approval gate) posts another one. Every run therefore shows exactly what each agent was
+  allowed to do and when.
+- **Narrowing only, at runtime.** A running agent can never widen its own capabilities.
+  Widening needs a human through the approval gate and applies from the next spawn.
+
+> To verify in P0: that a `task` pattern of `"explore"` restricts subagents by name, and
+> that `subagent_depth: 1` stops an explore subagent from spawning further agents.
+
+### 5.8 Web access via the host
+
+Sandboxes never get internet access for web content. opencode's built-in `webfetch` and
+`websearch` stay denied for every role. Instead, GuudFlow's MCP server (on the host)
+exposes:
+
+- `web_search(query, max_results)` → titles, URLs, snippets.
+- `web_fetch(url)` → readable text of one page.
+
+The host side enforces:
+- **Domain policy:** per-project allow/deny lists (deny wins); private and link-local
+  IP ranges are always blocked (no SSRF into the host network).
+- **Budget:** per-run and per-role request caps; responses cached per run (same URL or
+  query → cached result, which does not count against the budget).
+- **Audit:** every query and URL becomes a `WEB_REQUEST` board signal (role, query/URL,
+  cache hit, bytes).
+- **Untrusted content:** fetched text is returned wrapped in the existing untrusted-content
+  delimiters (DESIGN prompt-injection rule), truncated to a size cap, scripts and markup
+  stripped.
+- **Keys stay on the host:** the search-provider API key is held by the
+  `CredentialsBroker`, never sent to a sandbox (hard constraint #17).
+
+**Researcher pattern.** Only a `researcher` role gets `web: search+fetch` by default.
+It writes findings to `research/notes.md`, each with its source link. Builders read that
+file; they never call web tools and never see raw web pages. This confines prompt
+injection to one read-only, no-shell role.
+
+This contains the risk but does not remove it: a page could still steer what the
+researcher writes into its notes. So the builder brief wraps `research/notes.md` in the
+same untrusted-content delimiters, and the reviewer checks code against the spec, not
+against the notes.
+
+### 5.9 Let the harness do what it is good at
+
+- **Context management moves to opencode.** Compaction, LSP diagnostics, provider retries
+  and todo tracking are opencode's job. GuudFlow stops building context itself:
+  `core/context_manager.py` and `core/repo_map.py` retire (§6.3). The brief carries only
+  what opencode can't know (goal, upstream results, notes, review issues).
+- **Explore subagent for cheap search.** With `subagents: explore_only` (depth 1), a
+  builder can send opencode's read-only `explore` agent to search its own clone. It runs
+  in the same sandbox under the same rules, so GuudFlow doesn't need to schedule it.
+  Its token cost still flows through the gateway and shows up per role.
+- **Sticky approvals.** When a human answers an `ask` with "always", GuudFlow replies
+  `always` to opencode and also records it on the board as an `APPROVAL_GRANTED` signal
+  with `scope: run`. The same pattern is then auto-approved for that role for the rest of
+  the run, so Studio isn't flooded. "Always" never outlives the run: sandboxes (and their
+  opencode state) are destroyed at run end, and `host_dev` uses a fresh per-run `HOME`.
+- **Screenshots run on the host.** `screenshot(url_path, viewport)` is an MCP tool that
+  runs Playwright **on the host**, matching the existing visual-review rule; no browser
+  runs inside a sandbox. The role's dev server listens inside its sandbox; the host
+  reaches it over the run's internal network (host → sandbox is allowed, sandbox →
+  outside is not). Screenshots are saved under the run and served by the existing static
+  endpoint, never sent as base64 over the websocket.
 
 ---
 
@@ -358,7 +483,12 @@ branch. Instead:
 | `core/harness/opencode_client.py` | Typed async client for the ~12 endpoints used (session, prompt_async, abort, message, permission reply, diff, event SSE) |
 | `core/harness/opencode_runner.py` | `OpencodeAgentRunner`, the scheduler runner callable (§4.1) |
 | `core/harness/event_bridge.py` | SSE → board `Signal`s + quip triggers + Studio websocket |
-| `core/harness/permissions.py` | Role scopes → opencode ruleset (§5.1); unit tested per role |
+| `core/harness/capabilities.py` | `Capabilities` dataclass, role-type defaults, compile table (§5.7) |
+| `core/harness/permissions.py` | Compiled capabilities → opencode ruleset (§5.1); unit tested per role |
+| `api/mcp_web.py` | `web_search` / `web_fetch` host tools: domain policy, budget, cache, audit, delimiters (§5.8) |
+| `api/mcp_browser.py` | Host-side Playwright `screenshot` tool (§5.9) |
+| `api/routes/oneshot.py` + `cli/oneshot.py` | One-shot entry point (§10) |
+| `data/teams/default_oneshot.json` | Default one-shot team (§10) |
 | `core/harness/results.py` | `AgentResult` / `ReviewResult` + validation + retry prompt |
 | `core/harness/config_gen.py` | Generates `OPENCODE_CONFIG_CONTENT` (provider → gateway, agent defs from personas) |
 | `worker/sandbox_manager.py` | Start/stop hardened opencode containers, networks, clones (generalises `docker_manager.py`) |
@@ -455,7 +585,18 @@ Each phase ends in a demo-able state. Follow CLAUDE.md: commit per change, tests
 - Flip `harness` default to `opencode`; retire §6.3 code in small commits; update
   DESIGN.md, CLAUDE.md, and the docs/diagrams.
 
-Rough total: 2.5–3.5 weeks of focused work; P0–P2 alone already gives a watchable demo.
+The additions from §5.7–§5.9 and §10 slot in as follows (task-level detail is in
+`OPENCODE_WORK_BREAKDOWN.md`):
+- **P0:** capability compile table; `permissions.py` builds from capabilities; contract
+  tests for the `explore` restriction and `subagent_depth`.
+- **P2:** capability switches on the Studio approval screen; `CAPABILITIES` board
+  signal; sticky approvals.
+- **P3:** host-side `web_search` / `web_fetch` and `screenshot` MCP tools; escape-suite
+  cases for web and capability bypass.
+- **P5:** the one-shot entry point, the default team, and the `api-client-library` demo.
+
+Rough total: 3–4 weeks of focused work (up from 2.5–3.5 with the additions); P0–P2 alone
+already gives a watchable demo.
 
 ---
 
@@ -483,6 +624,10 @@ Rough total: 2.5–3.5 weeks of focused work; P0–P2 alone already gives a watc
 | gVisor not available on dev machines (macOS) | Docker Desktop's VM is the boundary there; runsc is used in production Linux |
 | Personas' 7-layer prompt vs opencode's own system prompt | Put persona layers in `agent.<role>.prompt`; P5 measures whether opencode's base prompt conflicts |
 | Compaction loses detail | The board and git are the record; the brief re-injects what matters on each spawn |
+| Prompt injection through `research/notes.md` | Only the researcher touches raw web content; notes are delimited as untrusted in builder briefs; reviewer checks against the spec (§5.8) |
+| Host Playwright needs to reach a network-closed sandbox | Host → sandbox only, on the run's internal network; P3 escape suite confirms the sandbox still can't reach out |
+| opencode's own web search flags untested | Not relied on; host-side MCP search is the default |
+| `host_dev` has no isolation | Refused in production; warning on every spawn and in Studio; demo mode only |
 
 **Open questions for you:**
 1. Is one container per agent acceptable for the demo (memory), or should P1–P2 start in
@@ -490,6 +635,58 @@ Rough total: 2.5–3.5 weeks of focused work; P0–P2 alone already gives a watc
 2. Which models should be the floor for the demo roles (e.g. Sonnet-class for builders,
    Haiku-class for quips)?
 3. OK to retire the ASK/ANSWER handshake entirely (§4.4)? It is the biggest behaviour change.
+
+---
+
+## 10. The generic one-shot (the demo)
+
+One entry point that takes a goal and runs a sensible team end to end.
+
+```bash
+guudflow oneshot "Build a typed Python client for the Open-Meteo API with tests" \
+  --web researcher --budget 5 --demo
+```
+
+or `POST /api/oneshot {goal, repo?, web, budget}`, which enqueues a job and returns
+`202` at once (hard constraint #12). It reuses the existing invoke job path
+(`api/routes/invoke.py` already returns 202 with a pollable `/{job_id}/status`).
+
+**Default team** (`data/teams/default_oneshot.json`), which fits most goals:
+
+```
+researcher (optional, web on) → planner → (builder A ‖ builder B) → reviewer
+                                              ↑______ review loop, 2 rounds ______|
+```
+
+- `--web researcher` includes the researcher (§5.8); `--web off` drops it. No other role
+  gets web access.
+- The planner splits the work into two independent halves for builder A and builder B
+  (separate clones and branches, §5.5); the runner merges both before review.
+- The reviewer loop is a scheduler review edge (§4.5) with `max_rounds: 2`, then tech
+  lead, then human.
+- Capabilities use the role defaults from §5.7.
+- `--budget` (USD) becomes the run's spend cap at the gateway (§5.4); the run stops
+  cleanly when it is reached.
+
+**Approval:** with `--demo`, the team and capabilities are auto-approved and a
+`CAPABILITIES` signal records what was granted. Without `--demo`, Studio's team approval
+screen (with the capability switches) is shown first.
+
+**Deliverables:**
+- a merged branch in the run repo;
+- a downloadable workspace (the existing deliverables endpoint);
+- a run summary posted to the board;
+- a cost breakdown per agent, taken from the gateway's cost log.
+
+**Demo project:** `data/example_projects/api-client-library`. It already has a
+researcher → design → implement → test → docs flow and shows everything at once: the
+researcher reads real public API docs through the host web tools, two builders work in
+parallel, the reviewer catches a real issue and sends one round back, and the quip feed
+narrates it live.
+
+**Exit criteria:** `guudflow oneshot … --demo` on `api-client-library` completes under
+the budget; the merged client's tests pass offline; the board shows `CAPABILITIES`,
+`WEB_REQUEST`, review-loop and cost signals; the Studio Run view plays it live.
 
 ---
 
