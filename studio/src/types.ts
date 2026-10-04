@@ -1,3 +1,4 @@
+import type { TaskColumn, TaskThreadDetail } from "./lib/runEvents.gen";
 // Shared types — mirror the backend's API shapes.
 
 export type ModelTier = "heavy" | "solid" | "fast";
@@ -82,6 +83,22 @@ export const HARNESS_SIGNAL_TYPES = [
   "THINKING",
   "BLOCKED",
 ] as const;
+
+/** One card as returned by `GET /api/runs/{id}/cards` (`card_view` in the backend). */
+export interface CardWire {
+  id: string;
+  title: string;
+  owner: string;
+  column: TaskColumn;
+  kind?: string;
+  size?: string;
+  priority?: number;
+  review_round?: number;
+  acceptance?: string[];
+  depends_on?: string[];
+  column_since?: string | null;
+  thread?: TaskThreadDetail[];
+}
 
 export interface Signal {
   id: string;

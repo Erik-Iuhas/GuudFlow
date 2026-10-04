@@ -1,6 +1,7 @@
 // Thin API client. Handles auth + JSON shape so views can stay focused.
 
 import type {
+  CardWire,
   ExampleProjectSummary,
   InputsState,
   InstantiateExampleProjectResponse,
@@ -700,6 +701,15 @@ export const approvalsApi = {
     ),
 };
 
+/** The run's board cards (works for active and finished runs). */
+export async function getCards(runId: string): Promise<CardWire[]> {
+  const res = await request<{ cards: CardWire[] }>(
+    "GET",
+    `/api/runs/${encodeURIComponent(runId)}/cards`,
+  );
+  return res?.cards ?? [];
+}
+
 // ── WebSocket helper ───────────────────────────────────────────────────────
 
 /** Auto-reconnecting WebSocket wrapper. Caller treats it as a `{ close }`
@@ -814,15 +824,21 @@ function _connectWithReconnect(
 
 export function connectRunStream(
   runId: string,
-  onMessage: (msg: { type: string; signals?: Signal[]; signal?: Signal }) => void,
+  onMessage: (msg: { type: string; signals?: Signal[]; signal?: Signal; live?: boolean }) => void,
   onClose?: () => void,
+  /** Optional: called with true on open and false on every drop (including the final give-up). */
+  onStateChange?: (connected: boolean) => void,
 ): WsHandle {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   const url = `${proto}://${window.location.host}/ws/runs/${encodeURIComponent(runId)}`;
   return _connectWithReconnect(
     url,
-    (data) => onMessage(data as { type: string; signals?: Signal[]; signal?: Signal }),
-    (connected) => { if (!connected) onClose?.(); },
+    (data) =>
+      onMessage(data as { type: string; signals?: Signal[]; signal?: Signal; live?: boolean }),
+    (connected) => {
+      if (!connected) onClose?.();
+      onStateChange?.(connected);
+    },
   );
 }
 
