@@ -141,6 +141,10 @@ class SignalType(str, Enum):
     ARTIFACT = "ARTIFACT"
     # The overseer changed course (plan §11.3).
     OVERSEER_INTERVENTION = "OVERSEER_INTERVENTION"
+    # Task board (plan §4.6): a card changed column (only the scheduler moves
+    # cards), and a typed entry was added to a card's thread.
+    TASK_MOVED = "TASK_MOVED"
+    TASK_THREAD = "TASK_THREAD"
 
 
 Priority = Literal["normal", "high"]

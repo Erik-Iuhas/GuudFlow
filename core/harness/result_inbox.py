@@ -8,6 +8,7 @@ then `take()`s the accepted result once the opencode session goes idle.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,9 +23,15 @@ _NOT_EXPECTED_SCHEMA: dict[str, Any] = {"type": "object", "properties": {},
                                         "additionalProperties": False}
 
 
+# Extra checks beyond the schema (e.g. "the plan's owners exist", "every
+# acceptance item is answered"): one problem per line, empty when acceptable.
+ResultCheck = Callable[[BaseModel], list[str]]
+
+
 @dataclass
 class _Slot:
     model: type[BaseModel]
+    check: ResultCheck | None = None
     accepted: BaseModel | None = None
     attempts: int = 0
     last_error: str | None = None
@@ -36,9 +43,14 @@ class ResultInbox:
 
     _slots: dict[tuple[str, str], _Slot] = field(default_factory=dict)
 
-    def expect(self, run_id: str, role: str, model: type[BaseModel]) -> None:
-        """Open a slot for the role's next turn (clears any previous result)."""
-        self._slots[(run_id, role)] = _Slot(model=model)
+    def expect(self, run_id: str, role: str, model: type[BaseModel],
+               check: ResultCheck | None = None) -> None:
+        """Open a slot for the role's next turn (clears any previous result).
+
+        `check` runs after schema validation; its problems bounce the result back
+        to the model in the same turn, exactly like schema errors.
+        """
+        self._slots[(run_id, role)] = _Slot(model=model, check=check)
 
     def take(self, run_id: str, role: str) -> BaseModel | None:
         """Return and clear the accepted result, if any."""
@@ -68,6 +80,10 @@ class ResultInbox:
             return ToolResult("No result is expected from you right now.", is_error=True)
         slot.attempts += 1
         result, error = validate_result(slot.model, args)
+        if result is not None and slot.check is not None:
+            problems = slot.check(result)
+            if problems:
+                result, error = None, "\n".join(problems)
         if result is None:
             slot.last_error = error
             return ToolResult(

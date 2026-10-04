@@ -67,6 +67,8 @@ class CollectResult:
     new_commits: list[str] = field(default_factory=list)
     changed_files: list[str] = field(default_factory=list)
     problem: str | None = None
+    base: str = ""      # main before the merge
+    head: str = ""      # main after the merge (base..head is exactly what was merged)
 
 
 class RoleClones:
@@ -204,4 +206,15 @@ class RoleClones:
         if not self.main.merge(branch, into="main"):
             return CollectResult(merged=False, new_commits=new_commits, changed_files=changed,
                                  problem=f"merge conflict merging {branch} into main")
-        return CollectResult(merged=True, new_commits=new_commits, changed_files=changed)
+        return CollectResult(merged=True, new_commits=new_commits, changed_files=changed,
+                             base=before, head=repo.git.rev_parse("main"))
+
+    def merged_diff(self, ranges: list[tuple[str, str]], limit: int = 30_000) -> str:
+        """Stat + patch of what the given (base, head) merges brought into main."""
+        repo = self.main.repo
+        parts = []
+        for base, head in ranges:
+            stat = repo.git.diff("--stat", base, head)
+            parts.append(f"# {base[:8]}..{head[:8]}\n{stat}\n\n{repo.git.diff(base, head)}")
+        text = "\n\n".join(parts) if parts else "(nothing merged for this card yet)"
+        return text if len(text) <= limit else text[:limit] + "\n[truncated]"

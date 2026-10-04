@@ -46,6 +46,8 @@ from core.harness.opencode_runner import EventHook, PermissionHook, PermissionRe
 from core.harness.result_inbox import ResultInbox
 from core.harness.results import AgentResult, ReviewResult
 from core.harness.server import OpencodeServer
+from core.harness.task_flow import TaskFlow, TurnPlan
+from core.harness.tasks import PlanResult
 from core.harness.tool_context import RunToolContext
 from core.llm.registry import ModelRegistry
 from core.scheduler import AgentSpec, Scheduler, SchedulerResult
@@ -95,6 +97,9 @@ class HarnessSettings:
     sandbox: SandboxMode = "auto"
     # Host-side tool overrides for tests (see each module's `tools()` signature).
     tool_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Task board (plan §4.6): "auto" drives the run by cards when the team has a
+    # planner; "off" keeps plain role mode.
+    task_board: Literal["auto", "off"] = "auto"
 
 
 @dataclass
@@ -129,6 +134,7 @@ class OpencodeRun:
         self.gate = PermissionGate(self.workspace, allow_list={
             str(k): [str(p) for p in v] for k, v in allow.items() if isinstance(v, list)})
         self.results: dict[str, BaseModel] = {}
+        self.flow: TaskFlow | None = None
         self._delivered_notes: set[str] = set()
         self._roles: dict[str, _Role] = {}
         self._http: RunningHttpServer | None = None
@@ -154,11 +160,20 @@ class OpencodeRun:
         self.mode = await self._resolve_mode()
         for cfg in self.runner.project.agents:
             self._roles[cfg.role] = self._prepare_role(cfg)
+        if self.settings.task_board == "auto":
+            self.flow = TaskFlow.build(
+                self.runner.project.agents, {n: r.role_type for n, r in self._roles.items()},
+                self.workspace, self._scheduler,
+                post=lambda kind, role, summary, detail: self._post(kind, role, summary, detail),
+                escalate=lambda role, summary, detail: self._escalate(role, summary, detail))
+        flow = self.flow
         try:
             await self._start_services()
             specs = [AgentSpec(role=cfg.role, runner=self._runner_for(cfg),
-                               depends_on=list(cfg.depends_on),
-                               max_review_rounds=cfg.max_review_rounds)
+                               depends_on=flow.depends_on(cfg) if flow else list(cfg.depends_on),
+                               max_review_rounds=cfg.max_review_rounds,
+                               has_work=(lambda r=cfg.role: flow.has_work(r))
+                               if flow and cfg.role in flow.card_roles else None)
                      for cfg in self.runner.project.agents]
             scheduler = Scheduler(specs, self.workspace, scope="pipeline",
                                   max_iterations=self.settings.max_spawns_per_role,
@@ -370,16 +385,32 @@ class OpencodeRun:
         if not self.clones.sync_from_main(role_name):
             self._post(SignalType.FAILED, role_name, "could not merge main into the branch")
             raise TurnFailed(f"{role_name}: merge conflict syncing with main")
+        plan = self.flow.begin_turn(role_name) if self.flow is not None else None
+        if plan is not None and plan.skip:
+            assert self.flow is not None
+            self.flow.end_turn(role_name)
+            self.flow.settle(current=role_name)
+            return
+        try:
+            await self._run_turn(role, workdir, plan)
+        finally:
+            if self.flow is not None:
+                self.flow.end_turn(role_name)
+
+    async def _run_turn(self, role: _Role, workdir: Path, plan: TurnPlan | None) -> None:
+        role_name = role.cfg.role
         client = await self._ensure_server(role, workdir)
-        model: type[BaseModel] = ReviewResult if role.role_type == "reviewer" else AgentResult
-        self.inbox.expect(self.run_id, role_name, model)
-        self._post(SignalType.STARTED, role_name, f"{role_name} started")
+        model: type[BaseModel] = (plan.model if plan is not None else
+                                  ReviewResult if role.role_type == "reviewer" else AgentResult)
+        self.inbox.expect(self.run_id, role_name, model, plan.check if plan else None)
+        self._post(SignalType.STARTED, role_name,
+                   f"{role_name} started" + (f" on {plan.card_id}" if plan and plan.card_id else ""))
         self._post_capabilities(role)
 
         session = await client.create_session(title=f"{self.run_id}:{role_name}")
         on_event = self._event_hook(role_name)
         on_permission = self._permission_hook(role_name)
-        stats = await drive_turn(client, session["id"], self._brief(role), agent=role_name,
+        stats = await drive_turn(client, session["id"], self._brief(role, plan), agent=role_name,
                                  on_event=on_event, on_permission=on_permission,
                                  timeout=self.settings.turn_timeout)
         result = self.inbox.take(self.run_id, role_name)
@@ -392,13 +423,19 @@ class OpencodeRun:
             result = self.inbox.take(self.run_id, role_name)
         if not self.settings.keep_servers:
             await self._stop_server(role)
-        await self._finish(role, result, stats)
+        await self._finish(role, result, stats, plan)
 
-    async def _finish(self, role: _Role, result: BaseModel | None, stats: TurnStats) -> None:
+    async def _finish(self, role: _Role, result: BaseModel | None, stats: TurnStats,
+                      plan: TurnPlan | None = None) -> None:
         name = role.cfg.role
+        card_id = plan.card_id if plan is not None else None
         if result is None:
             _, err = self.inbox.status(self.run_id, name)
             reason = err or "; ".join(stats.errors) or "no result was submitted"
+            if card_id is not None and self.flow is not None:
+                self.flow.card_problem(name, card_id, f"no valid result: {reason}")
+                self.flow.settle(current=name)
+                return
             self._post(SignalType.FAILED, name, f"{name} finished without a valid result",
                        reason)
             raise TurnFailed(f"{name}: {reason}")
@@ -417,9 +454,20 @@ class OpencodeRun:
         for to_role, note in getattr(result, "notes_for", {}).items():
             self._post_note(name, to_role, note)
         if not collected.merged:
+            if card_id is not None and self.flow is not None:
+                self.flow.card_problem(name, card_id,
+                                       f"branch not merged: {collected.problem}")
+                self.flow.settle(current=name)
+                return
             self._post(SignalType.FAILED, name, f"{name}'s branch was not merged",
                        collected.problem)
             raise TurnFailed(f"{name}: {collected.problem}")
+        if card_id is not None and self.flow is not None:
+            self.flow.apply_result(name, card_id, result,
+                                   collected.new_commits[0] if collected.new_commits else "",
+                                   (collected.base, collected.head))
+            self.flow.settle(current=name)
+            return
         self.workspace.set_artifact(name, Artifact(agent_role=name, type="agent_result",
                                                    content=result.model_dump(),
                                                    iteration=self._spawns(name)))
@@ -433,9 +481,14 @@ class OpencodeRun:
         if isinstance(result, AgentResult) and result.status == "failed":
             self._post(SignalType.FAILED, name, f"{name} reported failure", result.summary)
             raise TurnFailed(f"{name}: {result.summary}")
+        if isinstance(result, PlanResult) and self.flow is not None:
+            self.flow.plan_accepted(result)
+            summary = f"planned {len(result.tasks)} card(s). {result.notes}".strip()
         self.workspace.completed_agents.append(name)
         self.workspace.agent_states[name] = AgentState.COMPLETE
         self._post(SignalType.COMPLETE, name, f"{name} complete", summary or None)
+        if self.flow is not None:
+            self.flow.settle(current=name)
 
     # ── review edges and blocking (plan §4.4, §4.5) ────────────────────────
     def _scheduler(self) -> Scheduler:
@@ -479,7 +532,7 @@ class OpencodeRun:
         self._post(SignalType.ESCALATION, role, summary, detail)
 
     # ── briefs, notes, signals ─────────────────────────────────────────────
-    def _brief(self, role: _Role) -> str:
+    def _brief(self, role: _Role, plan: TurnPlan | None = None) -> str:
         cfg = role.cfg
         upstream = tuple(
             UpstreamResult(role=dep, summary=getattr(self.results[dep], "summary", ""),
@@ -504,6 +557,8 @@ class OpencodeRun:
             review_round=review_round,
             research_notes=(research.read_text(encoding="utf-8", errors="replace")
                             if role.role_type != "researcher" and research.is_file() else None),
+            task=plan.task_text if plan is not None else None,
+            extra_sections=plan.extra_sections if plan is not None else (),
         ))
 
     def _take_notes(self, role: str) -> tuple[tuple[str, str], ...]:
@@ -536,6 +591,15 @@ class OpencodeRun:
         empty = {"type": "object", "additionalProperties": False, "properties": {}}
 
         async def changes(identity: McpIdentity, args: dict[str, Any]) -> ToolResult:
+            task_id = args.get("task_id")
+            if task_id is not None:
+                if self.flow is None or not isinstance(task_id, str):
+                    return ToolResult("there is no task board in this run", is_error=True)
+                try:
+                    ranges = self.flow.board.merge_ranges(task_id)
+                except KeyError:
+                    return ToolResult(f"unknown card {task_id!r}", is_error=True)
+                return ToolResult(await asyncio.to_thread(self.clones.merged_diff, ranges))
             path = args.get("path")
             if path is not None and (not isinstance(path, str) or path.startswith("/")
                                      or ".." in Path(path).parts):
@@ -551,8 +615,10 @@ class OpencodeRun:
 
         return [
             McpTool("changes", "Show what changed in your folder compared to the team's main "
-                    "branch: a file summary and the full diff (optionally for one path).",
-                    {**empty, "properties": {"path": {"type": "string"}}}, changes),
+                    "branch: a file summary and the full diff (optionally for one path). "
+                    "With `task_id`, show exactly what that card's work merged instead.",
+                    {**empty, "properties": {"path": {"type": "string"},
+                                             "task_id": {"type": "string"}}}, changes),
             McpTool("history", "Recent commits on your branch.",
                     {**empty, "properties": {"limit": {"type": "integer"}}}, history),
         ]
@@ -623,7 +689,10 @@ def _result_line(role: str, result: BaseModel) -> str:
     if isinstance(result, ReviewResult):
         return f"{role}: review {result.verdict} ({len(result.issues)} issue(s))"
     if isinstance(result, AgentResult):
-        return f"{role}: {result.status} — {result.summary[:120]}"
+        card = f" {result.task_id}" if result.task_id else ""
+        return f"{role}:{card} {result.status} — {result.summary[:120]}"
+    if isinstance(result, PlanResult):
+        return f"{role}: planned {len(result.tasks)} card(s)"
     return f"{role}: result submitted"
 
 

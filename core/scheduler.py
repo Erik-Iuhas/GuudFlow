@@ -91,6 +91,10 @@ class AgentSpec:
     # Review edge (plan §4.5): how many times this role may send work back to
     # its authors via `Scheduler.request_rework` before escalation.
     max_review_rounds: int = 2
+    # Task board (plan §4.6): when set, the role is only spawned while this
+    # returns True ("there is a card for you now"). Keeps the decision of WHEN
+    # to spawn here, while the board decides WHAT the role works on.
+    has_work: Callable[[], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -334,6 +338,10 @@ class Scheduler:
         """The role `role` is currently blocked on, if any."""
         return self._blocked_on.get(role)
 
+    def is_running(self, role: str) -> bool:
+        """True while a spawn of `role` is in flight."""
+        return role in self._tasks
+
     def park(self, role: str) -> None:
         """Nothing is ready for `role` right now; don't respawn it until `wake_parked()`."""
         self._parked.add(role)
@@ -551,6 +559,8 @@ class Scheduler:
             if state in self._WAITING_STATES:
                 continue
             if not all(self._effective_complete(dep) for dep in spec.depends_on):
+                continue
+            if spec.has_work is not None and not spec.has_work():
                 continue
             if self._spawn_count[role] >= self.max_iterations:
                 continue

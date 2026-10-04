@@ -377,6 +377,8 @@ def serialise_task(task) -> dict[str, Any]:
         "visual_refs": list(task.visual_refs),
         "column": task.column,
         "review_round": task.review_round,
+        "priority": task.priority,
+        "column_since": task.column_since,
         "thread": [dict(e) for e in task.thread],
     }
 

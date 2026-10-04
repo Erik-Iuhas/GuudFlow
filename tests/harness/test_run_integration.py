@@ -121,15 +121,15 @@ async def test_protected_path_edit_fails_the_turn(tmp_path: Path, fake_llm: Fake
 
 
 async def test_notes_reach_the_next_role(tmp_path: Path, fake_llm: FakeLLM) -> None:
-    fake_llm.route("Your turn: planner",
+    fake_llm.route("Your turn: architect",
                    ToolCall("guudflow_post_note", {"to_role": "builder",
                                                    "text": "Use snake_case names please."}),
                    ToolCall("guudflow_submit_result",
                             {"status": "done", "summary": "Planned the module layout for builder.",
                              "notes_for": {"builder": "Keep it under 50 lines."}}))
     fake_llm.route("Your turn: builder", _done("Implemented the module as planned."))
-    runner = _runner(tmp_path, [AgentConfig(role="planner"),
-                                AgentConfig(role="builder", depends_on=["planner"])], fake_llm)
+    runner = _runner(tmp_path, [AgentConfig(role="architect"),
+                                AgentConfig(role="builder", depends_on=["architect"])], fake_llm)
     result = await runner.run()
     assert result.status is SchedulerStatus.COMPLETE
     builder_brief = next(str(r["messages"]) for r in fake_llm.requests

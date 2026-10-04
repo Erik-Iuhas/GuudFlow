@@ -278,6 +278,8 @@ class Task:
     # by scheduler events; independent of `status` (legacy lifecycle).
     column: str = "todo"
     review_round: int = 0
+    priority: int = 0  # higher runs first; humans change it from the board (S34)
+    column_since: float = 0.0  # unix time the card entered `column` (card aging, §11.2)
     # ThreadEntry.to_dict() payloads (core.harness.tasks.ThreadEntry).
     thread: list[dict[str, Any]] = field(default_factory=list)
 

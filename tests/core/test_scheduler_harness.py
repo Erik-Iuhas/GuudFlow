@@ -241,3 +241,49 @@ async def test_transition_rules_can_be_disabled() -> None:
 
     s = Scheduler([AgentSpec("a", a)], ws, transition_rules=False)
     assert (await s.run()).status is SchedulerStatus.COMPLETE and ran == ["a"]
+
+
+async def test_has_work_gates_spawns_and_counts_no_idle_spawns() -> None:
+    """Task board (§4.6): a role is spawned only while it has a card; idle wake-ups
+    cost no spawns; completion stays with whoever settles the board."""
+    ws = _ws()
+    cards = {"author": ["T1", "T2"], "reviewer": []}
+    log: list[str] = []
+    holder: dict[str, Scheduler] = {}
+
+    def settle() -> None:
+        for role in ("author", "reviewer"):
+            if not cards[role] and not (role == "reviewer" and cards["author"]) \
+                    and role not in ws.completed_agents:
+                _complete(ws, role)
+
+    async def author(w: Workspace) -> None:
+        card = cards["author"].pop(0)
+        log.append(f"author:{card}")
+        cards["reviewer"].append(card)
+        settle()
+
+    async def reviewer(w: Workspace) -> None:
+        card = cards["reviewer"].pop(0)
+        log.append(f"reviewer:{card}")
+        settle()
+
+    s = Scheduler([AgentSpec("author", author, has_work=lambda: bool(cards["author"])),
+                   AgentSpec("reviewer", reviewer, has_work=lambda: bool(cards["reviewer"]))],
+                  ws, transition_rules=False, max_parallel=1)
+    holder["s"] = s
+    result = await asyncio.wait_for(s.run(), timeout=5)
+    assert result.status is SchedulerStatus.COMPLETE
+    assert sorted(log) == ["author:T1", "author:T2", "reviewer:T1", "reviewer:T2"]
+    assert result.spawn_counts == {"author": 2, "reviewer": 2}
+
+
+async def test_has_work_false_everywhere_is_stuck_not_a_hang() -> None:
+    ws = _ws()
+
+    async def never(w: Workspace) -> None:  # pragma: no cover - never spawned
+        raise AssertionError("must not run")
+
+    s = Scheduler([AgentSpec("a", never, has_work=lambda: False)], ws, transition_rules=False)
+    result = await asyncio.wait_for(s.run(), timeout=5)
+    assert result.status is SchedulerStatus.STUCK and s.is_running("a") is False

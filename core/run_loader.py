@@ -274,6 +274,8 @@ def _deserialise_task(payload: dict[str, Any]) -> Task:
         visual_refs=[str(x) for x in payload.get("visual_refs") or []],
         column=str(payload.get("column") or "todo"),
         review_round=int(payload.get("review_round") or 0),
+        priority=int(payload.get("priority") or 0),
+        column_since=float(payload.get("column_since") or 0.0),
         thread=[dict(e) for e in payload.get("thread") or [] if isinstance(e, dict)],
     )
 
