@@ -19,6 +19,11 @@ if (typeof globalThis.DOMMatrixReadOnly === "undefined") {
   }
   (globalThis as unknown as Record<string, unknown>).DOMMatrixReadOnly = DOMMatrixReadOnlyStub;
 }
+// React Flow measures edge labels with SVG getBBox, which jsdom lacks.
+if (typeof SVGElement !== "undefined" && !("getBBox" in SVGElement.prototype)) {
+  (SVGElement.prototype as unknown as { getBBox: () => DOMRect }).getBBox = () =>
+    ({ x: 0, y: 0, width: 40, height: 14 }) as DOMRect;
+}
 if (typeof window !== "undefined" && !window.matchMedia) {
   window.matchMedia = (query: string): MediaQueryList =>
     ({

@@ -41,7 +41,7 @@ function ApprovalItem({ runId, approval }: { runId: string; approval: ApprovalVi
     decide.mutate(
       { approvalId: approval.id, decision },
       {
-        onSuccess: (res) => setSent(res.decision),
+        onSuccess: (res) => setSent(res?.decision ?? (decision === "grant" ? "granted" : "denied")),
         onError: (e) => setError(errorText(e)),
       },
     );

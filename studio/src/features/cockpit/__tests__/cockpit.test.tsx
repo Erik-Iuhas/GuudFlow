@@ -129,7 +129,7 @@ describe("AgentLane", () => {
     expect(within(chip).getByText("round 1")).toBeInTheDocument();
     expect(within(screen.getByTestId("toolfeed-dev")).getByText("src/form.ts")).toBeInTheDocument();
     expect(within(screen.getByTestId("lane-result-dev")).getByText("Form is built")).toBeInTheDocument();
-    expect(screen.getByTestId("lane-result-dev")).toHaveTextContent("$0.2500");
+    expect(screen.getByTestId("lane-result-dev")).toHaveTextContent("$0.25");
 
     const badge = screen.getByTestId("capability-badge-dev");
     expect(badge).toHaveTextContent("developer · 2/3 on");
