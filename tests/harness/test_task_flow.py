@@ -90,7 +90,9 @@ async def test_cards_drive_the_run_with_a_review_loop(tmp_path: Path, fake_llm: 
     board = runner.workspace.board
     assert result.status is SchedulerStatus.COMPLETE, [
         f"{s.type.value} {s.summary}" for s in board][-15:]
-    assert sorted(result.completed) == ["backend", "frontend", "planner", "reviewer"]
+    assert sorted(result.completed) == ["backend", "frontend", "overseer", "planner", "reviewer"]
+    # A clean run never wakes the overseer (it is event-driven, plan §11.1).
+    assert not any(s.from_agent == "overseer" and s.type is SignalType.STARTED for s in board)
 
     # Cards moved only through the scheduler path, T1 twice through review.
     moves = [(d["task_id"], d["to"]) for s in board if s.type is SignalType.TASK_MOVED

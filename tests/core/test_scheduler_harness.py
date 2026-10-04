@@ -287,3 +287,36 @@ async def test_has_work_false_everywhere_is_stuck_not_a_hang() -> None:
     s = Scheduler([AgentSpec("a", never, has_work=lambda: False)], ws, transition_rules=False)
     result = await asyncio.wait_for(s.run(), timeout=5)
     assert result.status is SchedulerStatus.STUCK and s.is_running("a") is False
+
+
+async def test_watchdog_can_rearm_a_role_before_stuck() -> None:
+    """Plan §11.2: the stall watchdog runs inside the scheduler loop and may wake the
+    overseer right before the run would end STUCK."""
+    ws = _ws()
+    calls: list[str] = []
+    state = {"stalled": False, "woken": False}
+    holder: dict[str, Scheduler] = {}
+
+    async def worker(w: Workspace) -> None:
+        calls.append("worker")
+        state["stalled"] = True       # leaves the run stuck: worker never completes
+
+    async def overseer(w: Workspace) -> None:
+        calls.append("overseer")
+        state["stalled"] = False
+        _complete(w, "worker")
+        _complete(w, "overseer")
+
+    def watchdog() -> None:
+        if state["stalled"] and not state["woken"]:
+            state["woken"] = True
+            holder["s"].rearm("overseer")
+
+    _complete(ws, "overseer")
+    s = Scheduler([AgentSpec("worker", worker, has_work=lambda: not state["stalled"]),
+                   AgentSpec("overseer", overseer)], ws, transition_rules=False,
+                  watchdog=watchdog, watchdog_interval=0.05)
+    holder["s"] = s
+    result = await asyncio.wait_for(s.run(), timeout=5)
+    assert result.status is SchedulerStatus.COMPLETE
+    assert calls == ["worker", "overseer"]

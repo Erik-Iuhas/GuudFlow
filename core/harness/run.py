@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import shutil
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -47,6 +48,9 @@ from core.harness.result_inbox import ResultInbox
 from core.harness.results import AgentResult, ReviewResult
 from core.harness.server import OpencodeServer
 from core.harness.task_flow import TaskFlow, TurnPlan
+from core.harness.detectors import DetectorConfig, RunView
+from core.harness.overseer import OverseerCaps, OverseerResult
+from core.harness.overseer_flow import OverseerFlow
 from core.harness.tasks import PlanResult
 from core.harness.tool_context import RunToolContext
 from core.llm.registry import ModelRegistry
@@ -100,6 +104,12 @@ class HarnessSettings:
     # Task board (plan §4.6): "auto" drives the run by cards when the team has a
     # planner; "off" keeps plain role mode.
     task_board: Literal["auto", "off"] = "auto"
+    # The overseer (plan §11): "auto" adds one to task-board runs that have none;
+    # "on" always; "off" never (escalations then just sit on the board).
+    overseer: Literal["auto", "on", "off"] = "auto"
+    detectors: DetectorConfig = field(default_factory=DetectorConfig)
+    overseer_caps: OverseerCaps = field(default_factory=OverseerCaps)
+    watchdog_interval: float = 30.0
 
 
 @dataclass
@@ -135,6 +145,9 @@ class OpencodeRun:
             str(k): [str(p) for p in v] for k, v in allow.items() if isinstance(v, list)})
         self.results: dict[str, BaseModel] = {}
         self.flow: TaskFlow | None = None
+        self.overseer: OverseerFlow | None = None
+        self.agents: list["AgentConfig"] = list(runner.project.agents)
+        self._started = 0.0
         self._delivered_notes: set[str] = set()
         self._roles: dict[str, _Role] = {}
         self._http: RunningHttpServer | None = None
@@ -158,31 +171,91 @@ class OpencodeRun:
     async def run(self) -> SchedulerResult:
         """Run every role through the scheduler and tear everything down after."""
         self.mode = await self._resolve_mode()
-        for cfg in self.runner.project.agents:
+        self._started = time.time()
+        for cfg in self.agents:
             self._roles[cfg.role] = self._prepare_role(cfg)
         if self.settings.task_board == "auto":
             self.flow = TaskFlow.build(
-                self.runner.project.agents, {n: r.role_type for n, r in self._roles.items()},
+                self.agents, {n: r.role_type for n, r in self._roles.items()},
                 self.workspace, self._scheduler,
                 post=lambda kind, role, summary, detail: self._post(kind, role, summary, detail),
                 escalate=lambda role, summary, detail: self._escalate(role, summary, detail))
+        self._setup_overseer()
         flow = self.flow
         try:
             await self._start_services()
             specs = [AgentSpec(role=cfg.role, runner=self._runner_for(cfg),
-                               depends_on=flow.depends_on(cfg) if flow else list(cfg.depends_on),
+                               depends_on=(flow.depends_on(cfg) if flow else list(cfg.depends_on))
+                               if not self._is_overseer(cfg.role) else [],
                                max_review_rounds=cfg.max_review_rounds,
                                has_work=(lambda r=cfg.role: flow.has_work(r))
                                if flow and cfg.role in flow.card_roles else None)
-                     for cfg in self.runner.project.agents]
+                     for cfg in self.agents]
+            if self.overseer is not None:
+                # Event-driven: complete until a stall re-arms it (plan §11.1).
+                self._mark_complete(self.overseer.overseer_role)
             scheduler = Scheduler(specs, self.workspace, scope="pipeline",
                                   max_iterations=self.settings.max_spawns_per_role,
                                   transition_rules=False,
-                                  max_parallel=self.settings.max_parallel)
+                                  max_parallel=self.settings.max_parallel,
+                                  watchdog=self._watchdog if self.overseer else None,
+                                  watchdog_interval=self.settings.watchdog_interval)
             self.runner._scheduler = scheduler  # noqa: SLF001 — lets force_stop() reach it
             return await scheduler.run()
         finally:
             await self.shutdown()
+
+    def _setup_overseer(self) -> None:
+        """Add the overseer role when the settings call for one (plan §11.1)."""
+        mode = self.settings.overseer
+        if mode == "off" or (mode == "auto" and self.flow is None):
+            return
+        name = next((n for n, r in self._roles.items() if r.role_type == "overseer"), None)
+        if name is None:
+            from core.runner import AgentConfig
+            name = "overseer" if "overseer" not in self._roles else "run_overseer"
+            cfg = AgentConfig(role=name, role_type="overseer", model_tier="heavy",
+                              description=("Watch the whole run. When woken with a situation "
+                                           "report, decide the smallest intervention that gets "
+                                           "the work moving again. You change no files."))
+            self.agents.append(cfg)
+            self._roles[name] = self._prepare_role(cfg)
+        self.overseer = OverseerFlow(
+            workspace=self.workspace, overseer_role=name,
+            roles={n: r.role_type for n, r in self._roles.items()},
+            board=self.flow.board if self.flow else None, scheduler=self._scheduler,
+            post=lambda kind, role, summary, detail: self._post(kind, role, summary, detail),
+            clones=self.clones, main_dir=self.runner.git.working_dir,
+            caps=self.settings.overseer_caps, detector_cfg=self.settings.detectors)
+
+    def _is_overseer(self, role: str) -> bool:
+        return self.overseer is not None and role == self.overseer.overseer_role
+
+    def _run_view(self) -> RunView:
+        scheduler = self._scheduler()
+        budget = self.runner.project.approval_gates.get("token_budget_usd")
+        return RunView(
+            signals=self.workspace.board,
+            cards=self.flow.board.cards() if self.flow else [],
+            role_states={r: (s.value if isinstance(s, AgentState) else str(s))
+                         for r, s in self.workspace.agent_states.items()
+                         if not self._is_overseer(r)},
+            running=[r for r in self._roles if scheduler.is_running(r)],
+            spent_usd=self.gateway.spend(self.run_id) if self.gateway else 0.0,
+            budget_usd=float(budget) if isinstance(budget, (int, float)) else None,
+            started_at=self._started)
+
+    def _watchdog(self) -> None:
+        """Scheduler hook: run the stall detectors; wake the overseer when needed."""
+        assert self.overseer is not None
+        name = self.overseer.overseer_role
+        if self.overseer.check(self._run_view()) and name in self.workspace.completed_agents:
+            self._scheduler().rearm(name)
+
+    def _mark_complete(self, name: str) -> None:
+        if name not in self.workspace.completed_agents:
+            self.workspace.completed_agents.append(name)
+        self.workspace.agent_states[name] = AgentState.COMPLETE
 
     async def shutdown(self) -> None:
         """Stop every opencode server/sandbox, the MCP server and gateway; revoke tokens."""
@@ -385,7 +458,12 @@ class OpencodeRun:
         if not self.clones.sync_from_main(role_name):
             self._post(SignalType.FAILED, role_name, "could not merge main into the branch")
             raise TurnFailed(f"{role_name}: merge conflict syncing with main")
-        plan = self.flow.begin_turn(role_name) if self.flow is not None else None
+        if self._is_overseer(role_name):
+            assert self.overseer is not None
+            plan: TurnPlan | None = self.overseer.begin_turn(
+                self._run_view(), {r: _result_line(r, res) for r, res in self.results.items()})
+        else:
+            plan = self.flow.begin_turn(role_name) if self.flow is not None else None
         if plan is not None and plan.skip:
             assert self.flow is not None
             self.flow.end_turn(role_name)
@@ -429,6 +507,17 @@ class OpencodeRun:
                       plan: TurnPlan | None = None) -> None:
         name = role.cfg.role
         card_id = plan.card_id if plan is not None else None
+        if self._is_overseer(name):
+            assert self.overseer is not None
+            if isinstance(result, OverseerResult):
+                self.overseer.apply(result)
+            else:
+                _, err = self.inbox.status(self.run_id, name)
+                self.overseer.failed(err or "; ".join(stats.errors) or "no result was submitted")
+            self._mark_complete(name)
+            if self.flow is not None:
+                self.flow.settle(current=name)
+            return
         if result is None:
             _, err = self.inbox.status(self.run_id, name)
             reason = err or "; ".join(stats.errors) or "no result was submitted"
@@ -528,7 +617,7 @@ class OpencodeRun:
         return False
 
     def _escalate(self, role: str, summary: str, detail: str | None = None) -> None:
-        """Escalation path (the overseer replaces this in P4, plan §11)."""
+        """Escalate: the overseer's `escalation` detector picks this up (plan §11.2)."""
         self._post(SignalType.ESCALATION, role, summary, detail)
 
     # ── briefs, notes, signals ─────────────────────────────────────────────
@@ -558,7 +647,9 @@ class OpencodeRun:
             research_notes=(research.read_text(encoding="utf-8", errors="replace")
                             if role.role_type != "researcher" and research.is_file() else None),
             task=plan.task_text if plan is not None else None,
-            extra_sections=plan.extra_sections if plan is not None else (),
+            extra_sections=(plan.extra_sections if plan is not None else ())
+            + (self.overseer.brief_addenda(cfg.role) if self.overseer is not None
+               and not self._is_overseer(cfg.role) else ()),
         ))
 
     def _take_notes(self, role: str) -> tuple[tuple[str, str], ...]:

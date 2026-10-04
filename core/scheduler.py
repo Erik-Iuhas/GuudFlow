@@ -145,6 +145,8 @@ class Scheduler:
         *,
         transition_rules: bool = True,
         max_parallel: int | None = None,
+        watchdog: Callable[[], None] | None = None,
+        watchdog_interval: float = 30.0,
     ):
         if len({a.role for a in agents}) != len(agents):
             raise ValueError("duplicate agent roles in scheduler scope")
@@ -176,6 +178,11 @@ class Scheduler:
 
         # opencode harness primitives (plan §4.4–§4.6)
         self.max_parallel = max_parallel
+        # Stall watchdog (plan §11.2): called every loop pass and at least every
+        # `watchdog_interval` seconds while work is in flight. It may re-arm
+        # roles (the overseer); it must not block.
+        self.watchdog = watchdog
+        self.watchdog_interval = watchdog_interval
         self._review_rounds: dict[tuple[str, str], int] = defaultdict(int)
         self._blocked_on: dict[str, str] = {}      # role → role it waits on
         self._parked: set[str] = set()
@@ -398,6 +405,11 @@ class Scheduler:
                 #     WAITING_FOR_SKIP_CONFIRM interrupts past their deadline_ts.
                 self._reap_expired_interrupts()
 
+                # 0c. Stall watchdog (opencode harness): may re-arm the overseer,
+                #     including right before the run would otherwise be STUCK.
+                if self.watchdog is not None:
+                    self.watchdog()
+
                 # 1. Try to spawn anything ready. The `pending_human` flag is
                 #    the global block for new spawns; per-agent WAITING_FOR_PEER
                 #    and WAITING_FOR_SKIP_CONFIRM are filtered inside _ready_to_spawn.
@@ -438,11 +450,15 @@ class Scheduler:
         whichever comes first. Caller re-enters the loop body to act.
         """
         next_deadline = self._next_interrupt_deadline()
-        if next_deadline is None:
+        if next_deadline is None and self.watchdog is None:
             await self._wake.wait()
             self._wake.clear()
             return
-        timeout = max(0.0, next_deadline - time.monotonic())
+        # With a watchdog, wake at least every interval so it (and the wall-clock
+        # deadline check) keep running while the run waits for a human.
+        timeout = min(max(0.0, next_deadline - time.monotonic())
+                      if next_deadline is not None else float("inf"),
+                      self.watchdog_interval if self.watchdog is not None else float("inf"))
         try:
             await asyncio.wait_for(self._wake.wait(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -685,8 +701,9 @@ class Scheduler:
         """Block until any in-flight task finishes OR `notify()` fires."""
         wake_task = asyncio.create_task(self._wake.wait(), name="scheduler:wake")
         waiters: list[asyncio.Task] = [wake_task, *self._tasks.values()]
+        timeout = self.watchdog_interval if self.watchdog is not None else None
         try:
-            await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED, timeout=timeout)
         finally:
             self._wake.clear()
             if not wake_task.done():
