@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { ArtifactsPage } from "./features/artifacts/ArtifactsPage";
 import { GlobalErrorHandler, ToastProvider } from "./components/Toaster";
 import { OneShotLauncher } from "./features/oneshot/OneShotLauncher";
+import { BoardPage } from "./features/board";
 import { Dashboard } from "./views/Dashboard";
 import { Projects } from "./views/Projects";
 import { Propose } from "./views/Propose";
@@ -79,6 +81,8 @@ function AppShell({
           <Route path="/propose" element={<Propose />} />
           <Route path="/oneshot" element={<OneShotLauncher />} />
           <Route path="/runs/:runId" element={<Run />} />
+          <Route path="/runs/:runId/board" element={<BoardPage />} />
+          <Route path="/runs/:id/artifacts" element={<ArtifactsPage />} />
           <Route path="/roster" element={<Roster />} />
           <Route path="/roster/:id" element={<Roster />} />
           <Route path="/training" element={<Training />} />
