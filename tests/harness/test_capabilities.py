@@ -157,3 +157,19 @@ def test_digest_changes_with_capabilities() -> None:
 def test_unknown_role_type_rejected() -> None:
     with pytest.raises(CapabilityError):
         compile_capabilities(Capabilities(), "wizard")
+
+
+@pytest.mark.parametrize("role,reviewer,declared,expected", [
+    ("code_reviewer", False, "", "reviewer"),
+    ("anything", True, "", "reviewer"),
+    ("backend_dev", False, "", "builder"),
+    ("frontend_dev", False, "", "frontend_builder"),
+    ("test_writer", False, "", "tester"),
+    ("researcher", False, "", "researcher"),
+    ("planner", False, "", "planner"),
+    ("x", False, "tester", "tester"),
+    ("x", False, "wizard", "builder"),
+])
+def test_infer_role_type(role: str, reviewer: bool, declared: str, expected: str) -> None:
+    from core.harness.capabilities import infer_role_type
+    assert infer_role_type(role, is_reviewer=reviewer, declared=declared) == expected

@@ -139,6 +139,24 @@ EDIT_SCOPES: dict[str, tuple[str, ...]] = {
 READS_TESTS = frozenset({"reviewer"})
 
 
+_ROLE_HINTS: tuple[tuple[str, str], ...] = (
+    ("review", "reviewer"), ("research", "researcher"), ("overseer", "overseer"),
+    ("tech_lead", "overseer"), ("it_agent", "it_agent"), ("plan", "planner"),
+    ("architect", "architect"), ("test", "tester"), ("qa", "tester"),
+    ("front", "frontend_builder"), ("ui", "frontend_builder"),
+)
+
+
+def infer_role_type(role: str, *, is_reviewer: bool = False, declared: str = "") -> str:
+    """Role type from an explicit declaration, the reviewer flag, or the role name."""
+    if declared in ROLE_TYPES:
+        return declared
+    if is_reviewer:
+        return "reviewer"
+    name = role.lower()
+    return next((rt for hint, rt in _ROLE_HINTS if hint in name), "builder")
+
+
 def defaults_for(role_type: str) -> Capabilities:
     """Default capabilities for a role type (unknown types get builder defaults)."""
     return ROLE_DEFAULTS.get(role_type, ROLE_DEFAULTS["builder"])

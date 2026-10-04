@@ -87,6 +87,10 @@ class ModelRegistry:
     def list_models(self) -> list[ModelInfo]:
         return list(self._models.values())
 
+    def provider(self, name: str) -> ProviderInfo | None:
+        """Provider config by name (data/models.json `providers`)."""
+        return self._providers.get(name)
+
     def get(self, model_id: str) -> ModelInfo | None:
         return self._models.get(model_id)
 

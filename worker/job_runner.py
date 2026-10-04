@@ -109,6 +109,8 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             # had `manages` populated.
             manages=list(a.get("manages") or []),
             escalates_to=list(a.get("escalates_to") or []),
+            role_type=str(a.get("role_type") or ""),
+            capabilities={str(k): str(v) for k, v in (a.get("capabilities") or {}).items()},
         ))
 
     rbac: dict[str, RoleRBAC] = {}
@@ -201,6 +203,7 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         stories=stories,
         pr_mode=pr_mode,  # type: ignore[arg-type]
         sub_llm_models=sub_llm_models,
+        harness="opencode" if data.get("harness") == "opencode" else "legacy",
     )
 
 

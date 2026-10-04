@@ -125,6 +125,13 @@ class SignalType(str, Enum):
     # heavy retry was skipped. Detail names the recovered block kind.
     PROTOCOL_CLEANUP_AUTO = "PROTOCOL_CLEANUP_AUTO"
 
+    # opencode harness (docs/OPENCODE_HARNESS_PLAN.md).
+    # What an agent was allowed to do for this spawn: the effective capability
+    # block plus a digest of the compiled permission rules (plan §5.7).
+    CAPABILITIES = "CAPABILITIES"
+    # The validated structured result an agent submitted for a turn (plan §4.2).
+    AGENT_RESULT = "AGENT_RESULT"
+
 
 Priority = Literal["normal", "high"]
 

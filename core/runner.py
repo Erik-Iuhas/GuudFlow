@@ -31,7 +31,7 @@ import uuid as _uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Literal
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal
 
 from agents.base import BaseAgent, ToolNotAvailable
 from agents.tools.base import BaseTool
@@ -107,6 +107,9 @@ from core.workspace import (
 )
 
 
+if TYPE_CHECKING:
+    from core.harness.run import HarnessSettings
+
 ScreenshotCallback = Callable[[Path, str], Awaitable[Path]]
 """(working_file_path, viewport) → screenshot output path. Stage 6 wires Playwright."""
 
@@ -168,6 +171,11 @@ class AgentConfig:
     # manages → RBAC-derived can_assign_to; escalates_to → tech_lead if present.
     manages: list[str] = field(default_factory=list)
     escalates_to: list[str] = field(default_factory=list)
+    # opencode harness (docs/OPENCODE_HARNESS_PLAN.md §5.7). `role_type` picks the
+    # capability defaults and edit scope; empty means inferred from role/is_reviewer.
+    # `capabilities` holds per-role overrides of the seven toggles.
+    role_type: str = ""
+    capabilities: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -234,6 +242,9 @@ class ProjectConfig:
     # every use_case falls back to ModelRegistry.cheapest_tool_capable() at
     # dispatch time. Validated at project-load — unknown ids fail loudly.
     sub_llm_models: dict[str, str] = field(default_factory=dict)
+    # Which agent harness runs this project: the original in-process loop
+    # ("legacy") or opencode sessions managed by core/harness ("opencode").
+    harness: Literal["legacy", "opencode"] = "legacy"
 
 
 # Default model id per tier. The runner may override via project config.
@@ -430,6 +441,8 @@ class AgentRunner:
         self.project = project
         self.run_id = run_id
         self.run_root = Path(run_root)
+        # opencode harness knobs (core.harness.run.HarnessSettings); None = defaults.
+        self.harness_settings: "HarnessSettings | None" = None
         self.llm = llm
         self._model_registry = model_registry
         self.broker = broker or CredentialsBroker(rbac=project.rbac,
@@ -1584,6 +1597,8 @@ class AgentRunner:
     # ── Main run loop ───────────────────────────────────────────────────────
 
     async def run(self) -> SchedulerResult:
+        if self.project.harness == "opencode":
+            return await self._run_opencode()
         # M2: materialize meta-agent desk_seeds into project overlay BEFORE
         # _build_agents() so DeskIndex sees them on first iteration.
         self._materialize_desk_seeds()
@@ -1726,6 +1741,32 @@ class AgentRunner:
             except Exception:
                 pass
 
+        return result
+
+    async def _run_opencode(self) -> SchedulerResult:
+        """Run on the opencode harness (docs/OPENCODE_HARNESS_PLAN.md).
+
+        Reuses this runner's workspace, persisters, git repo and post-run hooks;
+        core.harness.run.OpencodeRun replaces the agent loop.
+        """
+        from core.harness.run import OpencodeRun
+
+        result = await OpencodeRun(self, self.harness_settings).run()
+        if result.status is SchedulerStatus.STOPPED:
+            return result
+        if self.memory_writer is not None:
+            try:
+                await self._run_memory_writer(result)
+            except Exception as e:
+                self.workspace.post_signal(Signal(
+                    type=SignalType.FAILED, summary=f"memory_writer failed: {e}",
+                    from_agent="runner",
+                ))
+        if self.quip_engine is not None:
+            try:
+                await self.quip_engine.on_run_complete(self.workspace, result)
+            except Exception:
+                logging.getLogger(__name__).exception("quip engine failed at run end")
         return result
 
     def _ensure_synthetic_task(self, role: str, cfg: "AgentConfig") -> None:
