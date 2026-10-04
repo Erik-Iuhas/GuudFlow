@@ -489,6 +489,9 @@ against the notes.
 | `api/mcp_browser.py` | Host-side Playwright `screenshot` tool (§5.9) |
 | `api/routes/oneshot.py` + `cli/oneshot.py` | One-shot entry point (§10) |
 | `data/teams/default_oneshot.json` | Default one-shot team (§10) |
+| `core/harness/detectors.py` | Stuck detectors + situation report, called from the scheduler (§11.2) |
+| `core/harness/overseer.py` | `OverseerResult`/`Intervention` schemas, validation, and how the scheduler applies each intervention (§11.3) |
+| `core/playbook.py` | Project playbook storage, confidence and lifecycle; carry-forward brief (§11.4) |
 | `core/harness/results.py` | `AgentResult` / `ReviewResult` + validation + retry prompt |
 | `core/harness/config_gen.py` | Generates `OPENCODE_CONFIG_CONTENT` (provider → gateway, agent defs from personas) |
 | `worker/sandbox_manager.py` | Start/stop hardened opencode containers, networks, clones (generalises `docker_manager.py`) |
@@ -508,7 +511,7 @@ against the notes.
 
 `_generic_tool_use_loop` and the peer/skip/escalation side tasks in `core/runner.py`;
 most of `core/protocol.py` (ASK/ANSWER/SKIP parsing); `core/loop_guard.py`;
-`core/edit_blocks.py`; `core/context_manager.py` + `core/repo_map.py` (opencode has its
+`agents/builtin/tech_lead.py` (folded into the overseer, §11); `core/edit_blocks.py`; `core/context_manager.py` + `core/repo_map.py` (opencode has its
 own context handling and LSP); most of `agents/tools/` (fs, code, git, board are replaced
 by opencode built-ins + MCP); `core/llm/` (replaced by the gateway). Expect `core/runner.py`
 to drop from ~5.5k lines to roughly 1k.
@@ -595,8 +598,12 @@ The additions from §5.7–§5.9 and §10 slot in as follows (task-level detail 
   cases for web and capability bypass.
 - **P5:** the one-shot entry point, the default team, and the `api-client-library` demo.
 
-Rough total: 3–4 weeks of focused work (up from 2.5–3.5 with the additions); P0–P2 alone
-already gives a watchable demo.
+- **P4:** stuck detectors and the overseer's in-run interventions (§11.1–§11.3).
+- **P5:** retrospectives, the project playbook, and carry-forward briefs for re-runs (§11.4).
+- **Parallel UI track U0–U4** (§12.4).
+
+Rough total: 4–5 weeks of focused work with the overseer and the UI track included;
+P0–P2 alone already gives a watchable demo.
 
 ---
 
@@ -628,6 +635,9 @@ already gives a watchable demo.
 | Host Playwright needs to reach a network-closed sandbox | Host → sandbox only, on the run's internal network; P3 escape suite confirms the sandbox still can't reach out |
 | opencode's own web search flags untested | Not relied on; host-side MCP search is the default |
 | `host_dev` has no isolation | Refused in production; warning on every spawn and in Studio; demo mode only |
+| The overseer becomes a new source of churn | Fixed intervention menu, caps per wake and per run, deterministic detectors, structural changes need a human (§11) |
+| Playbook learns the wrong lesson | Evidence runs required, recency-weighted confidence with decay, never auto-applied outside demo mode (§11.4) |
+| UI rewrite stalls feature work | Parallel track, view by view, behind existing routes (§12.4) |
 
 **Open questions for you:**
 1. Is one container per agent acceptable for the demo (memory), or should P1–P2 start in
@@ -687,6 +697,174 @@ narrates it live.
 **Exit criteria:** `guudflow oneshot … --demo` on `api-client-library` completes under
 the budget; the merged client's tests pass offline; the board shows `CAPABILITIES`,
 `WEB_REQUEST`, review-loop and cost signals; the Studio Run view plays it live.
+
+---
+
+## 11. The overseer: keeping runs on track, within and across runs
+
+The old system had escalation (`agents/builtin/tech_lead.py`) but nothing that looked at
+the *whole* run, noticed it was stuck, and changed course. Nothing carried coordination
+lessons into the next run either: persona memory records per-agent lessons, not "this
+team shape stalls on this project". The overseer fills both gaps. It **replaces the tech
+lead** as the single escalation handler.
+
+The design rule is the same as everywhere else in this plan: the overseer **decides**,
+the **scheduler acts**. The overseer has no side channels, edits no code, and cannot
+widen anyone's capabilities, its own included.
+
+### 11.1 The overseer role
+
+- HEAVY tier (one strong model), event-driven like the tech lead today: no `depends_on`;
+  it is woken by the scheduler.
+- Capabilities: `sandbox: strict`, `web: off`, `shell: readonly`,
+  `subagents: explore_only`. It can read every branch's results and the board, and
+  write nothing but its structured output.
+- Result schema: `OverseerResult {assessment, interventions: list[Intervention]}`,
+  validated like every other result (§4.3).
+
+### 11.2 When it wakes (cheap, deterministic stuck detectors)
+
+The detectors run in the scheduler and cost no LLM calls. Each one builds a
+**situation report**: the graph with role states, the last result from each role, open
+review issues, blocked chains, time and cost burn, and recent `WEB_REQUEST` and
+permission activity. The overseer is woken with that report.
+
+| Detector | Fires when |
+|---|---|
+| No progress | No role completed and no commit landed for N minutes (default 10) while roles are running |
+| Same review issue | The reviewer fails the same file/issue in two consecutive rounds |
+| Blocked chain | A `blocked_on` chain is longer than 2, or a cycle is found (§4.4) |
+| Burn without output | Spend crosses 50% of budget with fewer than half the roles complete |
+| Permission thrash | The same `ask` pattern is rejected 3+ times for one role |
+| Repeated validation failure | A role fails structured-output validation on 2 consecutive spawns |
+| Escalation | Review rounds exhausted (§4.5), or what used to go to the tech lead |
+
+Wakes are deduplicated per detector and role, with a cooldown, and capped per run
+(default 5). If the overseer itself fails or the cap is hit → `HUMAN_NEEDED`.
+
+### 11.3 What it can do (a fixed menu of interventions)
+
+| Intervention | Effect (applied by the scheduler) | Needs a human? |
+|---|---|---|
+| `rebrief(role, addendum)` | Next spawn of `role` gets the addendum prepended | No |
+| `decide(question, decision, rationale)` | Writes a decision note to the board and `docs/decisions.md`; unblocks roles waiting on it | No |
+| `reassign(work, from_role, to_role)` | Moves a slice of work between existing roles of the same type | No |
+| `split(role, parts)` | Splits a role's brief into sequential parts within the same role | No |
+| `extend_review(edge, +1)` | One extra review round, never beyond a hard cap | No |
+| `restart_role(role, from_ref)` | Resets the role's clone to a known-good ref, then re-arms it | No |
+| `pause(question)` | `HUMAN_NEEDED` with a plain-language question | — (is the human) |
+| `propose_team_change(diff)` | Add or remove a role, change an edge, change capabilities, raise budget | **Yes**, via the approval gate |
+
+Every intervention is posted as an `OVERSEER_INTERVENTION` board signal with its
+rationale, and shows in Studio's overseer panel (§12) and the quip feed. Interventions
+are bounded too: at most 3 per wake, at most one `restart_role` per role per run.
+
+### 11.4 Across runs and re-runs: the project playbook
+
+At the end of every run (after `memory_writer`), the overseer writes a **retrospective**:
+where time and money went, what stalled and why, which interventions worked (did the
+role complete after the intervention?), and which review issues recurred.
+
+The retrospective updates a per-project **playbook**
+(`data/projects/{id}/playbook.json`), separate from persona memory:
+
+```jsonc
+{
+  "team_adjustments": [    // e.g. "split backend into api + persistence"
+    {"change": {...}, "evidence_runs": ["run_…"], "confidence": 0.7, "state": "active"}
+  ],
+  "brief_addenda":   {"builder": ["Read research/notes.md before designing the client"]},
+  "known_pitfalls":  [{"issue": "Open-Meteo returns hourly arrays, not objects", "evidence_runs": [...]}],
+  "review_rounds":   {"builder->reviewer": 3},
+  "capability_hints":{"tester": {"browser": "screenshot"}}
+}
+```
+
+It follows the same rules as persona memory (hard constraints #16 and #22): every entry
+needs evidence runs, confidence is recency-weighted and decays when contradicted, and
+entries move through emerging → active → declining → archived.
+
+How the playbook is used:
+- **Next run:** the meta-agent starts its team proposal from the playbook. Playbook-driven
+  changes appear as a highlighted diff on the team approval screen. They never apply
+  silently (as with project rules today, hard constraint #24). In `--demo`, they are
+  auto-approved like the rest of the team and recorded on the board.
+- **Re-runs and continuations:** the overseer writes a **carry-forward brief**: what's
+  done and verified (with commit refs), open issues, files of note, and decisions made.
+  Seeded files are attributed to "previous run, commit X", which fixes the old
+  continuation bug where seeded files with no author made agents distrust them and
+  spiral into questions (`.claude/future_buff/bugs/run_632863526b_circular_ask_cascade.md`).
+- **Measuring it:** every run records stall minutes, interventions and their outcomes,
+  review rounds used, and cost per completed role. Studio's dashboard shows these trending
+  across runs of the same project, so you can see whether the overseer is helping.
+
+---
+
+## 12. Studio UI modernization
+
+### 12.1 Where it is today
+
+React 18 + react-router, Vite, vitest. No component library, data-fetching layer, or
+graph library. Styling is 658 lines of `styles.css` plus about **500 inline `style={{…}}`
+objects**. `Run.tsx` (621 lines), `Projects.tsx` (668) and `Studio.tsx` (608) each hold
+most of their view's logic. It works, but it is hard to extend, and the live run view
+doesn't yet show what the new harness can show.
+
+### 12.2 Target stack
+
+| Concern | Choice | Why |
+|---|---|---|
+| Styling | Tailwind CSS + design tokens as CSS variables (light/dark) | Replaces inline styles; one token source |
+| Components | shadcn/ui (Radix primitives, copied into the repo) | Accessible dialogs, switches, tabs, tooltips; owned code, no runtime dependency lock-in |
+| Server state | TanStack Query | Caching, refetching, loading and error states for REST calls |
+| Live state | One typed run-event store (Zustand) fed by the websocket | Every panel reads the same typed event stream; no per-view socket parsing |
+| Graphs | React Flow (`@xyflow/react`) | Live pipeline graph: role states, review edges with round counters, blocked arrows |
+| Long feeds | TanStack Virtual | Board, quip and tool-call feeds stay smooth over long runs |
+| Diffs | A side-by-side diff viewer (e.g. `react-diff-view`) | Reviewing agent branches in place |
+| Tests | vitest + Testing Library (kept); Playwright for key flows and visual snapshots | |
+
+Pin the major versions at the start of U0 and upgrade deliberately (React 19 and the
+current Vite major are candidates, checked for compatibility first).
+
+### 12.3 Screens
+
+- **Run cockpit** (the centrepiece; replaces `Run.tsx`):
+  - left: live pipeline graph (React Flow);
+  - centre: one lane per agent, streaming tool calls, file edits and its structured
+    result as they happen (from the event bridge, §2.1);
+  - right: tabs for board, quip feed, and overseer panel (interventions with rationale,
+    detector that fired);
+  - bottom bar: pending approvals (permission asks with once/always/reject), budget meter
+    with per-agent cost, and the always-visible comment box.
+- **Team approval:** the proposed team as a graph; per-role capability switches (§5.7)
+  with plain-language tooltips; playbook changes highlighted as a diff (§11.4); a cost
+  estimate that updates as models and capabilities change.
+- **One-shot launcher:** a goal box, web on/off, budget, demo toggle; the example
+  gallery as starting points.
+- **Run report:** summary, cost per agent, diff viewer per branch, screenshot gallery,
+  `WEB_REQUEST` log, capability record, retrospective.
+- **Project page:** run history with the overseer metrics trending (§11.4), the
+  playbook (with its evidence links), persona roster.
+- Global: dark mode, keyboard command palette, responsive layout down to tablet width,
+  accessible focus states, real empty and error states.
+
+### 12.4 How it rolls out
+
+The UI work runs as a parallel track alongside the harness phases. It never blocks the
+harness; each step ships behind the existing routes.
+
+| Step | Scope | Aligns with |
+|---|---|---|
+| U0 | Tokens, Tailwind, shadcn/ui, TanStack Query, typed run-event store; migrate the shared components | Harness P0–P1 |
+| U1 | Run cockpit on the new event store (graph, lanes, approvals bar, virtualized feeds) | Harness P2 |
+| U2 | Team approval with capability switches; one-shot launcher | Harness P3–P5 |
+| U3 | Overseer panel, run report, project page with trends and playbook | Harness P4–P5 + §11 |
+| U4 | Migrate the remaining views (Dashboard, Roster, Training, Tournament, Settings, Inputs); delete `styles.css` and the inline styles; Playwright visual suite | Harness P6 |
+
+**Done when:** no inline style objects remain; every view uses tokens and shared
+components; the Run cockpit holds 60 fps scrolling on a 2,000-event run; Playwright flows
+cover launching a one-shot, approving a team with capability changes, answering a
+permission ask, and reading the run report.
 
 ---
 

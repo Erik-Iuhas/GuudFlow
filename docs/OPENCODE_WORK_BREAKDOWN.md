@@ -78,6 +78,9 @@ S1 and S3 run in parallel while Opus builds O1 and O16; S2 starts as soon as O16
 |---|---|---|---|---|
 | O11 | **Opus** | Scheduler: review edges with `max_rounds` (§4.5), blocked re-arm, A↔B cycle → `HUMAN_NEEDED` (§4.4), `max_parallel_sandboxes`; new tests alongside the existing six; no concurrency outside `core/scheduler.py` | O3 | All scheduler tests green, old and new |
 | S10 | Sonnet | Studio PipelineGraph: draw review edges, round counters and blocked-on arrows | O11 | vitest green |
+| S21 | Sonnet | `core/harness/overseer.py`: `OverseerResult` / `Intervention` schemas and validators for the menu in plan §11.3, `OVERSEER_INTERVENTION` signal + tests | — | One pass and one fail test per intervention type; caps enforced |
+| O18 | **Opus** | Stuck detectors + situation report (§11.2) and scheduler-side application of each intervention (§11.3), with dedupe, cooldown and per-run caps; the overseer replaces the tech lead as escalation handler | O11, S21 | Fake-LLM scenarios for every detector: the stall is detected, the intervention is applied by the scheduler, the run recovers or reaches `HUMAN_NEEDED` |
+| O19 | **Opus** | Overseer prompt and real-model tuning on forced stalls (blocked cycle, repeated review issue, burn without output) | O18 | Overseer picks a sensible intervention in each scripted stall; results noted in the plan |
 | O12 | **Opus** | Real multi-agent demo: planner → (backend ‖ frontend) → reviewer on `fullstack-web-app`, including one forced review loop | O11, P3 | Recorded run that completes; findings fed back into the briefs |
 
 ## Phase 5 — Meta-agent, personas, quality
@@ -89,6 +92,8 @@ S1 and S3 run in parallel while Opus builds O1 and O16; S2 starts as soon as O16
 | S12 | Sonnet | Implement O13 in `config_gen.py` (reusing `effective_system_prompt()`) + tests | O13, S4 | Snapshot tests of the generated agent prompts |
 | S13 | Sonnet | `memory_writer` adapter that reads opencode transcripts (`GET /session/{id}/message`) instead of the old turn logs | O3 | Memory-writer tests green on recorded transcripts |
 | S14 | Sonnet | Quality gate: `tests/quality/`, `scripts/run_quality_gate.sh`, per-project assertions (`.claude/future_buff/functional_verification.md`) | O12 | Runs against a recorded workspace offline |
+| S22 | Sonnet | `core/playbook.py`: playbook storage, evidence runs, recency-weighted confidence, lifecycle states (reuse the persona-memory pattern code) + tests | — | Tests for add, reinforce, contradict/decay, archive |
+| O20 | **Opus** | Retrospective + carry-forward brief (§11.4); the meta-agent starts from the playbook and shows changes as a diff; regression test that replays the `run_632863526b` continuation scenario | O18, S22, S11 | Continuation test no longer spirals; the second run of a project shows playbook changes on the approval screen |
 | S20 | Sonnet | One-shot (§10): `cli/oneshot.py` (`guudflow oneshot GOAL --web --budget --demo`), `POST /api/oneshot` reusing the invoke 202 job path, `data/teams/default_oneshot.json`, demo auto-approve, deliverables incl. per-agent cost from the gateway | O11, S8, S11 | API returns 202; fake-LLM end-to-end test of the default team; CLI prints the summary and cost table |
 | O14 | **Opus** | Run all six example projects for real; triage; tune role profiles and briefs | S11–S14 | All six complete; quality gate passes on two |
 | O17 | **Opus** | The demo: tune the default team and briefs on `api-client-library` with a real model; check the §10 exit criteria; record it | S20, O14 | `guudflow oneshot … --demo` completes under budget, the client's tests pass offline, Studio plays it live |
@@ -101,17 +106,31 @@ S1 and S3 run in parallel while Opus builds O1 and O16; S2 starts as soon as O16
 | S16 | Sonnet | Draft updates to DESIGN.md, CLAUDE.md, ARCHITECTURE.md and the diagrams | O14 | Drafts ready |
 | O15 | **Opus** | Review S15 and S16 (especially the hard-constraint text); flip the `harness` default to `opencode`; final full run | S15, S16, O17 | Default flipped; demo recorded |
 
+## UI track (runs in parallel with the harness phases)
+
+Plan §12. Mostly Sonnet: it's well-specified front-end work once the contracts are set.
+
+| ID | Owner | Task | Depends on | Done when |
+|---|---|---|---|---|
+| O21 | **Opus** | UI spec: design tokens, the typed run-event store contract (generated from the event bridge's signal types), and the Run cockpit layout | O5 | Spec merged; event types shared between backend and Studio |
+| S23 | Sonnet | U0: Tailwind + tokens (light/dark), shadcn/ui, TanStack Query, Zustand run-event store; migrate shared components | O21 | Shared components on tokens; vitest green |
+| S24 | Sonnet | U1: Run cockpit: React Flow pipeline graph, per-agent lanes, approvals bar (once/always/reject), budget meter, virtualized board and quip feeds | S23, S5 | Plays a recorded 2,000-event run smoothly; vitest + Playwright flow |
+| S25 | Sonnet | U2: one-shot launcher; team approval as a graph with the playbook diff (S17's capability switches move onto the new components) | S23, S17, S20 | Playwright: launch a one-shot, approve a team with a capability change |
+| S26 | Sonnet | U3: overseer panel, run report (cost per agent, branch diffs, screenshots, web log, capability record, retrospective), project page with trends and playbook | S24, O18, O20 | Playwright: read a run report; overseer interventions render with rationale |
+| S27 | Sonnet | U4: migrate the remaining views; delete `styles.css` and all inline styles; Playwright visual snapshot suite | S26 | `grep "style={{"` finds nothing; visual suite green |
+| O22 | **Opus** | UX review passes at U1 and U4: information hierarchy, accessibility, empty and error states | S24, S27 | Review notes fixed |
+
 ---
 
 ## Totals
 
 | | Opus | Sonnet |
 |---|---|---|
-| Tasks | 17 | 20 |
-| Share of new code (rough) | ~35% | ~65% |
-| Nature | Foundation, scheduler, security, real-model runs, every review | Modules, adapters, UI, infra from spec, cleanup, docs |
+| Tasks | 22 | 27 |
+| Share of new code (rough) | ~30% | ~70% |
+| Nature | Foundation, scheduler, security, overseer logic, real-model runs, specs, every review | Modules, adapters, schemas, the UI track, infra from spec, cleanup, docs |
 
-Running Sonnet tasks in parallel: phase 0 runs S1 and S3 together (S2 right after O16); phase 2 runs S6 and S17 together; phase 3 runs S7–S9 together, then S18 and S19.
+Running Sonnet tasks in parallel: phase 0 runs S1 and S3 together (S2 right after O16); phase 2 runs S6 and S17 together; phase 3 runs S7–S9 together, then S18 and S19; the UI track (S23–S27) runs alongside the harness phases once O21 lands.
 
 ## How each Sonnet task runs
 
