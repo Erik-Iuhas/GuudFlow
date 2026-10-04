@@ -321,7 +321,7 @@ def test_baseline_scopes_for_sub_llm_tools():
 
 def test_tools_registered_in_local_tool_classes():
     """The runner's LOCAL_TOOL_CLASSES tuple includes all three."""
-    from core.runner import LOCAL_TOOL_CLASSES
+    from agents.tools.catalog import LOCAL_TOOL_CLASSES
     names = {cls.name for cls in LOCAL_TOOL_CLASSES}
     assert "llm-dispatch" in names
     assert "summarise-subtask" in names

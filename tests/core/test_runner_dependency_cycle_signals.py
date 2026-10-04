@@ -24,7 +24,7 @@ def test_cycle_raises_runtime_error(tmp_path: Path):
     ]
     runner = _make_runner(agents, tmp_path)
     with pytest.raises(RuntimeError, match="dependency cycle detected"):
-        runner._build_agents()
+        runner._prepare_team()
 
 
 def test_cycle_emits_failed_signal(tmp_path: Path):
@@ -34,7 +34,7 @@ def test_cycle_emits_failed_signal(tmp_path: Path):
     ]
     runner = _make_runner(agents, tmp_path)
     with pytest.raises(RuntimeError):
-        runner._build_agents()
+        runner._prepare_team()
 
     failed = [s for s in runner.workspace.board if s.type == SignalType.FAILED]
     assert len(failed) == 1
@@ -49,7 +49,7 @@ def test_three_way_cycle_detected(tmp_path: Path):
     ]
     runner = _make_runner(agents, tmp_path)
     with pytest.raises(RuntimeError, match="dependency cycle detected"):
-        runner._build_agents()
+        runner._prepare_team()
 
 
 def test_no_cycle_builds_normally(tmp_path: Path):
@@ -58,5 +58,5 @@ def test_no_cycle_builds_normally(tmp_path: Path):
         AgentConfig(role="b", depends_on=["a"]),
     ]
     runner = _make_runner(agents, tmp_path)
-    runner._build_agents()   # must not raise
+    runner._prepare_team()   # must not raise
     assert True

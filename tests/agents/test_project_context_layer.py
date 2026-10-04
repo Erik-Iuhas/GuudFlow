@@ -109,10 +109,19 @@ def test_runner_empty_when_roadmap_is_whitespace_only(tmp_path: Path):
 # ── agent prompt assembly ──────────────────────────────────────────────────
 
 
+async def _opencode_prompt(runner: AgentRunner) -> str:
+    """The prompt an opencode role starts with, built from the runner's context."""
+    from core.harness.persona_prompt import build_agent_prompt
+
+    layers = await build_agent_prompt(
+        role="developer", description="dev", base_prompt="x", persona=None,
+        project_id=None, persona_id=None, goal="g",
+        project_context=runner._project_context)
+    return layers.render()
+
+
 async def test_agent_prompt_includes_project_context(tmp_path: Path):
-    """When the runner builds agents, each agent's _project_context
-    is set; effective_system_prompt() includes the PROJECT CONTEXT
-    section verbatim."""
+    """The runner's roadmap reaches the opencode agent prompt as the PROJECT CONTEXT layer."""
     project_dir = tmp_path / "projects" / "p_ctx"
     (project_dir / "context").mkdir(parents=True)
     roadmap = "## Where we are\nAuth landed last week. Refresh tokens next.\n"
@@ -125,26 +134,21 @@ async def test_agent_prompt_includes_project_context(tmp_path: Path):
         llm=MockLLMClient([]),
         project_dir=project_dir,
     )
-    runner._build_agents()
-    agent = runner.agents["developer"]
-    prompt = await agent.effective_system_prompt()
+    prompt = await _opencode_prompt(runner)
 
     assert "PROJECT CONTEXT" in prompt
     assert "Auth landed last week" in prompt
 
 
 async def test_agent_prompt_omits_layer_when_no_roadmap(tmp_path: Path):
-    """No roadmap → no PROJECT CONTEXT section in the prompt at all.
-    Same effective prompt as today's runs."""
+    """No roadmap, no PROJECT CONTEXT section in the prompt at all."""
     runner = AgentRunner(
         project=_project(),
         run_id="r",
         run_root=tmp_path / "runs" / "r",
         llm=MockLLMClient([]),
     )
-    runner._build_agents()
-    agent = runner.agents["developer"]
-    prompt = await agent.effective_system_prompt()
+    prompt = await _opencode_prompt(runner)
 
     assert "PROJECT CONTEXT" not in prompt
 

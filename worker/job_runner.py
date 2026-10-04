@@ -34,7 +34,6 @@ from core.llm import AnthropicClient, LLMClient
 from core.llm.registry import ModelRegistry
 from core.quip_engine import QuipEngine
 from core.runner import AgentConfig, AgentRunner, ProjectConfig
-from core.task_summarizer import TaskSummarizer
 from core.tool_manifest import RoleRBAC
 from worker.docker_manager import DockerManager, DockerManagerError
 from worker.queue import (
@@ -436,11 +435,11 @@ def _persist_run(run_root: Path, runner: AgentRunner, run_id: str,
 
 
 RunnerFactory = Callable[..., AgentRunner]
-"""Factory signature: (project, run_id, run_root, llm, *, docker_manager=None,
-data_root=None) -> AgentRunner.
+"""Factory signature: (project, run_id, run_root, llm, *, data_root=None,
+restored_workspace=None) -> AgentRunner.
 
-The trailing keyword args are positional-via-kwarg so existing factories
-that ignore them still work — JobRunner always passes them as keywords."""
+The trailing keyword args are passed as keywords so factories that ignore
+them still work."""
 
 
 def default_runner_factory(
@@ -449,7 +448,6 @@ def default_runner_factory(
     run_root: Path,
     llm: LLMClient,
     *,
-    docker_manager: DockerManager | None = None,
     data_root: Path | None = None,
     restored_workspace=None,
 ) -> AgentRunner:
@@ -473,8 +471,8 @@ def default_runner_factory(
         if data_root is not None else None
     )
     # M3: load ModelRegistry when no explicit LLM is injected (production path).
-    # Tests inject llm=MockLLMClient, which takes priority in _resolve_llm_for_tier;
-    # registry is only loaded for production runs where llm=None.
+    # Tests inject llm=MockLLMClient; the registry is only loaded for production
+    # runs where llm=None.
     model_registry: ModelRegistry | None = None
     if llm is None:
         registry_path = (
@@ -503,27 +501,12 @@ def default_runner_factory(
     else:
         mw_llm = _build_default_llm()
 
-    # TaskSummarizer uses FAST tier. Fall back to the same client as
-    # MemoryWriter if FAST resolution fails (mirrors quip_engine pattern).
-    if llm is not None:
-        ts_llm: LLMClient = llm
-    elif model_registry is not None:
-        try:
-            ts_model = model_registry.resolve("fast")
-            ts_llm = model_registry.get_client(ts_model)
-        except Exception:
-            ts_llm = _build_default_llm()
-    else:
-        ts_llm = _build_default_llm()
-
     return AgentRunner(
         project=project,
         run_id=run_id,
         run_root=run_root,
         llm=llm,
         memory_writer=MemoryWriter(llm=mw_llm),
-        task_summarizer=TaskSummarizer(llm=ts_llm),
-        docker_manager=docker_manager,
         rubric_scorer=RubricScorer(),
         training_scenarios_root=scenarios_root,
         restored_workspace=restored_workspace,
@@ -747,12 +730,9 @@ class JobRunner:
         # loads ModelRegistry and resolves per-agent clients by tier.
         llm = self.llm  # may be None; factory handles it
 
-        # 4. Construct runner. Thread docker_manager through so the
-        # production code:exec routing in core/runner.py can reach it.
-        # On resume, also thread the restored workspace so the runner
-        # uses it instead of constructing a fresh one.
+        # 4. Construct runner. On resume, also thread the restored workspace
+        # so the runner uses it instead of constructing a fresh one.
         factory_kwargs: dict[str, Any] = {
-            "docker_manager": self.docker,
             "data_root": self.data_root,
         }
         if restored_workspace is not None:

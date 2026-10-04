@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.runner import LOCAL_TOOL_CLASSES
+from agents.tools.catalog import LOCAL_TOOL_CLASSES
 from core.tool_manifest import BASELINE_LOCAL_SCOPES
 
 
