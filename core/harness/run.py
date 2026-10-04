@@ -43,6 +43,7 @@ from core.harness.opencode_client import OpencodeClient
 from core.harness import mcp_browser, mcp_tools, mcp_visual, mcp_web
 from core.harness.approvals import PermissionGate
 from core.harness.artifacts import ArtifactRegistry
+from core.harness.persona_prompt import PromptLayers, build_agent_prompt
 from core.harness.opencode_runner import EventHook, PermissionHook, PermissionReply, TurnStats, drive_turn
 from core.harness.result_inbox import ResultInbox
 from core.harness.results import AgentResult, ReviewResult
@@ -125,6 +126,7 @@ class _Role:
     sandbox: "Sandbox | None" = None
     client: OpencodeClient | None = None
     token: str = ""
+    prompt: PromptLayers | None = None  # layers of the prompt this role's server started with
 
 
 class OpencodeRun:
@@ -456,8 +458,9 @@ class OpencodeRun:
         via_gateway = replace(role.binding,
                               base_url=f"{self._gw_http.url}/{role.binding.provider_key}",
                               api_key=virtual_key)
+        role.prompt = await self._system_prompt(role)
         agent = agent_entry(role.compiled, model_ref=via_gateway.model_ref,
-                            prompt=self._system_prompt(role), description=role.cfg.description,
+                            prompt=role.prompt.render(), description=role.cfg.description,
                             steps=self.settings.steps)
         config = build_config(role=name, agent=agent, binding=via_gateway,
                               mcp_url=self._http.url + "/", mcp_token=role.token,
@@ -503,10 +506,31 @@ class OpencodeRun:
             self.mcp.revoke(role.token)
             role.token = ""
 
-    def _system_prompt(self, role: _Role) -> str:
-        base = role.cfg.system_prompt.strip()
-        persona = f"You are the {role.cfg.role} on a small software team."
-        return f"{persona}\n\n{base}".strip()
+    async def _system_prompt(self, role: _Role) -> PromptLayers:
+        """Compile the role's persona and project layers into its agent prompt (plan §5.11)."""
+        cfg = role.cfg
+        runner = self.runner
+        persona = None
+        if cfg.persona_id and runner.personas_root is not None:
+            try:
+                from agents.persona import Persona
+                persona = Persona.load(cfg.persona_id, runner.personas_root)
+            except Exception as exc:  # noqa: BLE001 — a bad persona must not take the run down
+                log.warning("%s: could not load persona %r: %s", cfg.role, cfg.persona_id, exc)
+        brief = ""
+        builder = getattr(runner, "_build_teammate_brief", None)
+        if builder is not None:
+            try:
+                brief = builder(cfg.role)
+            except Exception as exc:  # noqa: BLE001 — the brief is optional context
+                log.warning("%s: teammate brief failed: %s", cfg.role, exc)
+        # QUESTION: should task_hint be the current card's title? Cards change per
+        # turn but the prompt is fixed per server, so it stays empty for now.
+        return await build_agent_prompt(
+            role=cfg.role, description=cfg.description, base_prompt=cfg.system_prompt,
+            persona=persona, project_id=getattr(runner.project, "project_id", None),
+            persona_id=cfg.persona_id, goal=runner.project.goal, task_hint="",
+            teammate_brief=brief, project_context=getattr(runner, "_project_context", ""))
 
     # ── one spawn ──────────────────────────────────────────────────────────
     async def execute_turn(self, role_name: str) -> None:
@@ -803,6 +827,9 @@ class OpencodeRun:
                   "effective": role.compiled.capabilities.to_dict(),
                   "digest": role.compiled.digest(), "mcp_tools": sorted(role.compiled.mcp_tools),
                   "model": role.binding.model_ref, "warnings": list(role.compiled.warnings)}
+        if role.prompt is not None:
+            # Hash and layer names only: memory text never goes on the board.
+            detail["prompt"] = {"digest": role.prompt.digest(), "layers": role.prompt.included()}
         for warning in role.compiled.warnings:
             log.warning("%s: %s", role.cfg.role, warning)
         self._post(SignalType.CAPABILITIES, role.cfg.role,

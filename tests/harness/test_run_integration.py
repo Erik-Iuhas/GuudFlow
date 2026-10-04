@@ -6,6 +6,7 @@ opencode server per role, the per-run MCP server, and submit_result.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -189,3 +190,44 @@ async def test_shell_ask_goes_through_the_approval_gate(tmp_path: Path, fake_llm
     assert len(asked) == 1, "an 'always this run' grant covers the second touch"
     main = runner.git.working_dir
     assert (main / "made_by_ask.txt").exists() and (main / "second.txt").exists()
+
+
+def _write_persona(root: Path) -> None:
+    d = root / "ada"
+    d.mkdir(parents=True)
+    (d / "profile.json").write_text(json.dumps({
+        "persona_id": "ada", "name": "Ada", "specialty": "Python engineer",
+        "character": "Methodical and thorough.", "stake_framing": "Your code ships this week."}))
+
+
+async def test_persona_prompt_is_compiled_and_recorded(tmp_path: Path, fake_llm: FakeLLM) -> None:
+    """S12: the persona's layers reach the model; the board gets only digest + layer names."""
+    _write_persona(tmp_path / "personas")
+    fake_llm.route("Your turn: builder", _done("Did the work for the builder role."))
+    project = ProjectConfig(project_id="p", goal="Build a tiny greeting module.", harness="opencode",
+                            agents=[AgentConfig(role="builder", persona_id="ada",
+                                                system_prompt="Write clean code.\nEmit [COMMIT] when done.")])
+    runner = AgentRunner(project=project, run_id="run1", run_root=tmp_path / "run",
+                         max_wall_seconds=300, personas_root=tmp_path / "personas")
+    runner.harness_settings = _settings(fake_llm)
+    result = await runner.run()
+    assert result.status is SchedulerStatus.COMPLETE, runner.workspace.board
+    caps = next(s for s in runner.workspace.board if s.type is SignalType.CAPABILITIES)
+    prompt = json.loads(caps.detail or "{}")["prompt"]
+    assert len(prompt["digest"]) == 16
+    assert {"identity", "character", "stake", "base", "cot", "framing"} <= set(prompt["layers"])
+    assert prompt["layers"][-1] == "framing" and "memory" not in prompt["layers"]
+    sent = str(fake_llm.requests[0]["messages"])
+    assert "You are Ada, a Python engineer." in sent and "Write clean code." in sent
+    assert "Emit [COMMIT]" not in sent
+    assert "Make this something you are proud of." in sent
+
+
+async def test_single_builder_prompt_layers_without_persona(tmp_path: Path,
+                                                            fake_llm: FakeLLM) -> None:
+    fake_llm.route("Your turn: builder", _done("Did the work for the builder role."))
+    runner = _runner(tmp_path, [AgentConfig(role="builder")], fake_llm)
+    await runner.run()
+    caps = next(s for s in runner.workspace.board if s.type is SignalType.CAPABILITIES)
+    layers = json.loads(caps.detail or "{}")["prompt"]["layers"]
+    assert layers[0] == "identity" and layers[-1] == "framing" and "character" not in layers
