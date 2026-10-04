@@ -70,7 +70,7 @@ export function PlaybookPanel({ entries }: { entries: PlaybookEntry[] }) {
                 className={cn("rounded-md border p-2 text-xs", KIND_CLASS[line.kind])}
               >
                 <div className="font-mono">
-                  <span aria-hidden className="mr-1.5 font-bold">{line.marker}</span>
+                  <span aria-hidden className="font-bold">{line.marker} </span>
                   {line.text}
                 </div>
                 <div className="mt-1 flex gap-1.5">

@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   capabilities: vi.fn(),
   resolve: vi.fn(),
+  playbook: vi.fn(),
 }));
 
 vi.mock("../../api", () => {
@@ -34,7 +35,7 @@ vi.mock("../../api", () => {
   return {
     ApiError,
     metaApi: { propose: mocks.propose },
-    projectsApi: { create: mocks.create, update: mocks.update },
+    projectsApi: { create: mocks.create, update: mocks.update, playbook: mocks.playbook },
     harnessApi: { capabilities: mocks.capabilities, resolve: mocks.resolve },
   };
 });
@@ -97,6 +98,9 @@ describe("Propose capability switches", () => {
   it("shows switches for opencode and persists role_type + capabilities", async () => {
     await proposeTeam();
     fireEvent.change(screen.getByLabelText("Agent harness"), { target: { value: "opencode" } });
+    // Graph view is the default: capabilities live in the node's side sheet.
+    await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTestId("team-node-dev"));
     const web = await screen.findByLabelText("dev web");
     fireEvent.change(web, { target: { value: "search" } });
     await waitFor(() =>
@@ -112,10 +116,46 @@ describe("Propose capability switches", () => {
     expect(saved.agents[0].capabilities).toEqual({ ...builder, web: "search" });
   });
 
+  it("keeps the list view behind the List toggle", async () => {
+    await proposeTeam();
+    expect(screen.getByTestId("team-graph")).toBeTruthy();
+    expect(screen.queryByText("card dev")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "List" }));
+    expect(screen.getByText("card dev")).toBeTruthy();
+    expect(screen.queryByTestId("team-graph")).toBeNull();
+  });
+
+  it("shows playbook entries that shaped a continuation proposal", async () => {
+    mocks.propose.mockResolvedValue({ ...PROPOSAL, playbook_entries_used: ["e1"] });
+    mocks.playbook.mockResolvedValue({
+      entries: [
+        { id: "e1", section: "brief_addenda", key: "dev", value: "Read the notes", confidence: 0.8,
+          state: "active", evidence_runs: ["r1"] },
+        { id: "e2", section: "known_pitfalls", key: "dev", value: "unused", confidence: 0.5,
+          state: "active", evidence_runs: ["r1"] },
+      ],
+      metrics: [],
+    });
+    render(
+      <MemoryRouter initialEntries={["/propose?project_id=p1"]}>
+        <Propose />
+      </MemoryRouter>,
+    );
+    fireEvent.change(screen.getByPlaceholderText(/Build an auth flow|Add a refresh-token|e\.g\./), {
+      target: { value: "build it" },
+    });
+    fireEvent.click(screen.getByText("Propose team"));
+    const rows = await screen.findAllByTestId("playbook-entry");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("brief addendum for dev: Read the notes");
+    expect(mocks.playbook).toHaveBeenCalledWith("p1");
+  });
+
   it("shows the server's validation error under the switches", async () => {
     const { ApiError } = await import("../../api");
     await proposeTeam();
     fireEvent.change(screen.getByLabelText("Agent harness"), { target: { value: "opencode" } });
+    fireEvent.click(screen.getByRole("button", { name: "List" }));
     const sandbox = await screen.findByLabelText("dev sandbox");
     mocks.resolve.mockRejectedValueOnce(new ApiError(422, "bad capability"));
     fireEvent.change(sandbox, { target: { value: "host_dev" } });
