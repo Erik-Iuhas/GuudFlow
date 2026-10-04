@@ -20,6 +20,7 @@ class ModelInfo:
     provider: str
     tier: str  # "heavy" | "solid" | "fast"
     supports_tools: bool = True
+    supports_images: bool = False
     max_context_tokens: int = 200000
     max_output_tokens: int = 8192
     cost_per_1k_input: float = 0.0
@@ -57,6 +58,7 @@ class ModelRegistry:
                 provider=m["provider"],
                 tier=m["tier"],
                 supports_tools=m.get("supports_tools", True),
+                supports_images=m.get("supports_images", False),
                 max_context_tokens=m.get("max_context_tokens", 200000),
                 max_output_tokens=m.get("max_output_tokens", 8192),
                 cost_per_1k_input=m.get("cost_per_1k_input", 0.0),

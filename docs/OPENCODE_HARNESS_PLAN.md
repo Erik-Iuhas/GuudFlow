@@ -107,6 +107,15 @@ or memory.
     **Mitigation (verified):** `agent.explore.permission = {task: deny, edit: deny, bash:
     read-only}` in the generated config. config_gen always emits it.
 
+12. **Forced tool use is rejected by the newest Claude models** (found while choosing models
+    for P1). opencode's structured output forces `tool_choice: required` (seen in the fake-LLM
+    request log), which the Anthropic provider sends as forced tool use. Claude Opus 5.5,
+    Sonnet 5.5 and Fable 5.1 return HTTP 400 for forced `any`/`tool` choice.
+    **Design consequence:** GuudFlow does **not** use opencode's `format`. Agents finish by
+    calling the MCP tool `guudflow_submit_result` (normal `auto` tool choice). The MCP server
+    validates the payload in the tool call and returns validation errors straight to the model
+    in the same turn. This also sidesteps gotcha #10. §4.1 and §4.3 are updated accordingly.
+
 **Verified in O2 (contract tests in `tests/harness/test_opencode_contract_o2.py`):**
 `permission.asked` → reply `once`/`reject` round-trip; `always` covers repeat prompts for
 the session; abort stops a running bash call; edit patterns are project-relative and a later
@@ -165,9 +174,10 @@ The scheduler's runner contract is already `Callable[[Workspace], Awaitable[None
 
 1. Ensure the role's sandbox is up (§5) and its clone is synced to the latest merged base.
 2. `POST /session` with `{title, agent: <role>, permission: <role ruleset>}`.
-3. `POST /session/{id}/prompt_async` with the task brief + `format: json_schema(AgentResult)`.
+3. `POST /session/{id}/prompt_async` with the task brief. The brief ends by telling the agent
+   to finish with `guudflow_submit_result` (gotcha #12: no opencode `format`).
 4. Bridge SSE events to board signals until `session.idle` or `session.error`.
-5. Read the final `AssistantMessage.structured`, validate with Pydantic (§4.3).
+5. Read the result the MCP server accepted for this session (already Pydantic-validated, §4.3).
 6. Fetch `agent/{role}` from the sandbox clone, run the branch checks (§5.5), then post
    `GIT_COMMIT` / `COMPLETE` / `BLOCKED` / `FAILED` to the board.
 
@@ -201,9 +211,11 @@ instead of a regex.
 
 ### 4.3 Validation and the single retry
 
-- `structured` is missing (`StructuredOutputError`), or Pydantic validation fails →
-  send **one** follow-up message in the same session: the validation error plus "call
-  StructuredOutput again with a corrected result". Same schema.
+- `guudflow_submit_result` validates the payload when it is called and returns any
+  validation error to the model as the tool result, so the model can correct it in the same
+  turn (no extra round trip).
+- The turn ends with no accepted result → send **one** follow-up message in the same session
+  telling the agent to call `guudflow_submit_result`.
 - It fails a second time → the role is `FAILED` with the validation error as detail. The
   loop is the error handler (hard constraint #8): the reviewer or escalation path deals
   with it.
