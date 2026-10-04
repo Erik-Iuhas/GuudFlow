@@ -5,7 +5,7 @@ import { Dashboard } from "./views/Dashboard";
 import { Projects } from "./views/Projects";
 import { Propose } from "./views/Propose";
 import { Roster } from "./views/Roster";
-import { Run } from "./views/Run";
+import { RunRoute } from "./views/RunRoute";
 import { Settings } from "./views/Settings";
 import { Studio } from "./views/Studio";
 import { Tournament } from "./views/Tournament";
@@ -73,7 +73,7 @@ function AppShell({
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:id" element={<Studio />} />
           <Route path="/propose" element={<Propose />} />
-          <Route path="/runs/:runId" element={<Run />} />
+          <Route path="/runs/:runId" element={<RunRoute />} />
           <Route path="/roster" element={<Roster />} />
           <Route path="/roster/:id" element={<Roster />} />
           <Route path="/training" element={<Training />} />

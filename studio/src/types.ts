@@ -30,6 +30,10 @@ export interface AgentConfig {
    *  from the manifest even though they're in BASELINE_LOCAL_SCOPES.
    *  Studio's tool picker writes here when the user un-checks a baseline. */
   excluded_baseline_tools?: string[];
+  /** opencode harness: for a reviewer, the roles whose work it reviews (a review edge). */
+  review_of?: string[];
+  /** opencode harness: rework rounds a review edge allows before escalating. */
+  max_review_rounds?: number;
 }
 
 export interface RoleRBAC {
@@ -44,6 +48,8 @@ export interface ProjectConfig {
   mcp_servers?: unknown[];
   max_iterations?: number;
   approval_gates?: Partial<ApprovalGates>;
+  /** "legacy" only on request; a missing value means the opencode harness (plan O15). */
+  harness?: "legacy" | "opencode";
   pr_mode?: "manual" | "auto";
   /** Track 12 — per-use-case sub-LLM model picks. Maps use_case name
    *  (e.g. "summarise-subtask", "protocol-cleanup", "llm-dispatch")
@@ -71,6 +77,10 @@ export interface RunMeta {
   created_at?: string;
   pr_mode?: "manual" | "auto";
   pr_ready?: PrReadyInfo;
+  /** Spend cap in USD, when the run meta carries it (else the project's `approval_gates`). */
+  token_budget_usd?: number | null;
+  /** Harness the run used, when the run meta carries it. */
+  harness?: "legacy" | "opencode";
 }
 
 /** Signal types posted by the opencode harness. Their `detail` is a JSON

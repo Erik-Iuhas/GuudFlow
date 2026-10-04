@@ -30,6 +30,7 @@ import { WorkerSettingsPanel } from "../components/WorkerSettingsPanel";
 import { RunWsProvider } from "../contexts/RunWsContext";
 import type { RunWsSubscriber } from "../contexts/RunWsContext";
 import { summariseAgents, signalsForRoleIteration } from "../lib/iterations";
+import { isTerminalStatus } from "../lib/runStatus";
 import type { ProjectConfig, RunMeta, Signal } from "../types";
 
 /** Unresolved approval gates: APPROVAL_NEEDED signals whose matching
@@ -49,19 +50,7 @@ function unresolvedApprovals(signals: Signal[]): Signal[] {
   });
 }
 
-const TERMINAL_STATUSES = new Set([
-  "complete",
-  "max_iterations",
-  "stuck",
-  "deadline_exceeded",
-  "errored",
-  "failed",
-  "stopped",
-]);
-
-function isTerminal(status: string | undefined): boolean {
-  return !!status && TERMINAL_STATUSES.has(status);
-}
+const isTerminal = isTerminalStatus;
 
 export function Run() {
   const { runId } = useParams<{ runId: string }>();
@@ -264,6 +253,8 @@ export function Run() {
                 </span>
               )}
               {!meta && <span className="muted small">live (no on-disk meta yet)</span>}
+              {" "}
+              <Link to={`/runs/${runId}`} className="small">Cockpit view</Link>
             </div>
             <div className="row small muted">
               <span className={connected ? "tag tag-status-running" : "tag"}>

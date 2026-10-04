@@ -1,13 +1,15 @@
-import { useState } from "react";
+import { useState, type Ref } from "react";
 import { ApiError, runsApi } from "../api";
 
 interface Props {
   runId: string;
   /** Optional override — defaults to runsApi.postComment. Tests inject. */
   onSubmit?: (text: string, priority: "normal" | "high") => Promise<void>;
+  /** Lets a parent focus the input (cockpit `c` shortcut, HUMAN_NEEDED). */
+  inputRef?: Ref<HTMLInputElement>;
 }
 
-export function CommentBox({ runId, onSubmit }: Props) {
+export function CommentBox({ runId, onSubmit, inputRef }: Props) {
   const [text, setText] = useState("");
   const [priority, setPriority] = useState<"normal" | "high">("normal");
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +53,8 @@ export function CommentBox({ runId, onSubmit }: Props) {
             Post a comment to run <span className="mono">{runId}</span>
           </label>
           <input
+            ref={inputRef}
+            aria-label="Comment for the agents"
             placeholder="Add some context for the agents — 'use Tailwind, not raw CSS'"
             value={text}
             onChange={(e) => setText(e.target.value)}

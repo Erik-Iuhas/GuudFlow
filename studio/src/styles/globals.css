@@ -1,3 +1,22 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Cockpit pipeline graph (U1): React Flow edges and chrome, coloured from tokens. */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-node-border-radius: var(--radius);
+}
+.react-flow__edge-path { stroke-width: 1.5; }
+.react-flow__edge.cockpit-edge-depends .react-flow__edge-path { stroke: hsl(var(--muted-foreground)); }
+.react-flow__edge.cockpit-edge-review .react-flow__edge-path { stroke: hsl(var(--status-waiting)); stroke-width: 2; }
+.react-flow__edge.cockpit-edge-blocked .react-flow__edge-path {
+  stroke: hsl(var(--status-blocked));
+  stroke-dasharray: 6 4;
+}
+.react-flow__edge-text { fill: hsl(var(--foreground)); font-size: 11px; font-weight: 600; }
+.react-flow__edge-textbg { fill: hsl(var(--card)); }
+.react-flow__handle { background: hsl(var(--muted-foreground)); }
+.react-flow__attribution { background: transparent; font-size: 10px; }
+.react-flow__attribution a { color: hsl(var(--muted-foreground)); }
+.react-flow__node:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
