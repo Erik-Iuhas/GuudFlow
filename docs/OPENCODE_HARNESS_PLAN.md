@@ -492,10 +492,13 @@ Defaults per role type (each can be overridden on the approval screen):
 | builder | standard | off | project | via_it_agent | explore_only | off | off |
 | frontend builder | standard | off | project | via_it_agent | explore_only | screenshot | on |
 | tester | standard | off | project | via_it_agent | explore_only | off | off |
-| reviewer | strict | off | readonly + test runners | off | explore_only | screenshot | on |
+| reviewer | standard | off | readonly + test runners | off | explore_only | screenshot | on |
 | IT agent | standard | off | installers only (§5.1) | — | off | off | off |
 
 (`vision: on` defaults apply only where the model supports images.)
+
+Reviewers use the `standard` sandbox because they run the test suite; their shell stays
+read-only and gains only the test runners (no commits, no edits).
 
 Rules:
 - **Set before the run.** Capabilities show as switches per role on Studio's team
