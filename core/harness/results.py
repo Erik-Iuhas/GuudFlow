@@ -29,12 +29,46 @@ class Issue(BaseModel):
     detail: str = Field(min_length=20)  # a FAIL must cite specifics
 
 
+class AcceptanceCheck(BaseModel):
+    """A builder's claim about one acceptance item, with the evidence for it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item: str = Field(min_length=1)
+    met: bool
+    evidence: str = ""
+
+    @model_validator(mode="after")
+    def _check_evidence(self) -> "AcceptanceCheck":
+        if self.met and len(self.evidence) < 10:
+            raise ValueError("evidence: at least 10 characters required when met is true; say how you know")
+        return self
+
+
+class ItemVerdict(BaseModel):
+    """A reviewer's verdict on one acceptance item."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item: str = Field(min_length=1)
+    met: bool
+    detail: str = ""
+
+    @model_validator(mode="after")
+    def _check_detail(self) -> "ItemVerdict":
+        if not self.met and len(self.detail) < 20:
+            raise ValueError("detail: at least 20 characters required when met is false; cite specifics")
+        return self
+
+
 class AgentResult(BaseModel):
     """Result for builders, architects and testers."""
 
     model_config = ConfigDict(extra="forbid")
 
     status: Literal["done", "blocked", "failed"]
+    task_id: str | None = None
+    acceptance: list[AcceptanceCheck] = []
     summary: str = Field(min_length=20)
     files_changed: list[str] = []
     blocked_on: BlockedOn | None = None
@@ -64,13 +98,20 @@ class ReviewResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     verdict: Literal["pass", "fail"]
+    task_id: str | None = None
+    items: list[ItemVerdict] = []
     issues: list[Issue] = []
     summary: str = ""
 
     @model_validator(mode="after")
     def _check_issues(self) -> "ReviewResult":
-        if self.verdict == "fail" and not self.issues:
-            raise ValueError("issues: at least one issue is required when verdict is 'fail'")
+        unmet = [i.item for i in self.items if not i.met]
+        if self.verdict == "pass" and unmet:
+            raise ValueError(f"items: verdict is 'pass' but these items are unmet: {'; '.join(unmet)}")
+        if self.verdict == "fail" and not self.issues and not unmet:
+            raise ValueError(
+                "issues: at least one issue or one unmet item is required when verdict is 'fail'"
+            )
         return self
 
 

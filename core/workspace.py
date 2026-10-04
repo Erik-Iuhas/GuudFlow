@@ -267,6 +267,20 @@ class Task:
     # M5.5: set by TaskSummarizer on close; persisted via tasks.jsonl mutation.
     completion_summary: dict | None = None
 
+    # Task board (harness plan 4.6). All optional so legacy rows still load.
+    title: str = ""
+    kind: str = "code"  # code | test | docs | research | visual
+    size: str = "M"  # S | M | L
+    files_hint: list[str] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)  # task ids
+    visual_refs: list[str] = field(default_factory=list)
+    # todo | in_progress | review | done | blocked | needs_attention. Moved only
+    # by scheduler events; independent of `status` (legacy lifecycle).
+    column: str = "todo"
+    review_round: int = 0
+    # ThreadEntry.to_dict() payloads (core.harness.tasks.ThreadEntry).
+    thread: list[dict[str, Any]] = field(default_factory=list)
+
 
 # Map a TaskStatus transition to the SignalType the runner posts when
 # `mutate_task` fires. PENDING is the initial state and never re-enters

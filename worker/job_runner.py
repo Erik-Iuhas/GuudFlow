@@ -369,6 +369,15 @@ def serialise_task(task) -> dict[str, Any]:
         "closed_by_commit": task.closed_by_commit,
         "blocked_on": list(task.blocked_on),
         "cancelled_reason": task.cancelled_reason,
+        "title": task.title,
+        "kind": task.kind,
+        "size": task.size,
+        "files_hint": list(task.files_hint),
+        "depends_on": list(task.depends_on),
+        "visual_refs": list(task.visual_refs),
+        "column": task.column,
+        "review_round": task.review_round,
+        "thread": [dict(e) for e in task.thread],
     }
 
 

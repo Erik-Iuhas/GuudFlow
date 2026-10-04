@@ -266,6 +266,15 @@ def _deserialise_task(payload: dict[str, Any]) -> Task:
         closed_by_commit=str(payload.get("closed_by_commit") or ""),
         blocked_on=list(payload.get("blocked_on") or []),
         cancelled_reason=str(payload.get("cancelled_reason") or ""),
+        title=str(payload.get("title") or ""),
+        kind=str(payload.get("kind") or "code"),
+        size=str(payload.get("size") or "M"),
+        files_hint=[str(x) for x in payload.get("files_hint") or []],
+        depends_on=[str(x) for x in payload.get("depends_on") or []],
+        visual_refs=[str(x) for x in payload.get("visual_refs") or []],
+        column=str(payload.get("column") or "todo"),
+        review_round=int(payload.get("review_round") or 0),
+        thread=[dict(e) for e in payload.get("thread") or [] if isinstance(e, dict)],
     )
 
 
