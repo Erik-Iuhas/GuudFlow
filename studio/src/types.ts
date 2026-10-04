@@ -170,6 +170,8 @@ export interface MetaProposal {
   persona_hires?: PersonaHire[];
   warnings?: string[];
   deltas?: RoleDelta[];
+  /** Ids of the active playbook entries that were shown to the meta-agent. */
+  playbook_entries_used?: string[];
 }
 
 // ── Approval gates (Phase C.0.5) ───────────────────────────────────────────
@@ -309,4 +311,52 @@ export interface Task {
 export interface DesksData {
   desks: Record<string, Task[]>;
   tasksById: Record<string, Task>;
+}
+
+// ── One-shot launcher (POST /api/oneshot) ──────────────────────────────────
+
+export interface OneShotRequestBody {
+  goal: string;
+  web: "researcher" | "off";
+  /** USD; the backend accepts > 0 and <= 1000. */
+  budget: number;
+  demo: boolean;
+}
+
+export interface OneShotResponse {
+  accepted: boolean;
+  needs_approval: boolean;
+  project_id: string;
+  run_id?: string;
+  job_id?: string;
+  status_url?: string;
+  confirm_url?: string;
+  estimated_cost?: CostEstimate;
+  message?: string;
+}
+
+// ── Project playbook (GET /api/projects/{id}/playbook) ─────────────────────
+
+export type PlaybookSection =
+  | "team_adjustments"
+  | "brief_addenda"
+  | "known_pitfalls"
+  | "review_rounds"
+  | "capability_hints"
+  | "task_templates";
+
+export interface PlaybookEntry {
+  id: string;
+  section: PlaybookSection;
+  key: string;
+  value: unknown;
+  confidence: number;
+  state: "emerging" | "active" | "declining" | "archived" | "superseded";
+  evidence_runs: string[];
+  needs_review?: boolean;
+}
+
+export interface PlaybookResponse {
+  entries: PlaybookEntry[];
+  metrics: { run_id: string; recorded_at: string; metrics: Record<string, number> }[];
 }

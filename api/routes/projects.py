@@ -29,6 +29,36 @@ async def get_project(request: Request, project_id: str) -> dict:
     return project
 
 
+@router.get("/{project_id}/playbook", dependencies=[Depends(require_bearer)])
+async def get_playbook(request: Request, project_id: str) -> dict[str, Any]:
+    """The project's playbook (plan 11.4), read-only.
+
+    Returns `{entries: [{id, section, key, value, confidence, state,
+    evidence_runs, needs_review}], metrics: [{run_id, recorded_at, metrics}]}`.
+    Archived and superseded entries are omitted. A project with no playbook
+    yet returns empty lists. Nothing here changes a team (hard constraint 24).
+    """
+    if await _store(request).get(project_id) is None:
+        raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+    from core.playbook import Playbook
+
+    try:
+        playbook = Playbook.load(request.app.state.data_root, project_id)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=500, detail=f"playbook unreadable: {exc}")
+    return {
+        "entries": [
+            {
+                "id": e.id, "section": e.section, "key": e.key, "value": e.value,
+                "confidence": e.confidence, "state": e.state,
+                "evidence_runs": list(e.evidence_runs), "needs_review": e.needs_review,
+            }
+            for e in playbook.entries()
+        ],
+        "metrics": playbook.metrics_history(),
+    }
+
+
 @router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_bearer)])
 async def create_project(request: Request, project: dict = Body(...)) -> dict:
     if "project_id" not in project or not project["project_id"]:

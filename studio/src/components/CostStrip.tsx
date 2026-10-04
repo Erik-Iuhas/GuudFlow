@@ -1,10 +1,18 @@
+import type { CapabilityBlock } from "../lib/capabilities";
 import { estimateProjectCost, formatCost, tierClass } from "../lib/cost";
 import { cn } from "../lib/utils";
 import type { ProjectConfig } from "../types";
 import { Card } from "./ui/card";
 
-export function CostStrip({ project }: { project: ProjectConfig }) {
-  const breakdown = estimateProjectCost(project);
+export function CostStrip({
+  project,
+  capsByRole,
+}: {
+  project: ProjectConfig;
+  /** Per-role capabilities (opencode harness); scale the estimate. */
+  capsByRole?: Record<string, CapabilityBlock | undefined>;
+}) {
+  const breakdown = estimateProjectCost(project, capsByRole);
   return (
     <Card
       className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-sm"
