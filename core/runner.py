@@ -2353,12 +2353,15 @@ class AgentRunner:
         entries: list[TeammateEntry] = []
         for cfg in self.project.agents:
             agent = self.agents.get(cfg.role)
-            if agent is None:
-                continue
+            # The opencode harness builds no BaseAgent objects: fall back to the
+            # role config (description, persona id) so the brief isn't empty there.
+            persona = agent.persona if agent is not None else None
 
             # Descriptor: goal field (M2 adds it), fall back to first sentence of character
             descriptor = ""
-            if agent.persona is not None:
+            if agent is None:
+                descriptor = (cfg.description or "")[:80]
+            elif agent.persona is not None:
                 goal = getattr(agent.persona.profile, "goal", "") or ""
                 if goal:
                     descriptor = goal[:80]
@@ -2379,7 +2382,7 @@ class AgentRunner:
                 status = "PENDING"
 
             last_commit = ""
-            if status == "DONE":
+            if status == "DONE" and self.workspace.git is not None:
                 for commit in reversed(self.workspace.git.commits):
                     if commit.agent == cfg.role:
                         last_commit = commit.message[:60]
@@ -2393,8 +2396,10 @@ class AgentRunner:
                     escalation_target = "tech_lead"
 
             persona_name = ""
-            if agent.persona is not None:
-                persona_name = agent.persona.profile.name or cfg.role
+            if persona is not None:
+                persona_name = persona.profile.name or cfg.role
+            elif agent is None and cfg.persona_id:
+                persona_name = cfg.persona_id.split("-")[0].capitalize()
             else:
                 persona_name = cfg.role.capitalize()
 
