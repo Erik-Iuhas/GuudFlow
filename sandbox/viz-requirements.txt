@@ -1,0 +1,9 @@
+# Pinned chart stack for the optional agent-opencode-viz image (plan §5.10).
+# kaleido 0.2.1 bundles its own headless Chromium inside the wheel, so plotly static
+# export works with no browser download. kaleido 1.x needs a separately downloaded
+# Chrome, and plotly >= 6.1 only supports kaleido 1.x, hence the plotly pin.
+matplotlib==3.10.8
+plotly==5.24.1
+kaleido==0.2.1
+numpy==2.2.6
+pandas==2.3.3

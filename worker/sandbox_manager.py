@@ -45,11 +45,20 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 DEFAULT_IMAGE = f"guudflow/agent-opencode:{OPENCODE_VERSION}"
+# Optional chart-rendering variant (plan §5.10): matplotlib, plotly, kaleido, numpy, pandas.
+# Never the default. A run opts in per role with `SandboxSpec(image=VIZ_IMAGE)` or
+# `image_for_variant("viz")`; build it with `SandboxManager.ensure_image(variant="viz")`.
+VIZ_IMAGE = f"guudflow/agent-opencode-viz:{OPENCODE_VERSION}"
+VIZ_WHEELS_ENV = "GUUDFLOW_VIZ_WHEELS_DIR"
 LABEL_RUN = "guudflow.run"
 LABEL_ROLE = "guudflow.role"
 OPENCODE_PORT = 4096
 
 _DOCKERFILE = Path(__file__).resolve().parents[1] / "sandbox" / "agent-opencode.Dockerfile"
+_VIZ_DOCKERFILE = (Path(__file__).resolve().parents[1] / "sandbox"
+                   / "agent-opencode-viz.Dockerfile")
+_VIZ_INSTALLER = Path(__file__).resolve().parents[1] / "sandbox" / "viz_install.py"
+_DEFAULT_VIZ_WHEELS = Path(__file__).resolve().parents[1] / ".tools" / "viz-wheels"
 AGENT_UID = 10001                      # the image's unprivileged `agent` user
 _AGENT_HOME = "/home/agent"
 _CONTAINER_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -60,6 +69,25 @@ _IPTABLES_TIMEOUT = 10
 
 class SandboxError(RuntimeError):
     """Raised when a sandbox cannot be created, started or become healthy."""
+
+
+def image_for_variant(variant: str = "default") -> str:
+    """Image tag for a sandbox variant: `"default"` or `"viz"` (chart rendering).
+
+    Use the result as `SandboxSpec.image` to give one role the viz image; every other
+    role keeps `DEFAULT_IMAGE`. Raises `SandboxError` for an unknown variant.
+    """
+    if variant == "default":
+        return DEFAULT_IMAGE
+    if variant == "viz":
+        return VIZ_IMAGE
+    raise SandboxError(f"unknown sandbox image variant {variant!r} (use 'default' or 'viz')")
+
+
+def viz_wheels_dir() -> Path:
+    """Directory holding the viz wheels: `$GUUDFLOW_VIZ_WHEELS_DIR` or `.tools/viz-wheels`."""
+    override = os.environ.get(VIZ_WHEELS_ENV)
+    return Path(override) if override else _DEFAULT_VIZ_WHEELS
 
 
 @dataclass(frozen=True)
@@ -154,25 +182,67 @@ class SandboxManager:
 
     # ------------------------------------------------------------------ image
 
-    async def ensure_image(self, *, build: bool = True) -> None:
-        """Make sure the sandbox image exists locally, building it if allowed.
+    async def ensure_image(self, *, build: bool = True, variant: str = "default") -> None:
+        """Make sure a sandbox image exists locally, building it if allowed.
 
-        The build context is a temp directory holding only the Dockerfile, so nothing
-        from the repository is sent to the daemon.
+        `variant="default"` (the default) is the manager's own image (`self.image`).
+        `variant="viz"` is the optional chart-rendering image (`VIZ_IMAGE`), built on top of
+        the default image (which is built first when missing). The viz build needs the wheels
+        fetched by `scripts/fetch_viz_wheels.sh`; without them it raises `SandboxError`.
+
+        The build context is a temp directory holding only the Dockerfile (plus the pinned
+        binary, or the viz installer and wheels), so nothing from the repository is sent to
+        the daemon.
         """
+        if variant == "viz":
+            await self._ensure_viz_image(build=build)
+            return
+        image_for_variant(variant)  # validates the name
         if await asyncio.to_thread(self._image_exists):
             return
         if not build:
             raise SandboxError(f"sandbox image {self.image} is missing and build=False")
         await asyncio.to_thread(self._build_image)
 
-    def _image_exists(self) -> bool:
+    async def _ensure_viz_image(self, *, build: bool) -> None:
+        if await asyncio.to_thread(self._image_exists, VIZ_IMAGE):
+            return
+        if not build:
+            raise SandboxError(f"sandbox image {VIZ_IMAGE} is missing and build=False")
+        wheels = viz_wheels_dir()
+        if not any(wheels.glob("*.whl")):
+            raise SandboxError(
+                f"cannot build {VIZ_IMAGE}: no wheels in {wheels}. Run "
+                "scripts/fetch_viz_wheels.sh on the host first (docker build has no network)"
+            )
+        await self.ensure_image(build=True)  # the viz image builds FROM the default image
+        await asyncio.to_thread(self._build_viz_image, wheels)
+
+    def _image_exists(self, image: str | None = None) -> bool:
         from docker.errors import ImageNotFound
         try:
-            self.client.images.get(self.image)
+            self.client.images.get(image or self.image)
             return True
         except ImageNotFound:
             return False
+
+    def _build_viz_image(self, wheels: Path) -> None:
+        from docker.errors import BuildError
+        if not _VIZ_DOCKERFILE.is_file() or not _VIZ_INSTALLER.is_file():
+            raise SandboxError(f"missing {_VIZ_DOCKERFILE} or {_VIZ_INSTALLER}")
+        with tempfile.TemporaryDirectory(prefix="gf-sandbox-viz-ctx-") as ctx:
+            # Context = Dockerfile + installer + the wheels only; the build needs no network.
+            shutil.copyfile(_VIZ_DOCKERFILE, Path(ctx) / "Dockerfile")
+            shutil.copyfile(_VIZ_INSTALLER, Path(ctx) / "viz_install.py")
+            (Path(ctx) / "wheels").mkdir()
+            for wheel in wheels.glob("*.whl"):
+                shutil.copyfile(wheel, Path(ctx) / "wheels" / wheel.name)
+            _logger.info("building sandbox image %s", VIZ_IMAGE)
+            try:
+                self.client.images.build(path=ctx, tag=VIZ_IMAGE, rm=True, forcerm=True,
+                                         buildargs={"BASE_IMAGE": self.image})
+            except BuildError as exc:
+                raise SandboxError(f"viz sandbox image build failed: {exc}") from exc
 
     def _build_image(self) -> None:
         from docker.errors import BuildError
