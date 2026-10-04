@@ -501,10 +501,8 @@ def test_planner_system_prompts_include_user_comment_addendum() -> None:
     from agents.builtin.requirements_writer import (
         REQUIREMENTS_WRITER_SYSTEM_PROMPT,
     )
-    from agents.builtin.tech_lead import TECH_LEAD_SYSTEM_PROMPT
 
     for prompt in (
-        TECH_LEAD_SYSTEM_PROMPT,
         ARCHITECT_SYSTEM_PROMPT,
         REQUIREMENTS_WRITER_SYSTEM_PROMPT,
     ):

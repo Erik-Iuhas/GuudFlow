@@ -41,7 +41,6 @@ async def test_tools_assign_task_metadata(client, auth_header):
     granted = entry.get("granted_by_archetypes", [])
     assert "architect" in granted
     assert "requirements_writer" in granted
-    assert "tech_lead" in granted
 
 
 @pytest.mark.asyncio

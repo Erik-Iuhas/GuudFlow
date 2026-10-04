@@ -16,7 +16,6 @@ from agents.builtin.code_reviewer import REVIEWER_SYSTEM_PROMPT
 from agents.builtin.requirements_writer import (
     REQUIREMENTS_WRITER_SYSTEM_PROMPT,
 )
-from agents.builtin.tech_lead import TECH_LEAD_SYSTEM_PROMPT
 from core.llm import MockLLMClient
 from core.runner import AgentConfig, AgentRunner, ProjectConfig
 from core.workspace import Task, TaskRef
@@ -123,10 +122,8 @@ def test_completed_tasks_omitted_blocked_separated(tmp_path: Path) -> None:
 def test_planner_system_prompts_include_task_assignment_line() -> None:
     """§5.2 — the four planning archetypes have the TASK ASSIGNMENT
     paragraph in their static system prompt (cacheable)."""
-    assert "TASK ASSIGNMENT" in TECH_LEAD_SYSTEM_PROMPT
     assert "TASK ASSIGNMENT" in ARCHITECT_SYSTEM_PROMPT
     assert "TASK ASSIGNMENT" in REQUIREMENTS_WRITER_SYSTEM_PROMPT
-    assert "assign-task" in TECH_LEAD_SYSTEM_PROMPT
     assert "assign-task" in ARCHITECT_SYSTEM_PROMPT
     assert "assign-task" in REQUIREMENTS_WRITER_SYSTEM_PROMPT
 
