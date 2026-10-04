@@ -49,6 +49,11 @@ class FakeClient:
         return {"Runtimes": self._runtimes}
 
 
+def _agent_uid() -> int:
+    """The uid sandboxes run as: the host user, or the image's agent user when root."""
+    return os.getuid() if os.getuid() != 0 else 10001
+
+
 def make_spec(tmp_path: Path, **overrides: Any) -> SandboxSpec:
     fields: dict[str, Any] = dict(
         run_id="run1", role="dev", workdir=tmp_path / "clone", inputs_dir=None,
@@ -87,7 +92,9 @@ def test_container_kwargs_has_every_hardening_flag(manager: SandboxManager, tmp_
     assert kw["tmpfs"] == {"/tmp": "rw,size=256m,mode=1777",
                            "/home/agent": "rw,size=512m,mode=1777"}
     assert kw["volumes"] == {str(tmp_path / "clone"): {"bind": "/work", "mode": "rw"}}
-    assert kw["user"] == f"{os.getuid()}:{os.getgid()}"
+    host_user = f"{os.getuid()}:{os.getgid()}"
+    assert kw["user"] == (host_user if os.getuid() != 0 else "10001:10001")
+    assert not kw["user"].startswith("0:"), "the agent never runs as root"
     assert kw["working_dir"] == "/work"
     assert kw["labels"] == {LABEL_RUN: "run1", LABEL_ROLE: "dev"}
     assert "runtime" not in kw
@@ -177,7 +184,8 @@ def test_restrict_host_ports_returns_false_without_iptables(
 
 # ------------------------------------------------------------- integration
 
-DOCKER = SandboxManager.available()
+# CI runs the Docker tests in their own (root) job; GUUDFLOW_SKIP_DOCKER_TESTS=1 elsewhere.
+DOCKER = SandboxManager.available() and not os.environ.get("GUUDFLOW_SKIP_DOCKER_TESTS")
 needs_docker = pytest.mark.skipif(not DOCKER, reason="docker daemon not available")
 
 
@@ -228,6 +236,7 @@ async def test_hardened_container_via_manager_kwargs(
     spec = make_spec(tmp_path, run_id=run_id, workdir=_git_workdir(tmp_path), inputs_dir=inputs,
                      network=net, image=NODE_IMAGE)
     kwargs = mgr.container_kwargs(spec)
+    mgr._hand_over_workdir(spec, kwargs["user"])  # what start() does
     kwargs["command"] = ["sleep", "120"]
     container = mgr.client.containers.run(**kwargs)
     info = _inspect(container.id)
@@ -248,10 +257,10 @@ async def test_hardened_container_via_manager_kwargs(
     )])
     assert code == 3
 
-    # Files written by the agent keep the host uid.
+    # Files written by the agent keep the agent's (host, or unprivileged when root) uid.
     code, out = container.exec_run(["sh", "-c", "echo x > /work/f.txt"])
     assert code == 0, out
-    assert (spec.workdir / "f.txt").stat().st_uid == os.getuid()
+    assert (spec.workdir / "f.txt").stat().st_uid == _agent_uid()
     # /inputs is read-only, root fs is read-only.
     assert container.exec_run(["sh", "-c", "echo x > /inputs/f.txt"])[0] != 0
     assert container.exec_run(["sh", "-c", "echo x > /etc/f.txt"])[0] != 0
@@ -325,7 +334,7 @@ async def test_opencode_sandbox_end_to_end(agent_image: SandboxManager, tmp_path
         assert code == 3
         code, out = container.exec_run(["sh", "-c", "echo x > /work/f.txt"])
         assert code == 0, out
-        assert (spec.workdir / "f.txt").stat().st_uid == os.getuid()
+        assert (spec.workdir / "f.txt").stat().st_uid == _agent_uid()
 
         await mgr.stop_run(run_id)
         assert not mgr.client.containers.list(all=True, filters={"label": f"{LABEL_RUN}={run_id}"})

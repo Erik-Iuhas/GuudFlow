@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Any, Literal
 
@@ -154,7 +155,19 @@ def infer_role_type(role: str, *, is_reviewer: bool = False, declared: str = "")
     if is_reviewer:
         return "reviewer"
     name = role.lower()
-    return next((rt for hint, rt in _ROLE_HINTS if hint in name), "builder")
+    if name in ROLE_TYPES:
+        return name
+    words = [w for w in re.split(r"[^a-z0-9]+", name) if w]
+    return next((rt for hint, rt in _ROLE_HINTS if _hint_matches(hint, name, words)), "builder")
+
+
+def _hint_matches(hint: str, name: str, words: list[str]) -> bool:
+    """Match a hint against whole words: "ui" must not match "builder" (O10 finding)."""
+    if "_" in hint:
+        return hint in name
+    if len(hint) <= 2:
+        return hint in words
+    return any(w.startswith(hint) for w in words)
 
 
 def defaults_for(role_type: str) -> Capabilities:

@@ -135,6 +135,28 @@ Quips are triggered by the run (role complete, review verdict), not by the bridg
     validates the payload in the tool call and returns validation errors straight to the model
     in the same turn. This also sidesteps gotcha #10. §4.1 and §4.3 are updated accordingly.
 
+13. **An agent with a shell can reach its own opencode server** (found in O10). The
+    server password is in the container's environment, so `python3 -c` can call
+    `127.0.0.1:4096` (read `/config`, answer its own permission asks). Layer 1 is therefore
+    advisory for roles with `shell: project`; it is not a boundary.
+    **Design consequence:** nothing security-relevant may depend on opencode's permission
+    rules alone. The boundaries are host-side: the container (read-only root, no caps,
+    non-root uid, internal network), the gateway (virtual key, model and endpoint allow-list),
+    the MCP server (token identity, per-role grants), and the runner's branch checks
+    (protected paths, symlinks, secrets). The escape suite asserts each of these with the
+    agent using its tokens directly.
+
+**Found and fixed by the O10 escape suite (`tests/harness/test_escape_suite.py`):**
+role-type hints matched substrings, so `builder` (b-**ui**-lder) got frontend grants
+(`screenshot`, vision); hints now match whole words. A root runner started agents as
+uid 0; agents now run as the image's `agent` user (10001) and get `/work` handed over.
+The suite covers: writes outside `/work` incl. redirects, read-only `/inputs` and tool dir,
+the upstream key (env, files, opencode's DB), internet/DNS/metadata, host ports other than
+gateway and MCP, other sandboxes' port 4096, gateway misuse (other model, `/models`,
+other endpoints, no key, other provider), MCP without or with a forged token and
+ungranted tools, `opencode.json`/`.opencode` self-widening, planted `.git` config, hooks
+and filters (no host marker), and symlinks out of the repo.
+
 **Verified in O2 (contract tests in `tests/harness/test_opencode_contract_o2.py`):**
 `permission.asked` → reply `once`/`reject` round-trip; `always` covers repeat prompts for
 the session; abort stops a running bash call; edit patterns are project-relative and a later

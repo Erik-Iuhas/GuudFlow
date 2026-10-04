@@ -46,7 +46,46 @@ jobs:
           git config --global user.name "GuudFlow CI"
 
       - name: Run tests
+        env:
+          GUUDFLOW_SKIP_DOCKER_TESTS: "1"
         run: python -m pytest -q
+
+  # Sandbox + escape suite (O10): real hardened containers, iptables host-port
+  # rules (needs root), the opencode image built offline from .tools/opencode.
+  sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: sudo -H "$(which python)" -m pip install -r requirements.txt
+
+      - name: Cache opencode binary
+        uses: actions/cache@v4
+        with:
+          path: .tools/opencode
+          key: opencode-${{ runner.os }}-${{ hashFiles('core/harness/server.py', 'scripts/install_opencode.sh') }}
+
+      - name: Install pinned opencode
+        run: scripts/install_opencode.sh
+
+      - name: Configure git identity
+        run: |
+          sudo git config --global user.email "ci@guudflow.invalid"
+          sudo git config --global user.name "GuudFlow CI"
+
+      - name: Escape suite and sandbox tests (as root, for iptables)
+        run: >
+          sudo -E env "PATH=$PATH" "$(which python)" -m pytest -q -rs
+          tests/worker/test_sandbox_manager.py
+          tests/harness/test_run_docker.py
+          tests/harness/test_escape_suite.py
 
   studio:
     runs-on: ubuntu-latest

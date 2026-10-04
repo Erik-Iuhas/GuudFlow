@@ -50,6 +50,7 @@ LABEL_ROLE = "guudflow.role"
 OPENCODE_PORT = 4096
 
 _DOCKERFILE = Path(__file__).resolve().parents[1] / "sandbox" / "agent-opencode.Dockerfile"
+AGENT_UID = 10001                      # the image's unprivileged `agent` user
 _AGENT_HOME = "/home/agent"
 _CONTAINER_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 _HEALTH_POLL_SECONDS = 0.25
@@ -301,7 +302,7 @@ class SandboxManager:
                 _AGENT_HOME: "rw,size=512m,mode=1777",
             },
             "volumes": volumes,
-            "user": spec.user or f"{os.getuid()}:{os.getgid()}",
+            "user": self.container_user(spec),
             "environment": self.container_env(spec),
             "working_dir": "/work",
             "labels": {LABEL_RUN: spec.run_id, LABEL_ROLE: spec.role},
@@ -312,9 +313,38 @@ class SandboxManager:
 
     # -------------------------------------------------------------- lifecycle
 
+    @staticmethod
+    def container_user(spec: SandboxSpec) -> str:
+        """uid:gid the agent runs as: the host user, never root.
+
+        When the runner itself is root (CI, dev containers) the agent runs as the
+        image's unprivileged `agent` user instead, and `start()` hands it /work.
+        """
+        if spec.user:
+            return spec.user
+        if os.getuid() == 0:
+            return f"{AGENT_UID}:{AGENT_UID}"
+        return f"{os.getuid()}:{os.getgid()}"
+
+    @staticmethod
+    def _hand_over_workdir(spec: SandboxSpec, user: str) -> None:
+        """Make /work writable for a non-host agent uid (root runner only)."""
+        uid, _, gid = user.partition(":")
+        if os.getuid() != 0 or int(uid) == 0:
+            return
+        root = Path(spec.workdir)
+        for path in [root, *root.rglob("*")]:
+            if path.is_relative_to(root / ".guudflow"):
+                continue
+            try:
+                os.lchown(path, int(uid), int(gid or uid))
+            except FileNotFoundError:
+                continue
+
     async def start(self, spec: SandboxSpec, *, timeout: float = 60.0) -> Sandbox:
         """Start the sandbox and wait until opencode's /global/health answers 200."""
         kwargs = await asyncio.to_thread(self.container_kwargs, spec)
+        await asyncio.to_thread(self._hand_over_workdir, spec, kwargs["user"])
         try:
             container = await asyncio.to_thread(self._run_container, kwargs)
         except Exception as exc:  # noqa: BLE001 - docker raises many types; rewrap once

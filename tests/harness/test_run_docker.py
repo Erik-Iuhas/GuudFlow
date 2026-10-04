@@ -28,6 +28,9 @@ FAKE_MODEL = ModelInfo(id="fake-model", provider="fake", tier="solid", supports_
 
 
 def _docker_ok() -> bool:
+    import os
+    if os.environ.get("GUUDFLOW_SKIP_DOCKER_TESTS"):  # CI runs these in the Docker job
+        return False
     try:
         from worker.sandbox_manager import SandboxManager
         return SandboxManager.available() and opencode_available()

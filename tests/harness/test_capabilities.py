@@ -173,3 +173,16 @@ def test_unknown_role_type_rejected() -> None:
 def test_infer_role_type(role: str, reviewer: bool, declared: str, expected: str) -> None:
     from core.harness.capabilities import infer_role_type
     assert infer_role_type(role, is_reviewer=reviewer, declared=declared) == expected
+
+
+def test_role_hints_match_whole_words_only() -> None:
+    """O10 finding: "ui" inside "builder" made plain builders frontend builders."""
+    from core.harness.capabilities import infer_role_type
+    assert infer_role_type("builder") == "builder"
+    assert infer_role_type("squad") == "builder"
+    assert infer_role_type("guide") == "builder"
+    assert infer_role_type("ui_dev") == "frontend_builder"
+    assert infer_role_type("frontend") == "frontend_builder"
+    assert infer_role_type("qa") == "tester"
+    assert infer_role_type("code_reviewer") == "reviewer"
+    assert infer_role_type("tech_lead") == "overseer"
