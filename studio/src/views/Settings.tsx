@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { settingsApi, type SettingsState } from "../api";
 import { StorageSection } from "../components/SettingsDrawer";
+import { ThemeToggle } from "../components/ThemeToggle";
 
 export function Settings() {
   const [settings, setSettings] = useState<SettingsState | null>(null);
@@ -23,6 +24,14 @@ export function Settings() {
   return (
     <div className="page">
       <h1>Settings</h1>
+
+      <section className="mb-4 max-w-[720px]">
+        <h2 className="mb-2 text-base font-semibold">Appearance</h2>
+        <ThemeToggle />
+        <p className="mt-2 text-xs text-muted-foreground">
+          Dark mode currently restyles the new components only; legacy views follow in a later UI step.
+        </p>
+      </section>
 
       {loading && <div className="settings-loading">Loading…</div>}
       {error && <div className="settings-error">Error: {error}</div>}
