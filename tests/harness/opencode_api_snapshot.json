@@ -1,0 +1,57 @@
+{
+  "endpoints": {
+    "POST /session": [
+      "agent",
+      "metadata",
+      "model",
+      "parentID",
+      "permission",
+      "title",
+      "workspaceID"
+    ],
+    "POST /session/{sessionID}/message": [
+      "agent",
+      "format",
+      "messageID",
+      "model",
+      "noReply",
+      "parts",
+      "system",
+      "tools",
+      "variant"
+    ],
+    "POST /session/{sessionID}/prompt_async": [
+      "agent",
+      "format",
+      "messageID",
+      "model",
+      "noReply",
+      "parts",
+      "system",
+      "tools",
+      "variant"
+    ],
+    "GET /session/{sessionID}/message": [],
+    "POST /session/{sessionID}/abort": [],
+    "GET /session/status": [],
+    "GET /session/{sessionID}/diff": [],
+    "POST /permission/{requestID}/reply": [
+      "message",
+      "reply"
+    ],
+    "GET /event": [],
+    "GET /global/health": []
+  },
+  "events": [
+    "file.edited",
+    "message.part.updated",
+    "message.updated",
+    "permission.asked",
+    "permission.replied",
+    "session.compacted",
+    "session.error",
+    "session.idle",
+    "session.status",
+    "todo.updated"
+  ]
+}

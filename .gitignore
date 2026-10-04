@@ -23,3 +23,5 @@ data/personas/
 .DS_Store
 .idea/
 .vscode/
+.tools/
+.claude/worktrees/
