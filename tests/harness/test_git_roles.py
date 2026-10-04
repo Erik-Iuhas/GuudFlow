@@ -118,3 +118,24 @@ def test_parallel_conflict_is_reported(tmp_path: Path) -> None:
     assert clones.collect("a", "a").merged
     result = clones.collect("b", "b")
     assert not result.merged and "conflict" in (result.problem or "")
+
+
+def test_escaping_symlinks_are_refused_but_inner_links_allowed(tmp_path: Path) -> None:
+    main, clones, _ = _setup(tmp_path)
+    work = clones.ensure("builder", "Sam")
+    (work / "real.txt").write_text("ok\n")
+    (work / "inner").symlink_to("real.txt")
+    assert clones.collect("builder", "inner link").merged
+    (work / "leak").symlink_to("/etc/passwd")
+    result = clones.collect("builder", "leak")
+    assert not result.merged and "leak -> /etc/passwd" in (result.problem or "")
+    assert not (main.working_dir / "leak").is_symlink()
+
+
+def test_relative_symlink_escape_refused(tmp_path: Path) -> None:
+    main, clones, _ = _setup(tmp_path)
+    work = clones.ensure("builder", "Sam")
+    (work / "sub").mkdir()
+    (work / "sub" / "up").symlink_to("../../../secrets")
+    result = clones.collect("builder", "climb")
+    assert not result.merged and "sub/up" in (result.problem or "")

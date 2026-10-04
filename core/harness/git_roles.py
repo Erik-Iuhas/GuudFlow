@@ -26,6 +26,7 @@ is reported as failed with the reason.
 from __future__ import annotations
 
 import fnmatch
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -146,6 +147,26 @@ class RoleClones:
         """Recent commits on the role's branch."""
         return self.git(role, "log", f"-{max(1, min(limit, 100))}", "--format=%h %an: %s")
 
+    def _unsafe_symlinks(self, branch: str, paths: list[str]) -> list[str]:
+        """Committed symlinks on `branch` that are absolute or climb out of the repo.
+
+        Such a link merged into main would make host-side readers (repo map,
+        artifact scan, a later checkout) follow it to host files.
+        """
+        if not paths:
+            return []
+        repo, bad = self.main.repo, []
+        for line in repo.git.ls_tree("-r", branch, "--", *paths).splitlines():
+            meta, _, path = line.partition("\t")
+            mode, _kind, sha = meta.split()
+            if mode != "120000":
+                continue
+            target = repo.git.cat_file("-p", sha)
+            resolved = os.path.normpath(os.path.join("/repo", os.path.dirname(path), target))
+            if target.startswith("/") or not resolved.startswith("/repo/"):
+                bad.append(f"{path} -> {target}")
+        return bad
+
     def collect(self, role: str, summary: str) -> CollectResult:
         """Bring `agent/{role}` home: commit, fetch, check, merge into main."""
         branch = self.branch(role)
@@ -164,6 +185,10 @@ class RoleClones:
         if protected:
             return CollectResult(merged=False, new_commits=new_commits, changed_files=changed,
                                  problem=f"touched protected paths: {', '.join(protected)}")
+        links = self._unsafe_symlinks(branch, changed)
+        if links:
+            return CollectResult(merged=False, new_commits=new_commits, changed_files=changed,
+                                 problem=f"symlinks pointing outside the repo: {', '.join(links)}")
         work = self.path(role)
         secrets = [f"{p} ({reason})" for p in changed
                    if (work / p).is_file() and not (work / p).is_symlink()
