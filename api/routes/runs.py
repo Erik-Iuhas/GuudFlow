@@ -158,7 +158,21 @@ async def get_run(request: Request, run_id: str) -> dict:
     if registry is not None and meta.get("status") == "running":
         if run_id not in registry.runs:
             meta["status"] = "stale"
+    await _add_harness_meta(request, meta)
     return meta
+
+
+async def _add_harness_meta(request: Request, meta: dict) -> None:
+    """Fill `harness` and `token_budget_usd` from the project when the run meta lacks
+    them (Studio's cockpit picks its view and budget meter from these)."""
+    if "harness" in meta and "token_budget_usd" in meta:
+        return
+    store = getattr(request.app.state, "project_store", None)
+    project = await store.get(meta["project_id"]) if store and meta.get("project_id") else None
+    project = project or {}
+    meta.setdefault("harness", "legacy" if project.get("harness") == "legacy" else "opencode")
+    budget = (project.get("approval_gates") or {}).get("token_budget_usd")
+    meta.setdefault("token_budget_usd", budget if isinstance(budget, (int, float)) else None)
 
 
 @router.get("/{run_id}/board")

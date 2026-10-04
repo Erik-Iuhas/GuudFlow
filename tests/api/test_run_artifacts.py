@@ -119,3 +119,22 @@ async def test_visual_feedback_needs_token_and_active_run(client, app, auth_head
     r = await client.post("/api/runs/gone/visual_feedback", headers=auth_header,
                           json={"request_id": "r", "feedback": ""})
     assert r.status_code == 422
+
+
+async def test_run_meta_reports_harness_and_budget(tmp_path, monkeypatch) -> None:
+    """The cockpit reads harness and token_budget_usd from GET /api/runs/{id}."""
+    from types import SimpleNamespace
+
+    from api.routes.runs import _add_harness_meta
+
+    class Store:
+        async def get(self, pid: str) -> dict:
+            return {"harness": "legacy", "approval_gates": {"token_budget_usd": 5}} if pid == "old" else {}
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(project_store=Store())))
+    old = {"project_id": "old"}
+    await _add_harness_meta(request, old)  # type: ignore[arg-type]
+    assert old["harness"] == "legacy" and old["token_budget_usd"] == 5
+    new = {"project_id": "new"}
+    await _add_harness_meta(request, new)  # type: ignore[arg-type]
+    assert new["harness"] == "opencode" and new["token_budget_usd"] is None
