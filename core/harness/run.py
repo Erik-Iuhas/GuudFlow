@@ -201,8 +201,14 @@ class OpencodeRun:
                                   watchdog=self._watchdog if self.overseer else None,
                                   watchdog_interval=self.settings.watchdog_interval)
             self.runner._scheduler = scheduler  # noqa: SLF001 — lets force_stop() reach it
+            if self.flow is not None:
+                # Humans edit the board through the card API (S34): re-arm roles
+                # that got a card back and let the scheduler look again.
+                self.workspace.board_listeners.append(self.flow.settle)
             return await scheduler.run()
         finally:
+            if self.flow is not None and self.flow.settle in self.workspace.board_listeners:
+                self.workspace.board_listeners.remove(self.flow.settle)
             await self.shutdown()
 
     def _setup_overseer(self) -> None:
