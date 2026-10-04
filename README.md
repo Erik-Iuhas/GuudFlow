@@ -5,7 +5,20 @@ proposes a team, you approve it, and the team runs — with a shared
 workspace, a shared git repo, structured inter-agent communication, and a
 sandboxed code-execution surface.
 
-**Status: phases A, B, C, D-prime, D, F, G-prime, G, K, milestones
+**Opencode harness.** Agents now run on [opencode](https://github.com/anomalyco/opencode),
+headless, one sandboxed server per role, and `opencode` is the default harness for new projects.
+GuudFlow stays the manager: the scheduler, the task board (cards move only on scheduler events),
+personas and memory, per-role permissions, an LLM gateway that keeps provider keys on the host, a
+host-side MCP server for board and web tools, an overseer for stuck runs, and Studio. Agents finish
+every turn with a validated structured result instead of free-text protocol blocks. The original
+in-process agent loop is still in the repo behind `harness: "legacy"` until it is retired. To try it,
+see [Run the demo](#run-the-demo). Design: [docs/OPENCODE_HARNESS_PLAN.md](docs/OPENCODE_HARNESS_PLAN.md);
+task status: [docs/OPENCODE_WORK_BREAKDOWN.md](docs/OPENCODE_WORK_BREAKDOWN.md).
+
+The notes below on the inter-agent protocol, `ask-peer`, tech lead, repo map and the 12-layer prompt
+describe the legacy harness.
+
+**Status (legacy harness): phases A, B, C, D-prime, D, F, G-prime, G, K, milestones
 M0–M6, and Tracks 1, 3, 4, 7, 8, 9, 11, 12 shipped — backend tests +
 studio typecheck/build green.**
 Recent: subtask decomposition with active-subtask prompt layer
@@ -22,12 +35,11 @@ multi-tenant), I (headless service), F.5 (persona author depth), J
 [ROADMAP.md](ROADMAP.md). User stories driving priorities are in
 [docs/USER_STORIES.md](docs/USER_STORIES.md).
 
-**Architecture diagrams** — ASCII UML, sequence, state, deployment, and
-prompt-stack diagrams reflecting the current (post-M4) shape of the
-codebase live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Diagrams
-render anywhere — phones, terminals, plain markdown viewers — without
-needing a Mermaid runtime. Read that before `DESIGN.md` if you want the
-live picture; read `DESIGN.md` for original intent + rationale.
+**Architecture diagrams** — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) has Mermaid diagrams for
+the opencode harness (components and data flow, turn lifecycle, sandbox and network layout, card
+flow) and ASCII UML, sequence, state, deployment and prompt-stack diagrams for the earlier shape of
+the codebase (the legacy harness). Read that before `DESIGN.md` if you want the live picture; read
+`DESIGN.md` for original intent + rationale (section 39 summarises the opencode harness).
 
 ## What it actually is
 
@@ -91,6 +103,91 @@ current-state). The full intent / rationale is in
 [DESIGN.md](DESIGN.md) (37 sections, plus a refactor addendum at the
 end). Build plan and stage-by-stage progress is in
 [`.claude/progress/`](.claude/progress/).
+
+## Run the demo
+
+The generic one-shot takes a goal and runs a default team on it end to end: an optional researcher
+(the only role with web access), a planner that splits the work into task cards, two builders working
+in parallel, and a reviewer with a two-round review loop. An overseer is added automatically. See
+[plan section 10](docs/OPENCODE_HARNESS_PLAN.md).
+
+### Prerequisites
+
+1. Python deps and the backend setup from [Run it locally](#run-it-locally) (step 1).
+2. The pinned opencode binary (needs Node and npm):
+   ```bash
+   scripts/install_opencode.sh        # installs opencode into .tools/opencode (git-ignored)
+   ```
+   Set `OPENCODE_BIN` to use a binary somewhere else. A binary on your `PATH` is deliberately not used.
+3. A model key on the **host only**: `ANTHROPIC_API_KEY` (or another provider's key from
+   `data/models.json`). It is read by the LLM gateway on the host. It is never put in a project, a
+   sandbox or an agent's environment; agents get a per-role virtual key instead. The API loads `.env`;
+   the CLI reads the process environment, so export it first:
+   ```bash
+   set -a; source .env; set +a
+   ```
+4. Docker is optional.
+   - **With Docker:** every role runs in a hardened container on an internal network that can reach only
+     the gateway and the MCP server. The agent image is built on first use. This is the default
+     (`--sandbox auto` picks Docker when the daemon is available) and is required when
+     `GUUDFLOW_ENV=production`.
+   - **Without Docker:** use host mode, `--sandbox host`. Agents run as processes on your machine with
+     no isolation, and a warning is logged on every spawn. Use it for trusted local demos only; it is
+     refused when `GUUDFLOW_ENV=production`. Note that with `--sandbox auto` and no Docker, a run also
+     falls back to host mode outside production.
+
+### From the command line
+
+```bash
+python -m cli.oneshot "Build a typed Python client for the Open-Meteo API with tests" \
+    --example api-client-library --web researcher --budget 5 --demo
+# or: scripts/guudflow oneshot "..." --demo
+```
+
+Options: `--web researcher|off` (default `researcher`), `--budget USD` (spend cap enforced at the
+gateway, default 5), `--demo` (auto-approve the team and its capabilities), `--example NAME` (seed the
+run's `inputs/` from `data/example_projects/NAME`), `--sandbox auto|docker|host`, `--run-dir`,
+`--max-minutes`. Board events print live, one line each; at the end you get the run summary and a cost
+table per role. Exit status is 0 when the run completed, 1 otherwise, 2 on bad arguments.
+
+### From the API
+
+```bash
+uvicorn api.main:app --port 8000
+curl -X POST http://localhost:8000/api/oneshot \
+  -H "Authorization: Bearer $GUUDFLOW_API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"goal": "Build a typed Python client for the Open-Meteo API with tests", "web": "researcher", "budget": 5, "demo": true}'
+```
+
+It returns `202` at once with `job_id`, `run_id` and a `status_url` (`/api/invoke/{job_id}/status`) to
+poll. Without `"demo": true` the project is stored but not started: the `202` carries
+`needs_approval`, a cost estimate and a `confirm_url`; approve the team in Studio (or POST
+`{"confirm": true}` to that URL) to start the run. Open Studio to watch the run live (board, quip feed,
+task cards, pending approvals). `GUUDFLOW_API_TOKEN` can be unset in dev mode.
+
+### Quality gate
+
+An offline check of a finished run (no network, no model):
+
+```bash
+scripts/run_quality_gate.sh data/runs/<run_id> api-client-library
+```
+
+The second argument is optional and adds that example project's functional checks (available:
+`algorithm-with-benchmarks`, `api-client-library`, `bug-hunt-and-fix`, `cli-tool-from-spec`,
+`codebase-wiki`, `fullstack-web-app`). It prints a report table and exits 0 when the gate passes, 1
+when it fails, 2 on a usage error. Add `--json` for machine-readable output.
+
+### Tests
+
+```bash
+pytest tests/harness/    # fake LLM and, if installed, the real pinned opencode; no API key needed
+```
+
+Tests that need the opencode binary or Docker skip cleanly when they are missing. The security escape
+suite (`tests/harness/test_escape_suite.py`) needs Docker and runs in CI's Docker job.
+
+---
 
 ## Run it locally
 
@@ -191,23 +288,32 @@ Set environment variables in `.env` (the compose file reads it):
 
 ```
 guudflow/
-├── core/              ← signals, protocol, workspace, scheduler, runner,
-│                        llm/ (split package), loop_guard, edit_blocks,
-│                        run_initializer, run_loader, training/, ...
+├── core/              ← signals, workspace, scheduler, runner, playbook,
+│                        oneshot, run_initializer, run_loader, training/, ...
+│                        (legacy harness: protocol, llm/, loop_guard,
+│                        edit_blocks, context_manager, repo_map)
+│   └── harness/       ← opencode harness: OpencodeRun, client, event bridge,
+│                        capabilities + permissions, results, task board,
+│                        detectors + overseer, git roles, MCP server and
+│                        host tools (web, screenshot, visual_diff)
+├── gateway/           ← LLM gateway: virtual keys, spend caps, cost log
+├── cli/               ← `python -m cli.oneshot`
 ├── agents/            ← BaseAgent, abstract archetypes, persona,
 │                        persona_desk, persona_chat, registry, catalog,
 │                        tools/, builtin/
 ├── api/               ← FastAPI app + routes + WebSocket
-├── worker/            ← JobRunner, queue, DockerManager
+├── worker/            ← JobRunner, queue, SandboxManager, DockerManager
 ├── studio/            ← Vite + React + TS frontend
-├── sandbox/           ← per-run sandbox Dockerfile (§29)
+├── sandbox/           ← agent-opencode image (+ chart variant) and the
+│                        legacy per-run sandbox Dockerfile (§29)
 ├── data/              ← personas, projects, runs, role_templates,
 │                        manifestos, models.json, training_camp/
 ├── tests/             ← pytest suite
 ├── scripts/           ← setup + sandbox build helpers
-├── docs/              ← USER_STORIES, worker-archetypes,
+├── docs/              ← OPENCODE_HARNESS_PLAN, OPENCODE_WORK_BREAKDOWN,
+│                        STUDIO_UI_SPEC, USER_STORIES, worker-archetypes,
 │                        ARCHITECTURE.md + diagrams/
-├── DESIGN.md          ← full architecture (37 sections + refactor addendum)
+├── DESIGN.md          ← full architecture (39 sections; 39 = opencode harness)
 ├── CLAUDE.md          ← operating instructions for AI assistants
 └── ROADMAP.md         ← what's next
 ```
@@ -222,6 +328,8 @@ you need.
 | `ANTHROPIC_API_KEY` | (unset) | Required for real LLM calls |
 | `GUUDFLOW_API_TOKEN` | (unset) | Bearer token for credentialed routes. Unset = dev-permissive; required in production |
 | `GUUDFLOW_MODE` | `dev` | `dev` or `production`. Production refuses to start without Docker; gates `code-exec` to container path |
+| `GUUDFLOW_ENV` | unset | Set to `production` to make the opencode harness refuse host mode (Docker required) |
+| `OPENCODE_BIN` | `.tools/opencode/...` | Path to the pinned opencode binary (see `scripts/install_opencode.sh`) |
 | `GUUDFLOW_DATA_DIR` | `./data` | Where runs, personas, and projects are stored |
 | `GUUDFLOW_DISABLE_INPROC_WORKER` | unset | Set to `1` to disable the in-process worker (use a separate worker process instead) |
 | `GUUDFLOW_CORS_ORIGINS` | `*` | Comma-separated CORS origins |

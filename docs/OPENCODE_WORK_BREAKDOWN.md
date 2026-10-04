@@ -32,6 +32,84 @@ at the end). Opus reviews each one before it merges.
 
 ---
 
+## Status
+
+As of commit `e80822f` plus the documentation update (S16). Legend: **Done** = merged, offline tests
+green. **Partly** = the offline part is merged, the rest is listed. **Deferred (you)** = needs a real
+model and API key, or a decision only you can make; nothing in the repo blocks it. **Not started**.
+
+Everything that runs offline against the fake LLM is done. What is left falls into three groups:
+the real-model runs (O4, O12, O14, O17 and the real-model halves of O19 and O24), the legacy-code
+retirement (S15) and final review (O15), and the rest of the Studio track (S24 to S29, S33, O22).
+
+| Phase | Task | Status | Notes |
+|---|---|---|---|
+| P0 | O1 | Done | Fake LLM, locked-launch fixture, `scripts/install_opencode.sh`, `/doc` snapshot test |
+| P0 | O16 | Done | `core/harness/capabilities.py` |
+| P0 | S1 | Done | `core/harness/results.py` |
+| P0 | S2 | Done | `core/harness/permissions.py` |
+| P0 | S3 | Done | `core/harness/opencode_client.py` |
+| P0 | O2 | Done | Contract tests; findings are in plan §2.2 |
+| P0 | S35 | Done | `.github/workflows/ci.yml` (backend, harness contract, Docker escape-suite job, Studio) |
+| P1 | S4 | Done | `core/harness/config_gen.py` |
+| P1 | O3 | Done | `core/harness/run.py` (`OpencodeRun`) and `opencode_runner.py`; `harness` flag in `ProjectConfig` |
+| P1 | O4 | Deferred (you) | First real-model run of one builder on `cli-tool-from-spec`; needs an API key |
+| P2 | O5 | Done | Event-to-signal table in plan §2.1a; signal types in `core/signals.py` |
+| P2 | S5 | Done | `core/harness/event_bridge.py` |
+| P2 | O6 | Done | `core/harness/approvals.py` |
+| P2 | S6 | Done | Legacy Run view renders the harness signals |
+| P2 | S17 | Done | Capability switches on team approval |
+| P3 | S7 | Done | `sandbox/agent-opencode.Dockerfile`, `worker/sandbox_manager.py` |
+| P3 | O7 | Done | Hardening review and network isolation wired in `OpencodeRun` |
+| P3 | S8 | Done | `gateway/app.py` |
+| P3 | S9 | Done | `core/harness/mcp_server.py`, `mcp_tools.py` |
+| P3 | S18 | Done | `core/harness/mcp_web.py` (a search-provider key is optional, see "Before anything starts") |
+| P3 | S19 | Done | `core/harness/mcp_browser.py` |
+| P3 | S30 | Done | `core/harness/artifacts.py` |
+| P3 | S31 | Done | `core/harness/mcp_visual.py` |
+| P3 | O8 | Done | Security review; findings fixed (host-only git dir and tool dir) |
+| P3 | O9 | Done | `core/harness/git_roles.py` |
+| P3 | O10 | Done | `tests/harness/test_escape_suite.py`; skips without Docker, runs in CI |
+| P4 | O11 | Done | Review edges, blocking, cycle to human, parking, `max_parallel`, `has_work`, watchdog |
+| P4 | S28 | Done | `core/harness/tasks.py` |
+| P4 | O23 | Done | `core/harness/task_board.py`, `task_flow.py` |
+| P4 | S34 | Done | `api/routes/cards.py`, `core/harness/card_ops.py`, live re-arm |
+| P4 | S21 | Done | `core/harness/overseer.py` |
+| P4 | O18 | Done | `core/harness/detectors.py`, `overseer_flow.py`; overseer replaces the tech lead |
+| P4 | O19 | Partly | Offline stall scenarios with a scripted model are done; tuning the overseer prompt on a real model is deferred (you) |
+| P4 | O12 | Deferred (you) | Real multi-agent demo on `fullstack-web-app`; needs an API key |
+| P5 | O13 | Done | Plan §5.11 |
+| P5 | S11 | Done | `core/meta_proposal.py` |
+| P5 | S12 | Done | `core/harness/persona_prompt.py` |
+| P5 | S13 | Done | `memory_writer` reads opencode runs |
+| P5 | S14 | Done | `tests/quality/`, `scripts/run_quality_gate.sh` (runs offline on a recorded workspace) |
+| P5 | S22 | Done | `core/playbook.py` |
+| P5 | O20 | Done | `core/harness/retrospective.py`; continuation regression test |
+| P5 | O24 | Partly | Visual review loop is done and tested offline; the real-model run on a frontend example is deferred (you) |
+| P5 | S32 | Done | `sandbox/agent-opencode-viz.Dockerfile` |
+| P5 | S20 | Done | `core/oneshot.py`, `cli/oneshot.py`, `api/routes/oneshot.py`, `data/teams/default_oneshot.json` |
+| P5 | O14 | Deferred (you) | All six example projects for real, quality gate on two; needs an API key |
+| P5 | O17 | Deferred (you) | The recorded demo on `api-client-library` with a real model; needs an API key |
+| P6 | S15 | Not started | Legacy code is still in the repo behind `harness: "legacy"` (plan §6.3) |
+| P6 | S16 | Done | This documentation update: CLAUDE.md, DESIGN.md, `docs/ARCHITECTURE.md`, README |
+| P6 | O15 | Partly | The `harness` default is flipped to `opencode` for new and stored projects. Still open: your review of S16's hard-constraint text (plan §6.4), the S15 retirement review, and the final full real-model run |
+| UI | O21 | Done | `docs/STUDIO_UI_SPEC.md`, generated `runEvents.gen.ts` |
+| UI | S23 | Done | U0: Tailwind and tokens, ui primitives, run-event store, shared components migrated |
+| UI | S24 | Not started | U1 Run cockpit |
+| UI | S25 | Not started | U2 one-shot launcher, team approval as a graph |
+| UI | S29 | Not started | U3 task board view |
+| UI | S33 | Not started | U3 artifact gallery |
+| UI | S26 | Not started | U3 overseer panel, run report, project page |
+| UI | S27 | Not started | U4 migrate remaining views, delete `styles.css` |
+| UI | O22 | Not started | UX review passes |
+
+**What you need to do to finish the deferred work:** provide an API key (see "Before anything starts")
+and run O4, O12, O14 and O17, plus the real-model parts of O19 and O24, using the commands in the
+README's "Run the demo" section. Then review the CLAUDE.md changes marked "changed for the opencode
+harness, plan §6.4" and say whether S15 (retiring the legacy code) should go ahead.
+
+---
+
 ## Phase overview
 
 | Phase | Goal | Tasks | Estimate | Exit (plan §7) |

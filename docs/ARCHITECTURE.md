@@ -2,24 +2,251 @@
 
 > This is the **current-state** map of the system. It is meant to be read
 > first, before `DESIGN.md`. The design doc is still the canonical
-> specification of intent (37 sections), but several layers and flows
-> have been refactored since it was written; this overview points to the
-> diagrams that reflect what actually exists in the repo.
+> specification of intent, but several layers and flows have been
+> refactored since it was written; this overview points to the diagrams
+> that reflect what actually exists in the repo.
+>
+> **Two harnesses.** Agent work now runs on [opencode](https://github.com/anomalyco/opencode)
+> in sandboxes. That is the default harness and the first part of this
+> document. The original in-process agent loop (`harness: "legacy"`) still
+> exists until its retirement task (work breakdown S15) lands; diagrams
+> 03 to 05, 07 and 11 and the refactor log describe that legacy harness.
 
 For high-level context, see [`README.md`](../README.md). For the full
 intent + rationale, see [`DESIGN.md`](../DESIGN.md). For deviations from
 the original design, see the [refactor log](#refactor-log) below.
 
-> **Diagram format.** All diagrams in `docs/diagrams/` are **ASCII art**
-> (box-drawing characters + plain arrows) so they render cleanly on
-> phones, terminals, plain-text viewers, and any markdown frontend —
-> no Mermaid runtime required.
+> **Diagram format.** The legacy diagrams in `docs/diagrams/` are **ASCII
+> art** (box-drawing characters + plain arrows) so they render cleanly on
+> phones, terminals, and plain-text viewers. The opencode harness diagrams
+> below are **Mermaid** blocks, which GitHub and most markdown viewers
+> render; the same facts are also given in the tables next to each one.
+
+---
+
+## Opencode harness (default)
+
+Design source: [`OPENCODE_HARNESS_PLAN.md`](OPENCODE_HARNESS_PLAN.md). Task list and
+status: [`OPENCODE_WORK_BREAKDOWN.md`](OPENCODE_WORK_BREAKDOWN.md). Studio:
+[`STUDIO_UI_SPEC.md`](STUDIO_UI_SPEC.md). Summary in
+[`DESIGN.md` section 39](../DESIGN.md#39-opencode-harness).
+
+GuudFlow is the manager: it decides who runs when, with which permissions, and records what
+happened. opencode does the agent work. One `opencode serve` (pinned 1.18.34) runs per role, in its
+own sandbox, working in its own git clone.
+
+### Components
+
+| Component | Where | Job |
+|---|---|---|
+| Runner | `core/runner.py` (`AgentRunner`) | Run setup (workspace, run repo, persisters, quips); hands the run to `OpencodeRun` when `project.harness == "opencode"`; runs `memory_writer` and the retrospective afterwards |
+| `OpencodeRun` | `core/harness/run.py` | Builds the role table, starts the MCP server and gateway, executes one turn per spawn, merges branches |
+| Scheduler | `core/scheduler.py` | Unchanged class. Decides when to spawn: dependencies, joins, review edges (`request_rework`), blocking (`block`), parking, `max_parallel`, `has_work`, a watchdog hook |
+| opencode servers | sandbox containers, or host processes in `host_dev` mode | The tool loop, edits, shell, LSP, compaction, provider retries |
+| Sandbox manager | `worker/sandbox_manager.py`, `sandbox/agent-opencode.Dockerfile` | Hardened container per role, one internal network per run |
+| LLM gateway | `gateway/app.py` | Holds the real provider keys, issues per-(run, role) virtual keys, enforces model allow-list and spend caps, writes the cost log |
+| GuudFlow MCP server | `core/harness/mcp_server.py` | The only way an agent talks back: `submit_result`, `post_note`, `read_board`, `report_progress`, `ask_human`, `request_visual_feedback`, `request_package`, git `changes` / `history`; the role comes from the bearer token |
+| Host tools | `core/harness/mcp_web.py`, `mcp_browser.py`, `mcp_visual.py` | `web_search` / `web_fetch`, Playwright `screenshot`, `visual_diff`; granted per role |
+| Event bridge | `core/harness/event_bridge.py` | opencode SSE events become board signals (`TOOL_CALL`, `THINKING`, `AGENT_TODO`, ...) |
+| Approval gate | `core/harness/approvals.py` | Answers `permission.asked`: sticky "always", project allow-list, else a human |
+| Task board | `core/harness/task_board.py`, `task_flow.py`, `tasks.py` | Cards from the planner's validated plan; column moves on scheduler events only |
+| Overseer and detectors | `core/harness/detectors.py`, `overseer.py`, `overseer_flow.py` | Stuck detectors wake the overseer; the scheduler applies its interventions |
+| Retrospective and playbook | `core/harness/retrospective.py`, `core/playbook.py` | End-of-run retrospective, per-project playbook, carry-forward brief |
+| Git roles | `core/harness/git_roles.py` | Per-role checkouts, runner-side fetch, checks and merge |
+| Artifact registry | `core/harness/artifacts.py` | Indexes images, SVG, PDF and HTML an agent produced; `ARTIFACT` signals |
+| Capabilities | `core/harness/capabilities.py`, `permissions.py`, `config_gen.py` | Per-role toggles compiled to the opencode ruleset, container profile and MCP grants; the generated opencode config |
+| One-shot | `core/oneshot.py`, `cli/oneshot.py`, `api/routes/oneshot.py` | One goal, default team (`data/teams/default_oneshot.json`), 202 from the API |
+| Studio event store | `studio/src/stores/runEvents.ts`, `runEvents.gen.ts` | One typed run-event store fed by `/ws/runs/{id}` |
+
+### Data flow
+
+```mermaid
+flowchart LR
+    Studio["Studio (React)<br/>run-event store"] <-- "REST + /ws/runs" --> API["api/ (FastAPI)"]
+    API --> Queue["worker/queue.py<br/>job runner"]
+    Queue --> Runner["AgentRunner"]
+    Runner --> Run["OpencodeRun"]
+    Run --> Sched["Scheduler"]
+    Sched -- "spawn role" --> Run
+    Run -- "prompt_async, abort" --> OC["opencode servers<br/>(one sandbox per role)"]
+    OC -- "SSE events" --> Bridge["Event bridge"]
+    Bridge --> Board[("Workspace board<br/>signals + task cards")]
+    Run --> Board
+    OC -- "LLM calls (virtual key)" --> GW["LLM gateway<br/>real keys, caps, cost log"]
+    OC -- "MCP calls (bearer token)" --> MCP["GuudFlow MCP server<br/>+ host tools"]
+    GW --> Providers["Model providers"]
+    MCP --> Board
+    MCP --> Web["Web (host side only)"]
+    Board --> Detect["Stuck detectors"]
+    Detect --> Over["Overseer<br/>(an opencode role)"]
+    Over -- "interventions" --> Sched
+    Run -- "fetch, check, merge agent/role" --> Repo[("Run repo<br/>main + agent/* branches")]
+    Runner -- "after the run" --> Retro["memory_writer,<br/>retrospective, playbook"]
+    Board --> API
+```
+
+Reading it: the scheduler owns concurrency and decides *when* a role spawns. `OpencodeRun`
+executes the spawn. Everything an agent does is visible on the board because the event bridge and the
+MCP server write signals; agents never write signals or touch each other. The overseer is itself an
+opencode role, woken by detectors that run in the scheduler, and its decisions are applied by the
+scheduler.
+
+### Turn lifecycle
+
+One spawn is one opencode session and one validated structured result.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Scheduler
+    participant R as OpencodeRun
+    participant G as Run repo (host)
+    participant O as opencode (sandbox)
+    participant L as LLM gateway
+    participant M as MCP server
+    participant B as Board and Studio
+
+    S->>R: spawn role (has_work is true)
+    R->>G: merge main into agent/role in the role's clone
+    R->>O: ensure server is up (locked config, token, virtual key)
+    R->>B: STARTED, CAPABILITIES
+    R->>O: create session with the role's permission ruleset
+    R->>O: prompt_async with the brief
+    loop until the session goes idle
+        O->>L: model call
+        L-->>O: response
+        O->>M: MCP tools (read_board, post_note, request_package, ...)
+        O-->>R: SSE events
+        R->>B: TOOL_CALL, THINKING, AGENT_TODO (event bridge)
+    end
+    O->>M: guudflow_submit_result
+    M-->>O: validation errors, fixed in the same turn
+    alt no accepted result
+        R->>O: one follow-up message in the same session
+    end
+    R->>G: commit leftovers, fetch agent/role, check, merge into main
+    R->>B: AGENT_RESULT, then COMPLETE or BLOCKED or FAILED
+    R-->>S: return (cards move, roles re-arm)
+```
+
+| Step | Detail |
+|---|---|
+| Brief | Only what opencode cannot know: goal, the card with its checklist and thread, upstream results, notes, review issues. Untrusted content is delimited |
+| Result | `AgentResult`, `ReviewResult`, `PlanResult` or `OverseerResult`, validated with Pydantic inside the MCP tool |
+| Failure | One retry, then `FAILED` with the validation error; with the task board on, a bad card turn sends the card to needs attention instead of failing the role |
+| Branch checks | Only `agent/{role}` moved; no protected paths (`inputs/`, `.github/`, `opencode.json`, `.opencode/`, `.guudflow/`); no symlinks out of the repo; `core/secret_scan.py` passes |
+| Limits | Per-turn wall clock aborts the session; opencode `steps`; `doom_loop: deny`; gateway spend caps |
+
+### Sandbox and network layout
+
+Each run gets one Docker network that is `internal` with inter-container traffic disabled. Sandboxes
+can reach exactly two services, both on the host and bound to the network's gateway IP.
+
+```mermaid
+flowchart TB
+    subgraph Host["Host (GuudFlow)"]
+        Runner["OpencodeRun"]
+        GW["LLM gateway<br/>holds real API keys"]
+        MCP["MCP server<br/>token -> role, default-deny"]
+        PW["Playwright (host)"]
+        Web["web_search / web_fetch<br/>domain policy, SSRF guard, budget"]
+        Repo[("Run repo")]
+        Keys[("Provider keys<br/>(host environment)")]
+    end
+    subgraph Net["Per-run internal Docker network (no internet, no container-to-container)"]
+        subgraph SA["Sandbox: role A"]
+            OA["opencode serve :4096<br/>read-only root, no caps, non-root"]
+            WA["/work: role A clone (rw)<br/>/inputs (ro)"]
+        end
+        subgraph SB["Sandbox: role B"]
+            OB["opencode serve :4096"]
+            WB["/work: role B clone (rw)"]
+        end
+    end
+    OA -- "virtual key" --> GW
+    OA -- "bearer token" --> MCP
+    OB -- "virtual key" --> GW
+    OB -- "bearer token" --> MCP
+    Runner -- "HTTP, password" --> OA
+    Runner -- "HTTP, password" --> OB
+    PW -- "dev server port" --> OA
+    GW --> Keys
+    GW --> Providers["Model providers (internet)"]
+    Web --> Internet["Internet"]
+    MCP --> Web
+    Runner -- "fetch agent/role" --> Repo
+    OA -. "blocked" .-> OB
+    OA -. "blocked" .-> Internet
+```
+
+| Rule | Where it is enforced |
+|---|---|
+| A sandbox reaches only the gateway and the MCP server (and only their ports) | Internal network plus host port rules (`SandboxManager.restrict_host_ports`) |
+| No sandbox reaches another sandbox or the internet, not even DNS | Network settings; verified by the escape suite |
+| Real provider keys never enter a container | The container environment is built from scratch; the gateway swaps in the real key |
+| The host drives the sandbox | Host to container works (prompting, abort, screenshots of the role's dev server) |
+| Web access is host-side | `web_search` / `web_fetch` run in the MCP server; opencode's own `webfetch` / `websearch` are denied |
+| Container hardening | Read-only root, `cap_drop ALL`, `no-new-privileges`, memory 1 GB, pid and cpu limits, tmpfs for `/tmp` and home, gVisor (`runsc`) when available |
+| Host mode | `sandbox: host_dev` / `--sandbox host` runs opencode as a host process with a warning on every spawn; refused when `GUUDFLOW_ENV=production` |
+
+### Card flow
+
+The task board is the work queue. Only scheduler-side events move a card. Humans can add a card, change
+priority and comment (through `/api/runs/{id}/cards`), but never change a column.
+
+```mermaid
+stateDiagram-v2
+    [*] --> todo: planner result validated, runner creates the card
+    todo --> in_progress: scheduler starts a turn for the card
+    in_progress --> review: result done and branch checks pass
+    in_progress --> done: result done and nobody reviews this owner
+    in_progress --> blocked: result blocked, with blocked_on
+    in_progress --> needs_attention: result failed
+    review --> done: reviewer passes every acceptance item
+    review --> in_progress: reviewer fails an item, issues on the thread, round + 1
+    review --> needs_attention: review rounds exhausted
+    blocked --> todo: the cards it waits on are done
+    needs_attention --> todo: overseer reopens it (rebrief, decide, reassign, split)
+    needs_attention --> in_progress: overseer extends the review by one round
+    done --> [*]
+```
+
+| Column | Who moves a card there | Event |
+|---|---|---|
+| to do | Runner / scheduler side | Card created from the validated plan; returned from blocked when its dependencies finish; reopened by an overseer intervention (applied by the run, not by the overseer itself) |
+| in progress | Scheduler | Turn starts for the card, or rework after a failed review |
+| review | Scheduler | Author's result is `done` and the branch passed its checks |
+| done | Scheduler | Reviewer passes every acceptance item (or no reviewer for that owner) |
+| blocked | Scheduler | Result `blocked`; an "unblock" card is made for the role it waits on |
+| needs attention | Scheduler | Result `failed` or review rounds exhausted; wakes the overseer |
+
+Cards carry a thread of typed entries (`note`, `blocked_on`, `review_issue`, `decision`,
+`intervention`, `human_comment`, `artifact`), and every brief includes the thread of its card.
+Built-in guards: files-overlap serialisation, one active card per role, a cap on the review column,
+card aging as a stuck detector.
+
+### After the run
+
+`memory_writer` records persona episodes and patterns from the run's opencode transcripts and card
+threads. Then `finalize_run()` writes a retrospective (cost per role, review rounds, interventions and
+whether they worked, stall minutes), a conservative playbook diff for
+`data/projects/{id}/playbook.json`, and a carry-forward brief for continuation runs. Nothing from the
+playbook is applied to a team without human approval.
+
+### Running it
+
+See the "Run the demo" section of the [README](../README.md): `python -m cli.oneshot "..." --demo`,
+`POST /api/oneshot`, `scripts/install_opencode.sh`, and `scripts/run_quality_gate.sh` for the offline
+quality gate on a finished run.
 
 ---
 
 ## How GuudFlow runs
 
-A run goes through six big phases. Each phase has at least one diagram.
+A run goes through six big phases. Each phase has at least one diagram. The
+phase names hold for both harnesses; under opencode, phase 4 is "scheduler ·
+opencode turns · review edges · overseer" (see the diagrams above), and the
+diagram links below describe the legacy harness.
 
 ```
    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
@@ -40,7 +267,7 @@ A run goes through six big phases. Each phase has at least one diagram.
                                            ┌──────┴────────────────┐
                                            │ 4 · Loop              │
                                            │ scheduler · agents ·  │
-                                           │ reviews · escalation  │
+                                           │ reviews · overseer    │
                                            └───────────────────────┘
 ```
 
@@ -56,9 +283,12 @@ A run goes through six big phases. Each phase has at least one diagram.
 
 ## Diagram index
 
-All diagrams use **ASCII art** so they render anywhere — including on
-phones, in terminals, and in any markdown viewer. No Mermaid runtime
-required.
+Diagrams 01 to 11 are **ASCII art** so they render anywhere. They were drawn
+before the opencode harness: 01, 02, 06, 08, 09 and 10 are still broadly right
+for run phases, personas and deployment, while 03, 04, 05, 07 and 11 describe
+the legacy agent loop (`BaseAgent`, tool catalog, ASK/ANSWER, 12-layer prompt).
+The opencode harness diagrams are the Mermaid blocks in
+[Opencode harness (default)](#opencode-harness-default) above.
 
 | # | Title | What it answers |
 |---|-------|-----------------|
@@ -72,7 +302,8 @@ required.
 | 08 | [Sequence — Persona Memory](diagrams/08-sequence-persona-memory.md) | Memory injection, post-run synthesis, lifecycle states. |
 | 09 | [State — Agent + Run](diagrams/09-state-agent-and-run.md) | The two FSMs the scheduler reasons about. |
 | 10 | [Deployment + Data Flow](diagrams/10-deployment-and-data-flow.md) | Local dev, docker compose, on-disk run layout. |
-| 11 | [Prompt Stack](diagrams/11-prompt-stack.md) | The 12-layer system prompt, cache boundary, where each layer is set. |
+| 11 | [Prompt Stack](diagrams/11-prompt-stack.md) | The 12-layer system prompt, cache boundary, where each layer is set (legacy harness; opencode roles use `core/harness/persona_prompt.py`). |
+| — | [Opencode harness](#opencode-harness-default) | Components, data flow, turn lifecycle, sandbox and network layout, card flow (Mermaid, in this file). |
 
 ---
 
@@ -80,7 +311,10 @@ required.
 
 | If you are reading… | …start with diagram |
 |---|---|
-| `core/scheduler.py` | 03, 06, 07, 09 |
+| `core/scheduler.py` | 03, 06, 07, 09; the data-flow and card-flow diagrams above |
+| `core/harness/*` | the opencode harness section above |
+| `gateway/*`, `worker/sandbox_manager.py` | the sandbox and network diagram above |
+| `cli/oneshot.py`, `core/oneshot.py`, `api/routes/oneshot.py` | the data-flow diagram above |
 | `core/runner.py` | 03, 06, 07, 09, 11 |
 | `core/workspace.py` / `signals.py` / `protocol.py` | 03, 06 |
 | `core/credentials_broker.py` / `tool_manifest.py` | 02, 05 |
@@ -98,7 +332,32 @@ required.
 
 Notable deviations from the originally-written `DESIGN.md`. The design
 doc is still the right place for *intent*; this log captures *what
-changed in the code* so the diagrams above make sense.
+changed in the code* so the diagrams above make sense. Entries below the
+opencode one describe the legacy harness unless they say otherwise.
+
+### Opencode harness (see [`OPENCODE_HARNESS_PLAN.md`](OPENCODE_HARNESS_PLAN.md))
+
+- Agent work runs on opencode, one sandboxed server per role, behind
+  `harness: "opencode"` (the default for new and stored projects).
+  `harness: "legacy"` keeps the old loop until work breakdown task S15
+  retires it.
+- New packages: `core/harness/` (runner, client, event bridge,
+  capabilities, permissions, results, task board, detectors, overseer,
+  git roles, artifacts, host MCP tools), `gateway/` (LLM gateway),
+  `worker/sandbox_manager.py` and `sandbox/agent-opencode.Dockerfile`,
+  `core/playbook.py`, `core/oneshot.py` + `cli/oneshot.py`,
+  `api/routes/{oneshot,cards,harness}.py`, `tests/harness/`,
+  `tests/quality/`.
+- Completion contract: structured results via the MCP tool
+  `guudflow_submit_result`, replacing `[COMMIT]` / `[VERIFY]` / `[ASK]`.
+- No synchronous peer ASK. Notes on cards plus `blocked_on`;
+  `Scheduler.block()` re-arms the role that must act.
+- Review is a scheduler edge (`Scheduler.request_rework`, `max_review_rounds`).
+- The task board is the work queue; only the scheduler moves cards.
+- The overseer replaces the tech lead; stuck detectors wake it.
+- File claims are dropped; each role has its own clone and branch.
+- Hard constraints 13, 18, 19, 20 and the protocol rules changed
+  (see CLAUDE.md, marked "changed for the opencode harness").
 
 ### M1 — Handshake protocol & roster awareness (commit `1ec92e4`)
 

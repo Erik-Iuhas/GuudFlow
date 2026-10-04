@@ -19,9 +19,22 @@ the agent team before any run starts. Projects become callable API endpoints for
 Full architecture is in DESIGN.md. Do not infer architecture from existing code —
 read the design doc. Every structural decision is intentional.
 
+**Opencode harness.** Agent work is done by [opencode](https://github.com/anomalyco/opencode)
+running headless, one sandboxed server per role. GuudFlow stays the manager: scheduler,
+task board, personas and memory, permissions, credentials, merges and Studio. The design is
+in `docs/OPENCODE_HARNESS_PLAN.md`, the task list in `docs/OPENCODE_WORK_BREAKDOWN.md`, and
+the Studio spec in `docs/STUDIO_UI_SPEC.md`. `opencode` is the default harness for new and
+stored projects; `harness: "legacy"` (the original in-process tool loop) still exists until the
+legacy code is retired (work breakdown S15). Where DESIGN.md and the plan disagree, the plan
+wins for the opencode harness.
+
 ---
 
 ## Token Budget Per Stage
+
+> **Note:** the stages below describe the original build (the legacy harness). The opencode
+> harness work is tracked task by task in `docs/OPENCODE_WORK_BREAKDOWN.md`, which also
+> records which tasks are done and which are deferred.
 
 Use these estimates to pace the build. At the end of each stage, check your
 actual token usage against the estimate. If you're significantly over, stop
@@ -203,18 +216,41 @@ These are from DESIGN.md sections 13, 14, and 19. They are not preferences.
 10. **Scheduler is one reusable class.** PipelineScheduler and GroupScheduler are same class, different scope.
 11. **Workspace artifacts are typed.** Use `Artifact` dataclass — never `dict[str, str]`.
 12. **Invoke endpoints return immediately.** Enqueue job, return 202. Never block on pipeline completion.
-13. **All file I/O goes through FileWorkspace.** No raw filesystem APIs in agents.
+13. **File I/O: agents write inside their sandbox; GuudFlow goes through FileWorkspace.** (changed for the opencode harness, plan §6.4) Agent file I/O happens inside the sandbox via opencode. GuudFlow-side I/O (runner, API, workspace) still uses `FileWorkspace`, with `_safe_path()` on every operation. The sandbox mount *is* the path-safety boundary: a role can write only its own clone at `/work`, `/inputs` is read-only, and the runner checks every branch (protected paths, symlinks, secrets) before merging.
 14. **Signals reference files, not contain them.** Agents post `files_written` paths, others read from disk.
 15. **Personas persist across runs.** Profile, memory, history, reputation are independent of any project.
 16. **Memory writes are conservative.** Only record lessons backed by specific evidence.
 17. **Credentialed calls go through the broker.** Agents never hold API keys, OAuth tokens, or MCP secrets. All credentialed access routes through the Credentials Broker via `request_credential()` or `invoke_mcp()`. RBAC is default-deny. See DESIGN §30.
-18. **One tool entrypoint.** Every tool call goes through `BaseAgent.call_tool(name, arguments)`. Agents never import tool classes directly and never call MCP transports themselves. The agent's `ToolManifest` is the source of truth at runtime. See DESIGN §31.
-19. **Built-in tools are namespaced.** `fs:*`, `doc:*`, `code:*`, `web:*`, `git:*`, `vis:*`, `mcp:*`. RBAC scope names match tool names 1:1. Read tools (`fs-read`, `fs-list`, `git-diff`, `doc:*`, `web-fetch`, `web-search`) are baseline; write tools require explicit RBAC scope. See DESIGN §31.
-20. **File claims are advisory; branches are the safety net.** Write tools (`fs-write`, `fs-edit`, etc.) auto-claim before the operation and release after commit. Default behaviour when another agent's claim is active is to wait. Crash → synthetic release. See DESIGN §32.
+18. **One tool policy.** (changed for the opencode harness, plan §6.4) The policy is the generated opencode permission ruleset plus MCP RBAC, both compiled from the role's capabilities (`core/harness/capabilities.py`, `permissions.py`). Agents never see credentials (rule 17 is unchanged). The role's MCP identity comes from its bearer token, never from tool arguments. `BaseAgent.call_tool` and `ToolManifest` apply only to the legacy harness. See plan §5.1, §5.6, §5.7.
+19. **Scopes keep their names.** (changed for the opencode harness, plan §6.4) The RBAC scope names (`fs:*`, `doc:*`, `code:*`, `web:*`, `git:*`, `vis:*`, `mcp:*`) are unchanged. `core/harness/permissions.py` maps them onto opencode permission keys, and `capabilities.py` onto MCP tool grants. Read access is baseline; anything that writes, runs a shell, uses the web, installs packages or takes screenshots needs an explicit capability. Default-deny.
+20. **No file claims: each role has its own clone and branch.** (changed for the opencode harness, plan §6.4) Advisory file claims are dropped, because there is no shared working tree to claim. Overlap is prevented before it happens: the task board never runs two cards with overlapping `files_hint` at the same time (plan §4.6), and the runner merges `agent/{role}` branches into `main`, never the agents.
 21. **`inputs/` is read-only at runtime.** Only the runner writes there, once, at initialization. Continuation runs preserve persona memory, not git history. The meta-agent reads `inputs/README.md` first before proposing a team. See DESIGN §33.
 22. **Memory is dynamic, not append-only-forever.** Patterns have lifecycle states (emerging/active/declining/archived/superseded). Confidence is recency-weighted (90d half-life default). Failure clusters narrow `applies_when` before decaying global confidence. Patterns can flip to anti-patterns. Reconciliation runs in the memory_writer at end-of-run. See DESIGN §34.
 23. **Training and production reputation are segregated; episodes are unified.** Both feed `recall()`; reputation aggregates split. Training mode is a flag, not a separate runner. Graduation is a soft gate. See DESIGN §35.
 24. **Project rules live with the project, not the persona.** `data/projects/{id}/persona_rules/{persona_id}.md` and `_shared.md`. Loaded at Layer 3.7 of `effective_system_prompt()`, ABOVE memory. Rules trump memory on conflict. Auto-suggestion never auto-applies. See DESIGN §36.
+
+Rules 1–12, 14–17 and 21–24 are unchanged in substance. Notes on how they read under the opencode harness:
+- Rule 4 (`BaseAgent`) and rule 5 (stateless tools) describe the legacy harness. In the opencode harness the equivalent contract is `OpencodeRun` driven by the scheduler (`core/harness/run.py`); host-side MCP tools stay stateless apart from per-run state created in their `tools(ctx)` closure.
+- Rule 6 (MCP is additive) is about third-party MCP servers: core still works with none configured. GuudFlow's own MCP server (`core/harness/mcp_server.py`) is part of the opencode harness, because it is how agents submit results.
+- Rule 8 (the loop is the error handler): a bad turn becomes a failed card or role, and the reviewer or the overseer deals with it.
+- Rule 14 (signals reference files) holds: results list `files_changed`; the diff lives in git.
+
+---
+
+## Opencode harness rules (added for the opencode harness, plan §6.4)
+
+These apply to everything under `core/harness/`, `gateway/`, `worker/sandbox_manager.py` and the sandbox images. Section numbers refer to `docs/OPENCODE_HARNESS_PLAN.md`.
+
+- **Agents finish with `guudflow_submit_result`.** One spawn is one opencode session and one validated structured result (§4.1–§4.3). GuudFlow does not use opencode's `format` / structured-output setting (§2.2 #12).
+- **No synchronous peer communication.** No ASK/ANSWER, no waiting on another agent. Agents leave notes (`post_note`, `notes_for`) or return `blocked` with `blocked_on`; the scheduler re-arms the role that must act. Cycles go to `HUMAN_NEEDED` (§4.4).
+- **Only the scheduler moves cards.** Task cards change column on scheduler events, never because an agent wrote text. The planner's validated result is the task list; the runner creates the cards (§4.6).
+- **Credentials never enter sandboxes.** Real provider keys stay on the host in the LLM gateway; each sandbox gets a per-(run, role) virtual key. MCP tokens map to a role and are revoked at run end. Search-provider keys come from the `CredentialsBroker` (§5.4, §5.6, §5.8).
+- **Host tools via MCP.** Web search and fetch, screenshots, `visual_diff`, package installs and board tools run on the host behind the MCP server. opencode's own `webfetch` / `websearch` stay denied for every role, and no sandbox has internet egress (§5.8, §5.9).
+- **Capabilities decide what a role may do.** Set on the team approval screen before the run, recorded as a `CAPABILITIES` signal at every spawn, narrowing only at runtime. Widening needs a human and applies from the next spawn (§5.7).
+- **Protected paths.** `inputs/`, `.github/`, `opencode.json`, `.opencode/` and `.guudflow/` can never be changed by an agent branch. The runner fails the turn and does not merge (§5.5).
+- **The escape suite must pass.** `tests/harness/test_escape_suite.py` (with `test_run_docker.py`) runs hostile code in a real sandbox and asserts on the host. Run it on every change to `core/harness/`, `worker/`, `sandbox/` or `gateway/`; CI runs it in its Docker job (§7 P3, §8).
+- **Host mode is for trusted local demos only.** `sandbox: host_dev` / `--sandbox host` runs agents on the host with a warning on every spawn, and is refused when `GUUDFLOW_ENV=production`. Production requires Docker.
+- **No concurrency outside the scheduler.** The harness adds no `asyncio.gather`. The overseer decides and the scheduler acts (§11).
 
 ---
 
@@ -330,7 +366,14 @@ Scheduler tests are the most critical. Cover:
 - Group completion: group COMPLETE unblocks downstream pipeline agents
 - Max iterations cutoff
 
-Use `pytest` + `pytest-asyncio`. Mock LLM calls — never make real API calls in tests.
+The opencode harness adds scheduler tests in `tests/core/test_scheduler_harness.py`: review edge and
+exhausted rounds, blocked re-arm and blocked cycle → human, parking, `max_parallel`, `has_work`
+gating and the stall watchdog.
+
+Use `pytest` + `pytest-asyncio`. Mock LLM calls — never make real API calls in tests. The harness
+tests under `tests/harness/` use a scripted fake OpenAI-compatible LLM (`tests/harness/fake_llm.py`)
+and, where marked, a real pinned `opencode` binary (`scripts/install_opencode.sh`); they skip cleanly
+when the binary or Docker is missing and need no API key.
 
 ---
 
@@ -354,6 +397,7 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
+scripts/install_opencode.sh   # pinned opencode binary into .tools/opencode (needs node/npm)
 
 cp .env.example .env
 # fill in ANTHROPIC_API_KEY at minimum
@@ -388,14 +432,16 @@ From DESIGN.md section 22.
 - Live cost estimate in studio updates on every model change — use estimated tokens per role type x max_iterations, not real billing
 - Dynamic escalation is handled by the runner — agents never change their own model
 - Quip generator always uses FAST tier regardless of run profile — no exceptions
-- Tech lead always uses HEAVY tier — it activates rarely and needs genuine reasoning
+- Overseer always uses HEAVY tier — it activates rarely and needs genuine reasoning (changed for the opencode harness, plan §6.4). It replaces the tech lead (plan §11.1); the legacy tech lead had the same rule.
 
 ## Escalation & Quip Board Rules
 
 From DESIGN.md section 23.
 
-- Escalation thresholds are stored in project config with defaults: 2/3/4 rejections
-- Tech lead is event-driven — same pattern as IT agent, wakes on escalation signal, no depends_on
+- Escalation is a scheduler review edge (changed for the opencode harness, plan §6.4): rework is `review_of` + `max_review_rounds`. When the rounds run out an `ESCALATION` signal is posted and the overseer wakes (plan §4.5, §11). The legacy 2/3/4 rejection thresholds in project config apply to the legacy harness only.
+- The overseer replaces the tech lead (changed for the opencode harness, plan §6.4). It is event-driven, has no `depends_on`, and is woken by the scheduler's deterministic stuck detectors (no progress, same review issue, blocked chain, burn without output, permission thrash, repeated validation failure, card aging, escalation). It has no side channels and writes nothing but its structured result (plan §11.1, §11.2).
+- The overseer decides, the scheduler acts. Its fixed intervention menu is `rebrief`, `decide`, `reassign`, `split`, `extend_review`, `restart_role`, `pause`, `propose_team_change`; only `propose_team_change` needs a human. Wakes and interventions are capped per wake and per run, and if the overseer fails or its wakes run out the run goes to `HUMAN_NEEDED`. Every intervention is posted as an `OVERSEER_INTERVENTION` signal with its rationale (plan §11.3).
+- After each run the overseer writes a retrospective and updates the project playbook (`data/projects/{id}/playbook.json`). Playbook entries follow rules 16 and 22 (evidence runs, recency-weighted confidence, lifecycle) and never apply to a team without human approval (rule 24); `--demo` auto-approves them and records that on the board (plan §11.4).
 - Quip board is a completely separate log — never included in agent context, never read by agents
 - Quip generation is a secondary LLM call triggered by the runner after significant events — not inside agent run() methods
 - Teammate brief is generated at run start from reputation.json stats only — no subjective content
@@ -417,6 +463,7 @@ From DESIGN.md section 20. These are functional requirements, not decoration.
 - "Make this something you are proud of." is the final line of every effective system prompt, always
 - Character descriptions should describe working style, not just knowledge — "methodical and thorough" not "knows React"
 - Chain of thought primer is always included — it costs tokens but reduces iteration count which saves tokens overall
+- Opencode harness (plan §5.11): a persona-backed role's system prompt is built by `core/harness/persona_prompt.py: build_agent_prompt()`. It reuses the persona layers (identity, character, stake framing, teammate brief, manifesto, project rules, project context, recalled memory, base prompt with the legacy protocol instructions stripped, CoT primer, positive framing) and drops what opencode or the harness now owns (repo map, tool catalog, protocol voice, autonomy rules). "Make this something you are proud of." is still the last line. The board records the prompt as a hash plus layer names, never the memory text.
 
 ---
 
@@ -437,62 +484,55 @@ From DESIGN.md section 26. This is the moat — get the structure right from day
 
 ---
 
-## Context Management Rules — Token Cost Control
+## Context Management Rules — Token Cost Control (changed for the opencode harness, plan §6.4)
 
-From DESIGN.md section 28. This is the most important cost control mechanism.
+From plan §5.9 (replaces DESIGN.md section 28 for the opencode harness).
 
-- Agents NEVER call `file_read` directly to understand the codebase — always `get_context()`
-- `get_context(task_description, max_tokens)` is called ONCE at the start of each reasoning step
-- Repo map is ALWAYS included in every context — it is cheap and always useful, never skip it
-- Full file contents are included only up to the token budget — highest relevance first
-- On iteration 2+, `include_diff=True` by default — diffs replace full file re-reads
-- Token counts returned by `get_context()` MUST be logged by the runner per agent per call
-- Embeddings are OFF by default — symbol search handles most cases without extra setup
-- `core/repo_map.py` is rebuilt incrementally after every GIT_COMMIT — not from scratch
-- Token budget defaults: HEAVY=12k, SOLID=6k, FAST=2k — agents can request more for specific steps
-- `search_codebase(query)` works without embeddings via symbol search — never require embeddings
+- opencode owns context: file reading, compaction (`compaction` config), LSP diagnostics, provider retries and todo tracking. GuudFlow does not build agent context.
+- `core/context_manager.py` and `core/repo_map.py` (`get_context()`, repo map, relevance ranking, `include_diff`) belong to the legacy harness and retire with it. Do not use them from `core/harness/`.
+- The brief carries only what opencode cannot know: the goal, the card (title, acceptance checklist, dependency results, thread, `visual_refs`), notes addressed to the role, review issues and the carry-forward brief. It ends with how to finish (`guudflow_submit_result`).
+- Anything that did not come from GuudFlow or the human (web research, `research/notes.md`, other agents' free text, fetched pages, images) is wrapped in untrusted-content delimiters before it enters a brief.
+- Cost is measured at the gateway, not estimated from iterations: each role's tokens and cost (image tokens separately) go to the run's `llm_costs.jsonl` and into `AGENT_RESULT`. Per-turn limits are opencode `steps`, `doom_loop: deny`, a per-turn wall clock that aborts the session, the gateway spend cap per role and run, and the scheduler's `max_iterations` and deadline.
+- `explore` subagents (capability `subagents: explore_only`, depth 1) do cheap read-only search in the role's own clone; their cost still flows through the gateway.
+- Embeddings are OFF by default and stay optional for persona memory recall.
 
 ---
 
-## Protocol Rules — Inter-Agent Communication
+## Result & Communication Rules — Structured Results (changed for the opencode harness, plan §6.4)
 
-From DESIGN.md section 18. This is the most important efficiency decision in the system.
+From plan §4.2–§4.6 (replaces the Protocol Rules, DESIGN.md section 18, for the opencode harness).
 
-**The rule:** Agents reason internally in natural language. They communicate externally in protocol.
+**The rule:** agents work in natural language inside opencode. They report to GuudFlow in typed results and leave async notes. Nothing parses free text.
 
-- `core/protocol.py` is built alongside `core/signals.py` at step 1 — they are peers
-- Every agent output posted to the board MUST use a protocol render helper
-- `emit_commit()`, `emit_verify()`, `emit_delta()`, `emit_action()` are the only valid ways to post work-related board messages
-- Agents read the board via `read_protocol()` which returns parsed objects — never raw text parsing
-- `FAIL` results in `emit_verify()` MUST include a specific detail string — "doesn't work" is invalid, Claude Code should raise a ValueError if detail is missing on FAIL
-- Protocol messages are rendered as structured visuals in the UI — users never see raw protocol text
-- What goes to humans (`ask_human`, visual feedback, deliverable descriptions) stays in plain language
-- The protocol does NOT prevent bad outputs — the multi-stage review architecture does. Do not add verification logic inside the protocol layer itself.
+- Results are Pydantic models in `core/harness/results.py`, `tasks.py` and `overseer.py`: `AgentResult`, `ReviewResult`, `PlanResult`, `OverseerResult`. They replace the `[COMMIT]` / `[VERIFY]` / `[ASK]` blocks. `core/protocol.py` and `emit_commit()` / `emit_verify()` / `read_protocol()` belong to the legacy harness.
+- A role submits its result by calling the MCP tool `guudflow_submit_result`. The payload is validated inside the tool call, and validation errors go straight back to the model in the same turn.
+- A turn that ends with no accepted result gets exactly one follow-up message in the same session. A second miss fails the turn with the validation error as its detail (rule 8).
+- A failing verdict or unmet acceptance item MUST carry specifics: `Issue.detail` and an unmet `ItemVerdict.detail` need at least 20 characters, and a `pass` cannot have unmet items. This is a validator, not a regex.
+- No synchronous peer communication. Notes go on the card thread (`post_note`, `notes_for`) and are read in the recipient's next brief. A role that cannot continue returns `status: "blocked"` with `blocked_on`; the scheduler re-arms the role it needs, bounded by `max_iterations`.
+- Review is a scheduler edge, not an agent-to-agent exchange.
+- The event bridge (`core/harness/event_bridge.py`) turns opencode events into board signals; agents do not post signals themselves. Studio renders structured results and cards, so users never see raw JSON or protocol text.
+- What goes to humans (`ask_human`, visual feedback, deliverable descriptions) stays in plain language.
+- The schemas check shape and required specifics. They do not replace review: the reviewer and the overseer catch bad output.
 
 ---
 
-## Git & IT Rules — Non-Negotiable
+## Git & IT Rules — Non-Negotiable (changed for the opencode harness, plan §6.4)
 
-From DESIGN.md sections 18, 19, and 21.
+From plan §5.4 and §5.5 (replaces DESIGN.md sections 19 and 21 for the opencode harness).
 
 **Git:**
-- Every run initialises a git repo in `workspace/working/` at run start
-- Every agent role gets exactly one branch: `agent/{role}`
-- Agents only commit to their own branch — never to main or another agent's branch
-- Agents read other branches via `git_read()` only — never checkout
-- Reviewer agents use `git_diff()` in iteration 2+ — never re-read the full codebase
-- The runner handles all merges — never agents
-- Commit messages use conventional commits format (`feat:`, `fix:`, `test:`, `docs:`)
-- The full `.git/` repo is included in the run's deliverable output
+- Every run has one run repo. Every role works in its own checkout under `<run_root>/roles/<role>/` on its own branch `agent/{role}`. The worktree (`work/`, mounted at `/work`) has no `.git`; the git directory is host-only and never mounted, so nothing the agent writes can configure git on the host.
+- Agents only ever change their own branch. They have no remote credentials, `git push` is denied, and they never merge or touch `main` or another role's branch.
+- After each turn the runner (host side) commits leftover changes with a conventional message, fetches only `agent/{role}`, checks it (protected paths, symlinks, `core/secret_scan.py`), and merges it into `main`. A failed check means no merge and a failed turn with the reason.
+- Each spawn starts with `main` merged into the role's branch; a merge conflict there fails the turn.
+- Commit messages use conventional commits format (`feat:`, `fix:`, `test:`, `docs:`).
+- The full `.git/` repo is included in the run's deliverable output.
 
-**IT Agent:**
-- No agent may call `pip install`, `npm install`, or any package manager directly
-- All installs go through `self.request_package()` which routes to the IT agent
-- The IT agent is event-driven — no `depends_on`, wakes on `PACKAGE_REQUEST`
-- Auto-approve packages on the project allow-list with pinned versions
-- Packages not on the allow-list route to human approval
-- Every approved install is recorded in workspace state
-- Runtime installs do not persist to the sandbox image — each run starts clean
+**Packages (the IT agent's job moved to a host tool):**
+- No role may run `pip install`, `npm install`, `curl` or `wget`. The generated ruleset denies them, and sandboxes have no internet anyway.
+- Roles with `packages: via_it_agent` call the host-side MCP tool `request_package(manager, name, version)`. Packages on the project allow-list with pinned versions are installed on the host into the role's tool directory (`pip install --only-binary=:all:`, `npm install --ignore-scripts`, so no install script runs). Anything else becomes an approval request for a human.
+- Installed files go into the host-written tool directory `.guudflow/` (read-only to the agent, git-excluded). Every request, approval and rejection is a `PACKAGE_REQUEST` / `PACKAGE_APPROVED` / `PACKAGE_REJECTED` board signal, and each run starts clean.
+- The `it_agent` role type still exists but is not needed for allow-listed installs.
 
 ---
 

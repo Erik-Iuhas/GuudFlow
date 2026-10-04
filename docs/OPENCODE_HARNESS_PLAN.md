@@ -1,6 +1,6 @@
 # GuudFlow on opencode — the thin-orchestrator rebuild
 
-**Status:** plan, not started. Written 2026-10-04.
+**Status:** written 2026-10-04; largely implemented. Per-task status is in `OPENCODE_WORK_BREAKDOWN.md` ("Status").
 **Goal:** keep what is distinctive about GuudFlow (scheduler, board, personas, Studio,
 quips, example projects) and replace the home-built agent harness with
 [opencode](https://github.com/anomalyco/opencode) running headless, one sandboxed
