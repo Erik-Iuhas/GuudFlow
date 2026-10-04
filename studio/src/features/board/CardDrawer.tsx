@@ -234,7 +234,7 @@ function CommentForm({ runId, cardId, disabled }: { runId: string; cardId: strin
   }
 
   return (
-    <form onSubmit={(e) => void submit(e)} className="mt-auto grid gap-2" aria-label="Comment on this card">
+    <form onSubmit={(e) => void submit(e)} className="mt-auto grid gap-2">
       <label className="grid gap-1 text-sm font-semibold">
         Comment
         <textarea
