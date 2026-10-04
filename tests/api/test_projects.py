@@ -224,3 +224,32 @@ async def test_put_roadmap_rejects_non_string_content(client, auth_header):
         headers=auth_header,
     )
     assert r.status_code == 400
+
+
+async def test_get_playbook_entries_and_metrics(client, auth_header, data_root):
+    from core.playbook import Playbook
+
+    await client.post("/api/projects", json={"project_id": "p_book", "goal": "g"},
+                      headers=auth_header)
+    pb = Playbook.load(data_root, "p_book")
+    entry = pb.add("review_rounds", "builder>reviewer", 3, "run_1", confidence=0.7)
+    pb.record_run_metrics("run_1", {"cost_usd": 1.5})
+    pb.save()
+
+    r = await client.get("/api/projects/p_book/playbook", headers=auth_header)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [e["id"] for e in body["entries"]] == [entry.id]
+    first = body["entries"][0]
+    assert first["section"] == "review_rounds" and first["value"] == 3
+    assert first["evidence_runs"] == ["run_1"] and first["state"] in {"emerging", "active"}
+    assert body["metrics"][0]["run_id"] == "run_1"
+
+
+async def test_get_playbook_empty_404_and_auth(client, auth_header):
+    await client.post("/api/projects", json={"project_id": "p_none", "goal": "g"},
+                      headers=auth_header)
+    r = await client.get("/api/projects/p_none/playbook", headers=auth_header)
+    assert r.status_code == 200 and r.json() == {"entries": [], "metrics": []}
+    assert (await client.get("/api/projects/missing/playbook", headers=auth_header)).status_code == 404
+    assert (await client.get("/api/projects/p_none/playbook")).status_code in (401, 403)
