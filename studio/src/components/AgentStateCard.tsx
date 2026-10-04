@@ -5,6 +5,7 @@ import {
   type AgentLiveSummary,
 } from "../lib/iterations";
 import { avatarFor } from "../lib/avatar";
+import { latestCapabilityWarnings } from "./harness/parse";
 
 export function AgentStateCard({
   summary,
@@ -25,6 +26,7 @@ export function AgentStateCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const capWarnings = latestCapabilityWarnings(allSignals, summary.role);
   const iterationSignals = expanded
     ? signalsForRoleIteration(allSignals, summary.role, summary.iteration)
     : [];
@@ -73,6 +75,16 @@ export function AgentStateCard({
           <span className="muted small" style={{ fontStyle: "italic" }}>{personaName}</span>
         )}
         <span className="muted small">iter {summary.iteration}</span>
+        {capWarnings.length > 0 && (
+          <span
+            role="img"
+            aria-label="Capability warning"
+            title={capWarnings.join("\n")}
+            style={{ color: "#b45309", cursor: "help" }}
+          >
+            ⚠
+          </span>
+        )}
         {summary.lastCommit && (
           <span className="muted small mono" title={summary.lastCommitMessage ?? ""}>
             commit {summary.lastCommit}

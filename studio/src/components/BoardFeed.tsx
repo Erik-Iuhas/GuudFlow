@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import type { Signal } from "../types";
+import { HARNESS_SIGNAL_TYPES, type Signal } from "../types";
+import { renderHarnessBody } from "./harness/renderers";
 
 // Signal types grouped into logical buckets for the filter bar.
 const TYPE_GROUPS: { label: string; types: string[]; color: string }[] = [
@@ -7,7 +8,8 @@ const TYPE_GROUPS: { label: string; types: string[]; color: string }[] = [
   { label: "Protocol", types: ["PROTOCOL", "COMMIT", "VERIFY_RESULT", "ASK", "ANSWER", "SKIP_REQUEST", "SKIP_GRANTED", "SKIP_DENIED"], color: "#0891b2" },
   { label: "Tasks",    types: ["TASK_ASSIGNED", "TASK_COMPLETE", "TASK_CLOSED", "STORY_OPENED", "STORY_CLOSED"], color: "#059669" },
   { label: "Git",      types: ["GIT_COMMIT", "GIT_MERGE"], color: "#d97706" },
-  { label: "User",     types: ["USER_COMMENT", "APPROVAL_NEEDED", "APPROVAL_GRANTED", "APPROVAL_DENIED", "HUMAN_NEEDED", "HUMAN_RESPONDED"], color: "#db2777" },
+  { label: "Harness", types: [...HARNESS_SIGNAL_TYPES], color: "#7c3aed" },
+  { label: "User",    types: ["USER_COMMENT", "APPROVAL_NEEDED", "APPROVAL_GRANTED", "APPROVAL_DENIED", "HUMAN_NEEDED", "HUMAN_RESPONDED"], color: "#db2777" },
 ];
 
 const ALL_GROUP_LABELS = TYPE_GROUPS.map((g) => g.label);
@@ -124,6 +126,9 @@ export function BoardFeed({ signals }: { signals: Signal[] }) {
 function SignalRow({ signal }: { signal: Signal }) {
   const time = signal.timestamp?.replace("T", " ").split(".")[0]?.slice(11) ?? "";
   const kind = classify(signal);
+  // Structured body for opencode harness signals; null (bad or missing JSON,
+  // other types) falls back to the plain summary + raw detail below.
+  const harness = renderHarnessBody(signal);
   return (
     <div className={`signal ${kind}`}>
       <div className="sig-head">
@@ -138,9 +143,16 @@ function SignalRow({ signal }: { signal: Signal }) {
           <span className="muted small">iter {signal.iteration}</span>
         )}
       </div>
-      <div className="sig-summary">{signal.summary}</div>
-      {signal.detail && (
-        <pre>{signal.detail}</pre>
+      {harness ? (
+        <>
+          {signal.type !== "TOOL_CALL" && <div className="sig-summary">{signal.summary}</div>}
+          {harness}
+        </>
+      ) : (
+        <>
+          <div className="sig-summary">{signal.summary}</div>
+          {signal.detail && <pre>{signal.detail}</pre>}
+        </>
       )}
     </div>
   );

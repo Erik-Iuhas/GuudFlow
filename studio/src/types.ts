@@ -72,6 +72,17 @@ export interface RunMeta {
   pr_ready?: PrReadyInfo;
 }
 
+/** Signal types posted by the opencode harness. Their `detail` is a JSON
+ *  string (THINKING's is free text). */
+export const HARNESS_SIGNAL_TYPES = [
+  "CAPABILITIES",
+  "AGENT_RESULT",
+  "TOOL_CALL",
+  "AGENT_TODO",
+  "THINKING",
+  "BLOCKED",
+] as const;
+
 export interface Signal {
   id: string;
   type: string;

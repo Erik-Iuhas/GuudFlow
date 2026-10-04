@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { ApiError, approvalsApi } from "../api";
 import type { Signal } from "../types";
+import {
+  decideToolPermission,
+  ToolPermissionButtons,
+  ToolPermissionSummary,
+  type ToolPermissionChoice,
+} from "./harness/toolPermission";
 
 interface ApprovalContext {
   approval_id: string;
@@ -27,6 +33,7 @@ export function ApprovalCard({ runId, signal, onDecided }: ApprovalCardProps) {
   const [busy, setBusy] = useState<"grant" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [toolBusy, setToolBusy] = useState<ToolPermissionChoice | null>(null);
 
   const ctx = parseApprovalDetail(signal.detail);
   if (ctx === null) {
@@ -51,6 +58,26 @@ export function ApprovalCard({ runId, signal, onDecided }: ApprovalCardProps) {
     }
   }
 
+  async function decideTool(choice: ToolPermissionChoice) {
+    setToolBusy(choice);
+    setError(null);
+    try {
+      const decision = await decideToolPermission(
+        runId,
+        ctx!.approval_id,
+        choice,
+        note.trim() || undefined,
+      );
+      if (onDecided) onDecided(decision);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setToolBusy(null);
+    }
+  }
+
+  const isToolPermission = ctx.kind === "tool_permission";
+
   return (
     <div className="card approval-card">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -62,6 +89,8 @@ export function ApprovalCard({ runId, signal, onDecided }: ApprovalCardProps) {
       </div>
 
       <p style={{ marginTop: 8 }}>{signal.summary}</p>
+
+      {isToolPermission && <ToolPermissionSummary detail={signal.detail} />}
 
       {ctx.estimated_cost_usd != null && (
         <p className="muted small">
@@ -75,11 +104,14 @@ export function ApprovalCard({ runId, signal, onDecided }: ApprovalCardProps) {
         value={note}
         onChange={(e) => setNote(e.target.value)}
         style={{ marginTop: 8 }}
-        disabled={busy !== null}
+        disabled={busy !== null || toolBusy !== null}
       />
 
       {error && <div className="error" style={{ marginTop: 8 }}>{error}</div>}
 
+      {isToolPermission ? (
+        <ToolPermissionButtons busy={toolBusy} onChoose={(c) => void decideTool(c)} />
+      ) : (
       <div className="row" style={{ marginTop: 8, gap: 8 }}>
         <button
           className="primary"
@@ -96,6 +128,7 @@ export function ApprovalCard({ runId, signal, onDecided }: ApprovalCardProps) {
           {busy === "deny" ? "Denying…" : "Deny"}
         </button>
       </div>
+      )}
     </div>
   );
 }
@@ -105,6 +138,20 @@ export function ApprovalCard({ runId, signal, onDecided }: ApprovalCardProps) {
  */
 function parseApprovalDetail(detail: string | null | undefined): ApprovalContext | null {
   if (!detail) return null;
+  if (detail.trimStart().startsWith("{")) {
+    try {
+      const j = JSON.parse(detail) as Record<string, unknown>;
+      if (typeof j.approval_id !== "string" || !j.approval_id) return null;
+      const cost = typeof j.estimated_cost_usd === "number" ? j.estimated_cost_usd : null;
+      return {
+        approval_id: j.approval_id,
+        kind: typeof j.kind === "string" ? j.kind : "approval",
+        estimated_cost_usd: cost,
+      };
+    } catch {
+      return null;
+    }
+  }
   const fields = Object.fromEntries(
     detail.split(";")
       .map((kv) => kv.trim().split("=", 2))
