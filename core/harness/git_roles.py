@@ -1,16 +1,26 @@
-"""Per-role git clones and runner-side branch checks (plan §5.5).
+"""Per-role git checkouts and runner-side branch checks (plan §5.5).
 
-Each role works in its own clone of the run repo, on `agent/{role}`. The agent
-never sees the run repo, `main`, or another role's branch. After every turn the
-runner (host side):
+Layout per role (under `<run_root>/roles/<role>/`):
 
-  1. commits anything the agent left uncommitted in its clone,
-  2. fetches ONLY `agent/{role}` from the clone into the run repo,
-  3. checks the branch: no protected paths touched, no obvious secrets,
+  work/      the role's worktree — the ONLY thing the agent can write
+             (bind-mounted at /work in its sandbox). It has no `.git`.
+  git/       the role's git directory, host-only, never mounted.
+  guudflow/  host-written tool output (screenshots, installed packages,
+             diffs), mounted read-only at /work/.guudflow in the sandbox.
+
+Why the git directory is separate (O8 review): if the agent could write its own
+`.git`, a planted `core.fsmonitor`, hook path or clean filter would make the
+host execute agent-chosen commands the next time the runner ran `git add`.
+Here every host-side git call names the host-owned git dir explicitly and turns
+hooks and fsmonitor off, so nothing in the worktree can configure git.
+
+After every turn the runner (host side):
+  1. commits the worktree on `agent/{role}`,
+  2. fetches ONLY that branch into the run repo,
+  3. checks it: no protected paths touched, no obvious secrets,
   4. merges it into `main`.
-
-Agents never merge. A failed check means the branch is not merged and the
-turn is reported as failed with the reason.
+Agents never merge. A failed check means the branch is not merged and the turn
+is reported as failed with the reason.
 """
 
 from __future__ import annotations
@@ -26,17 +36,20 @@ from core.secret_scan import _classify as classify_secret  # noqa: PLC2701 — s
 from core.signals import SignalType
 
 AGENT_BRANCH = "agent/{role}"
-LOCAL_EXCLUDES = (".guudflow/",)
+# ".guudflow" without a slash also matches the host-mode symlink.
+LOCAL_EXCLUDES = ("/.guudflow", "node_modules/", "__pycache__/")
+_SAFE_GIT = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+             "-c", "commit.gpgsign=false", "-c", "core.symlinks=true")
 
 
 class GitRoleError(RuntimeError):
-    """A git operation on a role clone failed."""
+    """A git operation on a role checkout failed."""
 
 
-def _git(cwd: Path, *args: str) -> str:
-    proc = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+def _run(args: list[str], cwd: Path) -> str:
+    proc = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
     if proc.returncode != 0:
-        raise GitRoleError(f"git {' '.join(args)} failed in {cwd}: {proc.stderr.strip()}")
+        raise GitRoleError(f"{' '.join(args[:6])}… failed: {proc.stderr.strip()}")
     return proc.stdout.strip()
 
 
@@ -56,7 +69,7 @@ class CollectResult:
 
 
 class RoleClones:
-    """Owns the per-role clones of one run's repo."""
+    """Owns the per-role checkouts of one run's repo."""
 
     def __init__(self, main: GitWorkspace, clones_root: Path) -> None:
         self.main = main
@@ -67,60 +80,82 @@ class RoleClones:
         return AGENT_BRANCH.format(role=role)
 
     def path(self, role: str) -> Path:
-        """The role's clone directory."""
-        return self.root / role
+        """The role's worktree (what the agent sees as /work)."""
+        return self.root / role / "work"
+
+    def git_dir(self, role: str) -> Path:
+        """The role's host-only git directory."""
+        return self.root / role / "git"
+
+    def tool_dir(self, role: str) -> Path:
+        """Host-written tool output for the role (/work/.guudflow, read-only to the agent)."""
+        return self.root / role / "guudflow"
+
+    def git(self, role: str, *args: str) -> str:
+        """Run git for `role` against its host-owned git dir and worktree."""
+        return _run(["git", f"--git-dir={self.git_dir(role)}", f"--work-tree={self.path(role)}",
+                     *_SAFE_GIT, *args], cwd=self.git_dir(role))
 
     def ensure(self, role: str, author: str) -> Path:
-        """Create the role's clone (idempotent) on `agent/{role}` from main."""
-        clone = self.path(role)
-        if not (clone / ".git").exists():
-            self.root.mkdir(parents=True, exist_ok=True)
-            _git(self.root, "clone", "--quiet", "--no-hardlinks", "--branch", "main",
-                 str(self.main.working_dir), role)
-            _git(clone, "config", "user.name", f"{author} ({role})")
-            _git(clone, "config", "user.email", f"{role}@guudflow.local")
-            _git(clone, "config", "commit.gpgsign", "false")
-            # The clone cannot push anywhere: the agent's only output is its branch,
-            # which the runner fetches.
-            _git(clone, "remote", "set-url", "--push", "origin", "no-push://disabled")
-            _git(clone, "checkout", "--quiet", "-B", self.branch(role))
-            exclude = clone / ".git" / "info" / "exclude"
-            exclude.write_text(exclude.read_text() + "".join(f"{p}\n" for p in LOCAL_EXCLUDES)
-                               if exclude.exists() else "".join(f"{p}\n" for p in LOCAL_EXCLUDES))
-        return clone
+        """Create the role's checkout (idempotent) on `agent/{role}` from main."""
+        work, gdir = self.path(role), self.git_dir(role)
+        if not (gdir / "HEAD").exists():
+            work.mkdir(parents=True, exist_ok=True)
+            self.tool_dir(role).mkdir(parents=True, exist_ok=True)
+            _run(["git", "init", "--quiet", "--bare", str(gdir)], cwd=self.root)
+            self.git(role, "config", "core.bare", "false")
+            self.git(role, "config", "user.name", f"{author} ({role})")
+            self.git(role, "config", "user.email", f"{role}@guudflow.local")
+            self.git(role, "fetch", "--quiet", str(self.main.working_dir), "main:refs/heads/main")
+            self.git(role, "checkout", "--quiet", "-B", self.branch(role), "main")
+            exclude = gdir / "info" / "exclude"
+            exclude.parent.mkdir(parents=True, exist_ok=True)
+            exclude.write_text("".join(f"{p}\n" for p in LOCAL_EXCLUDES))
+        return work
 
     def sync_from_main(self, role: str) -> bool:
         """Merge the run's current `main` into the role's branch. False on conflict."""
-        clone = self.path(role)
         self.commit_leftovers(role, "chore: save work in progress before sync")
-        _git(clone, "fetch", "--quiet", str(self.main.working_dir), "main")
+        self.git(role, "fetch", "--quiet", str(self.main.working_dir), "+main:refs/heads/main")
         try:
-            _git(clone, "merge", "--quiet", "--no-edit", "FETCH_HEAD")
+            self.git(role, "merge", "--quiet", "--no-edit", "main")
         except GitRoleError:
-            _git(clone, "merge", "--abort")
+            self.git(role, "merge", "--abort")
             return False
         return True
 
     def commit_leftovers(self, role: str, message: str) -> str | None:
-        """Commit any uncommitted changes in the clone; returns the new sha or None."""
-        clone = self.path(role)
-        if not _git(clone, "status", "--porcelain"):
+        """Commit any changes in the worktree; returns the new sha or None."""
+        if not self.git(role, "status", "--porcelain"):
             return None
-        _git(clone, "add", "-A")
-        _git(clone, "commit", "--quiet", "-m", message)
-        return _git(clone, "rev-parse", "HEAD")
+        self.git(role, "add", "-A")
+        self.git(role, "commit", "--quiet", "-m", message)
+        return self.git(role, "rev-parse", "HEAD")
+
+    def changes(self, role: str, base: str = "main", path: str | None = None,
+                limit: int = 30_000) -> str:
+        """`git diff --stat` plus the patch of the worktree against `base` (for review)."""
+        self.commit_leftovers(role, "chore: snapshot for review")
+        spec = [base, "--"] + ([path] if path else [])
+        stat = self.git(role, "diff", "--stat", *spec)
+        patch = self.git(role, "diff", *spec)
+        text = f"{stat}\n\n{patch}" if stat else "(no changes)"
+        return text if len(text) <= limit else text[:limit] + "\n[truncated]"
+
+    def history(self, role: str, limit: int = 20) -> str:
+        """Recent commits on the role's branch."""
+        return self.git(role, "log", f"-{max(1, min(limit, 100))}", "--format=%h %an: %s")
 
     def collect(self, role: str, summary: str) -> CollectResult:
-        """Bring `agent/{role}` home: commit leftovers, fetch, check, merge into main."""
+        """Bring `agent/{role}` home: commit, fetch, check, merge into main."""
         branch = self.branch(role)
-        clone = self.path(role)
         first_line = summary.strip().splitlines()[0][:72] if summary.strip() else "update"
         self.commit_leftovers(role, f"chore({role}): {first_line}")
         repo = self.main.repo
         repo.git.checkout("main")
         before = repo.git.rev_parse("main")
-        # Fetch ONLY the role's branch; nothing else in the clone can reach the run repo.
-        repo.git.fetch(str(clone), f"+{branch}:refs/heads/{branch}")
+        # Fetch ONLY the role's branch from the host-owned git dir.
+        repo.git.fetch(str(self.git_dir(role)), f"+{branch}:refs/heads/{branch}")
         new_commits = [c for c in repo.git.rev_list(f"main..{branch}").split() if c]
         if not new_commits:
             return CollectResult(merged=True)
@@ -129,8 +164,10 @@ class RoleClones:
         if protected:
             return CollectResult(merged=False, new_commits=new_commits, changed_files=changed,
                                  problem=f"touched protected paths: {', '.join(protected)}")
+        work = self.path(role)
         secrets = [f"{p} ({reason})" for p in changed
-                   if (clone / p).is_file() and (reason := classify_secret(clone / p, p))]
+                   if (work / p).is_file() and not (work / p).is_symlink()
+                   and (reason := classify_secret(work / p, p))]
         if secrets:
             return CollectResult(merged=False, new_commits=new_commits, changed_files=changed,
                                  problem=f"possible secrets committed: {', '.join(secrets)}")

@@ -22,6 +22,9 @@ from core.signals import Priority, Signal, SignalType
 from core.workspace import Workspace
 
 
+TOOL_DIR_NAME = ".guudflow"
+
+
 @dataclass
 class RunToolContext:
     """Run-scoped facts and callbacks shared by host-side MCP tools."""
@@ -34,11 +37,36 @@ class RunToolContext:
     # Role → host/IP where the role's processes (e.g. a dev server) are reachable
     # from the host: "127.0.0.1" in host mode, the container IP in a sandbox.
     sandbox_host_for: Callable[[str], str]
+    # Role → host-only directory for tool output (screenshots, installed packages,
+    # diffs). Mounted read-only at /work/.guudflow in a sandbox; never agent-writable.
+    # None (tests) falls back to <clone>/.guudflow.
+    tool_dir_for: Callable[[str], Path] | None = None
     # Free-form project settings for tools (allow-lists, budgets), e.g.
     # project.approval_gates plus a `web` block. Read-only for tools.
     settings: dict[str, Any] = field(default_factory=dict)
     # Secrets (search API keys) come from here, never from tool arguments.
     secret: Callable[[str], str | None] = lambda name: None
+
+    def tool_dir(self, role: str) -> Path:
+        """Host-only tool output directory for `role` (created on demand)."""
+        path = self.tool_dir_for(role) if self.tool_dir_for else self.clone_for(role) / ".guudflow"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def resolve_agent_path(self, role: str, path: str) -> Path | None:
+        """Resolve a path the agent gave (relative to /work) without following symlinks.
+
+        `.guudflow/...` maps to the host-only tool directory; anything else must stay
+        inside the role's worktree. None when the path escapes or crosses a symlink.
+        """
+        from core.harness.artifacts import safe_resolve
+
+        rel = path.strip().removeprefix("/work/").lstrip("/") if path.startswith("/work/") else path.strip()
+        if rel == TOOL_DIR_NAME:
+            return self.tool_dir(role)
+        if rel.startswith(TOOL_DIR_NAME + "/"):
+            return safe_resolve(self.tool_dir(role), rel[len(TOOL_DIR_NAME) + 1:])
+        return safe_resolve(self.clone_for(role), rel)
 
     def post(self, kind: SignalType, role: str, summary: str,
              detail: dict[str, Any] | str | None = None, priority: Priority = "normal") -> None:

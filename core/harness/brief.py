@@ -103,16 +103,17 @@ def build_brief(inp: BriefInputs) -> str:
 
 def _how_to_work(is_reviewer: bool) -> str:
     if is_reviewer:
-        doing = ("Review the work in this repository against the goal. Look at what changed "
-                 "(`git log`, `git diff main~1` or the files listed above), run the tests, and "
-                 "check behaviour, not just style. Do not edit files.")
+        doing = ("Review the work in this folder against the goal. Call `guudflow_changes` to "
+                 "see exactly what changed, read the files, run the tests, and check behaviour, "
+                 "not just style. Do not edit files.")
         finish = (f"Finish by calling `{SUBMIT_TOOL_NAME}` with your verdict. A `fail` verdict "
                   "must list every issue with the file and a specific, actionable detail.")
     else:
-        doing = ("Work directly in this repository; it is your own clone and branch. Read what "
-                 "exists before changing it, keep changes focused on your job, and run the tests "
-                 "you add. Commit your work with conventional commit messages (`feat:`, `fix:`, "
-                 "`test:`, `docs:`); anything left uncommitted is committed for you.")
+        doing = ("Work directly in this folder; it is your own working copy. Read what exists "
+                 "before changing it, keep changes focused on your job, and run the tests you "
+                 "add. There is no git here: GuudFlow commits your changes when you finish "
+                 "(`guudflow_changes` shows your diff so far). Tool output such as screenshots "
+                 "and installed packages lives in `.guudflow/` (read-only).")
         finish = (f"Finish by calling `{SUBMIT_TOOL_NAME}` once, as your last action, with "
                   "`status` done (with a specific summary and the files you changed), blocked "
                   "(with `blocked_on`: which role must act and exactly what you need) or failed "

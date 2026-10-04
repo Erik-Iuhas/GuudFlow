@@ -13,6 +13,7 @@ Lifecycle of one spawn (`execute_turn`):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -103,6 +104,8 @@ class OpencodeRun:
         self.inbox = ResultInbox()
         self.mcp.register(self.inbox.tool())
         self.mcp.register(self._post_note_tool())
+        for tool in self._git_tools():
+            self.mcp.register(tool)
         self.clones = RoleClones(runner.git, runner.run_root / "roles")
         allow = runner.project.approval_gates.get("tool_permission_allow") or {}
         self.gate = PermissionGate(self.workspace, allow_list={
@@ -180,7 +183,8 @@ class OpencodeRun:
         if role.client is not None:
             return role.client
         assert self._http is not None
-        identity = McpIdentity(self.run_id, role.cfg.role, role.compiled.mcp_tools | {"submit_result"})
+        identity = McpIdentity(self.run_id, role.cfg.role,
+                               role.compiled.mcp_tools | {"submit_result", "changes", "history"})
         role.token = self.mcp.issue_token(identity)
         agent = agent_entry(role.compiled, model_ref=role.binding.model_ref,
                             prompt=self._system_prompt(role), description=role.cfg.description,
@@ -218,6 +222,7 @@ class OpencodeRun:
         role = self._roles[role_name]
         cfg = role.cfg
         workdir = self.clones.ensure(role_name, self._author(cfg))
+        self._link_tool_dir(role_name, workdir)
         if not self.clones.sync_from_main(role_name):
             self._post(SignalType.FAILED, role_name, "could not merge main into the branch")
             raise TurnFailed(f"{role_name}: merge conflict syncing with main")
@@ -370,6 +375,39 @@ class OpencodeRun:
     def _post_note(self, from_role: str, to_role: str, text: str) -> None:
         self._post(SignalType.AGENT_MESSAGE, from_role, f"note → {to_role}",
                    json.dumps({"from": from_role, "to": to_role, "message": text}))
+
+    def _link_tool_dir(self, role: str, workdir: Path) -> None:
+        """Host mode: expose the host-only tool dir at <worktree>/.guudflow (a sandbox
+        bind-mounts it read-only there instead)."""
+        link = workdir / ".guudflow"
+        if not link.exists() and not link.is_symlink():
+            link.symlink_to(self.clones.tool_dir(role), target_is_directory=True)
+
+    def _git_tools(self) -> list[McpTool]:
+        """Read-only git views for agents, computed on the host (agents have no git)."""
+        empty = {"type": "object", "additionalProperties": False, "properties": {}}
+
+        async def changes(identity: McpIdentity, args: dict[str, Any]) -> ToolResult:
+            path = args.get("path")
+            if path is not None and (not isinstance(path, str) or path.startswith("/")
+                                     or ".." in Path(path).parts):
+                return ToolResult("path must be relative to your folder", is_error=True)
+            text = await asyncio.to_thread(self.clones.changes, identity.role, "main", path)
+            return ToolResult(text)
+
+        async def history(identity: McpIdentity, args: dict[str, Any]) -> ToolResult:
+            limit = args.get("limit", 20)
+            if not isinstance(limit, int) or isinstance(limit, bool):
+                return ToolResult("limit must be an integer", is_error=True)
+            return ToolResult(await asyncio.to_thread(self.clones.history, identity.role, limit))
+
+        return [
+            McpTool("changes", "Show what changed in your folder compared to the team's main "
+                    "branch: a file summary and the full diff (optionally for one path).",
+                    {**empty, "properties": {"path": {"type": "string"}}}, changes),
+            McpTool("history", "Recent commits on your branch.",
+                    {**empty, "properties": {"limit": {"type": "integer"}}}, history),
+        ]
 
     def _post_note_tool(self) -> McpTool:
         async def handler(identity: McpIdentity, args: dict[str, Any]) -> ToolResult:
