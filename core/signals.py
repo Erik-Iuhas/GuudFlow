@@ -131,6 +131,16 @@ class SignalType(str, Enum):
     CAPABILITIES = "CAPABILITIES"
     # The validated structured result an agent submitted for a turn (plan §4.2).
     AGENT_RESULT = "AGENT_RESULT"
+    # One finished opencode tool call (completed or error), from the event bridge.
+    TOOL_CALL = "TOOL_CALL"
+    # The agent's own todo list changed (opencode todowrite).
+    AGENT_TODO = "AGENT_TODO"
+    # A host-side web_search / web_fetch call (plan §5.8).
+    WEB_REQUEST = "WEB_REQUEST"
+    # A visual or document artifact was produced (plan §5.10).
+    ARTIFACT = "ARTIFACT"
+    # The overseer changed course (plan §11.3).
+    OVERSEER_INTERVENTION = "OVERSEER_INTERVENTION"
 
 
 Priority = Literal["normal", "high"]

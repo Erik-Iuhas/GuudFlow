@@ -54,6 +54,25 @@ or memory.
 | Sticky approvals | Permission reply `once \| always \| reject`; `GET /api/permission/saved` | "always" answers stop repeat prompts (§5.9) |
 | Built-in web search | Env flags `OPENCODE_ENABLE_EXA`, `OPENCODE_WEBSEARCH_PROVIDER` exist in the binary | **Not tested.** Not used: web access goes through GuudFlow's host-side MCP tools instead (§5.8) |
 
+### 2.1a Event → board signal mapping (O5)
+
+The event bridge (`core/harness/event_bridge.py`) turns one role's opencode event stream
+into board signals. A real recorded stream lives in
+`tests/harness/fixtures/events_builder_turn.jsonl`.
+
+| opencode event | Condition | Board signal | Summary / detail |
+|---|---|---|---|
+| `message.part.updated`, part `tool` | state `completed` or `error`; tool not `guudflow_submit_result`, `StructuredOutput` or `todowrite` | `TOOL_CALL` | `"{role}: {tool} {target} → ok/error"`; detail JSON `{tool, status, input (≤2 KB), output preview (≤1.5 KB) or error, duration_ms}` |
+| `message.part.delta` (field `text`) and `message.part.updated` part `text` | parts of **assistant** messages only | buffered per message | — |
+| `message.updated`, assistant, `time.completed` set | buffered text for that message is non-empty | `THINKING` | first 160 chars; detail = full text (≤4 KB) |
+| `todo.updated` | list differs from the last one posted | `AGENT_TODO` | `"{role}: {n} todos ({k} done)"`; detail JSON todo list |
+| `session.compacted` | — | `THINKING` | `"{role}: context compacted"` |
+| `session.error` | — | `THINKING`, priority high | `"{role}: error — {message}"` (the runner decides whether the turn failed) |
+| `permission.asked` / `.replied` | — | handled by the approval gate (O6), not the bridge | — |
+| everything else | `plugin.added`, `catalog.updated`, `session.status`, `session.diff`, `session.updated`, `file.*`, step and patch parts, user-message parts, … | dropped | — |
+
+Quips are triggered by the run (role complete, review verdict), not by the bridge.
+
 ### 2.2 Gotchas that the design must handle (all reproduced)
 
 1. **Default permissions are wide open.** Every built-in agent ships with
