@@ -77,6 +77,17 @@ def find_opencode_binary() -> Path:
     )
 
 
+def native_opencode_binary() -> Path:
+    """The platform-native opencode executable behind the npm wrapper (for the sandbox image)."""
+    root = _DEFAULT_BIN.parents[1]  # .tools/opencode/node_modules
+    for pkg in ("opencode-linux-x64", "opencode-linux-arm64", "opencode-linux-x64-baseline"):
+        candidate = root / pkg / "bin" / "opencode"
+        if candidate.is_file():
+            return candidate
+    raise OpencodeNotInstalled(
+        f"native opencode binary not found under {root}; run scripts/install_opencode.sh")
+
+
 def free_port() -> int:
     """Return a free TCP port on 127.0.0.1."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
