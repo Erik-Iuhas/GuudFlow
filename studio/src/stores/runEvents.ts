@@ -87,6 +87,10 @@ export interface ArtifactView {
   servedPath: string | null;
   url: string | null;
   createdAt: string;
+  /** SCREENSHOT_READY from `request_visual_feedback`: the id the answer must carry. */
+  requestId?: string | null;
+  /** The question the requesting agent asked about the screenshot. */
+  question?: string | null;
 }
 
 export interface WebRequestView {
@@ -449,6 +453,7 @@ function screenshotFromDetail(
   return {
     signalId, source: "screenshot", path: d.path, kind: "screenshot", role: d.role ?? role,
     taskId: null, size: null, servedPath: null, url: d.url ?? null, createdAt: timestamp,
+    requestId: d.request_id ?? null, question: d.question ?? null,
   };
 }
 
