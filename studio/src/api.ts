@@ -15,6 +15,11 @@ import type {
   Signal,
   SourceRepoMeta,
 } from "./types";
+import type {
+  CapabilitiesMeta,
+  ResolveCapabilitiesRequest,
+  ResolveCapabilitiesResponse,
+} from "./lib/capabilities";
 
 const TOKEN_KEY = "guudflow.token";
 
@@ -892,6 +897,20 @@ export const toolsApi = {
   list: () =>
     request<{ tools: ToolEntry[] }>("GET", "/api/tools", undefined, true).then(
       (r) => r.tools,
+    ),
+};
+
+export const harnessApi = {
+  /** Toggle levels, role types and per-role-type defaults (opencode harness). */
+  capabilities: () =>
+    request<CapabilitiesMeta>("GET", "/api/harness/capabilities", undefined, true),
+  /** Merge overrides onto role defaults; gates vision by the model. 422 on invalid values. */
+  resolve: (body: ResolveCapabilitiesRequest) =>
+    request<ResolveCapabilitiesResponse>(
+      "POST",
+      "/api/harness/capabilities/resolve",
+      body,
+      true,
     ),
 };
 

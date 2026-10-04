@@ -1,13 +1,21 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ApiError, metaApi, projectsApi } from "../api";
+import { ApiError, harnessApi, metaApi, projectsApi } from "../api";
+import { CapabilitySwitches } from "../components/CapabilitySwitches";
 import { CostStrip } from "../components/CostStrip";
 import { WorkerCard } from "../components/WorkerCard";
 import type {
+  CapabilitiesMeta,
+  CapabilityBlock,
+  HarnessAgentConfig,
+  HarnessKind,
+  HarnessProjectConfig,
+} from "../lib/capabilities";
+import type {
+  AgentConfig,
   MetaProposal,
   ModelTier,
   PersonaHire,
-  ProjectConfig,
   RoleDelta,
 } from "../types";
 
@@ -39,6 +47,18 @@ function highlightPaths(text: string): React.ReactNode[] {
   return parts;
 }
 
+/** Per-role capability state kept alongside the proposal (opencode harness). */
+interface RoleCapState {
+  roleType: string;
+  capabilities: CapabilityBlock;
+  visionAvailable: boolean;
+  error: string | null;
+}
+
+function errorText(e: unknown): string {
+  return e instanceof ApiError ? e.detail : String(e);
+}
+
 export function Propose() {
   const [searchParams] = useSearchParams();
   const initialProjectId = searchParams.get("project_id") ?? "";
@@ -53,6 +73,73 @@ export function Propose() {
   // string — the meta-agent reads inputs/ from data/projects/{id}/
   const [projectId, setProjectId] = useState(initialProjectId);
   const navigate = useNavigate();
+  // Harness selector: "legacy" stays the default; "opencode" reveals the
+  // per-role capability switches (plan §5.7).
+  const [harness, setHarness] = useState<HarnessKind>("legacy");
+  const [capMeta, setCapMeta] = useState<CapabilitiesMeta | null>(null);
+  const [roleCaps, setRoleCaps] = useState<Record<string, RoleCapState>>({});
+  const capSeq = useRef<Record<string, number>>({});
+
+  // Load the toggle levels once the opencode harness is chosen.
+  useEffect(() => {
+    if (harness !== "opencode" || capMeta) return;
+    let cancelled = false;
+    harnessApi
+      .capabilities()
+      .then((m) => !cancelled && setCapMeta(m))
+      .catch((e) => !cancelled && setError(errorText(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [harness, capMeta]);
+
+  // Resolve role type + default capabilities for each proposed agent.
+  useEffect(() => {
+    if (harness !== "opencode" || !capMeta || !proposal) return;
+    for (const agent of proposal.agents) {
+      if (capSeq.current[agent.role]) continue;
+      void resolveRole(agent);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [harness, capMeta, proposal]);
+
+  async function resolveRole(agent: AgentConfig, caps?: CapabilityBlock, roleType?: string) {
+    const seq = (capSeq.current[agent.role] = (capSeq.current[agent.role] ?? 0) + 1);
+    try {
+      const r = await harnessApi.resolve({
+        role: agent.role,
+        role_type: roleType ?? agent.agent_class_role_type ?? undefined,
+        is_reviewer: !!agent.is_reviewer,
+        model_id: agent.model_id || undefined,
+        capabilities: caps,
+      });
+      if (capSeq.current[agent.role] !== seq) return;
+      setRoleCaps((prev) => ({
+        ...prev,
+        [agent.role]: {
+          roleType: r.role_type,
+          capabilities: r.capabilities,
+          visionAvailable: r.vision_available,
+          error: null,
+        },
+      }));
+    } catch (e) {
+      if (capSeq.current[agent.role] !== seq) return;
+      // Keep the user's edit visible, but show why the server refused it.
+      setRoleCaps((prev) => {
+        const cur = prev[agent.role];
+        if (!cur) return prev;
+        return { ...prev, [agent.role]: { ...cur, error: errorText(e) } };
+      });
+    }
+  }
+
+  function handleCapChange(agent: AgentConfig, next: CapabilityBlock) {
+    const cur = roleCaps[agent.role];
+    if (!cur) return;
+    setRoleCaps((prev) => ({ ...prev, [agent.role]: { ...cur, capabilities: next, error: null } }));
+    void resolveRole(agent, next, cur.roleType);
+  }
 
   async function handlePropose() {
     setError(null);
@@ -63,6 +150,8 @@ export function Propose() {
       if (initialPriorRunId) opts.priorRunId = initialPriorRunId;
       opts.metaModel = metaModel;
       const p = await metaApi.propose(goal, opts);
+      capSeq.current = {};
+      setRoleCaps({});
       setProposal(p);
       // Suggest a project id from the goal slug ONLY when this is a
       // greenfield proposal. Continuation flow keeps the existing id.
@@ -78,12 +167,19 @@ export function Propose() {
 
   async function handleApprove() {
     if (!proposal) return;
-    const project: ProjectConfig = {
+    // Same place the screen already saves agent fields: opencode projects
+    // carry per-agent role_type + capabilities, which serialise_project reads.
+    const agents: HarnessAgentConfig[] = proposal.agents.map((a) => {
+      const rc = harness === "opencode" ? roleCaps[a.role] : undefined;
+      return rc ? { ...a, role_type: rc.roleType, capabilities: rc.capabilities } : a;
+    });
+    const project: HarnessProjectConfig = {
       project_id: projectId,
       goal,
-      agents: proposal.agents,
+      agents,
       rbac: proposal.rbac,
       max_iterations: 5,
+      ...(harness === "opencode" ? { harness } : {}),
     };
     try {
       if (initialProjectId) {
@@ -177,15 +273,48 @@ export function Propose() {
 
           {deltas.length > 0 && <DeltaTable deltas={deltas} />}
 
+          <div style={{ margin: "12px 0" }}>
+            <label className="small" htmlFor="harness-select">Agent harness</label>
+            <select
+              id="harness-select"
+              value={harness}
+              onChange={(e) => setHarness(e.target.value as HarnessKind)}
+              style={{ width: "auto", marginLeft: 8 }}
+            >
+              <option value="legacy">Legacy</option>
+              <option value="opencode">opencode</option>
+            </select>
+            {harness === "opencode" && (
+              <span className="muted small" style={{ marginLeft: 8 }}>
+                Review what each agent may do before approving.
+              </span>
+            )}
+          </div>
+
           <hr />
           <div className="grid-2">
-            {proposal.agents.map((a) => (
-              <WorkerCard
-                key={a.role}
-                agent={a}
-                mode="preview"
-              />
-            ))}
+            {proposal.agents.map((a) => {
+              const rc = roleCaps[a.role];
+              return (
+                <div key={a.role}>
+                  <WorkerCard agent={a} mode="preview" />
+                  {harness === "opencode" && capMeta && rc && (
+                    <CapabilitySwitches
+                      role={a.role}
+                      roleType={rc.roleType}
+                      value={rc.capabilities}
+                      onChange={(next) => handleCapChange(a, next)}
+                      levels={capMeta.levels}
+                      defaults={capMeta.defaults[rc.roleType]}
+                      visionAvailable={rc.visionAvailable}
+                      production={capMeta.production}
+                      hostDevWarning={capMeta.host_dev_warning}
+                      error={rc.error}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           <hr />
