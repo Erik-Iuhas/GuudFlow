@@ -202,6 +202,21 @@ async def propose(
         project_dir = request.app.state.data_root / "projects" / "_greenfield"
         meta_project_id = "_greenfield"
 
+    # Harness: the stored project decides. Greenfield proposals have no project
+    # yet, so the request body may name it (default legacy).
+    # QUESTION: should the Propose view always send `harness` for greenfield runs?
+    raw_harness = (project or {}).get("harness") or body.get("harness")
+    harness = "opencode" if raw_harness == "opencode" else "legacy"
+    playbook_text = ""
+    if project_id is not None:
+        try:
+            from core.playbook import Playbook
+            playbook_text = Playbook.load(
+                request.app.state.data_root, project_id,
+            ).render_for_meta()
+        except Exception as e:  # a corrupt playbook must not break proposals
+            _logger.warning("playbook for %s unreadable: %s", project_id, e)
+
     meta = MetaAgent()
     meta._llm = _build_meta_llm(request, meta_model=meta_model)
     try:
@@ -213,6 +228,9 @@ async def propose(
             prior_run_id=prior_run_id,
             prior_team_roles=prior_team_roles,
             prior_team=prior_team,
+            harness=harness,
+            playbook_text=playbook_text,
+            model_registry=getattr(request.app.state, "model_registry", None),
         )
     except Exception as e:
         _logger.exception("meta.propose crashed")

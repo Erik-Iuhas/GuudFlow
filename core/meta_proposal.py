@@ -15,9 +15,10 @@ easy to test in isolation.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agents.catalog import (
     ArchetypeMeta,
@@ -26,8 +27,27 @@ from agents.catalog import (
     suggest_persona_id,
 )
 from core.archetype_doc import get_doc_archetype
+from core.harness.capabilities import (
+    LEVELS,
+    ROLE_TYPES,
+    Capabilities,
+    CapabilityError,
+    defaults_for,
+    gate_vision,
+    infer_role_type,
+)
 from core.runner import AgentConfig
 from core.tool_manifest import RoleRBAC
+
+if TYPE_CHECKING:
+    from core.llm.registry import ModelRegistry
+
+_logger = logging.getLogger(__name__)
+
+# Review rounds a reviewer may use before the scheduler escalates (plan §4.5).
+MIN_REVIEW_ROUNDS = 1
+MAX_REVIEW_ROUNDS = 5
+DEFAULT_REVIEW_ROUNDS = 2
 
 
 # ── Input model ────────────────────────────────────────────────────────────
@@ -273,12 +293,68 @@ def render_inputs(inputs: MetaInputs) -> str:
     return "\n".join(parts)
 
 
+def render_harness_guidance(harness: str = "legacy") -> str:
+    """Prompt section describing role types, capability toggles, review edges
+    and (opencode harness only) the planner role.
+
+    Allowed capability values come from `core.harness.capabilities.LEVELS`.
+    """
+    lines = [
+        "Per-role harness fields (all optional on each agent):",
+        "- `role_type`: one of " + ", ".join(ROLE_TYPES) + ". It picks the role's "
+        "default permissions; omit it and it is inferred from the role name.",
+        "- `capabilities`: partial overrides of these toggles (allowed values in "
+        "brackets). Omit a toggle to keep the role-type default. Grant only what "
+        "the role needs; the human approves every toggle before the run.",
+    ]
+    for name, values in LEVELS.items():
+        lines.append(f"    {name}: [{' | '.join(values)}]")
+    lines += [
+        "  `vision: on` is dropped automatically when the role's model cannot "
+        "read images. `sandbox: host_dev` cannot be proposed.",
+        "- `review_of`: for a reviewer, the roles whose work it reviews (a review "
+        "edge: when the reviewer fails the work, those roles are re-run with the "
+        "issues). Defaults to the non-reviewer roles it depends on. "
+        f"`max_review_rounds` ({MIN_REVIEW_ROUNDS}-{MAX_REVIEW_ROUNDS}, default "
+        f"{DEFAULT_REVIEW_ROUNDS}) caps the rework rounds before escalation.",
+    ]
+    if harness == "opencode":
+        lines.append(
+            "- Planner: a `planner` role (role_type planner) turns the goal into the "
+            "task list the other roles work from. Include one when the team has 2 or "
+            "more builders; it has no depends_on and every other non-reviewer role "
+            "depends on it. If you omit it, GuudFlow adds a default planner."
+        )
+    return "\n".join(lines)
+
+
+def render_playbook_section(playbook_text: str) -> str:
+    """Delimited playbook section for the meta prompt; empty when there is none."""
+    text = playbook_text.strip()
+    if not text:
+        return ""
+    return (
+        "=== Project playbook (lessons from earlier runs; propose changes, "
+        "never apply silently) ===\n"
+        f"{text}\n"
+        "=== end project playbook ==="
+    )
+
+
 def render_user_message(
     inputs: MetaInputs,
     archetypes: list[ArchetypeMeta],
     roster: list[dict[str, Any]],
+    *,
+    playbook_text: str = "",
+    harness: str = "legacy",
 ) -> str:
-    """Build the full user message the LLM sees."""
+    """Build the full user message the LLM sees.
+
+    `playbook_text` (the project playbook rendered for the meta-agent) adds a
+    delimited section only when non-empty. `harness` ("legacy" | "opencode")
+    controls whether the planner role is described.
+    """
     is_continuation = inputs.continuation is not None
     if is_continuation and inputs.continuation and inputs.continuation.feedback:
         story_instruction = (
@@ -294,10 +370,12 @@ def render_user_message(
             "design + implementation), populate `stories` with one slug per phase "
             "(e.g. 'backend-api', 'frontend-ui'). Omit for single-phase goals."
         )
-    return "\n\n".join([
+    sections = [
         render_inputs(inputs),
         render_archetype_catalog(archetypes),
         render_persona_roster(roster),
+        render_playbook_section(playbook_text),
+        render_harness_guidance(harness),
         (
             "Propose a team using the `propose_team` tool. Ensure every "
             "role name is unique. Prefer descriptive role names "
@@ -307,7 +385,8 @@ def render_user_message(
             "name_hint like 'Mike' or 'Sarah' that fits the persona's "
             f"character). {story_instruction}"
         ),
-    ])
+    ]
+    return "\n\n".join(sec for sec in sections if sec)
 
 
 # ── Tool-use schema ────────────────────────────────────────────────────────
@@ -356,6 +435,39 @@ PROPOSE_TEAM_TOOL = {
                         },
                         "is_reviewer": {"type": "boolean"},
                         "is_final_reviewer": {"type": "boolean"},
+                        "role_type": {
+                            "type": "string",
+                            "enum": list(ROLE_TYPES),
+                            "description": (
+                                "Harness role type; picks default permissions. "
+                                "Omit to infer from the role name."
+                            ),
+                        },
+                        "capabilities": {
+                            "type": "object",
+                            "description": (
+                                "Partial overrides of the role-type default "
+                                "capability toggles. Omit a key to keep its default."
+                            ),
+                            "properties": {
+                                name: {"type": "string", "enum": list(values)}
+                                for name, values in LEVELS.items()
+                            },
+                        },
+                        "review_of": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Reviewers only: roles whose work this role reviews. "
+                                "Defaults to the non-reviewer roles it depends on."
+                            ),
+                        },
+                        "max_review_rounds": {
+                            "type": "integer",
+                            "minimum": MIN_REVIEW_ROUNDS,
+                            "maximum": MAX_REVIEW_ROUNDS,
+                            "description": "Rework rounds before escalation (default 2).",
+                        },
                         "manages": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -506,12 +618,23 @@ def parse_proposal_args(
     args: dict[str, Any],
     archetypes: list[ArchetypeMeta],
     roster: list[dict[str, Any]],
+    *,
+    harness: str = "legacy",
+    model_registry: "ModelRegistry | None" = None,
 ) -> ParseResult:
     """Turn the LLM's `propose_team` tool-call arguments into a
     structured proposal. Defensive: missing or malformed fields are
     sanitised with warnings rather than failing outright. The caller
     (MetaAgent) decides whether to fall back to the skeleton based on
-    how degraded the result is."""
+    how degraded the result is.
+
+    Harness fields (plan §5.7, §4.5, §4.6) per agent: `role_type`,
+    `capabilities` (partial overrides), `review_of`, `max_review_rounds`.
+    `model_registry`, when given, is used to turn `vision` off for roles whose
+    model cannot read images. With `harness="opencode"` a default `planner`
+    role is added when the team has 2+ builders and no planner; the default
+    ("legacy") never adds one.
+    """
     warnings: list[str] = []
 
     rationale = str(args.get("rationale") or "").strip()
@@ -544,6 +667,7 @@ def parse_proposal_args(
 
     role_names: list[str] = []
     raw_role_data: list[dict[str, Any]] = []
+    raw_review_of: dict[str, Any] = {}
     for raw in raw_agents:
         if not isinstance(raw, dict):
             warnings.append("skipped a non-dict agent entry")
@@ -637,6 +761,14 @@ def parse_proposal_args(
                     goal=hire_goal,
                 ))
 
+        model_tier = str(raw.get("model_tier") or default_tier)
+        is_reviewer = bool(raw.get("is_reviewer", False))
+        role_type = _resolve_role_type(role, raw.get("role_type"), is_reviewer, warnings)
+        capabilities = _resolve_capabilities(
+            role, role_type, raw.get("capabilities"), model_tier, model_registry, warnings,
+        )
+        raw_review_of[role] = raw.get("review_of")
+
         agents.append(AgentConfig(
             role=role,
             description=str(raw.get("description") or "").strip(),
@@ -645,13 +777,16 @@ def parse_proposal_args(
             declared_local_tools=default_tools,
             declared_mcp_servers=[],
             persona_id=persona_id,
-            model_tier=str(raw.get("model_tier") or default_tier),
+            model_tier=model_tier,
             agent_class_role_type=agent_class_role_type,
-            is_reviewer=bool(raw.get("is_reviewer", False)),
+            is_reviewer=is_reviewer,
             is_final_reviewer=bool(raw.get("is_final_reviewer", False)),
             persona_goal=hire_goal if persona_block is not None else "",
             manages=[str(r) for r in (raw.get("manages") or [])],
             escalates_to=[str(r) for r in (raw.get("escalates_to") or [])],
+            role_type=role_type,
+            capabilities=capabilities,
+            max_review_rounds=_clamp_review_rounds(role, raw.get("max_review_rounds"), warnings),
         ))
         rbac[role] = RoleRBAC(role=role, allowed_scopes=default_rbac)
 
@@ -673,6 +808,13 @@ def parse_proposal_args(
                 f"other agents depend on it; clearing the flag"
             )
             a.is_final_reviewer = False
+
+    # Planner (plan §4.6): opencode harness only, so legacy runs keep their shape.
+    if harness == "opencode":
+        _ensure_planner(agents, rbac, model_registry, warnings)
+
+    # Review edges (plan §4.5), after the planner exists so defaults skip it.
+    _resolve_review_edges(agents, raw_review_of, warnings)
 
     # M2: extract desk_seeds — dict[persona_id → list[DeskFileSeed dicts]]
     raw_desk_seeds = args.get("desk_seeds") or {}
@@ -735,6 +877,190 @@ def parse_proposal_args(
         desk_seeds=desk_seeds,
         stories=stories,
     )
+
+
+# ── Harness fields (role type, capabilities, review edges, planner) ───────
+
+
+def _resolve_role_type(
+    role: str, declared: Any, is_reviewer: bool, warnings: list[str],
+) -> str:
+    """Role type from the proposal, else inferred. Invalid declarations warn."""
+    text = str(declared or "").strip()
+    if text and text not in ROLE_TYPES:
+        warnings.append(
+            f"role {role!r} declared unknown role_type {text!r}; inferring from the role name"
+        )
+        text = ""
+    return infer_role_type(role, is_reviewer=is_reviewer, declared=text)
+
+
+def _model_supports_images(registry: "ModelRegistry | None", tier: str) -> tuple[bool, str]:
+    """(supports_images, model_id) for the model the tier resolves to.
+
+    With no registry, or when the tier resolves to nothing, vision is not gated
+    (returns True): the runner re-gates at spawn time anyway.
+    """
+    if registry is None:
+        return True, ""
+    try:
+        info = registry.resolve(tier)
+    except Exception as exc:  # NoModelAvailableError or a broken registry
+        _logger.debug("vision gate skipped for tier %r: %s", tier, exc)
+        return True, ""
+    return bool(info.supports_images), str(info.id)
+
+
+def _resolve_capabilities(
+    role: str,
+    role_type: str,
+    raw_caps: Any,
+    tier: str,
+    registry: "ModelRegistry | None",
+    warnings: list[str],
+) -> dict[str, str]:
+    """Validate a partial capability dict; returns the overrides to store.
+
+    Each toggle is validated on its own (via `Capabilities.from_dict` on top of
+    the role-type defaults), so one bad value is dropped with a warning and the
+    rest survive. `sandbox: host_dev` is never accepted from a proposal. Vision
+    is forced off (and recorded as an override) when the role's model cannot
+    read images.
+    """
+    base = defaults_for(role_type)
+    overrides: dict[str, str] = {}
+    if raw_caps is not None and not isinstance(raw_caps, dict):
+        warnings.append(f"role {role!r} capabilities was not an object; ignored")
+        raw_caps = {}
+    for key, value in (raw_caps or {}).items():
+        try:
+            Capabilities.from_dict({key: value}, base=base)
+        except (CapabilityError, TypeError) as exc:
+            warnings.append(f"role {role!r} capability dropped: {exc}")
+            continue
+        if key == "sandbox" and value == "host_dev":
+            warnings.append(
+                f"role {role!r} capability dropped: sandbox 'host_dev' cannot be "
+                "proposed (a human may set it on the approval screen)"
+            )
+            continue
+        overrides[str(key)] = str(value)
+
+    effective = Capabilities.from_dict(overrides, base=base)
+    supports, model_id = _model_supports_images(registry, tier)
+    if gate_vision(effective, supports).vision != effective.vision:
+        overrides["vision"] = "off"
+        warnings.append(
+            f"role {role!r}: vision turned off, model {model_id!r} has no image input"
+        )
+    return overrides
+
+
+def _clamp_review_rounds(role: str, raw: Any, warnings: list[str]) -> int:
+    """`max_review_rounds` clamped to 1..5; missing means the default (2)."""
+    if raw is None:
+        return DEFAULT_REVIEW_ROUNDS
+    try:
+        if isinstance(raw, bool):
+            raise ValueError("bool")
+        value = int(raw)
+    except (TypeError, ValueError):
+        warnings.append(
+            f"role {role!r} max_review_rounds {raw!r} is not an integer; "
+            f"using {DEFAULT_REVIEW_ROUNDS}"
+        )
+        return DEFAULT_REVIEW_ROUNDS
+    clamped = max(MIN_REVIEW_ROUNDS, min(MAX_REVIEW_ROUNDS, value))
+    if clamped != value:
+        warnings.append(
+            f"role {role!r} max_review_rounds {value} clamped to {clamped} "
+            f"(allowed {MIN_REVIEW_ROUNDS}-{MAX_REVIEW_ROUNDS})"
+        )
+    return clamped
+
+
+def _is_review_role(agent: AgentConfig) -> bool:
+    """True for reviewers and the final reviewer (never counted as builders)."""
+    return agent.is_reviewer or agent.is_final_reviewer or agent.role_type == "reviewer"
+
+
+def _ensure_planner(
+    agents: list[AgentConfig],
+    rbac: dict[str, RoleRBAC],
+    registry: "ModelRegistry | None",
+    warnings: list[str],
+) -> None:
+    """Add a default planner when the team has 2+ non-reviewer roles and no planner.
+
+    The planner goes first, has no depends_on, and every other non-reviewer
+    role gains it as a dependency. Records the addition in `warnings`.
+    """
+    workers = [a for a in agents if not _is_review_role(a)]
+    if len(workers) < 2 or any(a.role_type == "planner" for a in agents):
+        return
+    taken = {a.role for a in agents}
+    name = "planner"
+    n = 1
+    while name in taken:
+        n += 1
+        name = f"planner_{n}"
+    planner = AgentConfig(
+        role=name,
+        description=(
+            "Breaks the goal into a task list (owner, acceptance checklist, "
+            "dependencies) that the other roles work from."
+        ),
+        depends_on=[],
+        declared_local_tools=["fs-read", "fs-list", "git-diff", "git-log", "git-read"],
+        declared_mcp_servers=[],
+        model_tier="solid",
+        role_type="planner",
+    )
+    # QUESTION: planner RBAC scopes are empty (conservative); the harness derives its
+    # edit scope (docs/**) from role_type, not from these legacy scopes.
+    planner.capabilities = _resolve_capabilities(
+        name, "planner", None, planner.model_tier, registry, warnings,
+    )
+    for a in workers:
+        if name not in a.depends_on:
+            a.depends_on.append(name)
+    agents.insert(0, planner)
+    rbac[name] = RoleRBAC(role=name, allowed_scopes=[])
+    warnings.append(
+        f"planner role {name!r} added: the team has {len(workers)} non-reviewer roles "
+        "and no planner; every other non-reviewer role now depends on it"
+    )
+
+
+def _resolve_review_edges(
+    agents: list[AgentConfig], raw_review_of: dict[str, Any], warnings: list[str],
+) -> None:
+    """Fill `review_of` from the proposal (unknown roles dropped) or by default.
+
+    A reviewer with no (valid) `review_of` reviews every non-reviewer,
+    non-planner role it depends on, or all such roles when it has none.
+    """
+    known = {a.role for a in agents}
+    builders = [a.role for a in agents if not _is_review_role(a) and a.role_type != "planner"]
+    for agent in agents:
+        raw = raw_review_of.get(agent.role)
+        edges: list[str] = []
+        if raw is not None and not isinstance(raw, list):
+            warnings.append(f"role {agent.role!r} review_of was not a list; ignored")
+            raw = None
+        for name in raw or []:
+            target = str(name).strip()
+            if target == agent.role:
+                warnings.append(f"role {agent.role!r} review_of itself; dropped")
+            elif target not in known:
+                warnings.append(
+                    f"role {agent.role!r} review_of unknown role {target!r}; dropped"
+                )
+            elif target not in edges:
+                edges.append(target)
+        if not edges and agent.is_reviewer:
+            edges = [d for d in agent.depends_on if d in builders] or list(builders)
+        agent.review_of = edges
 
 
 # ── Delta computation (Phase D.3 — continuation runs) ─────────────────────
@@ -863,6 +1189,7 @@ def fallback_skeleton(goal: str, reason: str = "") -> ParseResult:
                 ],
                 declared_mcp_servers=[],
                 model_tier="solid",
+                role_type="builder",
             ),
             AgentConfig(
                 role="reviewer",
@@ -876,6 +1203,8 @@ def fallback_skeleton(goal: str, reason: str = "") -> ParseResult:
                 model_tier="solid",
                 agent_class_role_type="code_reviewer",
                 is_reviewer=True,
+                role_type="reviewer",
+                review_of=["developer"],
             ),
         ],
         rbac={

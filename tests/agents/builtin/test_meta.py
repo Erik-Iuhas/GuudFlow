@@ -555,3 +555,78 @@ async def test_team_proposal_to_dict_round_trip(tmp_path: Path):
     assert d["persona_hires"][0]["display_name"] == "Sarah"
     assert isinstance(d["warnings"], list)
     assert isinstance(d["deltas"], list)
+
+
+# ── Harness fields (S11) ──────────────────────────────────────────────────
+
+
+class _NoImageRegistry:
+    """Stub model registry: every tier resolves to a text-only model."""
+
+    def resolve(self, tier: str, preference: str | None = None):
+        from types import SimpleNamespace
+        return SimpleNamespace(id="text-only-1", supports_images=False)
+
+
+async def test_propose_threads_harness_playbook_and_registry(tmp_path: Path):
+    """harness/playbook_text/model_registry reach the prompt and the parser."""
+    project_dir = _project_with_inputs(tmp_path)
+    llm = MockLLMClient([_propose_call({
+        "rationale": "x",
+        "agents": [
+            {"role": "api", "archetype": "backend_dev", "depends_on": []},
+            {"role": "ui", "archetype": "backend_dev", "depends_on": [],
+             "role_type": "frontend_builder"},
+        ],
+    })])
+    meta = MetaAgent()
+    meta._llm = llm
+    proposal = await meta.propose(
+        project_dir=project_dir, project_id="p1", goal="Build it", roster=[],
+        harness="opencode",
+        playbook_text="## Project playbook\n- builder: read notes first",
+        model_registry=_NoImageRegistry(),
+    )
+    user_msg = llm.calls[0]["messages"][0].content
+    assert (
+        "Project playbook (lessons from earlier runs; propose changes, never apply silently)"
+        in user_msg
+    )
+    assert "read notes first" in user_msg
+    assert "Planner:" in user_msg
+
+    roles = {r.role: r for r in proposal.roles}
+    assert roles["planner"].role_type == "planner"
+    assert roles["ui"].capabilities == {"vision": "off"}
+    assert any("planner role" in w for w in proposal.warnings)
+    d = proposal.to_dict()
+    ui = next(a for a in d["agents"] if a["role"] == "ui")
+    assert ui["role_type"] == "frontend_builder"
+    assert ui["depends_on"] == ["planner"]
+
+
+async def test_propose_defaults_keep_legacy_shape(tmp_path: Path):
+    """Without harness/playbook the team has no planner and no playbook section."""
+    project_dir = _project_with_inputs(tmp_path)
+    llm = MockLLMClient([_propose_call({
+        "rationale": "x",
+        "agents": [
+            {"role": "api", "archetype": "backend_dev", "depends_on": []},
+            {"role": "ui", "archetype": "backend_dev", "depends_on": []},
+        ],
+    })])
+    meta = MetaAgent()
+    meta._llm = llm
+    proposal = await meta.propose(
+        project_dir=project_dir, project_id="p1", goal="Build it", roster=[],
+    )
+    assert [r.role for r in proposal.roles] == ["api", "ui"]
+    assert "Project playbook" not in llm.calls[0]["messages"][0].content
+
+
+def test_fallback_skeleton_carries_harness_fields():
+    from core.meta_proposal import fallback_skeleton
+
+    reviewer = fallback_skeleton("goal").agents[1]
+    assert reviewer.role_type == "reviewer"
+    assert reviewer.review_of == ["developer"]

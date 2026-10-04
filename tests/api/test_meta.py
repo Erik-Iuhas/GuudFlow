@@ -275,3 +275,47 @@ async def test_propose_with_prior_run_id_passes_continuation_context(
     assert "CONTINUATION" in user_msg
     assert "Token expiry was missing" in user_msg
     assert "old_dev" in user_msg  # prior team roles surfaced
+
+
+# ── Harness + playbook (S11) ──────────────────────────────────────────────
+
+
+async def test_propose_passes_harness_and_playbook_to_meta_agent(
+    client, auth_header, app, data_root,
+):
+    """A project's playbook is shown to the model and an opencode harness
+    named in the request gets a default planner."""
+    from core.playbook import Playbook
+
+    await client.post(
+        "/api/projects",
+        json={"project_id": "p_pb", "goal": "Build it"},
+        headers=auth_header,
+    )
+    pb = Playbook.load(data_root, "p_pb")
+    pb.add("brief_addenda", "builder", "Read research/notes.md first", "run_1", confidence=0.8)
+    pb.save()
+
+    llm = MockLLMClient([MockTurn(tool_calls=[ToolCall(
+        id="m1", name="propose_team",
+        arguments={
+            "rationale": "two builders",
+            "agents": [
+                {"role": "api", "archetype": "backend_dev", "depends_on": []},
+                {"role": "ui", "archetype": "backend_dev", "depends_on": []},
+            ],
+        },
+    )])])
+    app.state.meta_llm = llm
+
+    r = await client.post(
+        "/api/meta/propose",
+        json={"goal": "Build it", "project_id": "p_pb", "harness": "opencode"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [a["role"] for a in body["agents"]][0] == "planner"
+    user_msg = llm.calls[0]["messages"][0].content
+    assert "Project playbook (lessons from earlier runs" in user_msg
+    assert "Read research/notes.md first" in user_msg
