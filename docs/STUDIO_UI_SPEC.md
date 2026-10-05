@@ -102,7 +102,7 @@ Rules:
 |---|---|
 | STARTED / COMPLETE / FAILED / BLOCKED | `agents[role].state`, `spawns` |
 | CAPABILITIES | `agents[role].capabilities` |
-| TOOL_CALL | `agents[role].toolCalls++`; the role's tool feed (details sheet) |
+| TOOL_CALL | `agents[role].toolCalls++`; the role's tool feed (node details sheet) |
 | AGENT_RESULT | `agents[role].lastResult`, `costs[role] += cost` |
 | TASK_ASSIGNED | new card stub (refetch the card via the query cache) |
 | TASK_MOVED | `cards[id].column`, `round`, `since` |
@@ -118,33 +118,29 @@ Rules:
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
 │ header: project · run id · status pill · elapsed · stop                   │
-├──────────────┬──────────────────────────────────────┬─────────────────────┤
-│ Pipeline     │ Agent cards (a grid, one per role)   │ Tabs: Board │ Quips │
-│ graph        │  - state + capability badge          │ Overseer │ Cards    │
-│ (React Flow) │  - current card chip                 │ (virtualized feeds) │
-│ role nodes   │  - two-line last result              │                     │
-│ coloured by  │  - calls · cost · "Details"          │                     │
-│ state; review│ Clicking a card or a graph node opens│                     │
-│ edges with   │ a side sheet with that role's tool   │                     │
-│ round count; │ calls (virtual) and full result.     │                     │
-│ blocked arrows│                                     │                     │
-├──────────────┴──────────────────────────────────────┴─────────────────────┤
+├───────────────────────────────────────────────────────────────────────────┤
+│ Pipeline graph (React Flow, full width, left → right, height fits nodes)  │
+│  each role node: name · state · current card · two-line last result ·     │
+│  calls · cost. Review edges carry the round; blocked arrows dashed;       │
+│  the overseer is a detached node. Clicking a node (or Enter on it) opens  │
+│  a side sheet: capability badge, full last result, tool calls (virtual).  │
+├───────────────────────────────────────────────────────────────────────────┤
+│ Tabs: Board │ Quips │ Overseer │ Cards │ Artifacts  (virtualized feeds)    │
+├───────────────────────────────────────────────────────────────────────────┤
 │ bottom bar: pending approvals (once/always/reject) · budget meter          │
 │ (spent / cap, per-agent breakdown on hover) · always-visible comment box  │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-- Widths: graph 280px (collapsible), agent cards flex, right panel 400px (collapsible). The
-  cockpit body has a fixed height and the page scrolls (approvals, budget and comment box
-  sit below it); the cockpit does not pin itself to the viewport. Below 1024px the graph
-  collapses to a top strip and the right panel becomes a drawer.
+- The graph takes the full width and sizes its height to its nodes at 1x; the panel
+  below has a fixed height and the page scrolls. Below 1024px the panel becomes a drawer.
 - The comment box never hides while agents run (CLAUDE.md user-interaction rule).
 - Empty states: "Waiting for the first agent…" before any STARTED; the error state
   shows the websocket error and a retry.
 - Keyboard: `g` focuses the graph, `c` the comment box, `a` the first approval,
   `⌘K` opens the command palette (U4).
 - Accessibility: every colour status also has a text label or icon. Focus is visible.
-  Agent cards are `role="region"` with the role name as label.
+  Each graph node holds a button labelled with the role and its state.
 
 ## 5. Folder layout
 

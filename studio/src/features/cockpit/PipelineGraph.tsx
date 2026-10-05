@@ -12,10 +12,12 @@ import "@xyflow/react/dist/base.css";
 import { cn } from "../../lib/utils";
 import { useRunStore } from "../../stores/runStoreContext";
 import type { AgentState } from "../../stores/runEvents";
+import { resultSummary } from "./AgentDetail";
 import {
   NODE_HEIGHT,
   NODE_WIDTH,
   STATE_LABEL,
+  formatUsd,
   buildGraph,
   type EdgeKind,
   type GraphDirection,
@@ -30,6 +32,7 @@ type RoleNodeData = {
   detached: boolean;
   card?: string;
   selected: boolean;
+  onOpen?: (role: string) => void;
 };
 type RoleNodeType = Node<RoleNodeData, "role">;
 
@@ -59,17 +62,32 @@ const STATE_MARK: Record<AgentState, string> = {
   waiting: "?",
 };
 
+/**
+ * One role: its state, current card, a two-line last result and calls · cost. The whole
+ * node is a button that opens the role's tool calls and full result (the details sheet).
+ */
 function RoleNode({ data }: NodeProps<RoleNodeType>) {
+  const { role } = data;
+  const toolCalls = useRunStore((s) => s.agents[role]?.toolCalls ?? 0);
+  const cost = useRunStore((s) => s.agents[role]?.cost ?? 0);
+  const card = useRunStore((s) => {
+    const id = s.agents[role]?.card;
+    return id ? s.cards[id] : undefined;
+  });
+  const summary = useRunStore((s) => resultSummary(s, role));
+  const cardLine = data.detached && !card ? "overseer (detached)"
+    : card ? `${card.id} · ${card.title}` : data.card ? `card ${data.card}` : "no active card";
   return (
     <div
       className={cn(
-        "flex h-full w-full flex-col justify-center rounded-md border-2 px-3 py-1.5 text-foreground",
+        "flex flex-col overflow-hidden rounded-md border-2 text-foreground",
         STATE_BOX[data.state],
         data.detached && "border-dashed",
         data.pulsing && "motion-safe:animate-pulse",
         data.selected && "ring-2 ring-ring",
       )}
-      data-testid={`graph-node-${data.role}`}
+      style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
+      data-testid={`graph-node-${role}`}
       data-state={data.state}
     >
       {/* Edge anchors only: the graph is read-only, so the dots stay invisible (O22). */}
@@ -77,16 +95,31 @@ function RoleNode({ data }: NodeProps<RoleNodeType>) {
         <Handle key={h.id} id={h.id} type={h.type} position={h.position}
           className={cn("!pointer-events-none !opacity-0", HANDLE_OFFSET[h.id])} />
       ))}
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm font-semibold">{data.role}</span>
-        <span className={cn("shrink-0 text-xs font-medium", STATE_TEXT[data.state])}>
-          <span aria-hidden>{STATE_MARK[data.state]} </span>
-          {STATE_LABEL[data.state]}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          data.onOpen?.(role);
+        }}
+        aria-label={`${role}: ${STATE_LABEL[data.state]}. Show tool calls and result`}
+        className="nodrag flex h-full w-full min-w-0 cursor-pointer flex-col gap-0.5 rounded-md px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span className="flex w-full items-center justify-between gap-2">
+          <span className="truncate text-sm font-semibold">{role}</span>
+          <span className={cn("shrink-0 text-xs font-medium", STATE_TEXT[data.state])}>
+            <span aria-hidden>{STATE_MARK[data.state]} </span>
+            {STATE_LABEL[data.state]}
+          </span>
         </span>
-      </div>
-      <div className="truncate text-xs text-muted-foreground">
-        {data.detached ? "overseer (detached)" : data.card ? `card ${data.card}` : "no active card"}
-      </div>
+        <span className="w-full truncate text-xs text-muted-foreground" title={card?.title}>{cardLine}</span>
+        <span className="line-clamp-2 w-full text-xs" title={summary}>
+          {summary || <span className="text-muted-foreground">No result yet.</span>}
+        </span>
+        <span className="mt-auto flex w-full items-center justify-between text-[11px] text-muted-foreground">
+          <span>{toolCalls} calls · {formatUsd(cost)}</span>
+          <span aria-hidden>details ›</span>
+        </span>
+      </button>
     </div>
   );
 }
@@ -112,8 +145,10 @@ export interface PipelineGraphProps {
   selectedRole?: string | null;
   onSelectRole?: (role: string) => void;
   className?: string;
-  /** Layout direction; the cockpit uses "TB" in its tall desktop column. */
+  /** Layout direction. */
   direction?: GraphDirection;
+  /** Size the graph's height to its nodes (at 1x) instead of filling the parent. */
+  fitHeight?: boolean;
 }
 
 /**
@@ -121,7 +156,9 @@ export interface PipelineGraphProps {
  * solid depends_on edges, review edges (reviewer -> author) carrying the rework round,
  * dashed blocked-on arrows, and the overseer as a detached node that pulses while it runs.
  */
-export function PipelineGraph({ specs, selectedRole, onSelectRole, className, direction = "LR" }: PipelineGraphProps) {
+export function PipelineGraph({
+  specs, selectedRole, onSelectRole, className, direction = "LR", fitHeight = false,
+}: PipelineGraphProps) {
   const agents = useRunStore((s) => s.agents);
   const reviews = useRunStore((s) => s.reviews);
   const blockedOn = useRunStore((s) => s.blockedOn);
@@ -144,6 +181,7 @@ export function PipelineGraph({ specs, selectedRole, onSelectRole, className, di
         direction,
         role: n.role, state: n.state, pulsing: n.pulsing, detached: n.detached, card: n.card,
         selected: selectedRole === n.role,
+        onOpen: onSelectRole,
       },
     }));
     const edges: Edge[] = model.edges.map((e) => ({
@@ -159,7 +197,7 @@ export function PipelineGraph({ specs, selectedRole, onSelectRole, className, di
       focusable: false,
     }));
     return { nodes, edges };
-  }, [model, selectedRole, direction]);
+  }, [model, selectedRole, direction, onSelectRole]);
 
   // Re-fit when the set of roles changes; layout of existing roles never moves.
   const roleKey = `${direction}:${model.nodes.map((n) => n.id).join("|")}`;
@@ -172,20 +210,32 @@ export function PipelineGraph({ specs, selectedRole, onSelectRole, className, di
     );
   }
 
+  // Natural height: the lowest node's bottom edge, plus room for edge labels and padding.
+  const naturalHeight = Math.max(...model.nodes.map((n) => n.y)) - Math.min(...model.nodes.map((n) => n.y))
+    + NODE_HEIGHT + 72;
   return (
-    <div className={cn("h-full min-h-[10rem] w-full", className)} data-testid="pipeline-graph">
+    <div
+      className={cn("w-full", fitHeight ? "" : "h-full min-h-[10rem]", className)}
+      style={fitHeight ? { height: naturalHeight } : undefined}
+      data-testid="pipeline-graph"
+    >
       <ReactFlow
         key={roleKey}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
+        fitViewOptions={{ padding: 0.12, maxZoom: 1 }}
         minZoom={0.3}
         maxZoom={1.5}
         nodesDraggable={false}
+        panOnScroll={false}
+        zoomOnScroll={false}
+        preventScrolling={false}
         nodesConnectable={false}
         elementsSelectable={false}
+        // Nodes only take pointer events when the graph has a click handler. The button
+        // inside each node is the keyboard path; both open the same details.
         onNodeClick={(_, node) => onSelectRole?.(node.id)}
         proOptions={{ hideAttribution: true }}
         aria-label="Pipeline graph"

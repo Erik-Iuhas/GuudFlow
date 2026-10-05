@@ -19,7 +19,7 @@ import { RunStoreProvider } from "../../../stores/runStoreContext";
 import { TooltipProvider } from "../../../components/ui/tooltip";
 import type { RawSignal, SignalType } from "../../../lib/runEvents.gen";
 import { mockElementSize, mockViewport } from "../../../test-utils/dom";
-import { AgentDetail, AgentLane } from "../AgentLane";
+import { AgentDetail } from "../AgentDetail";
 import { ApprovalsBar } from "../ApprovalsBar";
 import { BudgetMeter } from "../BudgetMeter";
 import { CockpitView } from "../Cockpit";
@@ -105,8 +105,8 @@ describe("PipelineGraph", () => {
   });
 });
 
-describe("AgentLane", () => {
-  it("shows the card chip, a short last result and the capability badge; details hold the tool calls", () => {
+describe("graph nodes and the details sheet", () => {
+  function devStore() {
     const store = createRunStore("r1");
     store.getState().ingest([
       sig("CAPABILITIES", "dev", {
@@ -119,36 +119,33 @@ describe("AgentLane", () => {
       sig("TOOL_CALL", "dev", { tool: "edit", status: "completed", input: { filePath: "src/form.ts" }, output: "ok", duration_ms: 12 }),
       sig("AGENT_RESULT", "dev", { result: { status: "done", summary: "Form is built" }, cost: 0.25 }, "dev result"),
     ]);
-    const onOpen = vi.fn();
-    wrap(store, <><AgentLane role="dev" onOpen={onOpen} /><AgentDetail role="dev" /></>);
+    return store;
+  }
 
-    const lane = screen.getByRole("region", { name: "dev" });
-    expect(lane).toBeInTheDocument();
-    const chip = screen.getByTestId("lane-card-dev");
-    expect(within(chip).getByText("T1")).toBeInTheDocument();
-    expect(within(chip).getByText("Build the form")).toBeInTheDocument();
-    expect(within(chip).getByText("round 1")).toBeInTheDocument();
-    // Tool calls live in the details, not on the compact card.
-    expect(within(lane).queryByTestId("toolfeed-dev")).toBeNull();
+  it("a node carries the agent's state, card, short result, calls and cost", () => {
+    wrap(devStore(), <PipelineGraph specs={roleSpecs(project.agents)} />);
+    const node = screen.getByTestId("graph-node-dev");
+    expect(node).toHaveTextContent("T1 · Build the form");
+    expect(node).toHaveTextContent("Form is built");
+    expect(node).toHaveTextContent("1 calls · $0.25");
+    // Tool calls are not on the graph.
+    expect(screen.queryByTestId("toolfeed-dev")).toBeNull();
+  });
+
+  it("the details hold the capability badge, full result and tool calls", () => {
+    wrap(devStore(), <AgentDetail role="dev" />);
+    const detail = screen.getByTestId("agent-detail-dev");
+    expect(within(detail).getByText("Form is built")).toBeInTheDocument();
     expect(within(screen.getByTestId("toolfeed-dev")).getByText("src/form.ts")).toBeInTheDocument();
-    expect(within(screen.getByTestId("agent-detail-dev")).getByText("Form is built")).toBeInTheDocument();
-    fireEvent.click(within(lane).getByRole("button", { name: "Details for dev" }));
-    expect(onOpen).toHaveBeenCalledWith("dev");
-    expect(within(screen.getByTestId("lane-result-dev")).getByText("Form is built")).toBeInTheDocument();
-    expect(screen.getByTestId("lane-result-dev")).toHaveTextContent("$0.25");
-
     const badge = screen.getByTestId("capability-badge-dev");
     expect(badge).toHaveTextContent("developer · 2/3 on");
     expect(badge.getAttribute("aria-label")).toContain("sandbox: strict, web: off, shell: on");
-    fireEvent.focus(badge);
-    return waitFor(() => expect(screen.getAllByText("web: off").length).toBeGreaterThan(0));
   });
 
   it("shows empty states for an idle role", () => {
-    wrap(createRunStore("r1"), <><AgentLane role="dev" /><AgentDetail role="dev" /></>);
-    expect(screen.getByText("No active card")).toBeInTheDocument();
+    wrap(createRunStore("r1"), <AgentDetail role="dev" />);
     expect(screen.getByText("No tool calls yet.")).toBeInTheDocument();
-    expect(screen.getAllByText("No result yet.")).toHaveLength(2);
+    expect(screen.getByText("No result yet.")).toBeInTheDocument();
   });
 });
 
@@ -337,11 +334,11 @@ describe("CockpitView", () => {
     expect(screen.getByTestId("waiting")).toHaveTextContent("Waiting for the first agent…");
     act(() => store.getState().ingest(sig("STARTED", "dev")));
     expect(screen.queryByTestId("waiting")).toBeNull();
-    expect(screen.getByRole("region", { name: "dev" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "overseer" })).toBeInTheDocument();
+    expect(screen.getByTestId("graph-node-dev")).toHaveAttribute("data-state", "running");
+    expect(screen.getByTestId("graph-node-overseer")).toBeInTheDocument();
   });
 
-  it("clicking an agent's details opens its tool calls in a sheet", async () => {
+  it("clicking a graph node opens its tool calls in a sheet", async () => {
     const store = createRunStore("r1");
     store.getState().ingest([
       sig("STARTED", "dev"),
@@ -349,7 +346,7 @@ describe("CockpitView", () => {
     ]);
     render(view(store));
     expect(screen.queryByTestId("toolfeed-dev")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Details for dev" }));
+    fireEvent.click(screen.getByRole("button", { name: /^dev: running/ }));
     const detail = await screen.findByTestId("agent-detail-dev");
     expect(within(detail).getByTestId("toolfeed-dev")).toBeInTheDocument();
   });
@@ -437,7 +434,7 @@ describe("recorded run (2,000 signals)", () => {
     const rows = within(screen.getByTestId("board-feed")).queryAllByText(/./, { selector: "[data-signal]" });
     expect(document.querySelectorAll("[data-signal]").length).toBeLessThan(400);
     expect(rows.length).toBeLessThan(400);
-    expect(screen.getByRole("region", { name: "backend" })).toBeInTheDocument();
+    expect(screen.getByTestId("graph-node-backend")).toBeInTheDocument();
     expect(screen.getByTestId("budget-meter")).toHaveTextContent("/ $5.00");
     expect(screen.getByLabelText("Comment for the agents")).toBeInTheDocument();
     expect(store.getState().reviews["reviewer>backend"].round).toBeGreaterThan(0);

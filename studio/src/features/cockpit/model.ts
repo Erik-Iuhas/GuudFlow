@@ -71,9 +71,9 @@ export interface GraphModel {
   edges: GraphEdgeModel[];
 }
 
-export const NODE_WIDTH = 168;
-export const NODE_HEIGHT = 56;
-const COL_GAP = 56;
+export const NODE_WIDTH = 248;
+export const NODE_HEIGHT = 112;
+const COL_GAP = 72;
 const ROW_GAP = 24;
 
 /** Longest dependency chain ending at each role (cycles are cut, not followed). */

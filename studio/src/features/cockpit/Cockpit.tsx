@@ -18,12 +18,12 @@ import { cn } from "../../lib/utils";
 import type { RunStore } from "../../stores/runEvents";
 import { RunStoreProvider, useRunStore } from "../../stores/runStoreContext";
 import type { ProjectConfig, RunMeta } from "../../types";
-import { AgentDetail, AgentLane } from "./AgentLane";
+import { AgentDetail } from "./AgentDetail";
 import { ApprovalsBar } from "./ApprovalsBar";
 import { BudgetMeter } from "./BudgetMeter";
 import { ArtifactGallery } from "../artifacts/ArtifactGallery";
 import { TaskBoard } from "../board";
-import { OVERSEER_ROLE, formatElapsed, mergeRoles, parseTimestamp, roleSpecs } from "./model";
+import { formatElapsed, mergeRoles, parseTimestamp, roleSpecs } from "./model";
 import { OverseerPanel } from "./OverseerPanel";
 import { PipelineGraph } from "./PipelineGraph";
 import { VirtualBoardFeed, VirtualQuipFeed, useQuipStream, type QuipStream } from "./VirtualFeeds";
@@ -136,10 +136,6 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
 
   const specs = useMemo(() => roleSpecs(project?.agents), [project]);
   const allSpecs = useMemo(() => mergeRoles(specs, Object.keys(agents)), [specs, agents]);
-  const laneRoles = useMemo(() => {
-    const roles = allSpecs.map((s) => s.role);
-    return [...roles.filter((r) => r !== OVERSEER_ROLE), ...roles.filter((r) => r === OVERSEER_ROLE)];
-  }, [allSpecs]);
   const anyStarted = useMemo(() => Object.values(agents).some((a) => a.spawns > 0), [agents]);
 
   const status = meta?.status ?? (live ? "running" : "finished");
@@ -310,46 +306,31 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
         </div>
       )}
 
-      {/* Body */}
-      <div className={cn("flex gap-2", desktop ? "h-[34rem] flex-row" : "flex-col")}>
-        {graphOpen && (
-          <div
-            ref={graphRef}
-            tabIndex={0}
-            aria-label="Pipeline graph"
-            className={cn(
-              "shrink-0 overflow-hidden rounded-lg border border-border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              desktop ? "w-[280px]" : "h-44 w-full",
-            )}
-          >
-            <PipelineGraph specs={allSpecs} selectedRole={selectedRole} onSelectRole={selectRole}
-              direction={desktop ? "TB" : "LR"} />
-          </div>
-        )}
-
-        <div
-          className="grid min-h-0 min-w-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-2 overflow-y-auto"
-          data-testid="lanes"
-          aria-label="Agents"
-          role="group"
-        >
-          {anyStarted ? (
-            laneRoles.map((role) => (
-              <AgentLane key={role} role={role} selected={selectedRole === role} onOpen={selectRole} />
-            ))
-          ) : (
-            <div className="col-span-full flex min-h-32 items-center justify-center rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground" data-testid="waiting">
-              {socket.status === "error" ? "The live feed is not connected." : "Waiting for the first agent…"}
-            </div>
-          )}
+      {/* Pipeline: the graph has the full width; each node carries its agent's state,
+          current card, last result and cost, and opens its tool calls on click. */}
+      {!anyStarted && (
+        <div className="rounded-md border border-dashed border-border px-3 py-1.5 text-sm text-muted-foreground" data-testid="waiting">
+          {socket.status === "error" ? "The live feed is not connected." : "Waiting for the first agent…"}
         </div>
+      )}
+      {graphOpen && (
+        <div
+          ref={graphRef}
+          tabIndex={0}
+          aria-label="Pipeline graph"
+          className={cn(
+            "w-full shrink-0 overflow-hidden rounded-lg border border-border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          )}
+        >
+          <PipelineGraph specs={allSpecs} selectedRole={selectedRole} onSelectRole={selectRole} direction="LR" fitHeight />
+        </div>
+      )}
 
-        {desktop && panelOpen && (
-          <aside className="flex w-[400px] shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card" aria-label="Run panels">
-            {sidePanel}
-          </aside>
-        )}
-      </div>
+      {desktop && panelOpen && (
+        <aside className="flex h-[30rem] flex-col overflow-hidden rounded-lg border border-border bg-card" aria-label="Run panels">
+          {sidePanel}
+        </aside>
+      )}
 
       {!desktop && (
         <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
@@ -370,7 +351,15 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           }
         }}
       >
-        <SheetContent side="right" className="flex w-full max-w-lg flex-col gap-0 p-0">
+        <SheetContent
+          side="right"
+          className="flex w-full max-w-lg flex-col gap-0 p-0"
+          // Focus the sheet itself, not its first control (that pops the capability tooltip).
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).focus();
+          }}
+        >
           <SheetTitle className="px-4 pb-1 pt-4 text-base">{detailRole}</SheetTitle>
           <SheetDescription className="px-4 pb-2 text-xs">Tool calls and the last result for this role.</SheetDescription>
           {detailRole && <AgentDetail role={detailRole} />}

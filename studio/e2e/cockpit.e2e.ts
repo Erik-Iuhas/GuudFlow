@@ -49,8 +49,13 @@ test("the cockpit renders the recorded run, windows the board and scrolls it", a
   await expect(page.getByTestId("graph-node-overseer")).toBeVisible();
   await expect(page.getByText(/round \d\/3/).first()).toBeVisible();
   for (const role of ["planner", "backend", "frontend", "reviewer", "overseer"]) {
-    await expect(page.getByRole("region", { name: role, exact: true })).toBeAttached();
+    await expect(page.getByTestId(`graph-node-${role}`)).toBeVisible();
   }
+  // A node opens that role's tool calls and full result.
+  await page.getByTestId("graph-node-backend").click();
+  await expect(page.getByTestId("agent-detail-backend")).toBeVisible();
+  await expect(page.getByTestId("toolfeed-backend")).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(page.getByTestId("budget-meter")).toContainText("/ $5.00");
   await expect(page.getByLabel("Comment for the agents")).toBeVisible();
 
