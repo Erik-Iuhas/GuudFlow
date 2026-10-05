@@ -833,6 +833,8 @@ class JobRunner:
             error = f"{type(e).__name__}: {e}"
             run_status = "errored"
             _logger.exception("runner crashed for job %s", job.job_id)
+            from core.project_runs import release_crashed_run
+            release_crashed_run(self.data_root, job.project_id, job.run_id, run_root, error)
         finally:
             await self.docker.stop(job.run_id)
             if self.run_registry is not None:

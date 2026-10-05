@@ -129,6 +129,18 @@ def close_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
     return submitted
 
 
+def release_crashed_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
+                        error: str) -> list[BacklogItem]:
+    """The run crashed: the items it took go back to open (with the error). Never raises."""
+    if not selection(run_root):
+        return []
+    try:
+        return Backlog(data_root, project_id).release(run_id, f"run errored: {error}"[:300])
+    except Exception:  # noqa: BLE001 — the crash is already being reported
+        log.exception("releasing the items of crashed run %s failed", run_id)
+        return []
+
+
 def card_results(board: Iterable[Signal]) -> tuple[dict[str, str], dict[str, float]]:
     """Per card: the latest result summary, and the gateway cost of its turns.
 

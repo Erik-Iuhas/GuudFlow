@@ -103,3 +103,26 @@ def test_continuing_merges_main_cleanly_when_possible(tmp_path: Path) -> None:
     repo.accept("run_a")
     head, conflicts = repo.continue_into(data / "w", "run_b", "run_c")
     assert conflicts == [] and (data / "w" / "a.py").exists() and (data / "w" / "b.py").exists()
+
+
+def test_a_crashed_run_gives_its_items_back(tmp_path: Path) -> None:
+    from core.project_runs import release_crashed_run, selection
+    from core.json_store import write_json
+    from dataclasses import asdict
+
+    data = tmp_path / "data"
+    backlog = Backlog(data, "p")
+    item = backlog.add("Feature", ["works"])
+    taken = backlog.take_for_run("run_x", ids=[item.id])
+    run_root = data / "runs" / "run_x"
+    run_root.mkdir(parents=True)
+    # No selection on disk: nothing is touched.
+    assert release_crashed_run(data, "p", "run_x", run_root, "boom") == []
+    write_json(run_root / "backlog_selection.json", [asdict(i) for i in taken])
+    assert selection(run_root)
+
+    released = release_crashed_run(data, "p", "run_x", run_root, "APIError: 409")
+    assert [i.id for i in released] == [item.id]
+    after = backlog.get(item.id)
+    assert after.status == "open" and after.run_id is None
+    assert "run errored: APIError: 409" in after.history[-1]["decision"]
