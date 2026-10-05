@@ -40,11 +40,16 @@ class AnthropicClient:
         cache_system: bool = False,
     ) -> LLMResponse:
         if self._client is None:
+            import httpx
             from anthropic import AsyncAnthropic
+            # anthropic 0.39 builds its default httpx client with `proxies=`, which
+            # httpx 0.28 removed; an explicit client avoids that (proxy settings
+            # still come from the environment through httpx's trust_env).
+            http_client = httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0))
             self._client = (
-                AsyncAnthropic(api_key=self._api_key)
+                AsyncAnthropic(api_key=self._api_key, http_client=http_client)
                 if self._api_key
-                else AsyncAnthropic()
+                else AsyncAnthropic(http_client=http_client)
             )
 
         # System prompt: plain string or cache-enabled block list
