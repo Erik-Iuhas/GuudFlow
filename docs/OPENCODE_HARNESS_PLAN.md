@@ -1214,8 +1214,10 @@ note, accept, reject, continue) and the backlog below (select items for the next
 reorder, add with one acceptance check per line). The run report shows the run's review
 state.
 
-Not built yet: the meta-agent does not read the backlog when proposing a team; runs are
-started by a human or CI, never on a schedule by themselves.
+The meta-agent sees the open backlog (`Backlog.render_for_meta`, run-written items wrapped as
+untrusted) when it proposes a team, so the team fits the ongoing work. Not built yet: runs
+start when a human or CI asks (CI can pass `backlog_items: "top"`), never on a schedule of
+their own.
 
 ## Appendix: how the research was done
 

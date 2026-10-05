@@ -222,6 +222,15 @@ async def propose(
         except Exception as e:  # a corrupt playbook must not break proposals
             _logger.warning("playbook for %s unreadable: %s", project_id, e)
 
+    # The project's open backlog (plan §13): the team should fit the ongoing work.
+    backlog_text = ""
+    if project_id is not None:
+        try:
+            from core.backlog import Backlog
+            backlog_text = Backlog(request.app.state.data_root, project_id).render_for_meta()
+        except Exception as e:  # a corrupt backlog must not break proposals
+            _logger.warning("backlog for %s unreadable: %s", project_id, e)
+
     meta = MetaAgent()
     meta._llm = _build_meta_llm(request, meta_model=meta_model)
     try:
@@ -235,6 +244,7 @@ async def propose(
             prior_team=prior_team,
             harness=harness,
             playbook_text=playbook_text,
+            backlog_text=backlog_text,
             model_registry=getattr(request.app.state, "model_registry", None),
         )
     except Exception as e:

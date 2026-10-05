@@ -207,6 +207,7 @@ class MetaAgent(BaseAgent):
         prior_team: list[dict[str, Any]] | None = None,
         harness: str = "legacy",
         playbook_text: str = "",
+        backlog_text: str = "",
         model_registry: "ModelRegistry | None" = None,
     ) -> TeamProposal:
         """Generate a team proposal for `goal` using inputs in
@@ -246,7 +247,7 @@ class MetaAgent(BaseAgent):
         # 3. Render the user message + pick the system prompt.
         user_message = render_user_message(
             inputs, archetypes, roster,
-            playbook_text=playbook_text, harness=harness,
+            playbook_text=playbook_text, backlog_text=backlog_text, harness=harness,
         )
         system = (
             META_CONTINUATION_PROMPT

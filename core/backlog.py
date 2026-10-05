@@ -113,6 +113,24 @@ class Backlog:
         return sorted(items, key=lambda i: (_STATUS_ORDER.get(i.status, 9), -i.priority,
                                             int(i.id[1:]) if _ID.match(i.id) else 0))
 
+    def render_for_meta(self, limit: int = 12) -> str:
+        """The open work for the meta-agent's team proposal ("" when there is none).
+
+        Items a run created carry agent-written titles, so they are wrapped as
+        untrusted data; human items are shown as they are.
+        """
+        from core.harness.brief import wrap_untrusted
+
+        items = [i for i in self.items() if i.status in ("in_run", "open")][:limit]
+        lines: list[str] = []
+        for i in items:
+            state = "in a run" if i.status == "in_run" else f"priority {i.priority}"
+            text = f"{i.title} ({i.kind}, size {i.size}, {len(i.acceptance)} checks, {state})"
+            if i.source.startswith("run:"):
+                text = wrap_untrusted(f"backlog item {i.id} (from a run)", text)
+            lines.append(f"- {i.id}: {text}")
+        return "\n".join(lines)
+
     def get(self, item_id: str) -> BacklogItem:
         """One item; BacklogError if unknown."""
         for item in self.items():

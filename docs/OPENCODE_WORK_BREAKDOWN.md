@@ -108,7 +108,7 @@ retirement (S15) and final review (O15), and the rest of the Studio track (S24 t
 | P7 | G3 | Done | Runs start from the project repo and take backlog items; planner must cover them; `RUN_SUBMITTED`; last accepted run in briefs (`core/project_runs.py`, worker, runner, `task_flow.py`); end-to-end test `tests/harness/test_ongoing_project.py` |
 | P7 | G4 | Done | API: backlog, runs-review, accept/reject, invoke `backlog_items` / `continue_run` (`api/routes/project_work.py`) |
 | P7 | G5 | Done | Studio Work tab (review queue + backlog), run start with selected items, review state on the run report |
-| P7 | G6 | Not started | Meta-agent reads the backlog when proposing a team; scheduled runs that take the top items |
+| P7 | G6 | Partly | The meta-agent reads the open backlog when proposing a team (done). Scheduled runs that take the top items on their own: not started (CI can invoke with `backlog_items: "top"`) |
 
 ### Final calls (closing the offline work)
 

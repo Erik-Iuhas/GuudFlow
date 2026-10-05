@@ -341,12 +341,26 @@ def render_playbook_section(playbook_text: str) -> str:
     )
 
 
+def render_backlog_section(backlog_text: str) -> str:
+    """Delimited open-backlog section for the meta prompt (plan §13); empty when none."""
+    text = backlog_text.strip()
+    if not text:
+        return ""
+    return (
+        "=== Project backlog (ongoing work the team will take on over the next runs; "
+        "pick roles that can do it) ===\n"
+        f"{text}\n"
+        "=== end project backlog ==="
+    )
+
+
 def render_user_message(
     inputs: MetaInputs,
     archetypes: list[ArchetypeMeta],
     roster: list[dict[str, Any]],
     *,
     playbook_text: str = "",
+    backlog_text: str = "",
     harness: str = "legacy",
 ) -> str:
     """Build the full user message the LLM sees.
@@ -375,6 +389,7 @@ def render_user_message(
         render_archetype_catalog(archetypes),
         render_persona_roster(roster),
         render_playbook_section(playbook_text),
+        render_backlog_section(backlog_text),
         render_harness_guidance(harness),
         (
             "Propose a team using the `propose_team` tool. Ensure every "
