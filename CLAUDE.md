@@ -525,8 +525,8 @@ From plan §5.4 and §5.5 (replaces DESIGN.md sections 19 and 21 for the opencod
 **Git:**
 - Every run has one run repo. Every role works in its own checkout under `<run_root>/roles/<role>/` on its own branch `agent/{role}`. The worktree (`work/`, mounted at `/work`) has no `.git`; the git directory is host-only and never mounted, so nothing the agent writes can configure git on the host.
 - Agents only ever change their own branch. They have no remote credentials, `git push` is denied, and they never merge or touch `main` or another role's branch.
-- After each turn the runner (host side) commits leftover changes with a conventional message, fetches only `agent/{role}`, checks it (protected paths, symlinks, `core/secret_scan.py`), and merges it into `main`. A failed check means no merge and a failed turn with the reason.
-- Each spawn starts with `main` merged into the role's branch; a merge conflict there fails the turn.
+- After each turn the runner (host side) commits leftover changes with a conventional message, fetches only `agent/{role}`, checks it (protected paths, symlinks, `core/secret_scan.py`), and merges it into `main`. A failed check means no merge and a failed turn with the reason; the branch is then *set aside* (reset to `main`, patch kept at `.guudflow/set_aside/`, reason in the next brief) so it never poisons later turns.
+- Each spawn starts with `main` merged into the role's branch. A conflict there, or when merging the branch home, goes back to the agent: the markers stay in the worktree and the agent resolves them (in the brief, or in one follow-up in the same session). Markers are never merged; unresolved work is set aside.
 - Commit messages use conventional commits format (`feat:`, `fix:`, `test:`, `docs:`).
 - The full `.git/` repo is included in the run's deliverable output.
 

@@ -103,6 +103,21 @@ retirement (S15) and final review (O15), and the rest of the Studio track (S24 t
 | UI | S27 | Done | U4: every view on tokens and ui primitives, `styles.css` deleted, Tailwind preflight on; visual suite `studio/e2e/visual.e2e.ts` (light and dark, 0.2% tolerance) |
 | UI | O22 | Partly | Offline passes on every visual baseline (light and dark): graph zoom, edge routing and handles, lane overflow, dark-mode rows, budget bar colour, one spend formatter. A pass on a live real-model run is deferred (you) |
 
+### Final calls (closing the offline work)
+
+Decisions taken when the offline plan was finished, so nobody has to re-derive them:
+
+| Topic | Call | Where |
+|---|---|---|
+| Rejected branches | Set aside (reset to `main`, patch kept in `.guudflow/set_aside/`, reason in the next brief) instead of staying on `agent/{role}` and failing every later turn | `core/harness/git_roles.py`, plan §5.5 |
+| Merge conflicts | Handed back to the agent with markers in its worktree (one follow-up in the same session, or the first item of the next brief); markers are never merged; unresolved work is set aside | `git_roles.py`, `run.py` |
+| Timed-out turns | One short wrap-up follow-up so the report and partial work are kept | `run.py`, `brief.py` |
+| Persona memory recall | Targets the current card (servers start per spawn), not only the goal | `run.py` `_system_prompt` |
+| Card diffs | `GET /git/diff?ref=&base=` shows exactly what a card's merge brought in | `api/routes/runs.py`, `CardDrawer.tsx` |
+| Review-column cap | Served in run meta (`review_column_cap`), not hardcoded in Studio | `_add_harness_meta`, `TaskBoard.tsx` |
+| Artifact files and report | Report, runs-metrics and diffs need the bearer token; artifact files take the token or a signed, HttpOnly, run-scoped one-hour cookie from `POST /artifact-access` (the token never goes into a URL); dev without a token stays open | `api/auth.py`, `run_artifacts.py` |
+| Visual suite tolerance | 0.2% per screenshot (2% hid a real regression) | `studio/playwright.config.ts` |
+
 **What you need to do to finish the deferred work:** provide an API key (see "Before anything starts")
 and run O4, O12, O14 and O17, plus the real-model parts of O19 and O24, using the commands in the
 README's "Run the demo" section.

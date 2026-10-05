@@ -500,6 +500,19 @@ branch. Instead:
     conventional message (replaces the old auto-commit/claim machinery).
 - A check failure → the turn counts as `failed` with the reason, and the branch is not
   merged. The runner merges into `main` as today; agents never merge.
+- **No dead ends** (added after O22). A rejected branch is *set aside*: reset to
+  `main`, with its patch kept read-only at `.guudflow/set_aside/NN.patch` and the reason
+  in the role's next brief, so one bad commit cannot fail every later turn of the role.
+  Unresolved conflict markers count as a failed check.
+- **Conflicts go back to the agent.** If `main` moved during the turn and the merge
+  conflicts, the runner merges `main` into the role's branch, leaves the markers in the
+  worktree and sends one follow-up in the same session; the agent resolves them and
+  resubmits, then the runner collects again. Still unresolved → set aside. A conflict
+  found when syncing with `main` at turn start becomes the first item of the brief
+  instead of failing the turn.
+- **Timeouts wrap up.** A turn that hits its wall clock gets one short follow-up asking
+  for a result now (`failed` with progress unless the work is complete), so the report and
+  the partial work are kept.
 
 ### 5.6 MCP RBAC and budgets (layers 6 and 8)
 

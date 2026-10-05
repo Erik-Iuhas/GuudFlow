@@ -461,7 +461,8 @@ class OpencodeRun:
                                base_url=provider.base_url or None,
                                api_key=os.environ.get(provider.api_key_env) or None)
 
-    async def _ensure_server(self, role: _Role, workdir: Path) -> OpencodeClient:
+    async def _ensure_server(self, role: _Role, workdir: Path,
+                             task_hint: str = "") -> OpencodeClient:
         if role.client is not None:
             return role.client
         assert self._http is not None
@@ -475,7 +476,7 @@ class OpencodeRun:
         via_gateway = replace(role.binding,
                               base_url=f"{self._gw_http.url}/{role.binding.provider_key}",
                               api_key=virtual_key)
-        role.prompt = await self._system_prompt(role)
+        role.prompt = await self._system_prompt(role, task_hint)
         agent = agent_entry(role.compiled, model_ref=via_gateway.model_ref,
                             prompt=role.prompt.render(), description=role.cfg.description,
                             steps=self.settings.steps)
@@ -523,7 +524,7 @@ class OpencodeRun:
             self.mcp.revoke(role.token)
             role.token = ""
 
-    async def _system_prompt(self, role: _Role) -> PromptLayers:
+    async def _system_prompt(self, role: _Role, task_hint: str = "") -> PromptLayers:
         """Compile the role's persona and project layers into its agent prompt (plan §5.11)."""
         cfg = role.cfg
         runner = self.runner
@@ -541,12 +542,12 @@ class OpencodeRun:
                 brief = builder(cfg.role)
             except Exception as exc:  # noqa: BLE001 — the brief is optional context
                 log.warning("%s: teammate brief failed: %s", cfg.role, exc)
-        # QUESTION: should task_hint be the current card's title? Cards change per
-        # turn but the prompt is fixed per server, so it stays empty for now.
+        # Servers start per spawn, so memory recall can target this turn's card
+        # (with keep_servers the first card's hint stays; tests only).
         return await build_agent_prompt(
             role=cfg.role, description=cfg.description, base_prompt=cfg.system_prompt,
             persona=persona, project_id=getattr(runner.project, "project_id", None),
-            persona_id=cfg.persona_id, goal=runner.project.goal, task_hint="",
+            persona_id=cfg.persona_id, goal=runner.project.goal, task_hint=task_hint,
             teammate_brief=brief, project_context=getattr(runner, "_project_context", ""))
 
     # ── one spawn ──────────────────────────────────────────────────────────
@@ -605,7 +606,8 @@ class OpencodeRun:
 
     async def _run_turn(self, role: _Role, workdir: Path, plan: TurnPlan | None) -> None:
         role_name = role.cfg.role
-        client = await self._ensure_server(role, workdir)
+        hint = (plan.task_text or "")[:600] if plan is not None else ""
+        client = await self._ensure_server(role, workdir, hint)
         model: type[BaseModel] = (plan.model if plan is not None else
                                   ReviewResult if role.role_type == "reviewer" else AgentResult)
         self.inbox.expect(self.run_id, role_name, model, plan.check if plan else None)
