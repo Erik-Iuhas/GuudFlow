@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { connectQuipStream, type QuipWire, type WsHandle } from "../api";
-import { avatarFor } from "../lib/avatar";
+import { AvatarDot } from "./AvatarDot";
+import { Card } from "./ui/card";
 
 const EVENT_LABEL: Record<string, string> = {
   agent_complete: "·",
@@ -44,41 +45,32 @@ export function QuipFeed({ runId }: Props) {
   const visible = quips.slice(-8);
 
   return (
-    <div className="card">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Quips</h2>
-        <span className="muted small">
+    <Card className="mb-3 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="m-0 text-[13px] font-semibold">Quips</h2>
+        <span className="text-xs text-muted-foreground">
           {connected ? "● live" : "○ disk"}
         </span>
       </div>
-      <div className="muted small">In-character commentary on key events.</div>
-      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-        {visible.length === 0 && <p className="muted small">No quips yet.</p>}
+      <div className="text-xs text-muted-foreground">In-character commentary on key events.</div>
+      <div className="mt-2 flex flex-col gap-1.5">
+        {visible.length === 0 && <p className="m-0 text-xs text-muted-foreground">No quips yet.</p>}
         {visible.map((q, i) => (
           <QuipRow key={`${q.ts}-${i}`} quip={q} />
         ))}
       </div>
-    </div>
+    </Card>
   );
 }
 
 /** One quip line. Exported for the cockpit's virtualized quip feed. */
 export function QuipRow({ quip: q }: { quip: QuipWire }) {
-  const av = avatarFor(q.persona || "system");
   return (
-    <div className="quip" style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-      <div
-        className="worker-avatar"
-        style={{ background: av.gradient, width: 24, height: 24, fontSize: 10, flexShrink: 0 }}
-        title={q.persona}
-      >
-        {av.initials}
-      </div>
+    <div className="flex items-start gap-2 rounded-md border border-status-blocked/30 bg-status-blocked/10 px-3 py-2 text-xs">
+      <AvatarDot seed={q.persona || "system"} title={q.persona} className="h-6 w-6 text-[10px]" />
       <div>
-        <span className="who">{q.persona}</span>
-        <span className="muted small" style={{ margin: "0 4px" }}>
-          {EVENT_LABEL[q.event] ?? q.event}
-        </span>
+        <span className="mr-1.5 font-semibold text-status-blocked">{q.persona}</span>
+        <span className="mx-1 text-xs text-muted-foreground">{EVENT_LABEL[q.event] ?? q.event}</span>
         <em>{q.text}</em>
       </div>
     </div>

@@ -1,6 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { AgentConfig, ModelTier } from "../types";
 import { modelsApi, type ModelEntry } from "../api";
+import { checkCls, checkLabelCls, errorCls, fieldCls, labelCls, sectionHeadingCls } from "../lib/field";
+import { cn } from "../lib/utils";
+import { Badge } from "./ui/badge";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
 
 interface Props {
   agent: AgentConfig;
@@ -10,16 +14,6 @@ interface Props {
   onChange: (partial: Partial<AgentConfig>) => void;
   onSave: (partial: Partial<AgentConfig>) => Promise<void>;
   onRbacChange?: (scopesToAdd: string[], scopesToRemove: string[]) => void;
-}
-
-function useEscapeClose(onClose: () => void) {
-  useEffect(() => {
-    function handle(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handle);
-    return () => window.removeEventListener("keydown", handle);
-  }, [onClose]);
 }
 
 // ── Two-level model picker ────────────────────────────────────────────────────
@@ -120,11 +114,11 @@ function ModelPicker({
     // here — model_id stays empty until the registry populates.
     return (
       <select
+        className={fieldCls}
         value={value}
         onChange={(e) =>
           onChange({ model_tier: e.target.value as ModelTier, model_id: "" })
         }
-        style={{ width: "100%" }}
       >
         <option value="heavy">Heavy (claude-opus-4-7)</option>
         <option value="solid">Solid (claude-sonnet-4-6)</option>
@@ -134,11 +128,11 @@ function ModelPicker({
   }
 
   return (
-    <div style={{ display: "flex", gap: 8 }}>
+    <div className="flex gap-2">
       <select
+        className={cn(fieldCls, "w-36 shrink-0")}
         value={provider}
         onChange={(e) => handleProviderChange(e.target.value)}
-        style={{ width: 140, flexShrink: 0 }}
         aria-label="Provider"
       >
         {providers.map((p) => (
@@ -149,8 +143,8 @@ function ModelPicker({
       </select>
       <select
         value={currentModel?.id ?? ""}
+        className={cn(fieldCls, "flex-1")}
         onChange={(e) => handleModelChange(e.target.value)}
-        style={{ flex: 1 }}
         aria-label="Model"
       >
         {providerModels.map((m) => (
@@ -279,7 +273,7 @@ function GroupedToolPicker({
   }
 
   if (error) {
-    return <p className="muted small">Could not load tools (check bearer token).</p>;
+    return <p className="m-0 text-xs text-muted-foreground">Could not load tools (check bearer token).</p>;
   }
 
   const groups = new Map<string, ToolEntry[]>();
@@ -359,7 +353,7 @@ function GroupedToolPicker({
   }
 
   if (tools.length === 0) {
-    return <p className="muted small">Loading tools…</p>;
+    return <p className="m-0 text-xs text-muted-foreground">Loading tools…</p>;
   }
 
   return (
@@ -383,34 +377,27 @@ function GroupedToolPicker({
           nsNonBaseline.every((t) => selected.includes(t.scope))
           && nsBaseline.every((t) => !excludedSet.has(t.scope));
         return (
-          <div key={ns} style={{ marginBottom: 4, border: "1px solid #e2e8f0", borderRadius: 6, overflow: "hidden" }}>
+          <div key={ns} className="mb-1 overflow-hidden rounded-md border border-border">
             <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "6px 10px",
-                background: "#f8fafc",
-                cursor: "pointer",
-              }}
+              className="flex cursor-pointer items-center gap-2 bg-muted px-2.5 py-1.5"
               onClick={() => toggleGroup(ns)}
             >
               <input
                 type="checkbox"
                 checked={allSelected}
-                style={{ width: "auto" }}
+                className={checkCls}
                 onChange={(e) => { e.stopPropagation(); allSelected ? deselectAll(ns) : selectAll(ns); }}
                 onClick={(e) => e.stopPropagation()}
                 title={allSelected ? "Deselect all" : "Select all enabled"}
               />
-              <span style={{ fontWeight: 600, fontSize: 12, flex: 1 }}>
+              <span className="flex-1 text-xs font-semibold">
                 {NAMESPACE_LABELS[ns] ?? ns}
               </span>
-              <span className="muted small">{nsSelected}/{nsTools.length}</span>
-              <span style={{ fontSize: 10, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .1s" }}>▶</span>
+              <span className="text-xs text-muted-foreground">{nsSelected}/{nsTools.length}</span>
+              <span className={cn("text-[10px] transition-transform", isOpen && "rotate-90")}>▶</span>
             </div>
             {isOpen && (
-              <div style={{ padding: "4px 0" }}>
+              <div className="py-1">
                 {nsTools.map((t) => {
                   const offArchetype = isOffArchetype(t);
                   const isExcludedBaseline = t.baseline && excludedSet.has(t.scope);
@@ -442,54 +429,37 @@ function GroupedToolPicker({
                     <div key={t.scope}>
                       <label
                         title={title}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          padding: "4px 10px 4px 28px",
-                          cursor: "pointer",
-                          background: t.baseline
-                            ? (isExcludedBaseline ? "rgba(239,68,68,.08)" : (isSelected ? "#eef2ff" : "transparent"))
+                        className={cn(
+                          checkLabelCls,
+                          "py-1 pl-7 pr-2.5",
+                          t.baseline
+                            ? isExcludedBaseline
+                              ? "bg-destructive/10"
+                              : isSelected && "bg-primary/10"
                             : offArchetype
-                              ? "rgba(251,146,60,.12)"
-                              : isSelected
-                                ? "#eef2ff"
-                                : "transparent",
-                        }}
+                              ? "bg-status-blocked/15"
+                              : isSelected && "bg-primary/10",
+                        )}
                       >
                         <input
                           type="checkbox"
                           checked={isSelected}
-                          style={{ width: "auto" }}
+                          className={checkCls}
                           onChange={() => toggleTool(t)}
                         />
-                        <span style={{ fontFamily: "monospace", fontSize: 12 }}>{t.name}</span>
+                        <span className="font-mono text-xs">{t.name}</span>
                         {t.baseline && (
-                          <span
-                            className="tag small"
-                            style={{
-                              fontSize: 10,
-                              background: isExcludedBaseline ? "#fee2e2" : undefined,
-                              color: isExcludedBaseline ? "#991b1b" : undefined,
-                            }}
-                          >
+                          <Badge variant={isExcludedBaseline ? "failed" : "secondary"} className="text-[10px]">
                             {isExcludedBaseline ? "baseline (off)" : "baseline"}
-                          </span>
+                          </Badge>
                         )}
-                        {offArchetype && <span className="tag small" style={{ fontSize: 10, background: "#fed7aa", color: "#92400e", border: "none" }}>off-archetype</span>}
+                        {offArchetype && <Badge variant="blocked" className="text-[10px]">off-archetype</Badge>}
                       </label>
                       {showModelPicker && (
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            padding: "2px 10px 6px 60px",
-                            fontSize: 12,
-                          }}
-                        >
-                          <span className="muted small" style={{ minWidth: 50 }}>Model:</span>
+                        <div className="flex items-center gap-2 pb-1.5 pl-[60px] pr-2.5 pt-0.5 text-xs">
+                          <span className="min-w-[50px] text-xs text-muted-foreground">Model:</span>
                           <select
+                            className={cn(fieldCls, "flex-1")}
                             value={currentModelId}
                             onChange={(e) => {
                               const next = { ...(subLlmModels ?? {}) };
@@ -500,7 +470,6 @@ function GroupedToolPicker({
                               }
                               onSubLlmModelsChange!(next);
                             }}
-                            style={{ flex: 1 }}
                           >
                             <option value="">(inherit project / auto)</option>
                             {(() => {
@@ -544,11 +513,8 @@ export function WorkerSettingsPanel({
   onSave,
   onRbacChange,
 }: Props) {
-  useEscapeClose(onClose);
-
   const [draft, setDraft] = useState<Partial<AgentConfig>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
-  const backdropRef = useRef<HTMLDivElement>(null);
 
   function merged(): AgentConfig {
     return { ...agent, ...draft };
@@ -576,10 +542,6 @@ export function WorkerSettingsPanel({
     }
   }
 
-  function handleBackdropClick(e: React.MouseEvent) {
-    if (e.target === backdropRef.current) onClose();
-  }
-
   const current = merged();
 
   const [baselineScopes, setBaselineScopes] = useState<string[]>([]);
@@ -596,35 +558,28 @@ export function WorkerSettingsPanel({
     ...projectRbacScopes.map((s) => ({ scope: s, source: "project" })),
   ];
 
-  return (
-    <div
-      ref={backdropRef}
-      className="slide-over-backdrop"
-      onClick={handleBackdropClick}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", zIndex: 200, display: "flex", justifyContent: "flex-end" }}
-    >
-      <div
-        className="slide-over-panel"
-        style={{ width: 480, maxWidth: "100vw", background: "var(--bg, #fff)", height: "100%", overflowY: "auto", padding: 24, boxShadow: "-4px 0 20px rgba(0,0,0,.15)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="row" style={{ justifyContent: "space-between", marginBottom: 16 }}>
-          <h2 style={{ margin: 0 }}>Agent settings — {current.role}</h2>
-          <button onClick={onClose} aria-label="Close settings">×</button>
-        </div>
+  const otherRoles = allRoles.filter((r) => r !== current.role);
 
-        {saveError && <div className="error" style={{ marginBottom: 12 }}>{saveError}</div>}
+  return (
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent side="right" className="w-[480px] max-w-full gap-0 overflow-y-auto p-6">
+        <SheetHeader className="mb-4 pr-8">
+          <SheetTitle>Agent settings — {current.role}</SheetTitle>
+          <SheetDescription className="sr-only">Edit this agent's behaviour, model, tools and dependencies.</SheetDescription>
+        </SheetHeader>
+
+        {saveError && <div className={errorCls}>{saveError}</div>}
 
         {/* Identity */}
-        <section style={{ marginBottom: 20 }}>
-          <h3 className="small" style={{ textTransform: "uppercase", color: "var(--muted)" }}>Identity</h3>
+        <section className="mb-5">
+          <h3 className={sectionHeadingCls}>Identity</h3>
           <div><strong>Role:</strong> {current.role}</div>
-          {current.persona_id && <div className="muted small" style={{ marginBottom: 8 }}>Persona: {current.persona_id}</div>}
-          <label className="small">Archetype</label>
+          {current.persona_id && <div className="mb-2 text-xs text-muted-foreground">Persona: {current.persona_id}</div>}
+          <label className={labelCls}>Archetype</label>
           <select
+            className={fieldCls}
             value={current.agent_class_role_type ?? ""}
             onChange={(e) => void handleChange({ agent_class_role_type: e.target.value || null })}
-            style={{ width: "100%" }}
           >
             <option value="">(generic)</option>
             <option value="planner">planner</option>
@@ -636,43 +591,44 @@ export function WorkerSettingsPanel({
         </section>
 
         {/* Description + system prompt */}
-        <section style={{ marginBottom: 20 }}>
-          <h3 className="small" style={{ textTransform: "uppercase", color: "var(--muted)" }}>Behaviour</h3>
-          <label className="small">Description</label>
+        <section className="mb-5">
+          <h3 className={sectionHeadingCls}>Behaviour</h3>
+          <label className={labelCls}>Description</label>
           <input
+            className={cn(fieldCls, "mb-2")}
             value={current.description ?? ""}
             onChange={(e) => void handleChange({ description: e.target.value })}
-            style={{ marginBottom: 8 }}
           />
-          <label className="small">System prompt</label>
+          <label className={labelCls}>System prompt</label>
           <textarea
+            className={cn(fieldCls, "mb-2")}
             rows={4}
             value={current.system_prompt ?? ""}
             onChange={(e) => void handleChange({ system_prompt: e.target.value })}
-            style={{ marginBottom: 8 }}
           />
-          <label className="small">Max tool iterations</label>
+          <label className={labelCls}>Max tool iterations</label>
           <input
+            className={fieldCls}
             type="number"
             min={1}
             max={50}
             value={current.max_tool_iterations ?? 6}
             onChange={(e) => void handleChange({ max_tool_iterations: parseInt(e.target.value || "6", 10) })}
           />
-          <label className="small" style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+          <label className={cn(checkLabelCls, "mt-2 gap-1.5")}>
             <input
               type="checkbox"
+              className={checkCls}
               checked={current.is_reviewer ?? false}
-              style={{ width: "auto" }}
               onChange={(e) => void handleChange({ is_reviewer: e.target.checked })}
             />
             Reviewer (merges branches on APPROVED)
           </label>
-          <label className="small" style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+          <label className={cn(checkLabelCls, "mt-2 gap-1.5")}>
             <input
               type="checkbox"
+              className={checkCls}
               checked={current.is_final_reviewer ?? false}
-              style={{ width: "auto" }}
               onChange={(e) => void handleChange({ is_final_reviewer: e.target.checked })}
             />
             Final reviewer (runs last; gates on heavy_tier_mid_run_dispatch)
@@ -680,8 +636,8 @@ export function WorkerSettingsPanel({
         </section>
 
         {/* Model */}
-        <section style={{ marginBottom: 20 }}>
-          <h3 className="small" style={{ textTransform: "uppercase", color: "var(--muted)" }}>Model</h3>
+        <section className="mb-5">
+          <h3 className={sectionHeadingCls}>Model</h3>
           <ModelPicker
             value={current.model_tier ?? "solid"}
             valueModelId={current.model_id ?? ""}
@@ -690,8 +646,8 @@ export function WorkerSettingsPanel({
         </section>
 
         {/* Tools — grouped accordion */}
-        <section style={{ marginBottom: 20 }}>
-          <h3 className="small" style={{ textTransform: "uppercase", color: "var(--muted)" }}>Tools</h3>
+        <section className="mb-5">
+          <h3 className={sectionHeadingCls}>Tools</h3>
           <GroupedToolPicker
             selected={current.declared_local_tools ?? []}
             onChange={(next) => void handleChange({ declared_local_tools: next })}
@@ -710,17 +666,17 @@ export function WorkerSettingsPanel({
         </section>
 
         {/* Dependencies */}
-        <section style={{ marginBottom: 20 }}>
-          <h3 className="small" style={{ textTransform: "uppercase", color: "var(--muted)" }}>Dependencies</h3>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {allRoles.filter((r) => r !== current.role).map((r) => {
+        <section className="mb-5">
+          <h3 className={sectionHeadingCls}>Dependencies</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {otherRoles.map((r) => {
               const checked = (current.depends_on ?? []).includes(r);
               return (
-                <label key={r} className="small" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <label key={r} className={cn(checkLabelCls, "gap-1")}>
                   <input
                     type="checkbox"
+                    className={checkCls}
                     checked={checked}
-                    style={{ width: "auto" }}
                     onChange={() => {
                       const next = checked
                         ? (current.depends_on ?? []).filter((x) => x !== r)
@@ -736,19 +692,19 @@ export function WorkerSettingsPanel({
         </section>
 
         {/* Hierarchy */}
-        {allRoles.filter((r) => r !== current.role).length > 0 && (
-          <section style={{ marginBottom: 20 }}>
-            <h3 className="small" style={{ textTransform: "uppercase", color: "var(--muted)" }}>Hierarchy</h3>
-            <label className="small">Manages (can assign tasks to)</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-              {allRoles.filter((r) => r !== current.role).map((r) => {
+        {otherRoles.length > 0 && (
+          <section className="mb-5">
+            <h3 className={sectionHeadingCls}>Hierarchy</h3>
+            <label className={labelCls}>Manages (can assign tasks to)</label>
+            <div className="mb-2.5 flex flex-wrap gap-1.5">
+              {otherRoles.map((r) => {
                 const checked = (current.manages ?? []).includes(r);
                 return (
-                  <label key={r} className="small" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <label key={r} className={cn(checkLabelCls, "gap-1")}>
                     <input
                       type="checkbox"
+                      className={checkCls}
                       checked={checked}
-                      style={{ width: "auto" }}
                       onChange={() => {
                         const next = checked
                           ? (current.manages ?? []).filter((x) => x !== r)
@@ -761,14 +717,14 @@ export function WorkerSettingsPanel({
                 );
               })}
             </div>
-            <label className="small">Escalates to</label>
+            <label className={labelCls}>Escalates to</label>
             <select
+              className={fieldCls}
               value={(current.escalates_to ?? [])[0] ?? ""}
               onChange={(e) => void handleChange({ escalates_to: e.target.value ? [e.target.value] : [] })}
-              style={{ width: "100%" }}
             >
               <option value="">(default: tech_lead if present)</option>
-              {allRoles.filter((r) => r !== current.role).map((r) => (
+              {otherRoles.map((r) => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>
@@ -777,20 +733,20 @@ export function WorkerSettingsPanel({
 
         {/* RBAC (read-only) */}
         <section>
-          <h3 className="small" style={{ textTransform: "uppercase", color: "var(--muted)" }}>Effective RBAC scopes</h3>
-          <ul className="rbac-list" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          <h3 className={sectionHeadingCls}>Effective RBAC scopes</h3>
+          <ul className="m-0 list-none p-0">
             {effectiveScopes.map(({ scope, source }) => (
-              <li key={scope} className="small" style={{ marginBottom: 2 }}>
-                <code>{scope}</code>
-                <span className="muted" style={{ marginLeft: 6 }}>from {source}</span>
+              <li key={scope} className="mb-0.5 text-xs">
+                <code className="font-mono">{scope}</code>
+                <span className="ml-1.5 text-muted-foreground">from {source}</span>
               </li>
             ))}
             {effectiveScopes.length === 0 && (
-              <li className="muted small">No extra scopes (baseline only)</li>
+              <li className="text-xs text-muted-foreground">No extra scopes (baseline only)</li>
             )}
           </ul>
         </section>
-      </div>
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 }

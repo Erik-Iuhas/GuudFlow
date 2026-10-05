@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { checkCls } from "../lib/field";
+import { cn } from "../lib/utils";
+import { Badge } from "./ui/badge";
 
 export interface ToolEntry {
   name: string;
@@ -83,44 +86,34 @@ export function ToolsMultiSelect({
   }
 
   return (
-    <div ref={containerRef} className="tools-multiselect">
+    <div ref={containerRef} className="relative">
       {/* Selected chips */}
-      <div className="chip-row" style={{ flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
+      <div className="mb-1 flex flex-wrap items-center gap-1">
         {selected.map((s) => (
-          <span key={s} className="tag small">
+          <Badge key={s} variant="secondary">
             {s}
             <button
-              className="chip-remove"
+              type="button"
+              className="cursor-pointer border-0 bg-transparent p-0 text-muted-foreground hover:text-foreground"
               onClick={() => remove(s)}
               aria-label={`Remove ${s}`}
             >
               ×
             </button>
-          </span>
+          </Badge>
         ))}
         <input
-          className="chip-input"
+          className="min-w-20 flex-1 border-0 bg-transparent p-0 text-sm text-foreground outline-none"
           placeholder={selected.length ? "" : "Add tools…"}
           value={search}
           onFocus={() => setOpen(true)}
           onChange={(e) => { setSearch(e.target.value); setOpen(true); }}
-          style={{ border: "none", outline: "none", flex: 1, minWidth: 80 }}
         />
       </div>
 
       {/* Dropdown list */}
       {open && filtered.length > 0 && (
-        <div className="tools-dropdown" style={{
-          position: "absolute",
-          background: "var(--bg, #fff)",
-          border: "1px solid var(--border, #ddd)",
-          borderRadius: 6,
-          zIndex: 100,
-          maxHeight: 260,
-          overflowY: "auto",
-          width: "100%",
-          boxShadow: "0 2px 8px rgba(0,0,0,.15)",
-        }}>
+        <div className="absolute z-[100] max-h-[260px] w-full overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md">
           {filtered.map((t) => {
             const enabled = isEnabled(t, archetypeRoleType, projectRbacScopes);
             const isSelected = selected.includes(t.scope);
@@ -132,26 +125,23 @@ export function ToolsMultiSelect({
                 key={t.name}
                 title={tooltip}
                 onClick={() => enabled && toggle(t.scope)}
-                style={{
-                  padding: "6px 10px",
-                  cursor: enabled ? "pointer" : "not-allowed",
-                  opacity: enabled ? 1 : 0.45,
-                  background: isSelected ? "var(--accent-faint, #eef)" : "transparent",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
+                aria-disabled={!enabled}
+                className={cn(
+                  "flex items-center gap-2 px-2.5 py-1.5",
+                  enabled ? "cursor-pointer" : "cursor-not-allowed opacity-45",
+                  isSelected && "bg-accent",
+                )}
               >
                 <input
                   type="checkbox"
                   checked={isSelected}
                   disabled={!enabled}
                   readOnly
-                  style={{ width: "auto", pointerEvents: "none" }}
+                  className={cn(checkCls, "pointer-events-none")}
                 />
-                <span style={{ fontFamily: "monospace", fontSize: 13 }}>{t.name}</span>
+                <span className="font-mono text-[13px]">{t.name}</span>
                 {t.baseline && (
-                  <span className="tag small" style={{ fontSize: 10 }}>baseline</span>
+                  <Badge variant="secondary" className="text-[10px]">baseline</Badge>
                 )}
               </div>
             );

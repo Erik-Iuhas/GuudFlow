@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { getToken } from "../api";
+import { errorCls, fieldCls } from "../lib/field";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "./ui/dialog";
 
 interface DirEntry {
   name: string;
@@ -52,61 +55,43 @@ export function FolderPicker({ initialPath, onSelect, onClose }: Props) {
   }, []);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal"
-        onClick={(e) => e.stopPropagation()}
-        style={{ minWidth: 480, maxWidth: 640 }}
-      >
-        <h3 style={{ marginTop: 0 }}>Select folder</h3>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="min-w-[480px] max-w-[640px]">
+        <DialogTitle>Select folder</DialogTitle>
+        <DialogDescription className="sr-only">Browse the API host's filesystem and choose a directory.</DialogDescription>
 
-        <div className="row" style={{ gap: 6, alignItems: "center", marginBottom: 8 }}>
-          <button
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="outline"
             disabled={!data?.parent || loading}
             onClick={() => data?.parent && void load(data.parent)}
             title="Go up one level"
           >
             ↑ Up
-          </button>
+          </Button>
           <input
             type="text"
             value={data?.path ?? ""}
             placeholder="(roots)"
             readOnly
-            className="mono small"
-            style={{ flex: 1 }}
+            className={`${fieldCls} flex-1 font-mono text-xs`}
           />
         </div>
 
-        {error && <div className="error" style={{ marginBottom: 8 }}>{error}</div>}
+        {error && <div className={`${errorCls} mb-0`}>{error}</div>}
 
-        <div
-          style={{
-            maxHeight: 320,
-            overflowY: "auto",
-            border: "1px solid #e2e8f0",
-            borderRadius: 6,
-          }}
-        >
+        <div className="max-h-80 overflow-y-auto rounded-md border border-border">
           {loading ? (
-            <p className="muted small" style={{ padding: 12 }}>Loading…</p>
+            <p className="m-0 p-3 text-xs text-muted-foreground">Loading…</p>
           ) : data && data.dirs.length === 0 ? (
-            <p className="muted small" style={{ padding: 12 }}>
-              No subdirectories here.
-            </p>
+            <p className="m-0 p-3 text-xs text-muted-foreground">No subdirectories here.</p>
           ) : (
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            <ul className="m-0 list-none p-0">
               {data?.dirs.map((d) => (
                 <li
                   key={d.path}
                   onClick={() => void load(d.path)}
-                  style={{
-                    padding: "6px 12px",
-                    cursor: "pointer",
-                    borderBottom: "1px solid #f1f5f9",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  className="cursor-pointer border-b border-border px-3 py-1.5 hover:bg-accent"
                 >
                   📁 {d.name}
                 </li>
@@ -115,10 +100,9 @@ export function FolderPicker({ initialPath, onSelect, onClose }: Props) {
           )}
         </div>
 
-        <div className="row" style={{ marginTop: 12, gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onClose}>Cancel</button>
-          <button
-            className="primary"
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
             disabled={!data?.path}
             onClick={() => {
               if (data?.path) {
@@ -128,9 +112,9 @@ export function FolderPicker({ initialPath, onSelect, onClose }: Props) {
             }}
           >
             Select this folder
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

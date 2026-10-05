@@ -1,6 +1,11 @@
 import { useState } from "react";
 import type { SecretFinding, SourceRepoMeta } from "../types";
+import { checkCls, errorCls, fieldCls, labelCls, warnCls } from "../lib/field";
+import { cn } from "../lib/utils";
 import { FolderPicker } from "./FolderPicker";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
 
 export interface SourceRepoFieldProps {
   current: SourceRepoMeta | null;
@@ -86,94 +91,99 @@ export function SourceRepoField({
 
   if (current && !editing) {
     return (
-      <div className="card">
-        <div className="row" style={{ justifyContent: "space-between" }}>
+      <Card className="mb-3 p-4">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <span className={`tag tag-source-${current.kind}`}>
+            <Badge variant="secondary" data-source-kind={current.kind}>
               {current.kind === "git_url"
                 ? "git"
                 : current.kind === "local_path_in_place"
                   ? "local · in-place"
                   : "local · copy"}
-            </span>{" "}
+            </Badge>{" "}
             {current.kind === "git_url" ? (
-              <span className="mono small">
+              <span className="font-mono text-xs">
                 {current.git_url} @ {current.branch}
               </span>
             ) : (
-              <span className="mono small">{current.path}</span>
+              <span className="font-mono text-xs">{current.path}</span>
             )}
           </div>
-          <div className="row">
-            <button onClick={() => setEditing(true)}>Replace</button>
+          <div className="flex items-center gap-3">
+            <Button variant="outline" onClick={() => setEditing(true)}>Replace</Button>
             {onDetach && (
-              <button onClick={() => void onDetach()} className="danger">
+              <Button variant="destructive" onClick={() => void onDetach()}>
                 Remove
-              </button>
+              </Button>
             )}
           </div>
         </div>
-        <p className="muted small" style={{ marginTop: 4 }}>
+        <p className="mb-0 mt-1 text-xs text-muted-foreground">
           Imported {current.imported_at?.replace("T", " ").split(".")[0]}
         </p>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="card">
-      <div className="row">
-        <label>
+    <Card className="mb-3 p-4">
+      <div className="flex items-center gap-3">
+        <label className="mb-0 flex cursor-pointer items-center gap-1.5 text-sm text-foreground">
           <input
             type="radio"
+            className={checkCls}
             checked={mode === "git"}
             onChange={() => setMode("git")}
-          />{" "}
+          />
           Git URL
         </label>
-        <label>
+        <label className="mb-0 flex cursor-pointer items-center gap-1.5 text-sm text-foreground">
           <input
             type="radio"
+            className={checkCls}
             checked={mode === "local"}
             onChange={() => setMode("local")}
-          />{" "}
+          />
           Local path
         </label>
       </div>
 
       {mode === "git" ? (
-        <div className="grid-2" style={{ marginTop: 8 }}>
-          <div style={{ gridColumn: "1 / span 2" }}>
-            <label>Git URL</label>
+        <div className="mt-2 grid grid-cols-2 gap-4">
+          <div className="col-span-2">
+            <label className={labelCls}>Git URL</label>
             <input
               type="text"
+              className={fieldCls}
               placeholder="https://github.com/example/repo"
               value={gitUrl}
               onChange={(e) => setGitUrl(e.target.value)}
             />
           </div>
           <div>
-            <label>Branch</label>
+            <label className={labelCls}>Branch</label>
             <input
               type="text"
+              className={fieldCls}
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
             />
           </div>
           <div>
-            <label>
+            <label className="mb-0 flex cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground">
               <input
                 type="checkbox"
+                className={checkCls}
                 checked={shallow}
                 onChange={(e) => setShallow(e.target.checked)}
-              />{" "}
+              />
               Shallow clone (--depth 1)
             </label>
           </div>
         </div>
       ) : (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div className="mt-2">
+          <div className="grid grid-cols-2 gap-2">
             {[
               { value: "isolated" as const, title: "Isolated", hint: "Copy this directory into the run's workspace. Original is untouched.", available: true },
               { value: "in-place" as const, title: "In-place", hint: inPlaceAvailable
@@ -188,26 +198,19 @@ export function SourceRepoField({
                   type="button"
                   onClick={() => { if (!disabled) setLocalSubMode(o.value); }}
                   disabled={disabled}
-                  style={{
-                    textAlign: "left",
-                    padding: "10px 12px",
-                    borderRadius: 6,
-                    border: selected && !disabled ? "1.5px solid #16a34a" : "1px solid #e2e8f0",
-                    background: selected && !disabled
-                      ? "#f0fdf4"
-                      : disabled ? "#f8fafc" : "#fff",
-                    cursor: disabled ? "not-allowed" : "pointer",
-                    opacity: disabled ? 0.65 : 1,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 2,
-                  }}
+                  className={cn(
+                    "flex flex-col gap-0.5 rounded-md border bg-card px-3 py-2.5 text-left text-card-foreground",
+                    selected && !disabled
+                      ? "border-status-complete bg-status-complete/10"
+                      : "border-border",
+                    disabled ? "cursor-not-allowed bg-muted opacity-65" : "cursor-pointer",
+                  )}
                   data-testid={`source-local-submode-${o.value}`}
                 >
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>
+                  <span className="text-[13px] font-semibold">
                     {selected && !disabled ? "● " : "○ "}{o.title}
                   </span>
-                  <span className="muted small" style={{ lineHeight: 1.3 }}>
+                  <span className="text-xs leading-tight text-muted-foreground">
                     {o.hint}
                   </span>
                 </button>
@@ -216,49 +219,40 @@ export function SourceRepoField({
           </div>
 
           {localSubMode === "in-place" && inPlaceAvailable ? (
-            <div style={{ marginTop: 12 }}>
-              <label style={{ display: "block" }}>Working directory</label>
+            <div className="mt-3">
+              <label className={labelCls}>Working directory</label>
               <div
-                className="row"
-                style={{
-                  gap: 8,
-                  alignItems: "center",
-                  marginTop: 4,
-                  padding: "8px 10px",
-                  background: "#f1f5f9",
-                  borderRadius: 6,
-                  border: "1px solid #e2e8f0",
-                }}
+                className="mt-1 flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-2"
                 data-testid="source-in-place-chip"
               >
                 <span aria-hidden>📁</span>
-                <span className="mono small" style={{ flex: 1, overflowX: "auto" }}>
+                <span className="flex-1 overflow-x-auto font-mono text-xs">
                   {storageBase}
                 </span>
-                <span className="muted small">From Settings → Storage root</span>
+                <span className="text-xs text-muted-foreground">From Settings → Storage root</span>
               </div>
-              <p className="muted small" style={{ marginTop: 6 }}>
+              <p className="mb-0 mt-1.5 text-xs text-muted-foreground">
                 ⚠ Agents will modify files in this directory directly. Strongly
                 recommended: keep PR mode = manual on every project so main is
                 never auto-merged.
               </p>
             </div>
           ) : (
-            <div style={{ marginTop: 12 }}>
-              <label style={{ display: "block" }}>
+            <div className="mt-3">
+              <label className={labelCls}>
                 Absolute path on the API host
               </label>
-              <div className="row" style={{ gap: 6 }}>
+              <div className="flex items-center gap-1.5">
                 <input
                   type="text"
+                  className={cn(fieldCls, "flex-1")}
                   placeholder="/abs/path/to/dir"
                   value={localPath}
                   onChange={(e) => setLocalPath(e.target.value)}
-                  style={{ flex: 1 }}
                 />
-                <button type="button" onClick={() => setPickerOpen(true)}>
+                <Button type="button" variant="outline" onClick={() => setPickerOpen(true)}>
                   Browse…
-                </button>
+                </Button>
               </div>
               {pickerOpen && (
                 <FolderPicker
@@ -267,10 +261,10 @@ export function SourceRepoField({
                   onClose={() => setPickerOpen(false)}
                 />
               )}
-              <p className="muted small" style={{ marginTop: 4 }}>
+              <p className="mb-0 mt-1 text-xs text-muted-foreground">
                 The API process must have read access to this path. Multi-tenant
                 deployments restrict this via{" "}
-                <span className="mono">GUUDFLOW_LOCAL_PATH_ALLOWLIST</span>.
+                <span className="font-mono">GUUDFLOW_LOCAL_PATH_ALLOWLIST</span>.
               </p>
             </div>
           )}
@@ -278,29 +272,28 @@ export function SourceRepoField({
       )}
 
       {findings && findings.length > 0 && (
-        <div className="warn" style={{ marginTop: 8 }}>
-          <p>
+        <div className={cn(warnCls, "mt-2")}>
+          <p className="m-0 mb-1.5">
             <strong>Secrets detected.</strong> The following files look
             sensitive and were not imported:
           </p>
-          <ul>
+          <ul className="my-1.5 ml-5 p-0">
             {findings.map((f) => (
               <li key={f.path}>
-                <span className="mono small">{f.path}</span> — {f.reason}
+                <span className="font-mono text-xs">{f.path}</span> — {f.reason}
               </li>
             ))}
           </ul>
-          <p className="muted small">
+          <p className="m-0 text-xs text-muted-foreground">
             "Import anyway" strips these files before the source lands.
           </p>
         </div>
       )}
 
-      {error && <div className="error" style={{ marginTop: 8 }}>{error}</div>}
+      {error && <div className={cn(errorCls, "mb-0 mt-2")}>{error}</div>}
 
-      <div className="row" style={{ marginTop: 8, gap: 8 }}>
-        <button
-          className="primary"
+      <div className="mt-2 flex items-center gap-2">
+        <Button
           onClick={() => void submit(false)}
           disabled={
             busy ||
@@ -312,21 +305,22 @@ export function SourceRepoField({
           }
         >
           {busy ? "Importing…" : "Import"}
-        </button>
+        </Button>
         {findings && findings.length > 0 && (
-          <button
+          <Button
+            variant="outline"
             onClick={() => void submit(true)}
             disabled={busy}
           >
             Import anyway (strip secrets)
-          </button>
+          </Button>
         )}
         {current && (
-          <button onClick={() => setEditing(false)} disabled={busy}>
+          <Button variant="outline" onClick={() => setEditing(false)} disabled={busy}>
             Cancel
-          </button>
+          </Button>
         )}
       </div>
-    </div>
+    </Card>
   );
 }

@@ -60,14 +60,15 @@ describe("WorkerSettingsPanel", () => {
 
   it("closes on backdrop click", () => {
     const { onClose } = renderPanel();
-    const backdrop = document.querySelector(".slide-over-backdrop")!;
-    fireEvent.click(backdrop);
+    // The Sheet overlay is the only element with the bg-foreground/50 scrim classes.
+    const backdrop = document.querySelector("[data-state=open].fixed.inset-0")!;
+    fireEvent.pointerDown(backdrop);
     expect(onClose).toHaveBeenCalled();
   });
 
   it("closes on Escape key", () => {
     const { onClose } = renderPanel();
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
   });
 

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Task } from "../types";
 import { useDesks } from "../hooks/useDesks";
+import { cn } from "../lib/utils";
+import { Badge } from "./ui/badge";
 
 interface Props {
   runId: string;
@@ -40,47 +42,36 @@ export function ActiveTaskChip({ runId, role }: Props) {
   }, [open]);
 
   if (!task) {
-    return <span className="tag small muted">idle</span>;
+    return <Badge variant="secondary" className="text-xs text-muted-foreground">idle</Badge>;
   }
 
   const label = task.status === "IN_PROGRESS" ? "in progress" : "pending";
 
   return (
-    <span style={{ position: "relative", display: "inline-block" }}>
+    <span className="relative inline-block">
       <button
-        className={`tag small tag-task-${label.replace(" ", "-")}`}
+        type="button"
+        className={cn(
+          "cursor-pointer rounded-full border px-2 py-0.5 text-xs font-medium leading-4",
+          label === "in progress"
+            ? "border-status-running/30 bg-status-running/15 text-status-running"
+            : "border-border bg-secondary text-secondary-foreground",
+        )}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
         title="Click to see task details"
-        style={{ cursor: "pointer" }}
       >
         {truncate(task.goal)}
       </button>
       {open && (
         <div
           ref={popoverRef}
-          className="task-popover"
-          style={{
-            position: "absolute",
-            top: "100%",
-            left: 0,
-            zIndex: 100,
-            minWidth: 280,
-            maxWidth: 400,
-            background: "#fff",
-            border: "1px solid #e2e8f0",
-            borderRadius: 6,
-            padding: 12,
-            boxShadow: "0 4px 16px rgba(0,0,0,.1)",
-            marginTop: 4,
-          }}
+          className="absolute left-0 top-full z-[100] mt-1 min-w-[280px] max-w-[400px] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-lg"
         >
-          <div className="small" style={{ fontWeight: 600, marginBottom: 6 }}>
-            {task.goal}
-          </div>
+          <div className="mb-1.5 text-xs font-semibold">{task.goal}</div>
           {task.acceptance_criteria.length > 0 && (
             <div>
-              <div className="small muted" style={{ marginBottom: 2 }}>Acceptance criteria</div>
-              <ul className="small" style={{ margin: 0, paddingLeft: 16 }}>
+              <div className="mb-0.5 text-xs text-muted-foreground">Acceptance criteria</div>
+              <ul className="m-0 pl-4 text-xs">
                 {task.acceptance_criteria.map((c, i) => (
                   <li key={i}>{c}</li>
                 ))}
@@ -88,19 +79,19 @@ export function ActiveTaskChip({ runId, role }: Props) {
             </div>
           )}
           {task.references.length > 0 && (
-            <div style={{ marginTop: 6 }}>
-              <div className="small muted" style={{ marginBottom: 2 }}>References</div>
+            <div className="mt-1.5">
+              <div className="mb-0.5 text-xs text-muted-foreground">References</div>
               {task.references.map((r, i) => (
-                <div key={i} className="small">
-                  <span className="tag">{r.kind}</span> {r.value}
-                  {r.note && <span className="muted"> — {r.note}</span>}
+                <div key={i} className="text-xs">
+                  <Badge variant="secondary">{r.kind}</Badge> {r.value}
+                  {r.note && <span className="text-muted-foreground"> — {r.note}</span>}
                 </div>
               ))}
             </div>
           )}
           {task.closed_by_commit && (
-            <div className="small muted" style={{ marginTop: 6 }}>
-              closes: <span className="mono">{task.closed_by_commit.slice(0, 8)}</span>
+            <div className="mt-1.5 text-xs text-muted-foreground">
+              closes: <span className="font-mono">{task.closed_by_commit.slice(0, 8)}</span>
             </div>
           )}
         </div>
