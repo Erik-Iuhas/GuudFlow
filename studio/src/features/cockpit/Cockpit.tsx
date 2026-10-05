@@ -315,13 +315,14 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
               desktop ? "w-[280px]" : "h-44 w-full",
             )}
           >
-            <PipelineGraph specs={allSpecs} selectedRole={selectedRole} onSelectRole={selectRole} />
+            <PipelineGraph specs={allSpecs} selectedRole={selectedRole} onSelectRole={selectRole}
+              direction={desktop ? "TB" : "LR"} />
           </div>
         )}
 
         <div
           ref={lanesRef}
-          className="flex min-h-0 min-w-0 flex-1 gap-2 overflow-x-auto"
+          className="flex min-h-0 min-w-0 flex-1 snap-x gap-2 overflow-x-auto pb-1 [scrollbar-gutter:stable]"
           data-testid="lanes"
           aria-label="Agent lanes"
           role="group"
