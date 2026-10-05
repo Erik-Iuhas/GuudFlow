@@ -6,9 +6,6 @@ const token = (name: string): string => `hsl(var(--${name}) / <alpha-value>)`;
 const config: Config = {
   darkMode: "class",
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  // U0: preflight is off so the legacy styles.css views are not reset under us.
-  // TODO(U4): turn preflight back on once the inline styles and styles.css are gone.
-  corePlugins: { preflight: false },
   theme: {
     extend: {
       colors: {

@@ -8,7 +8,6 @@ import { TooltipProvider } from "./components/ui/tooltip";
 import { initTheme } from "./lib/theme";
 import "./styles/tokens.css";
 import "./styles/globals.css";
-import "./styles.css";
 
 initTheme();
 const queryClient = createQueryClient();

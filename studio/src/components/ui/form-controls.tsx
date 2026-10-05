@@ -3,9 +3,8 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/utils";
 
 // Token-styled form controls and page furniture shared by the migrated views.
-// Every utility is explicit (border, background, focus ring) because the legacy
-// element rules in styles.css (`input`, `select`, `a`, `table.list`) still apply
-// until U4 finishes; class utilities win over those element selectors.
+// Every utility is explicit (border, background, focus ring) so the controls look
+// the same wherever they are used; element defaults live in styles/globals.css.
 
 const controlClass =
   "block w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
