@@ -237,9 +237,17 @@ async def lifespan(app: FastAPI):
     if os.environ.get("GUUDFLOW_DISABLE_INPROC_WORKER") != "1":
         worker_task = _start_inproc_worker(app, data_root)
 
+    # Autopilot (plan §14.7): starts due runs for projects that enable it.
+    autopilot_task = None
+    if os.environ.get("GUUDFLOW_DISABLE_AUTOPILOT") != "1":
+        from core.autopilot import run_loop
+        autopilot_task = asyncio.create_task(run_loop(app.state))
+
     try:
         yield
     finally:
+        if autopilot_task is not None:
+            autopilot_task.cancel()
         if app.state.__dict__.get("worker_task") is not None:
             app.state.job_runner.stop()
             try:

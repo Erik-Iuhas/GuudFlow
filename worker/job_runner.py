@@ -655,7 +655,11 @@ class JobRunner:
                 run_initializer.bundle_prior_history(prior_working, bundle_path)
 
         run_initializer.generate_inputs_readme(run_inputs)
+        from core.autopilot import RUN_MARKER
+        from core.json_store import write_json
         from core.project_remote import RemoteConfig
+        if isinstance((job.payload or {}).get("autopilot"), dict):
+            write_json(run_root / RUN_MARKER, job.payload["autopilot"])
         gates = ((project_data.get("approval_gates") if isinstance(project_data, dict)
                   else getattr(project_data, "approval_gates", None)) or {})
         project_runs.prepare_run(self.data_root, job.project_id, job.run_id, run_root,
@@ -682,6 +686,16 @@ class JobRunner:
             )
             return
         project = serialise_project(project_data)
+        # Autopilot runs carry a per-run spend cap (plan §14.7): it can only tighten
+        # the project's own token_budget_usd.
+        cap = (job.payload or {}).get("budget_usd")
+        if isinstance(cap, (int, float)) and cap > 0:
+            gates = dict(project.approval_gates or {})
+            own = gates.get("token_budget_usd")
+            gates["token_budget_usd"] = (min(float(own), float(cap))
+                                         if isinstance(own, (int, float)) and own > 0
+                                         else float(cap))
+            project.approval_gates = gates
 
         # 1.5. Bootstrap persona directories for any create_new persona_ids
         # that have no on-disk directory yet. Without this, Persona.load()

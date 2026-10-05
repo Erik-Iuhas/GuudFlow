@@ -66,6 +66,7 @@ DETAIL_SHAPES: dict[str, dict[str, str]] = {
         "state": "\"pending\" | \"no_changes\"", "base": "string", "head": "string",
         "commits": "number", "files": "string[]", "backlog?": "Record<string, string>",
         "check?": "\"passed\" | \"failed\" | \"timed_out\" | \"skipped\"",
+        "auto_accept?": "{ accepted: boolean; reason: string }",
     },
     "SCREENSHOT_READY": {
         "role?": "string", "path": "string", "url?": "string", "request_id?": "string",

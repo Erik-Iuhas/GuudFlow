@@ -9,6 +9,7 @@ All routes need the bearer token.
 
 from __future__ import annotations
 
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
@@ -20,6 +21,8 @@ from pydantic import BaseModel, Field
 from api.auth import require_bearer
 from core.backlog import Backlog, BacklogError
 from core.project_repo import ProjectRepo, ProjectRepoConflict, ProjectRepoError
+from core.autopilot import AutopilotConfig, AutopilotError
+from core.autopilot import status as autopilot_status
 from core.project_remote import RemoteConfig, RemoteError, sync
 from core.project_runs import decide_run
 
@@ -159,8 +162,16 @@ async def list_project_runs(request: Request, project_id: str) -> dict[str, Any]
     data_root = await _project(request, project_id)
     repo = ProjectRepo(data_root, project_id)
     main = repo.sha("main") if repo.exists() else None
-    remote = _remote(await request.app.state.project_store.get(project_id) or {})
+    project = await request.app.state.project_store.get(project_id) or {}
+    remote = _remote(project)
+    try:
+        pilot = AutopilotConfig.from_settings((project.get("approval_gates") or {})
+                                              .get("autopilot"))
+        pilot_status = autopilot_status(data_root, project_id, pilot, time.time())
+    except AutopilotError as exc:
+        pilot_status = {"enabled": False, "error": str(exc)}
     return {"main": main, "runs": [asdict(r) for r in repo.runs()],
+            "autopilot": pilot_status,
             "remote": None if remote is None else {
                 "url": remote.url, "branch": remote.branch, "publish": remote.publish,
                 "token": bool(remote.token())}}

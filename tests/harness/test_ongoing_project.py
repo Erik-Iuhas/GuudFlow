@@ -116,3 +116,30 @@ async def test_two_runs_build_on_the_project(tmp_path: Path, fake_llm: FakeLLM) 
     briefs = [r for r in fake_llm.requests if "Your turn: builder" in str(r["messages"])]
     assert any("Previous run: `run_one`" in str(r["messages"]) for r in briefs)
     assert repo.get("run_two").state == "no_changes"  # type: ignore[union-attr]
+
+
+async def test_autopilot_run_accepts_itself_when_checked(tmp_path: Path, fake_llm: FakeLLM) -> None:
+    from core.autopilot import RUN_MARKER
+    from core.json_store import write_json
+    data = tmp_path / "data"
+    item = Backlog(data, "p").add("Greeting function", ITEM)
+    _prepare(data, "run_auto", {"backlog_items": [item.id]})
+    write_json(data / "runs" / "run_auto" / RUN_MARKER, {"auto_accept": True})
+    fake_llm.route("Your turn: builder",
+                   ToolCall("write", {"filePath": "greet.py",
+                                      "content": "def greet(n):\n    return f'hi {n}'\n"}),
+                   _submit({"status": "done", "summary": "Added greet() in greet.py."}),
+                   Text("Done."))
+    runner = _runner(data, "run_auto", fake_llm)
+    runner.project.agents = [AgentConfig(role="builder")]
+    runner.project.approval_gates = {**runner.project.approval_gates,
+                                     "check_command": "test -f greet.py"}
+    await runner.run()
+    briefs = [r for r in fake_llm.requests if "Your turn: builder" in str(r["messages"])]
+    assert any("This run's backlog items" in str(r["messages"]) for r in briefs)
+    run = ProjectRepo(data, "p").get("run_auto")
+    assert run is not None and run.state == "accepted", run
+    assert run.check and run.check["status"] == "passed"
+    assert Backlog(data, "p").get(item.id).status == "done"
+    sig = [s for s in runner.workspace.board if s.type is SignalType.RUN_SUBMITTED][-1]
+    assert '"accepted": true' in (sig.detail or "")

@@ -188,6 +188,7 @@ export interface RunSubmittedDetail {
   files: string[];
   backlog?: Record<string, string>;
   check?: "passed" | "failed" | "timed_out" | "skipped";
+  auto_accept?: { accepted: boolean; reason: string };
 }
 
 export interface ScreenshotReadyDetail {

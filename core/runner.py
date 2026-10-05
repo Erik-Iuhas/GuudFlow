@@ -612,7 +612,7 @@ class AgentRunner:
         self._attach_personas()
         result = await OpencodeRun(self, self.harness_settings).run()
         if result.status is SchedulerStatus.STOPPED:
-            await self._close_project_run(stopped=True)
+            await self._close_project_run(stopped=True, completed=False)
             return result
         # Training rubric scoring runs before the memory writer so the
         # RUBRIC_SCORE signal is on the board before the episode is recorded.
@@ -656,14 +656,15 @@ class AgentRunner:
         data_root = (self.run_root.parent.parent
                      if self.run_root.parent.name == "runs" else None)
         finalize_run(self.run_root, self.run_id, self.project.project_id, data_root)
-        await self._close_project_run(stopped=False)
+        await self._close_project_run(stopped=False,
+                                      completed=result.status is SchedulerStatus.COMPLETE)
         return result
 
     def _data_root(self) -> Path | None:
         """`<data>` when the run lives at `<data>/runs/<id>` (else tests / ad-hoc dirs)."""
         return self.run_root.parent.parent if self.run_root.parent.name == "runs" else None
 
-    async def _close_project_run(self, *, stopped: bool) -> None:
+    async def _close_project_run(self, *, stopped: bool, completed: bool) -> None:
         """Hand the run back to its project (plan §13): submit it for a human decision
         and record what happened to the backlog items it took."""
         from core.backlog import card_outcomes
@@ -673,10 +674,15 @@ class AgentRunner:
         if data_root is None or not self.project.project_id:
             return
         summaries, costs = card_results(self.workspace.board)
+        cards = card_outcomes(self.workspace.tasks.values(), summaries, costs)
+        if not any(c.backlog_id for c in cards):
+            # No task board (no planner): the run's outcome is the items' outcome.
+            from core.backlog import CardOutcome
+            from core.project_runs import selection
+            cards += [CardOutcome(title=i.title, column="done" if completed else "todo",
+                                  backlog_id=i.id) for i in selection(self.run_root)]
         submitted = close_run(data_root, self.project.project_id, self.run_id, self.run_root,
-                              self.git.working_dir,
-                              card_outcomes(self.workspace.tasks.values(), summaries, costs),
-                              stopped=stopped)
+                              self.git.working_dir, cards, stopped=stopped)
         check = None
         command = str((self.project.approval_gates or {}).get("check_command") or "").strip()
         if submitted is not None and submitted.state == "pending" and command:
@@ -694,6 +700,9 @@ class AgentRunner:
             from core.backlog import Backlog
             outcomes = {i.id: str(i.pending or "not_started") for i in
                         Backlog(data_root, self.project.project_id).in_run(self.run_id)}
+            auto = (self._auto_accept(data_root, list(outcomes.values()), cards,
+                                      check.status if check else None)
+                    if submitted.state == "pending" else None)
             self.workspace.post_signal(Signal(
                 type=SignalType.RUN_SUBMITTED, from_agent="runner",
                 summary=(f"run submitted to the project: {submitted.commits} commit(s), "
@@ -703,7 +712,31 @@ class AgentRunner:
                 detail=json.dumps({"state": submitted.state, "base": submitted.base,
                                    "head": submitted.head, "commits": submitted.commits,
                                    "files": submitted.files[:200], "backlog": outcomes,
-                                   **({"check": check.status} if check else {})})))
+                                   **({"check": check.status} if check else {}),
+                                   **({"auto_accept": auto} if auto else {})})))
+
+    def _auto_accept(self, data_root: Path, items_pending: list[str], cards: list[Any],
+                     check_status: str | None) -> dict[str, Any] | None:  # Any: JSON
+        """Autopilot runs may accept themselves under strict conditions (plan §14.7)."""
+        from core.autopilot import RUN_MARKER, should_auto_accept
+        from core.json_store import read_json
+        marker = read_json(self.run_root / RUN_MARKER, None)
+        if marker is None:
+            return None
+        ok, why = should_auto_accept(marker, items_pending, cards, check_status)
+        if not ok:
+            return {"accepted": False, "reason": why}
+        from core.project_remote import RemoteConfig
+        from core.project_repo import ProjectRepoError
+        from core.project_runs import decide_run
+        try:
+            remote = RemoteConfig.from_settings(
+                (self.project.approval_gates or {}).get("project_remote"))
+            decide_run(data_root, self.project.project_id, self.run_id, accept=True,
+                       note=f"auto-accepted by autopilot: {why}", remote=remote)
+        except (ProjectRepoError, ValueError) as exc:
+            return {"accepted": False, "reason": f"could not merge: {exc}"}
+        return {"accepted": True, "reason": why}
 
     def _build_teammate_brief(self, role: str) -> str:
         """Build the TEAM block (Layer 3.5) for `role`.
