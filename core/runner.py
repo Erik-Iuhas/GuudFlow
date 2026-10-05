@@ -21,6 +21,7 @@ The runner is constructed with a project config and run-time handles, then
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time as _time
@@ -610,7 +611,23 @@ class AgentRunner:
 
         self._prepare_team()
         self._attach_personas()
-        result = await OpencodeRun(self, self.harness_settings).run()
+        # Live quips (DESIGN §23): a side task fed from board signals, never agents.
+        pump = None
+        if self.quip_engine is not None and hasattr(self.quip_engine, "on_agent_started"):
+            from core.quip_engine import QuipPump
+            pump = QuipPump(self.quip_engine, self.workspace)  # type: ignore[arg-type]
+            unsubscribe = self.workspace.subscribe(pump.on_signal)
+            pump_task = asyncio.create_task(pump.run())
+        try:
+            result = await OpencodeRun(self, self.harness_settings).run()
+        finally:
+            if pump is not None:
+                unsubscribe()
+                pump.close()
+                try:
+                    await asyncio.wait_for(pump_task, timeout=60)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pump_task.cancel()
         if result.status is SchedulerStatus.STOPPED:
             await self._close_project_run(stopped=True, completed=False)
             return result

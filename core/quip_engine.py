@@ -17,11 +17,15 @@ import random
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import asyncio
+import logging
 from typing import Any, Callable
 
 from core.llm import LLMClient, LLMMessage
 from core.scheduler import SchedulerResult
 from core.workspace import Workspace
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -348,3 +352,64 @@ class QuipEngine:
 
     def quips(self) -> list[Quip]:
         return list(self._quips)
+
+
+class QuipPump:
+    """Feeds live board signals to the quip engine during an opencode run.
+
+    The opencode harness posts signals instead of calling agent hooks, so this
+    maps them: an agent starting or finishing, and review verdicts. Quips are
+    generated one at a time on a single background task (never inside agents),
+    capped per run so the quip board stays a cheap side channel.
+    """
+
+    def __init__(self, engine: "QuipEngine", workspace: Workspace, limit: int = 20) -> None:
+        self.engine = engine
+        self.workspace = workspace
+        self.limit = limit
+        self.sent = 0
+        self._queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue()
+        self._last: tuple[str, str] | None = None
+
+    def on_signal(self, sig: Any) -> None:  # Any: core.signals.Signal (avoids a cycle)
+        """Workspace subscriber: queue the quip-worthy events."""
+        from core.signals import SignalType
+        role = str(getattr(sig, "from_agent", "") or "")
+        if not role or role in ("runner", "visual-check"):
+            return
+        kind = sig.type
+        event: str | None = None
+        if kind is SignalType.STARTED:
+            event = "started"
+        elif kind is SignalType.COMPLETE:
+            event = "complete"
+        elif kind is SignalType.REJECTED:
+            event = "REJECTED"
+        elif kind is SignalType.AGENT_RESULT and ": review pass" in (sig.summary or ""):
+            event = "APPROVED"
+        if event is None or (role, event) == self._last or self.sent >= self.limit:
+            return
+        self._last = (role, event)
+        self.sent += 1
+        self._queue.put_nowait((role, event))
+
+    async def run(self) -> None:
+        """Generate queued quips until `close()`; one failure never stops the rest."""
+        while True:
+            item = await self._queue.get()
+            if item is None:
+                return
+            role, event = item
+            try:
+                if event == "started":
+                    await self.engine.on_agent_started(role, self.workspace)
+                elif event == "complete":
+                    await self.engine.on_agent_complete(role, self.workspace)
+                else:
+                    await self.engine.on_review_verdict(role, event, self.workspace)
+            except Exception:  # noqa: BLE001 — quips are decoration; log and carry on
+                log.exception("quip for %s/%s failed", role, event)
+
+    def close(self) -> None:
+        """Stop after the queued quips are done."""
+        self._queue.put_nowait(None)
