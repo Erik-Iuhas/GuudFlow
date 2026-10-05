@@ -253,3 +253,22 @@ async def test_get_playbook_empty_404_and_auth(client, auth_header):
     assert r.status_code == 200 and r.json() == {"entries": [], "metrics": []}
     assert (await client.get("/api/projects/missing/playbook", headers=auth_header)).status_code == 404
     assert (await client.get("/api/projects/p_none/playbook")).status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_saving_a_project_names_every_worker(client, auth_header, write_persona):
+    """Every worker has a name: set on the team, the persona's, or a stable pick (core/crew.py)."""
+    write_persona("grace-1", name="Grace")
+    body = {"project_id": "crew", "goal": "g", "agents": [
+        {"role": "planner"}, {"role": "builder", "name": "Sarah"},
+        {"role": "reviewer", "persona_id": "grace-1"}]}
+    r = await client.post("/api/projects", json=body, headers=auth_header)
+    assert r.status_code == 201
+    names = {a["role"]: a.get("name") for a in r.json()["agents"]}
+    assert names["builder"] == "Sarah" and names["reviewer"] == "Grace"
+    assert names["planner"] and names["planner"] not in ("Sarah", "Grace")
+
+    # The same seat keeps its name when the team is saved again.
+    again = await client.put("/api/projects/crew", json={**body, "agents": [
+        {"role": "planner"}, {"role": "builder", "name": "Sarah"}]}, headers=auth_header)
+    assert {a["role"]: a["name"] for a in again.json()["agents"]}["planner"] == names["planner"]

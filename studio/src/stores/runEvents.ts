@@ -151,6 +151,8 @@ export interface RunState {
   interventions: InterventionView[];
   /** role -> USD so far (the latest running total from AGENT_RESULT.cost). */
   costs: Record<string, number>;
+  /** role -> worker name, from the TEAM signal (core/crew.py); empty for older runs. */
+  names: Record<string, string>;
   artifacts: ArtifactView[];
   web: WebRequestView[];
   /** role -> TOOL_CALL signals, in order: the lane feed. */
@@ -206,6 +208,7 @@ interface Draft {
   approvals: ApprovalView[];
   interventions: InterventionView[];
   costs: Record<string, number>;
+  names: Record<string, string>;
   artifacts: ArtifactView[];
   web: WebRequestView[];
   toolFeed: Record<string, TypedSignal[]>;
@@ -218,7 +221,7 @@ interface Draft {
 function startDraft(s: RunState): Draft {
   return {
     signals: s.signals, agents: s.agents, cards: s.cards, approvals: s.approvals,
-    interventions: s.interventions, costs: s.costs, artifacts: s.artifacts, web: s.web,
+    interventions: s.interventions, costs: s.costs, names: s.names, artifacts: s.artifacts, web: s.web,
     toolFeed: s.toolFeed, reviews: s.reviews, blockedOn: s.blockedOn,
     humanNeeded: s.humanNeeded, dirty: new Set(),
   };
@@ -257,7 +260,7 @@ export function createRunStore(runId: string): RunStore {
   function initial(): Omit<RunState, "ingest" | "seedCards" | "setLive" | "reset"> {
     return {
       runId, live: true, signals: [], byId: new Map(), agents: {}, cards: {}, approvals: [],
-      interventions: [], costs: {}, artifacts: [], web: [], toolFeed: {}, reviews: {},
+      interventions: [], costs: {}, names: {}, artifacts: [], web: [], toolFeed: {}, reviews: {},
       blockedOn: {}, humanNeeded: null,
     };
   }
@@ -304,6 +307,14 @@ export function createRunStore(runId: string): RunStore {
           const prev = d.reviews[key];
           if (prev && prev.round >= round) continue;
           own(d, "reviews")[key] = { reviewer: role, author, round, taskId: data.task_id };
+        }
+        break;
+      }
+      case "TEAM": {
+        const data: Data<"TEAM"> = sig.data;
+        const names = own(d, "names");
+        for (const m of data?.members ?? []) {
+          if (typeof m?.role === "string" && typeof m.name === "string" && m.name) names[m.role] = m.name;
         }
         break;
       }

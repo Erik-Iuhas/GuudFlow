@@ -75,6 +75,7 @@ function RoleNode({ data }: NodeProps<RoleNodeType>) {
     return id ? s.cards[id] : undefined;
   });
   const summary = useRunStore((s) => resultSummary(s, role));
+  const name = useRunStore((s) => s.names[role]);
   const cardLine = data.detached && !card ? "overseer (detached)"
     : card ? `${card.id} · ${card.title}` : data.card ? `card ${data.card}` : "no active card";
   return (
@@ -101,11 +102,14 @@ function RoleNode({ data }: NodeProps<RoleNodeType>) {
           e.stopPropagation();
           data.onOpen?.(role);
         }}
-        aria-label={`${role}: ${STATE_LABEL[data.state]}. Show tool calls and result`}
+        aria-label={`${name ? `${name}, ${role}` : role}: ${STATE_LABEL[data.state]}. Show tool calls and result`}
         className="nodrag flex h-full w-full min-w-0 cursor-pointer flex-col gap-0.5 rounded-md px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className="flex w-full items-center justify-between gap-2">
-          <span className="truncate text-sm font-semibold">{role}</span>
+          <span className="min-w-0 truncate text-sm">
+            <span className="font-semibold">{name ?? role}</span>
+            {name && <span className="text-xs text-muted-foreground"> · {role}</span>}
+          </span>
           <span className={cn("shrink-0 text-xs font-medium", STATE_TEXT[data.state])}>
             <span aria-hidden>{STATE_MARK[data.state]} </span>
             {STATE_LABEL[data.state]}

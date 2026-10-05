@@ -132,6 +132,15 @@ describe("graph nodes and the details sheet", () => {
     expect(screen.queryByTestId("toolfeed-dev")).toBeNull();
   });
 
+  it("a node shows the worker's name with the role, and so does the board", () => {
+    const store = devStore();
+    store.getState().ingest(sig("TEAM", "runner", { members: [{ role: "dev", name: "Maya", role_type: "builder" }] }));
+    wrap(store, <PipelineGraph specs={roleSpecs(project.agents)} />);
+    const node = screen.getByTestId("graph-node-dev");
+    expect(node).toHaveTextContent("Maya · dev");
+    expect(within(node).getByRole("button", { name: /^Maya, dev: running/ })).toBeInTheDocument();
+  });
+
   it("the details hold the capability badge, full result and tool calls", () => {
     wrap(devStore(), <AgentDetail role="dev" />);
     const detail = screen.getByTestId("agent-detail-dev");

@@ -160,7 +160,7 @@ export function BoardFeed({ signals }: { signals: Signal[] }) {
 }
 
 /** One board row. Exported for the cockpit's virtualized feed. */
-export function SignalRow({ signal }: { signal: FeedSignal }) {
+export function SignalRow({ signal, who }: { signal: FeedSignal; who?: string }) {
   const time = signal.timestamp?.replace("T", " ").split(".")[0]?.slice(11) ?? "";
   const kind = classify(signal);
   // Structured body for opencode harness signals; null (bad or missing JSON,
@@ -181,7 +181,7 @@ export function SignalRow({ signal }: { signal: FeedSignal }) {
         <Badge variant={statusVariant(signal.type)} className="rounded">
           {signal.type}
         </Badge>
-        {signal.from_agent && <span>{signal.from_agent}</span>}
+        {signal.from_agent && <span>{who ?? signal.from_agent}</span>}
         {signal.iteration > 0 && <span>iter {signal.iteration}</span>}
       </div>
       {harness ? (

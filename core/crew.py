@@ -71,6 +71,17 @@ def crew_names(project_id: str, roles: Iterable[str], *,
     return names
 
 
+def name_agents(project_id: str, agents: list[dict[str, object]],
+                persona_names: Mapping[str, str | None] | None = None) -> list[dict[str, object]]:
+    """Fill in `name` on project agent dicts that have none (same picks as at run time)."""
+    roles = [str(a.get("role") or "") for a in agents if a.get("role")]
+    names = crew_names(project_id, roles,
+                       explicit={str(a.get("role")): str(a.get("name") or "") for a in agents},
+                       persona_names=persona_names)
+    return [{**a, "name": names.get(str(a.get("role") or ""), a.get("name"))} if a.get("role")
+            else a for a in agents]
+
+
 def resolve_recipient(key: str, names: Mapping[str, str]) -> str | None:
     """The role a note is for, addressed by role or by name (case-insensitive)."""
     wanted = key.strip().lower()

@@ -11,6 +11,8 @@ export interface AgentConfig {
   declared_local_tools?: string[];
   declared_mcp_servers?: string[];
   persona_id?: string | null;
+  /** The worker's name (core/crew.py); filled in when the project is saved. */
+  name?: string | null;
   model_tier?: ModelTier;
   /** Optional explicit model id (e.g. "mistral-large-latest"). When set
    *  AND the model's tier matches `model_tier`, the runner uses this exact

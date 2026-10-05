@@ -9,6 +9,7 @@ import { VirtualFeed } from "./VirtualFeed";
 /** The board (every signal on the run) as a windowed list, with group and agent filters. */
 export function VirtualBoardFeed() {
   const signals = useRunStore((s) => s.signals);
+  const names = useRunStore((s) => s.names);
   const filter = useBoardFilter(signals);
   const { presentGroups, activeGroups, agents, agentFilter, toggleGroup, setAgentFilter, visible, board } = filter;
 
@@ -59,7 +60,8 @@ export function VirtualBoardFeed() {
         estimateSize={72}
         renderRow={(s) => (
           <div className="px-2 py-1">
-            <SignalRow signal={s} />
+            <SignalRow signal={s}
+              who={s.from_agent && names[s.from_agent] ? `${names[s.from_agent]} (${s.from_agent})` : undefined} />
           </div>
         )}
         empty={board.length === 0 ? "No signals yet. Waiting for the run to start…" : "No signals match the active filters."}

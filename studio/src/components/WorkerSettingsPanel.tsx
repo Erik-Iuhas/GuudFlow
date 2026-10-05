@@ -591,6 +591,18 @@ export function WorkerSettingsPanel({
         {/* Description + system prompt */}
         <section className="mb-5">
           <h3 className={sectionHeadingCls}>Behaviour</h3>
+          <label className={labelCls} htmlFor="worker-name">Name</label>
+          <input
+            id="worker-name"
+            className={cn(fieldCls, "mb-1")}
+            value={current.name ?? ""}
+            placeholder="Picked for you when the team is saved"
+            maxLength={40}
+            onChange={(e) => void handleChange({ name: e.target.value })}
+          />
+          <p className="mb-2 mt-0 text-xs text-muted-foreground">
+            Teammates call this worker by name in briefs, notes and reviews.
+          </p>
           <label className={labelCls}>Description</label>
           <input
             className={cn(fieldCls, "mb-2")}

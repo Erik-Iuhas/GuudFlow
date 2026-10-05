@@ -51,7 +51,10 @@ export function WorkerCard({
     <div className="flex items-center gap-2.5">
       <AvatarDot seed={avatarSeed} />
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-sm font-semibold">{agent.role}</span>
+        <span className="text-sm">
+          <span className="font-semibold">{agent.name || agent.role}</span>
+          {agent.name && <span className="text-xs text-muted-foreground"> · {agent.role}</span>}
+        </span>
         <Badge variant={tierVariant(agent.model_tier)}>
           {agent.model_tier ?? "solid"}
         </Badge>
@@ -90,7 +93,10 @@ export function WorkerCard({
         <div className="relative flex items-center gap-2.5">
           <AvatarDot seed={avatarSeed} />
           <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-semibold">{agent.role}</span>
+            <span className="text-sm">
+          <span className="font-semibold">{agent.name || agent.role}</span>
+          {agent.name && <span className="text-xs text-muted-foreground"> · {agent.role}</span>}
+        </span>
             <div className="mt-0.5 flex items-center gap-1">
               <Badge variant={tierVariant(agent.model_tier)}>
                 {agent.model_tier ?? "solid"}

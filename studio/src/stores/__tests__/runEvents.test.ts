@@ -167,6 +167,16 @@ describe("run event store: mapping table", () => {
     expect(state(store).toolFeed.qa).toBeUndefined();
   });
 
+  it("TEAM records each role's worker name", () => {
+    const store = createRunStore("r1");
+    state(store).ingest(sig("TEAM", { from: "runner", detail: { members: [
+      { role: "builder", name: "Maya", role_type: "builder" },
+      { role: "reviewer", name: "Ivy", role_type: "reviewer" },
+      { role: "bad", name: "" },
+    ] } }));
+    expect(state(store).names).toEqual({ builder: "Maya", reviewer: "Ivy" });
+  });
+
   it("AGENT_RESULT sets lastResult and keeps the role's running cost total", () => {
     const store = createRunStore("r1");
     state(store).ingest([

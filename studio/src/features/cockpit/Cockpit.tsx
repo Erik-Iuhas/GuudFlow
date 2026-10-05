@@ -121,6 +121,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
   const interventionCount = useRunStore((s) => s.interventions.length);
   const cardCount = useRunStore((s) => Object.keys(s.cards).length);
   const quips = useQuipStream(runId);
+  const names = useRunStore((s) => s.names);
 
   const [tab, setTab] = useState<PanelTab>("board");
   const [graphOpen, setGraphOpen] = useState(true);
@@ -360,7 +361,9 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
             (e.currentTarget as HTMLElement).focus();
           }}
         >
-          <SheetTitle className="px-4 pb-1 pt-4 text-base">{detailRole}</SheetTitle>
+          <SheetTitle className="px-4 pb-1 pt-4 text-base">
+            {detailRole && names[detailRole] ? `${names[detailRole]} · ${detailRole}` : detailRole}
+          </SheetTitle>
           <SheetDescription className="px-4 pb-2 text-xs">Tool calls and the last result for this role.</SheetDescription>
           {detailRole && <AgentDetail role={detailRole} />}
         </SheetContent>
