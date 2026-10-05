@@ -4,6 +4,9 @@
 
 import { useEffect, useState } from "react";
 import { settingsApi, type SettingsState, type StorageRootValidation } from "../api";
+import { Button } from "./ui/button";
+import { Alert, Input, Label, Select } from "./ui/form-controls";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
 
 interface SettingsDrawerProps {
   open: boolean;
@@ -27,45 +30,20 @@ export function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
       .finally(() => setLoading(false));
   }, [open]);
 
-  // ESC closes the drawer.
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
   return (
-    <>
-      <div className="settings-backdrop" onClick={onClose} />
-      <aside className="settings-drawer" role="dialog" aria-label="Settings">
-        <header className="settings-header">
-          <h2>Settings</h2>
-          <button
-            className="settings-close"
-            onClick={onClose}
-            aria-label="Close settings"
-          >
-            ×
-          </button>
-        </header>
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent side="right" className="w-[420px] max-w-full overflow-y-auto" aria-label="Settings">
+        <SheetHeader>
+          <SheetTitle>Settings</SheetTitle>
+          <SheetDescription className="sr-only">Storage and appearance settings.</SheetDescription>
+        </SheetHeader>
 
-        {loading && <div className="settings-loading">Loading…</div>}
-        {error && <div className="settings-error">Error: {error}</div>}
+        {loading && <p className="m-0 text-sm text-muted-foreground">Loading…</p>}
+        {error && <Alert variant="error">Error: {error}</Alert>}
 
         {settings && (
-          <div className="settings-body">
-            {settings.env_overrides_active && (
-              <div className="settings-banner settings-banner-warn">
-                Environment variables (e.g. <code>GUUDFLOW_STORAGE_MODE</code>) are
-                overriding settings on this server. Saving will persist your
-                choice but won't take effect until env vars are unset.
-              </div>
-            )}
+          <div>
+            {settings.env_overrides_active && <EnvOverrideBanner />}
 
             <StorageSection
               settings={settings}
@@ -73,8 +51,19 @@ export function SettingsDrawer({ open, onClose }: SettingsDrawerProps) {
             />
           </div>
         )}
-      </aside>
-    </>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+/** Warns that server environment variables override the saved storage settings. */
+export function EnvOverrideBanner() {
+  return (
+    <Alert variant="warn" className="mb-4">
+      Environment variables (e.g. <code className="rounded-sm bg-muted px-1">GUUDFLOW_STORAGE_MODE</code>) are
+      overriding settings on this server. Saving will persist your
+      choice but won't take effect until env vars are unset.
+    </Alert>
   );
 }
 
@@ -157,17 +146,17 @@ export function StorageSection({ settings, onUpdated }: StorageSectionProps) {
   };
 
   return (
-    <section className="settings-section">
-      <h3>Storage</h3>
-      <p className="settings-section-help">
+    <section className="border-b border-border py-4 last:border-b-0">
+      <h3 className="m-0 mb-1 text-sm font-semibold">Storage</h3>
+      <p className="mb-4 mt-0 text-xs leading-relaxed text-muted-foreground">
         Where projects, runs, and per-project agent desks live. Persona memory
         (episodes, patterns, reputation) always stays global — personas cross
         directories by design.
       </p>
 
-      <div className="settings-field">
-        <label htmlFor="storage-mode">Mode</label>
-        <select
+      <div className="mb-4 flex flex-col gap-1.5">
+        <Label htmlFor="storage-mode">Mode</Label>
+        <Select
           id="storage-mode"
           value={mode}
           onChange={(e) => {
@@ -177,14 +166,14 @@ export function StorageSection({ settings, onUpdated }: StorageSectionProps) {
         >
           <option value="global">Global (data/)</option>
           <option value="in-directory">In-directory (.flow/ at chosen path)</option>
-        </select>
+        </Select>
       </div>
 
       {mode === "in-directory" && (
-        <div className="settings-field">
-          <label htmlFor="storage-root">Storage root</label>
-          <div className="settings-field-row">
-            <input
+        <div className="mb-4 flex flex-col gap-1.5">
+          <Label htmlFor="storage-root">Storage root</Label>
+          <div className="flex gap-2">
+            <Input
               id="storage-root"
               type="text"
               value={storageRoot}
@@ -193,67 +182,52 @@ export function StorageSection({ settings, onUpdated }: StorageSectionProps) {
                 setValidation(null);
               }}
               placeholder="/path/to/your/repo"
+              className="flex-1"
             />
-            <button onClick={validate} disabled={validating}>
+            <Button variant="outline" onClick={validate} disabled={validating}>
               {validating ? "…" : "Validate"}
-            </button>
+            </Button>
           </div>
-          <small className="settings-hint">
-            <code>.flow/</code> will be created inside this directory on the next run.
+          <small className="text-xs text-muted-foreground">
+            <code className="rounded-sm bg-muted px-1">.flow/</code> will be created inside this directory on the next run.
           </small>
           {validation && (
-            <div
-              className={
-                validation.valid
-                  ? "settings-validation settings-validation-ok"
-                  : "settings-validation settings-validation-bad"
-              }
-            >
+            <Alert variant={validation.valid ? "success" : "error"} className="mt-1 text-xs">
               {validation.valid
                 ? `✓ Valid path, writable.`
                 : `✗ ${validation.reason}`}
-            </div>
+            </Alert>
           )}
-
         </div>
       )}
 
-      {saveError && <div className="settings-error">{saveError}</div>}
+      {saveError && <Alert variant="error" className="mb-3">{saveError}</Alert>}
       {hotReloaded && (
-        <div
-          className="settings-banner"
-          style={{
-            background: "#f0fdf4",
-            border: "1px solid #16a34a",
-            color: "#166534",
-            padding: "8px 10px",
-            borderRadius: 6,
-          }}
-        >
+        <Alert variant="success" className="mb-3">
           <strong>✓ Saved.</strong> New storage location is live — no
           restart needed.
-        </div>
+        </Alert>
       )}
       {restartRequired && (
-        <div className="settings-banner settings-banner-warn">
+        <Alert variant="warn" className="mb-3">
           <strong>Saved — but a restart is required.</strong> A run is
           in flight, so the backend kept the old storage config to avoid
           corrupting it. Once the run finishes, restart{" "}
-          <code>uvicorn</code> to pick up the new location.
-        </div>
+          <code className="rounded-sm bg-muted px-1">uvicorn</code> to pick up the new location.
+        </Alert>
       )}
       {mode === "in-directory" && settings.effective.storage_mode !== "in-directory" && !restartRequired && (
-        <div className="settings-banner settings-banner-warn" style={{marginTop: 8}}>
+        <Alert variant="warn" className="mt-2">
           <strong>Heads up:</strong> switching to in-directory mode means projects
           won't transfer automatically. You'll see an empty list at the new
           location until you create projects there or migrate manually.
-        </div>
+        </Alert>
       )}
 
-      <div className="settings-actions">
-        <button className="settings-save" onClick={save} disabled={saving}>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button onClick={save} disabled={saving}>
           {saving ? "Saving…" : "Save"}
-        </button>
+        </Button>
       </div>
     </section>
   );

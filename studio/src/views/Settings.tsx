@@ -3,7 +3,8 @@
 
 import { useEffect, useState } from "react";
 import { settingsApi, type SettingsState } from "../api";
-import { StorageSection } from "../components/SettingsDrawer";
+import { EnvOverrideBanner, StorageSection } from "../components/SettingsDrawer";
+import { Alert, Page, Skeleton } from "../components/ui/form-controls";
 import { ThemeToggle } from "../components/ThemeToggle";
 
 export function Settings() {
@@ -22,29 +23,26 @@ export function Settings() {
   }, []);
 
   return (
-    <div className="page">
-      <h1>Settings</h1>
-
+    <Page title="Settings">
       <section className="mb-4 max-w-[720px]">
         <h2 className="mb-2 text-base font-semibold">Appearance</h2>
         <ThemeToggle />
-        <p className="mt-2 text-xs text-muted-foreground">
-          Dark mode currently restyles the new components only; legacy views follow in a later UI step.
-        </p>
       </section>
 
-      {loading && <div className="settings-loading">Loading…</div>}
-      {error && <div className="settings-error">Error: {error}</div>}
+      {loading && (
+        <div className="max-w-[720px]" aria-busy="true">
+          <Skeleton className="h-24" />
+        </div>
+      )}
+      {error && (
+        <Alert variant="error" className="max-w-[720px]">
+          Error: {error}
+        </Alert>
+      )}
 
       {settings && (
-        <div className="settings-body" style={{ maxWidth: 720 }}>
-          {settings.env_overrides_active && (
-            <div className="settings-banner settings-banner-warn">
-              Environment variables (e.g. <code>GUUDFLOW_STORAGE_MODE</code>) are
-              overriding settings on this server. Saving will persist your
-              choice but won't take effect until env vars are unset.
-            </div>
-          )}
+        <div className="max-w-[720px]">
+          {settings.env_overrides_active && <EnvOverrideBanner />}
 
           <StorageSection
             settings={settings}
@@ -52,6 +50,6 @@ export function Settings() {
           />
         </div>
       )}
-    </div>
+    </Page>
   );
 }

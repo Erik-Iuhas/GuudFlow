@@ -6,6 +6,20 @@ import { TeamGraph } from "../features/team/TeamGraph";
 import { CapabilitySwitches } from "../components/CapabilitySwitches";
 import { CostStrip } from "../components/CostStrip";
 import { WorkerCard } from "../components/WorkerCard";
+import { Badge, type BadgeProps } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import {
+  Alert,
+  Input,
+  Label,
+  Page,
+  Select,
+  Table,
+  Td,
+  Textarea,
+  Th,
+} from "../components/ui/form-controls";
 import type {
   CapabilitiesMeta,
   CapabilityBlock,
@@ -39,7 +53,7 @@ function highlightPaths(text: string): React.ReactNode[] {
       parts.push(text.slice(lastIndex, idx));
     }
     parts.push(
-      <code key={`p-${idx}`} className="path-mention">
+      <code key={`p-${idx}`} className="rounded-sm bg-accent px-1.5 py-px font-mono text-xs text-accent-foreground">
         {match[1]}
       </code>,
     );
@@ -230,31 +244,33 @@ export function Propose() {
   const warnings = proposal?.warnings ?? [];
 
   return (
-    <div className="page">
-      <h1>{isContinuation ? "Continue from a prior run" : "Propose a project"}</h1>
-      <p className="muted small">
-        {isContinuation
+    <Page
+      title={isContinuation ? "Continue from a prior run" : "Propose a project"}
+      description={
+        isContinuation
           ? "Continuation runs read the prior team + outputs and propose what to change. Approve the deltas below to update the project's stored team."
-          : "Describe the goal in plain English. The meta-agent reads any uploads + source repo you've attached and proposes a tailored team."}
-      </p>
+          : "Describe the goal in plain English. The meta-agent reads any uploads + source repo you've attached and proposes a tailored team."
+      }
+    >
+      {error && <Alert variant="error" className="mb-3">{error}</Alert>}
 
-      {error && <div className="error">{error}</div>}
-
-      <div className="card">
-        <div style={{ marginBottom: 12 }}>
-          <label className="small">Meta-agent model</label>
-          <select
+      <Card className="mb-3 p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <Label className="m-0" htmlFor="meta-model">Meta-agent model</Label>
+          <Select
+            id="meta-model"
             value={metaModel}
             onChange={(e) => setMetaModel(e.target.value as ModelTier)}
-            style={{ width: "auto", marginLeft: 8 }}
+            className="w-auto"
           >
             <option value="heavy">Heavy (default)</option>
             <option value="solid">Solid</option>
             <option value="fast">Fast</option>
-          </select>
+          </Select>
         </div>
-        <label>{isContinuation ? "What's the new ask?" : "Project goal"}</label>
-        <textarea
+        <Label htmlFor="goal">{isContinuation ? "What's the new ask?" : "Project goal"}</Label>
+        <Textarea
+          id="goal"
           rows={3}
           placeholder={
             isContinuation
@@ -264,70 +280,66 @@ export function Propose() {
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
         />
-        <div className="row-end" style={{ marginTop: 12 }}>
-          <button
-            className="primary"
-            disabled={!goal || loading}
-            onClick={handlePropose}
-          >
+        <div className="mt-3 flex justify-end">
+          <Button disabled={!goal || loading} onClick={handlePropose}>
             {loading ? "Proposing…" : "Propose team"}
-          </button>
+          </Button>
         </div>
-      </div>
+      </Card>
 
       {proposal && (
-        <div className="card">
-          <h2>Proposed team</h2>
-          <p className="rationale">{highlightPaths(proposal.rationale)}</p>
+        <Card className="mb-3 p-4">
+          <h2 className="m-0 mb-2 text-base font-semibold">Proposed team</h2>
+          <p className="my-3 text-sm leading-relaxed">{highlightPaths(proposal.rationale)}</p>
 
           {warnings.length > 0 && (
-            <div className="warn">
+            <Alert variant="warn">
               <strong>Notes from the meta-agent:</strong>
-              <ul>
+              <ul className="my-1.5 ml-5 p-0">
                 {warnings.map((w, i) => (
                   <li key={i}>{w}</li>
                 ))}
               </ul>
-            </div>
+            </Alert>
           )}
 
           {deltas.length > 0 && <DeltaTable deltas={deltas} />}
 
-          <div style={{ margin: "12px 0" }}>
-            <label className="small" htmlFor="harness-select">Agent harness</label>
-            <select
+          <div className="my-3 flex flex-wrap items-center gap-2">
+            <Label className="m-0" htmlFor="harness-select">Agent harness</Label>
+            <Select
               id="harness-select"
               value={harness}
               onChange={(e) => setHarness(e.target.value as HarnessKind)}
-              style={{ width: "auto", marginLeft: 8 }}
+              className="w-auto"
             >
               <option value="legacy">Legacy</option>
               <option value="opencode">opencode</option>
-            </select>
+            </Select>
             {harness === "opencode" && (
-              <span className="muted small" style={{ marginLeft: 8 }}>
+              <span className="text-xs text-muted-foreground">
                 Review what each agent may do before approving.
               </span>
             )}
           </div>
 
           <div className="my-3 flex gap-1" role="group" aria-label="Team view">
-            <button
-              type="button"
-              className={view === "graph" ? "primary" : ""}
+            <Button
+              size="sm"
+              variant={view === "graph" ? "default" : "outline"}
               aria-pressed={view === "graph"}
               onClick={() => setView("graph")}
             >
               Graph
-            </button>
-            <button
-              type="button"
-              className={view === "list" ? "primary" : ""}
+            </Button>
+            <Button
+              size="sm"
+              variant={view === "list" ? "default" : "outline"}
               aria-pressed={view === "list"}
               onClick={() => setView("list")}
             >
               List
-            </button>
+            </Button>
           </div>
 
           {view === "graph" ? (
@@ -355,86 +367,89 @@ export function Propose() {
                 }}
                 capsByRole={capsByRole}
               />
-          <div className="grid-2">
-            {proposal.agents.map((a) => {
-              const rc = roleCaps[a.role];
-              return (
-                <div key={a.role}>
-                  <WorkerCard agent={a} mode="preview" />
-                  {harness === "opencode" && capMeta && rc && (
-                    <CapabilitySwitches
-                      role={a.role}
-                      roleType={rc.roleType}
-                      value={rc.capabilities}
-                      onChange={(next) => handleCapChange(a, next)}
-                      levels={capMeta.levels}
-                      defaults={capMeta.defaults[rc.roleType]}
-                      visionAvailable={rc.visionAvailable}
-                      production={capMeta.production}
-                      hostDevWarning={capMeta.host_dev_warning}
-                      error={rc.error}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
+              <div className="grid gap-4 md:grid-cols-2">
+                {proposal.agents.map((a) => {
+                  const rc = roleCaps[a.role];
+                  return (
+                    <div key={a.role}>
+                      <WorkerCard agent={a} mode="preview" />
+                      {harness === "opencode" && capMeta && rc && (
+                        <CapabilitySwitches
+                          role={a.role}
+                          roleType={rc.roleType}
+                          value={rc.capabilities}
+                          onChange={(next) => handleCapChange(a, next)}
+                          levels={capMeta.levels}
+                          defaults={capMeta.defaults[rc.roleType]}
+                          visionAvailable={rc.visionAvailable}
+                          production={capMeta.production}
+                          hostDevWarning={capMeta.host_dev_warning}
+                          error={rc.error}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </>
           )}
 
-          <hr />
-          <div className="row">
-            <div style={{ flex: 1 }}>
-              <label>Project id</label>
-              <input
+          <hr className="my-4 border-0 border-t border-border" />
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <Label htmlFor="project-id">Project id</Label>
+              <Input
+                id="project-id"
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
                 disabled={isContinuation}
               />
             </div>
-            <button
-              className="primary"
-              disabled={!projectId}
-              onClick={handleApprove}
-              style={{ alignSelf: "flex-end" }}
-            >
+            <Button disabled={!projectId} onClick={handleApprove}>
               {isContinuation ? "Approve deltas" : "Approve & create"}
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
-    </div>
+    </Page>
   );
 }
 
+const DELTA_VARIANT: Record<string, BadgeProps["variant"]> = {
+  keep: "secondary",
+  drop: "failed",
+  add: "complete",
+  swap_tier: "blocked",
+  replace_persona: "waiting",
+};
+
 function DeltaTable({ deltas }: { deltas: RoleDelta[] }) {
   return (
-    <div className="card delta-card">
-      <h3 style={{ marginTop: 0 }}>What's changing</h3>
-      <table className="list">
+    <Card className="mt-4 border-status-blocked/40 bg-status-blocked/10 p-4">
+      <h3 className="m-0 mb-2 text-base font-semibold">What's changing</h3>
+      <Table>
         <thead>
           <tr>
-            <th>Role</th>
-            <th>Action</th>
-            <th>Detail</th>
+            <Th>Role</Th>
+            <Th>Action</Th>
+            <Th>Detail</Th>
           </tr>
         </thead>
         <tbody>
           {deltas.map((d) => (
             <tr key={`${d.role}-${d.action}`}>
-              <td className="mono">{d.role}</td>
-              <td>
-                <span className={`tag tag-delta-${d.action}`}>
+              <Td className="font-mono">{d.role}</Td>
+              <Td>
+                <Badge variant={DELTA_VARIANT[d.action] ?? "secondary"}>
                   {d.action.replace("_", " ")}
-                </span>
-              </td>
-              <td className="small muted">{deltaDetail(d)}</td>
+                </Badge>
+              </Td>
+              <Td className="text-xs text-muted-foreground">{deltaDetail(d)}</Td>
             </tr>
           ))}
         </tbody>
-      </table>
-    </div>
+      </Table>
+    </Card>
   );
 }
 

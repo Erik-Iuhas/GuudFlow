@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, trainingApi } from "../api";
 import type { TournamentResult } from "../api";
+import { Badge } from "../components/ui/badge";
+import { Alert, EmptyState, linkClass, Page, Skeleton, Table, Td, Th } from "../components/ui/form-controls";
+import { cn } from "../lib/utils";
 
 /**
  * Phase G.4 — leaderboard for one tournament. Polls
@@ -51,64 +54,61 @@ export function Tournament() {
   if (!id) return null;
 
   return (
-    <div className="page">
-      <h1>Tournament</h1>
-      <div className="row" style={{ gap: 12, alignItems: "center" }}>
-        <span className="mono">{id}</span>
+    <Page title="Tournament">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="font-mono">{id}</span>
         {result && (
-          <span
-            className={`tag ${
-              result.complete ? "tag-status-complete" : "tag-status-running"
-            }`}
-          >
+          <Badge variant={result.complete ? "complete" : "running"}>
             {result.complete ? "complete" : "running"}
-          </span>
+          </Badge>
         )}
         {result && (
-          <span className="muted small">scenario: {result.scenario_id}</span>
+          <span className="text-xs text-muted-foreground">scenario: {result.scenario_id}</span>
         )}
       </div>
 
-      {error && <div className="error" style={{ marginTop: 12 }}>{error}</div>}
+      {error && <Alert variant="error" className="mt-3">{error}</Alert>}
 
       {!result ? (
-        <p className="muted">loading…</p>
+        !error && <Skeleton className="mt-4 h-24" />
       ) : result.leaderboard.length === 0 ? (
-        <p className="muted">No participants in this tournament.</p>
+        <EmptyState className="mt-4" title="No participants in this tournament." />
       ) : (
-        <table className="list" style={{ marginTop: 16 }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: "left" }}>Rank</th>
-              <th style={{ textAlign: "left" }}>Persona</th>
-              <th style={{ textAlign: "left" }}>Run</th>
-              <th style={{ textAlign: "right" }}>Score</th>
-            </tr>
-          </thead>
-          <tbody>
-            {result.leaderboard.map((row, i) => (
-              <tr key={row.run_id}>
-                <td>{row.score === null ? "—" : i + 1}</td>
-                <td>
-                  <strong className="mono">{row.persona_id}</strong>
-                </td>
-                <td>
-                  <Link to={`/runs/${row.run_id}`} className="mono small">
-                    {row.run_id}
-                  </Link>
-                </td>
-                <td style={{ textAlign: "right" }}>
-                  {row.score === null ? (
-                    <span className="muted small">Running…</span>
-                  ) : (
-                    <strong>{row.score.toFixed(2)}</strong>
-                  )}
-                </td>
+        <div className="mt-4">
+          <Table>
+            <thead>
+              <tr>
+                <Th>Rank</Th>
+                <Th>Persona</Th>
+                <Th>Run</Th>
+                <Th className="text-right">Score</Th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {result.leaderboard.map((row, i) => (
+                <tr key={row.run_id}>
+                  <Td>{row.score === null ? "—" : i + 1}</Td>
+                  <Td>
+                    <strong className="font-mono">{row.persona_id}</strong>
+                  </Td>
+                  <Td>
+                    <Link to={`/runs/${row.run_id}`} className={cn("font-mono text-xs", linkClass)}>
+                      {row.run_id}
+                    </Link>
+                  </Td>
+                  <Td className="text-right">
+                    {row.score === null ? (
+                      <span className="text-xs text-muted-foreground">Running…</span>
+                    ) : (
+                      <strong>{row.score.toFixed(2)}</strong>
+                    )}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       )}
-    </div>
+    </Page>
   );
 }

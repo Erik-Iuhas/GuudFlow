@@ -3,6 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { ApiError, personasApi, trainingApi } from "../api";
 import type { TrainingScenario } from "../api";
 import { ScenarioCard } from "../components/ScenarioCard";
+import { Button } from "../components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Alert, EmptyState, Page, SectionTitle, Skeleton } from "../components/ui/form-controls";
+import { cn } from "../lib/utils";
 import type { PersonaSummary } from "../types";
 
 /**
@@ -104,32 +115,33 @@ export function Training() {
     }
   }
 
-  if (loading) return <div className="page">Loading…</div>;
+  if (loading) {
+    return (
+      <Page title="Training Camp">
+        <div className="grid gap-4 md:grid-cols-2" aria-busy="true" aria-label="Loading scenarios">
+          <Skeleton className="h-32" />
+          <Skeleton className="h-32" />
+        </div>
+      </Page>
+    );
+  }
 
   return (
-    <div className="page">
-      <h1>Training Camp</h1>
-      <p className="muted small">
-        Train personas on toy scenarios. Each run produces a rubric
-        score (RUBRIC_SCORE signal) and a tagged training episode.
-        Tournaments rank N personas on the same scenario for hiring
-        decisions.
-      </p>
-
-      {error && <div className="error">{error}</div>}
+    <Page
+      title="Training Camp"
+      description="Train personas on toy scenarios. Each run produces a rubric score (RUBRIC_SCORE signal) and a tagged training episode. Tournaments rank N personas on the same scenario for hiring decisions."
+    >
+      {error && <Alert variant="error" className="mb-3">{error}</Alert>}
 
       {scenarios.length === 0 ? (
-        <div className="card">
-          <p className="muted">
-            No scenarios available. Add some to{" "}
-            <code>data/training_camp/scenarios/</code> — see DESIGN §35
-            for the format.
-          </p>
-        </div>
+        <EmptyState title="No scenarios available.">
+          Add some to <code className="rounded-sm bg-muted px-1">data/training_camp/scenarios/</code> — see DESIGN §35
+          for the format.
+        </EmptyState>
       ) : (
         <>
-          <h2>Scenarios</h2>
-          <div className="grid-2">
+          <SectionTitle>Scenarios</SectionTitle>
+          <div className="grid gap-4 md:grid-cols-2">
             {scenarios.map((s) => (
               <ScenarioCard
                 key={s.scenario_id}
@@ -143,70 +155,63 @@ export function Training() {
         </>
       )}
 
-      {activeScenario && mode && (
-        <div
-          className="modal-backdrop"
-          onClick={() => !busy && setMode(null)}
-        >
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>
-              {mode === "train" ? "Train one persona on" : "Tournament on"}{" "}
-              <span className="mono">{activeScenario.scenario_id}</span>
-            </h3>
-            <p className="small muted">
-              {mode === "train"
-                ? "Pick a persona. The training run uses FAST tier and disabled approval gates."
-                : "Pick at least 2 personas. Each gets its own run on the same scenario; the leaderboard ranks them by rubric score."}
-            </p>
+      <Dialog open={!!(activeScenario && mode)} onOpenChange={(o) => !o && !busy && setMode(null)}>
+        {activeScenario && mode && (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {mode === "train" ? "Train one persona on" : "Tournament on"}{" "}
+                <span className="font-mono">{activeScenario.scenario_id}</span>
+              </DialogTitle>
+              <DialogDescription>
+                {mode === "train"
+                  ? "Pick a persona. The training run uses FAST tier and disabled approval gates."
+                  : "Pick at least 2 personas. Each gets its own run on the same scenario; the leaderboard ranks them by rubric score."}
+              </DialogDescription>
+            </DialogHeader>
 
             {personas.length === 0 ? (
-              <p className="muted">No personas to train. Run setup or seed first.</p>
+              <p className="m-0 text-sm text-muted-foreground">No personas to train. Run setup or seed first.</p>
             ) : (
-              <div className="persona-pick-list">
+              <div className="flex max-h-80 flex-col gap-1 overflow-y-auto rounded-md border border-border p-2">
                 {personas.map((p) => (
                   <label
                     key={p.persona_id}
-                    className={`persona-pick ${
-                      selectedPersonas.has(p.persona_id) ? "selected" : ""
-                    }`}
+                    className={cn(
+                      "m-0 flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-foreground hover:bg-accent",
+                      selectedPersonas.has(p.persona_id) && "bg-accent",
+                    )}
                   >
                     <input
                       type={mode === "train" ? "radio" : "checkbox"}
                       name="persona-pick"
+                      className="m-0 h-auto w-auto accent-primary"
                       checked={selectedPersonas.has(p.persona_id)}
                       onChange={() => togglePersona(p.persona_id)}
                     />
                     <strong>{p.name}</strong>
-                    <span className="small muted mono" style={{ marginLeft: 6 }}>
-                      {p.persona_id}
-                    </span>
-                    <span className="small muted" style={{ marginLeft: 8 }}>
-                      ({p.specialty})
-                    </span>
+                    <span className="ml-1 font-mono text-xs text-muted-foreground">{p.persona_id}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">({p.specialty})</span>
                   </label>
                 ))}
               </div>
             )}
 
-            <div className="row" style={{ marginTop: 12, gap: 8 }}>
-              <button
-                className="primary"
-                onClick={() => void launch()}
-                disabled={busy || selectedPersonas.size === 0}
-              >
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setMode(null)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button onClick={() => void launch()} disabled={busy || selectedPersonas.size === 0}>
                 {busy
                   ? "Launching…"
                   : mode === "train"
                   ? "Train"
                   : `Run tournament (${selectedPersonas.size})`}
-              </button>
-              <button onClick={() => setMode(null)} disabled={busy}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
+    </Page>
   );
 }
