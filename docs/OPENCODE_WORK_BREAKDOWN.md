@@ -100,8 +100,8 @@ retirement (S15) and final review (O15), and the rest of the Studio track (S24 t
 | UI | S29 | Done | `features/board/`, `/runs/:id/board` |
 | UI | S33 | Done | `features/artifacts/`, `/runs/:id/artifacts`, safe artifact-file endpoint |
 | UI | S26 | Done | `features/overseer/`, `/runs/:id/report`, project Insights tab |
-| UI | S27 | In progress | U4 migrate remaining views, delete `styles.css` |
-| UI | O22 | Not started | UX review passes |
+| UI | S27 | Done | U4: every view on tokens and ui primitives, `styles.css` deleted, Tailwind preflight on; visual suite `studio/e2e/visual.e2e.ts` (light and dark, 0.2% tolerance) |
+| UI | O22 | Partly | Offline passes on every visual baseline (light and dark): graph zoom, edge routing and handles, lane overflow, dark-mode rows, budget bar colour, one spend formatter. A pass on a live real-model run is deferred (you) |
 
 **What you need to do to finish the deferred work:** provide an API key (see "Before anything starts")
 and run O4, O12, O14 and O17, plus the real-model parts of O19 and O24, using the commands in the
