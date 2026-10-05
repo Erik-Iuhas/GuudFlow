@@ -12,8 +12,7 @@ user's own directory) has one bare repo at `data/projects/{id}/repo.git`:
     branch stays for reference, `main` is untouched). Nothing an agent did
     reaches the project's `main` without that decision.
 
-Run states live in `data/projects/{id}/runs_state.json` (locked, see
-`core.json_store`). Every git call runs with hooks and fsmonitor off.
+Run states live in the project's SQLite work database (`core.work_db`). Every git call runs with hooks and fsmonitor off.
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from core.json_store import locked_json, read_json
+from core.work_db import WorkDB
 
 RunState = Literal["pending", "accepted", "rejected", "no_changes"]
 MAIN = "main"
@@ -89,7 +88,7 @@ class ProjectRepo:
     def __init__(self, data_root: Path, project_id: str) -> None:
         self.project_dir = Path(data_root) / "projects" / project_id
         self.path = self.project_dir / "repo.git"
-        self.state_path = self.project_dir / "runs_state.json"
+        self.db = WorkDB(self.project_dir)
 
     # ── setup ───────────────────────────────────────────────────────────────
     def exists(self) -> bool:
@@ -147,19 +146,19 @@ class ProjectRepo:
         run = RunBranch(run_id=run_id, state="pending" if commits else "no_changes", base=base,
                         head=head, commits=commits, files=files[:500], submitted_at=time.time(),
                         parent_run=parent_run)
-        with locked_json(self.state_path, {}) as states:
+        with self.db.runs_doc() as states:
             states[run_id] = asdict(run)
         return run
 
     def runs(self) -> list[RunBranch]:
         """Every submitted run, newest first."""
-        states = read_json(self.state_path, {})
+        states = self.db.read_runs_doc()
         runs = [RunBranch(**row) for row in states.values() if isinstance(row, dict)]
         return sorted(runs, key=lambda r: r.submitted_at, reverse=True)
 
     def get(self, run_id: str) -> RunBranch | None:
         """One run's state, or None."""
-        row = read_json(self.state_path, {}).get(run_id)
+        row = self.db.read_runs_doc().get(run_id)
         return RunBranch(**row) if isinstance(row, dict) else None
 
     def changes(self, run_id: str, limit: int = 200_000) -> str:
@@ -172,7 +171,7 @@ class ProjectRepo:
 
     def accept(self, run_id: str, note: str = "") -> RunBranch:
         """Merge the run into main. Raises ProjectRepoConflict if main moved incompatibly."""
-        with locked_json(self.state_path, {}) as states:
+        with self.db.runs_doc() as states:
             run = self._pending(states, run_id)
             with tempfile.TemporaryDirectory() as tmp:
                 work = Path(tmp) / "merge"
@@ -194,7 +193,7 @@ class ProjectRepo:
 
     def reject(self, run_id: str, note: str = "") -> RunBranch:
         """Leave main as it is; the branch stays for reference."""
-        with locked_json(self.state_path, {}) as states:
+        with self.db.runs_doc() as states:
             run = self._pending(states, run_id)
             run.state, run.decided_at, run.note = "rejected", time.time(), note
             states[run_id] = asdict(run)

@@ -16,7 +16,8 @@ Item lifecycle:
 An item is only `done` once the run that finished it has been accepted into the
 project's main (see `core.project_repo`). Cards a run's planner added beyond the
 selected items, and did not finish, become new open items so nothing is lost.
-Writes go through `core.json_store.locked_json` (the API and the worker share the file).
+Stored in the project's SQLite work database (`core.work_db`); every change is one
+transaction, so the API and the worker never interleave writes.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from core.json_store import locked_json, read_json
+from core.work_db import WorkDB
 
 ItemStatus = Literal["open", "in_run", "done", "dropped"]
 Outcome = Literal["done", "partial", "not_started"]
@@ -101,12 +102,12 @@ class Backlog:
     """The backlog of one project."""
 
     def __init__(self, data_root: Path, project_id: str) -> None:
-        self.path = Path(data_root) / "projects" / project_id / "backlog.json"
+        self.db = WorkDB(Path(data_root) / "projects" / project_id)
 
     # ── reads ───────────────────────────────────────────────────────────────
     def items(self, status: ItemStatus | None = None) -> list[BacklogItem]:
         """Items in working order: in-run first, then open by priority, then the rest."""
-        doc = read_json(self.path, {"next": 1, "items": []})
+        doc = self.db.read_backlog_doc()
         items = [BacklogItem(**row) for row in doc.get("items", []) if isinstance(row, dict)]
         if status is not None:
             items = [i for i in items if i.status == status]
@@ -147,7 +148,7 @@ class Backlog:
                                   "size": size, "priority": priority, "notes": notes,
                                   "files_hint": list(files_hint)})
         now = time.time()
-        with locked_json(self.path, {"next": 1, "items": []}) as doc:
+        with self.db.backlog_doc() as doc:
             item = BacklogItem(id=f"B{int(doc.get('next', 1))}", source=source,
                                created_at=now, updated_at=now, **fields)
             doc["next"] = int(doc.get("next", 1)) + 1
@@ -160,7 +161,7 @@ class Backlog:
         if unknown:
             raise BacklogError(f"cannot edit {', '.join(sorted(unknown))}")
         clean = self._validated(changes)
-        with locked_json(self.path, {"next": 1, "items": []}) as doc:
+        with self.db.backlog_doc() as doc:
             row = self._row(doc, item_id)
             if row["status"] == "done":
                 raise BacklogError(f"{item_id} is done; add a new item instead")
@@ -181,7 +182,7 @@ class Backlog:
                      limit: int = 3) -> list[BacklogItem]:
         """Mark items as in this run: the given ids, or the top `limit` open ones."""
         taken: list[BacklogItem] = []
-        with locked_json(self.path, {"next": 1, "items": []}) as doc:
+        with self.db.backlog_doc() as doc:
             rows = doc.get("items", [])
             if ids is None:
                 open_rows = sorted((r for r in rows if r.get("status") == "open"),
@@ -210,7 +211,7 @@ class Backlog:
         """
         now = time.time()
         created: list[BacklogItem] = []
-        with locked_json(self.path, {"next": 1, "items": []}) as doc:
+        with self.db.backlog_doc() as doc:
             rows = doc.setdefault("items", [])
             for row in rows:
                 if row.get("run_id") != run_id or row.get("status") != "in_run":
@@ -248,7 +249,7 @@ class Backlog:
         """The run was accepted or rejected: finished items close, the rest reopen."""
         changed: list[BacklogItem] = []
         now = time.time()
-        with locked_json(self.path, {"next": 1, "items": []}) as doc:
+        with self.db.backlog_doc() as doc:
             for row in doc.get("items", []):
                 if row.get("run_id") != run_id or row.get("status") != "in_run":
                     continue
@@ -265,7 +266,7 @@ class Backlog:
     def release(self, run_id: str, reason: str) -> list[BacklogItem]:
         """The run ended with nothing to accept: its items go back to open."""
         changed: list[BacklogItem] = []
-        with locked_json(self.path, {"next": 1, "items": []}) as doc:
+        with self.db.backlog_doc() as doc:
             for row in doc.get("items", []):
                 if row.get("run_id") == run_id and row.get("status") == "in_run":
                     row.update(status="open", run_id=None, pending=None, updated_at=time.time())
@@ -278,7 +279,7 @@ class Backlog:
     # ── helpers ─────────────────────────────────────────────────────────────
     def _set_status(self, item_id: str, status: ItemStatus, allowed: tuple[str, ...],
                     note: str) -> BacklogItem:
-        with locked_json(self.path, {"next": 1, "items": []}) as doc:
+        with self.db.backlog_doc() as doc:
             row = self._row(doc, item_id)
             if row["status"] not in allowed:
                 raise BacklogError(f"{item_id} is {row['status']}; cannot make it {status}")
