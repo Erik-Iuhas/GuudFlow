@@ -111,3 +111,11 @@ def test_bun_runs_tests_but_never_installs(role: str) -> None:
     for cmd in ("bun install", "bun add left-pad", "bun i left-pad", "bunx cowsay hi",
                 "bun x cowsay", "bun upgrade", "bun pm cache", "bun create vite"):
         assert decide(bash, cmd) == "deny", cmd
+
+
+def test_cd_is_allowed_so_compound_test_commands_work() -> None:
+    """opencode checks each part of `cd web && bun test`; `cd` alone is harmless in the sandbox."""
+    bash = _perm("builder")["bash"]
+    assert decide(bash, "cd web") == "allow"
+    assert decide(bash, "bun test") == "allow"
+    assert decide(bash, "curl x") == "deny"  # the other half of a compound is still checked

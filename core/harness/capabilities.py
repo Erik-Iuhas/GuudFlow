@@ -48,7 +48,7 @@ ROLE_TYPES = ("researcher", "planner", "architect", "builder", "frontend_builder
 PROTECTED_PATHS = ("inputs/**", ".github/**", "opencode.json", ".opencode/**", ".guudflow/**")
 
 READONLY_BASH = ("git status*", "git diff*", "git log*", "git show*", "git branch*",
-                 "ls*", "cat *", "head *", "tail *", "wc *", "pwd", "grep *")
+                 "ls*", "cat *", "head *", "tail *", "wc *", "pwd", "grep *", "cd *")
 COMMIT_BASH = ("git add*", "git commit*", "git checkout -b *", "git switch *", "git restore *",
                "mkdir *")
 TEST_RUNNER_BASH = ("pytest*", "python -m pytest*", "python3 -m pytest*", "npm test*",

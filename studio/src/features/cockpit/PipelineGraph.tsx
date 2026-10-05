@@ -180,7 +180,7 @@ export function PipelineGraph({ specs, selectedRole, onSelectRole, className, di
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.15 }}
+        fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
         minZoom={0.3}
         maxZoom={1.5}
         nodesDraggable={false}
