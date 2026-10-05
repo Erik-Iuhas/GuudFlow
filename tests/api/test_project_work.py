@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -162,3 +163,26 @@ async def test_dependencies_and_cost_over_the_api(client, auth_header) -> None:
     assert nope.status_code == 400 and "needs B1" in nope.json()["detail"]
     items = (await client.get("/api/projects/p1/backlog", headers=auth_header)).json()["items"]
     assert items[0]["total_cost_usd"] == 0.0
+
+
+async def test_remote_sync_endpoint_and_summary(client, auth_header, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GUUDFLOW_GIT_TOKEN", "ghp_secret")
+    bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+    seed = tmp_path / "seed"
+    subprocess.run(["git", "clone", "-q", str(bare), str(seed)], check=True, capture_output=True)
+    _commit(seed, "README.md", "# x\n")
+    subprocess.run(["git", "push", "-q", "origin", "main"], cwd=seed, check=True)
+    await client.post("/api/projects", headers=auth_header, json={
+        "project_id": "p2", "goal": "x",
+        "approval_gates": {"project_remote": {"url": str(bare), "publish": "branch",
+                                              "token_env": "GUUDFLOW_GIT_TOKEN"}}})
+    r = await client.post("/api/projects/p2/remote/sync", headers=auth_header)
+    assert r.status_code == 200 and r.json()["status"] == "seeded"
+    listing = (await client.get("/api/projects/p2/runs-review", headers=auth_header)).json()
+    assert listing["remote"] == {"url": str(bare), "branch": "main", "publish": "branch",
+                                 "token": True}
+    assert "ghp_secret" not in json.dumps(listing)
+    await _project(client, auth_header, "p3")
+    none = await client.post("/api/projects/p3/remote/sync", headers=auth_header)
+    assert none.status_code == 400

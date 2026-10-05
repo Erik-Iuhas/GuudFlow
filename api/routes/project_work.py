@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from api.auth import require_bearer
 from core.backlog import Backlog, BacklogError
 from core.project_repo import ProjectRepo, ProjectRepoConflict, ProjectRepoError
+from core.project_remote import RemoteConfig, RemoteError, sync
 from core.project_runs import decide_run
 
 router = APIRouter(prefix="/api/projects", tags=["project-work"],
@@ -158,7 +159,21 @@ async def list_project_runs(request: Request, project_id: str) -> dict[str, Any]
     data_root = await _project(request, project_id)
     repo = ProjectRepo(data_root, project_id)
     main = repo.sha("main") if repo.exists() else None
-    return {"main": main, "runs": [asdict(r) for r in repo.runs()]}
+    remote = _remote(await request.app.state.project_store.get(project_id) or {})
+    return {"main": main, "runs": [asdict(r) for r in repo.runs()],
+            "remote": None if remote is None else {
+                "url": remote.url, "branch": remote.branch, "publish": remote.publish,
+                "token": bool(remote.token())}}
+
+
+@router.post("/{project_id}/remote/sync")
+async def sync_remote(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
+    """Bring the remote branch into the project's main now (plan §14.1)."""
+    data_root = await _project(request, project_id)
+    remote = _remote(await request.app.state.project_store.get(project_id) or {})
+    if remote is None:
+        raise HTTPException(status_code=400, detail="this project has no remote configured")
+    return asdict(sync(ProjectRepo(data_root, project_id), remote))
 
 
 @router.get("/{project_id}/runs-review/{run_id}/changes")
@@ -171,13 +186,24 @@ async def run_changes(request: Request, project_id: str, run_id: str) -> dict[st
         raise _bad(exc, 404) from None
 
 
+def _remote(project: dict[str, Any]) -> RemoteConfig | None:  # Any: project JSON
+    try:
+        return RemoteConfig.from_settings((project.get("approval_gates") or {})
+                                          .get("project_remote"))
+    except RemoteError as exc:
+        raise HTTPException(status_code=400, detail=f"project_remote: {exc}") from None
+
+
 async def _decide(request: Request, project_id: str, run_id: str, accept: bool,
                   note: str) -> Any:  # Any: dict or JSONResponse
     data_root = await _project(request, project_id)
+    remote = _remote(await request.app.state.project_store.get(project_id) or {})
     if await _run_is_live(request, run_id):
         raise HTTPException(status_code=409, detail=f"run {run_id} is still running")
     try:
-        decision = decide_run(data_root, project_id, run_id, accept=accept, note=note)
+        decision = decide_run(data_root, project_id, run_id, accept=accept, note=note,
+                              remote=remote,
+                              http=getattr(request.app.state, "github_http", None))
     except ProjectRepoConflict as exc:
         return JSONResponse(status_code=409, content={
             "detail": (f"main changed since run {run_id} started and the merge conflicts. "

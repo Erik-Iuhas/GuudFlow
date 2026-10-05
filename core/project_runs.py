@@ -25,10 +25,13 @@ from pathlib import Path
 from collections.abc import Iterable
 from typing import Any
 
+import httpx
+
 from core.signals import Signal, SignalType
 
 from core.backlog import Backlog, BacklogItem, CardOutcome
 from core.json_store import read_json, write_json
+from core.project_remote import RemoteConfig, publish, sync
 from core.project_repo import ProjectRepo, RunBranch
 
 log = logging.getLogger(__name__)
@@ -49,7 +52,7 @@ class RunDecision:
 
 def prepare_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
                 working_dir: Path, payload: dict[str, Any], *,  # Any: job payload JSON
-                in_place: bool) -> list[BacklogItem]:
+                in_place: bool, remote: RemoteConfig | None = None) -> list[BacklogItem]:
     """Set the run up on the project's current state; returns the backlog items taken.
 
     `payload` keys: `backlog_items` (list of ids, or "top"), `backlog_limit`
@@ -64,6 +67,8 @@ def prepare_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
     parent = str(payload["continue_run"]) if payload.get("continue_run") else None
     if not in_place:
         repo = ProjectRepo(data_root, project_id)
+        # With a remote, sync first: it seeds a new project repo from the remote itself.
+        synced = asdict(sync(repo, remote)) if remote is not None else None
         repo.ensure(seed=working_dir if (working_dir / ".git").exists() else None)
         base = repo.sha("main")
         conflicts: list[str] = []
@@ -73,7 +78,8 @@ def prepare_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
             _, conflicts = repo.continue_into(working_dir, parent, run_id)
             items += backlog.transfer(parent, run_id)
         write_json(run_root / PROJECT_RUN_JSON,
-                   {"base": base, "parent_run": parent, "conflicts": conflicts})
+                   {"base": base, "parent_run": parent, "conflicts": conflicts,
+                    "sync": synced})
         if conflicts:
             fix = backlog.add(
                 f"Resolve the merge with main (continuing {parent})",
@@ -155,10 +161,20 @@ def card_results(board: Iterable[Signal]) -> tuple[dict[str, str], dict[str, flo
 
 
 def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
-               note: str = "") -> RunDecision:
-    """A human accepts or rejects a pending run (raises ProjectRepoError / Conflict)."""
+               note: str = "", remote: RemoteConfig | None = None,
+               http: httpx.Client | None = None) -> RunDecision:
+    """A human accepts or rejects a pending run (raises ProjectRepoError / Conflict).
+
+    With a remote (plan §14.1), accepting first syncs the remote into main, then
+    merges the run, then publishes as configured; both results are kept on the run.
+    """
     repo = ProjectRepo(data_root, project_id)
+    synced = sync(repo, remote) if accept and remote is not None else None
     run = repo.accept(run_id, note) if accept else repo.reject(run_id, note)
+    if remote is not None and accept:
+        published = publish(repo, remote, run, http=http)
+        run = repo.record(run_id, sync=asdict(synced) if synced else None,
+                          published=asdict(published))
     items = Backlog(data_root, project_id).decide(run_id, accepted=accept, note=note)
     if accept:
         carry = Path(data_root) / "runs" / run_id / "carry_forward.json"

@@ -65,6 +65,9 @@ class RunBranch:
     parent_run: str | None = None  # the pending run it continued, if any
     # `core.project_checks.CheckResult` as a dict, once the project's check ran (plan §14.3).
     check: dict[str, object] | None = None
+    # Remote results (plan §14.1): the sync before accepting, and where it was published.
+    sync: dict[str, object] | None = None
+    published: dict[str, object] | None = None
 
     @property
     def branch(self) -> str:
@@ -187,11 +190,15 @@ class ProjectRepo:
 
     def record_check(self, run_id: str, check: dict[str, object]) -> RunBranch:
         """Store the check result of a submitted run."""
+        return self.record(run_id, check=check)
+
+    def record(self, run_id: str, **fields: object) -> RunBranch:
+        """Store extra results on a submitted run (check, sync, publish)."""
         with self.db.runs_doc() as states:
             row = states.get(run_id)
             if not isinstance(row, dict):
                 raise ProjectRepoError(f"run {run_id} was never submitted to this project")
-            row["check"] = check
+            row.update(fields)
             return RunBranch(**row)
 
     def runs(self) -> list[RunBranch]:

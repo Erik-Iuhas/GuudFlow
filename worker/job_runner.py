@@ -606,7 +606,8 @@ class JobRunner:
                 pass
             raise
 
-    def _initialize_run(self, job: Job, run_root: Path) -> None:
+    def _initialize_run(self, job: Job, run_root: Path,
+                        project_data: dict[str, Any] | None = None) -> None:
         """Seed the run's workspace from the project's persistent inputs.
 
         Order matters:
@@ -654,8 +655,12 @@ class JobRunner:
                 run_initializer.bundle_prior_history(prior_working, bundle_path)
 
         run_initializer.generate_inputs_readme(run_inputs)
+        from core.project_remote import RemoteConfig
+        gates = ((project_data.get("approval_gates") if isinstance(project_data, dict)
+                  else getattr(project_data, "approval_gates", None)) or {})
         project_runs.prepare_run(self.data_root, job.project_id, job.run_id, run_root,
-                                 working_dir, dict(job.payload or {}), in_place=in_place)
+                                 working_dir, dict(job.payload or {}), in_place=in_place,
+                                 remote=RemoteConfig.from_settings(gates.get("project_remote")))
 
     async def run_one(self, job: Job) -> None:
         """Execute a single job end-to-end. Idempotent on status updates."""
@@ -702,7 +707,7 @@ class JobRunner:
             # source_repo, bundle attached prior runs' git history, and write
             # the inputs/README.md index.
             try:
-                self._initialize_run(job, run_root)
+                self._initialize_run(job, run_root, project_data)
             except Exception as e:
                 await self.queue.update_status(
                     job.job_id, JOB_FAILED,
