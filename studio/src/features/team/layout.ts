@@ -1,6 +1,6 @@
 // Pure layout for the team graph: layers by dependency depth, review edges back to authors.
 
-import type { Edge, Node } from "@xyflow/react";
+import { MarkerType, type Edge, type Node } from "@xyflow/react";
 import type { HarnessAgentConfig } from "../../lib/capabilities";
 
 export interface RoleNodeData extends Record<string, unknown> {
@@ -64,8 +64,10 @@ export function layoutTeam(
       initialWidth: NODE_WIDTH,
       initialHeight: NODE_HEIGHT,
       handles: [
-        { type: "target", position: "left" as never, x: 0, y: NODE_HEIGHT / 2, width: 1, height: 1 },
-        { type: "source", position: "right" as never, x: NODE_WIDTH, y: NODE_HEIGHT / 2, width: 1, height: 1 },
+        { id: "in", type: "target", position: "left" as never, x: 0, y: NODE_HEIGHT / 2, width: 1, height: 1 },
+        { id: "out", type: "source", position: "right" as never, x: NODE_WIDTH, y: NODE_HEIGHT / 2, width: 1, height: 1 },
+        { id: "review-in", type: "target", position: "bottom" as never, x: NODE_WIDTH / 3, y: NODE_HEIGHT, width: 1, height: 1 },
+        { id: "review-out", type: "source", position: "bottom" as never, x: (2 * NODE_WIDTH) / 3, y: NODE_HEIGHT, width: 1, height: 1 },
       ],
       data: {
         role: a.role,
@@ -81,7 +83,9 @@ export function layoutTeam(
   for (const a of agents) {
     for (const dep of a.depends_on ?? []) {
       if (!roles.has(dep)) continue;
-      edges.push({ id: `dep:${dep}->${a.role}`, source: dep, target: a.role, className: "team-edge-dep" });
+      edges.push({ id: `dep:${dep}->${a.role}`, source: dep, target: a.role, sourceHandle: "out", targetHandle: "in",
+        className: "team-edge-dep",
+        markerEnd: { type: MarkerType.ArrowClosed, color: "hsl(var(--muted-foreground))" } });
     }
     for (const author of a.review_of ?? []) {
       if (!roles.has(author)) continue;
@@ -90,8 +94,13 @@ export function layoutTeam(
         id: `review:${a.role}->${author}`,
         source: a.role,
         target: author,
+        // Bottom handles route the loop under the nodes, clear of the dependency edge.
+        sourceHandle: "review-out",
+        targetHandle: "review-in",
+        type: "smoothstep",
         label: `review, max ${rounds} ${rounds === 1 ? "round" : "rounds"}`,
         className: "team-edge-review",
+        markerEnd: { type: MarkerType.ArrowClosed, color: "hsl(var(--status-waiting))" },
         animated: true,
       });
     }

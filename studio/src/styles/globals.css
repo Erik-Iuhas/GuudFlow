@@ -35,6 +35,15 @@
 .react-flow__edge-text { fill: hsl(var(--foreground)); font-size: 11px; font-weight: 600; }
 .react-flow__edge-textbg { fill: hsl(var(--card)); }
 .react-flow__handle { background: hsl(var(--muted-foreground)); }
+/* Zoom controls follow the theme (the library default is white in both modes). */
+.react-flow__controls {
+  --xy-controls-button-background-color: hsl(var(--card));
+  --xy-controls-button-background-color-hover: hsl(var(--accent));
+  --xy-controls-button-color: hsl(var(--foreground));
+  --xy-controls-button-color-hover: hsl(var(--accent-foreground));
+  --xy-controls-button-border-color: hsl(var(--border));
+  --xy-controls-box-shadow: 0 0 0 1px hsl(var(--border));
+}
 .react-flow__attribution { background: transparent; font-size: 10px; }
 .react-flow__attribution a { color: hsl(var(--muted-foreground)); }
 .react-flow__node:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }

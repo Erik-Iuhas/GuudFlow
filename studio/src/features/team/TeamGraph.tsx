@@ -40,7 +40,10 @@ function RoleNodeView({ data, selected }: NodeProps<RoleNode>) {
         selected ? "border-primary ring-2 ring-ring" : "border-border",
       )}
     >
-      <Handle type="target" position={Position.Left} />
+      {/* Edge anchors only (read-only graph): dependencies left -> right, review edges along the bottom. */}
+      <Handle id="in" type="target" position={Position.Left} className={HANDLE_CLASS} />
+      <Handle id="review-in" type="target" position={Position.Bottom} className={cn(HANDLE_CLASS, "!left-1/3")} />
+      <Handle id="review-out" type="source" position={Position.Bottom} className={cn(HANDLE_CLASS, "!left-2/3")} />
       <div className="flex items-center justify-between gap-2">
         <span className="truncate font-mono text-sm font-semibold">{data.role}</span>
         <Badge variant="secondary" className="font-mono">{data.roleType}</Badge>
@@ -55,10 +58,12 @@ function RoleNodeView({ data, selected }: NodeProps<RoleNode>) {
           ))
         )}
       </div>
-      <Handle type="source" position={Position.Right} />
+      <Handle id="out" type="source" position={Position.Right} className={HANDLE_CLASS} />
     </div>
   );
 }
+
+const HANDLE_CLASS = "!pointer-events-none !opacity-0";
 
 const NODE_TYPES: NodeTypes = { role: RoleNodeView };
 
@@ -117,7 +122,10 @@ export function TeamGraph({
           nodesConnectable={false}
           elementsSelectable
           fitView
+          // Small teams must not be blown up past 1:1 (two nodes filled the canvas at 2x).
+          fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
           minZoom={0.3}
+          maxZoom={1.5}
           onNodeClick={(_, node) => setSelected(node.id)}
           onPaneClick={() => setSelected(null)}
           proOptions={{ hideAttribution: true }}
