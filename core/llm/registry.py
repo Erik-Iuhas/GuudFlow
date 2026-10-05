@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.llm.client import LLMClient
+    from core.model_config import KeyStore
 
 log = logging.getLogger(__name__)
 
@@ -26,8 +27,16 @@ class ModelInfo:
     cost_per_1k_input: float = 0.0
     cost_per_1k_output: float = 0.0
     cache_read_per_1k: float = 0.0
+    # Cache writes; None means the usual 1.25x of the input price.
+    cache_write_per_1k: float | None = None
     deprecated: bool = False
     replacement: str | None = None
+
+    @property
+    def cache_write_price(self) -> float:
+        """USD per 1k cache-write tokens."""
+        return (self.cache_write_per_1k if self.cache_write_per_1k is not None
+                else self.cost_per_1k_input * 1.25)
 
 
 @dataclass
@@ -48,8 +57,10 @@ class ModelRegistry:
     Anthropic SDK client — so callers don't pay construction cost per call.
     """
 
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str, *, keys: "KeyStore | None" = None):
         data = json.loads(Path(path).read_text(encoding="utf-8"))
+        # Keys typed into Studio (host only); environment variables still win.
+        self._keys = keys
 
         self._models: dict[str, ModelInfo] = {}
         for m in data.get("models", []):
@@ -64,6 +75,7 @@ class ModelRegistry:
                 cost_per_1k_input=m.get("cost_per_1k_input", 0.0),
                 cost_per_1k_output=m.get("cost_per_1k_output", 0.0),
                 cache_read_per_1k=m.get("cache_read_per_1k", 0.0),
+                cache_write_per_1k=m.get("cache_write_per_1k"),
                 deprecated=m.get("deprecated", False),
                 replacement=m.get("replacement"),
             )
@@ -77,12 +89,44 @@ class ModelRegistry:
                 base_url=pdata.get("base_url", ""),
             )
 
+        # The model each tier uses when a role names no model (Studio's tier pickers).
+        self._tiers: dict[str, str] = {
+            t: mid for t, mid in (data.get("tiers") or {}).items() if mid in self._models}
+
         for m in self._models.values():
             if m.deprecated:
                 hint = f" Use {m.replacement!r} instead." if m.replacement else ""
                 log.warning("Model %r is deprecated.%s", m.id, hint)
 
         self._client_cache: dict[str, LLMClient] = {}
+
+    @classmethod
+    def for_data_root(cls, data_root: Path | None) -> "ModelRegistry":
+        """The install's registry: its saved configuration (or the defaults) and its keys."""
+        from core.model_config import KeyStore, effective_path
+        return cls(effective_path(data_root),
+                   keys=KeyStore(Path(data_root)) if data_root is not None else None)
+
+    def api_key(self, provider_name: str) -> str | None:
+        """The host-side key for a provider (env var, else a key stored from Studio)."""
+        pinfo = self._providers.get(provider_name)
+        if pinfo is None:
+            return None
+        env = os.environ.get(pinfo.api_key_env, "")
+        if env:
+            return env
+        return self._keys.get(provider_name) if self._keys is not None else None
+
+    def tier_model(self, tier: str) -> ModelInfo | None:
+        """The model a tier uses for estimates: the saved tier choice, else the first
+        non-deprecated model of that tier (keys are not needed to price a model)."""
+        if tier in self._tiers:
+            return self._models[self._tiers[tier]]
+        return next((m for m in self._models.values() if m.tier == tier and not m.deprecated), None)
+
+    def tiers(self) -> dict[str, str]:
+        """The saved tier choices (tier -> model id)."""
+        return dict(self._tiers)
 
     def list_models(self) -> list[ModelInfo]:
         return list(self._models.values())
@@ -97,10 +141,15 @@ class ModelRegistry:
     def resolve(self, tier: str, preference: str | None = None) -> ModelInfo:
         """Pick a model for the given tier.
 
-        If preference is a model_id with matching tier, return it (with a
+        With no preference, the tier choice saved in Studio (`tiers`) wins when its
+        provider has a key. If preference is a model_id with matching tier, return it (with a
         deprecation warning if needed). Otherwise fall back to the first
         non-deprecated model matching tier whose provider has an API key set.
         """
+        if not preference and tier in self._tiers:
+            chosen = self._models[self._tiers[tier]]
+            if self._has_api_key(chosen.provider):
+                return chosen
         if preference and preference in self._models:
             m = self._models[preference]
             if m.tier == tier:
@@ -171,8 +220,7 @@ class ModelRegistry:
         pinfo = self._providers.get(provider_name)
         if pinfo is None:
             return False
-        key = os.environ.get(pinfo.api_key_env, "")
-        if key:
+        if self.api_key(provider_name):
             return True
         # Local endpoints (Ollama, LM Studio, vLLM) don't need a real key
         return "localhost" in pinfo.base_url or "127.0.0.1" in pinfo.base_url
@@ -181,7 +229,7 @@ class ModelRegistry:
         pinfo = self._providers.get(provider_name)
         if pinfo is None:
             raise NoModelAvailableError(f"Unknown provider {provider_name!r}")
-        api_key = os.environ.get(pinfo.api_key_env) or None
+        api_key = self.api_key(provider_name)
 
         if pinfo.client == "anthropic":
             from core.llm.anthropic import AnthropicClient

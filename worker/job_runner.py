@@ -170,10 +170,10 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
     raw_sub_llm = data.get("sub_llm_models") or {}
     sub_llm_models: dict[str, str] = {}
     if isinstance(raw_sub_llm, dict) and raw_sub_llm:
-        from pathlib import Path as _P
+        from core import storage as _storage
         from core.llm.registry import ModelRegistry as _MR
         try:
-            _reg = _MR(_P("data/models.json"))
+            _reg = _MR.for_data_root(_storage.data_root())
             _known = {m.id for m in _reg.list_models()}
         except Exception:
             _known = set()
@@ -184,7 +184,7 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             if _known and mid not in _known:
                 raise ValueError(
                     f"sub_llm_models[{use_case!r}] = {mid!r} is not in the "
-                    "model registry (data/models.json). Pick a known model "
+                    "model registry (Settings → Models & providers). Pick a known model "
                     "or remove the entry to fall back to cheapest_tool_capable()."
                 )
             sub_llm_models[str(use_case)] = mid
@@ -476,17 +476,13 @@ def default_runner_factory(
     # runs where llm=None.
     model_registry: ModelRegistry | None = None
     if llm is None:
-        registry_path = (
-            Path(data_root) / "models.json" if data_root is not None
-            else Path("data/models.json")
-        )
-        if not registry_path.exists():
-            registry_path = Path("data/models.json")
-        if registry_path.exists():
-            try:
-                model_registry = ModelRegistry(registry_path)
-            except Exception:
-                pass  # malformed registry — runner raises on first agent spawn
+        # The install's saved configuration (Studio "Models & providers") or the
+        # shipped defaults, with keys stored from Studio (core/model_config.py).
+        try:
+            model_registry = ModelRegistry.for_data_root(
+                Path(data_root) if data_root is not None else None)
+        except Exception:  # noqa: BLE001 — a malformed registry fails the first spawn
+            _logger.exception("could not load the model registry")
 
     # MemoryWriter needs a concrete LLM client (it calls complete() directly
     # for pattern synthesis). Give it the injected client, or resolve a

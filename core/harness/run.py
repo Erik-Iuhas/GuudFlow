@@ -436,7 +436,8 @@ class OpencodeRun:
         for role in self._roles.values():
             m = role.binding.model
             if m.id == model_id:
-                return Price(m.cost_per_1k_input, m.cost_per_1k_output, m.cache_read_per_1k)
+                return Price(m.cost_per_1k_input, m.cost_per_1k_output, m.cache_read_per_1k,
+                             m.cache_write_price)
         return None
 
     def _sandbox_host(self, role: str) -> str:
@@ -470,7 +471,7 @@ class OpencodeRun:
     def _binding(self, cfg: "AgentConfig") -> ProviderBinding:
         if self.settings.binding_factory is not None:
             return self.settings.binding_factory(cfg)
-        registry = self._registry or ModelRegistry(Path("data/models.json"))
+        registry = self._registry or ModelRegistry.for_data_root(None)
         model = registry.get(cfg.model_id) if cfg.model_id else None
         model = model or registry.resolve(cfg.model_tier)
         provider = registry.provider(model.provider)
@@ -480,7 +481,7 @@ class OpencodeRun:
         # (see _upstreams); opencode gets a per-role virtual key.
         return ProviderBinding(provider_key=model.provider, model=model, client=provider.client,
                                base_url=provider.base_url or None,
-                               api_key=os.environ.get(provider.api_key_env) or None)
+                               api_key=registry.api_key(model.provider))
 
     async def _ensure_server(self, role: _Role, workdir: Path,
                              task_hint: str = "") -> OpencodeClient:

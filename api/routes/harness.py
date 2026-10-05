@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,7 +21,6 @@ from core.harness.capabilities import (
 
 router = APIRouter(prefix="/api/harness", tags=["harness"], dependencies=[Depends(require_bearer)])
 
-_REGISTRY_PATH = Path("data/models.json")
 
 
 def _production() -> bool:
@@ -71,7 +69,8 @@ async def resolve_capabilities(body: ResolveRequest) -> dict:
     warnings: list[str] = []
     if body.model_id:
         from core.llm.registry import ModelRegistry
-        info = ModelRegistry(_REGISTRY_PATH).get(body.model_id)
+        from core import storage
+        info = ModelRegistry.for_data_root(storage.data_root()).get(body.model_id)
         vision_available = bool(info and info.supports_images)
         gated = gate_vision(caps, vision_available)
         if gated.vision != caps.vision:

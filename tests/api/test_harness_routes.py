@@ -1,7 +1,6 @@
 """Tests for /api/harness (S17)."""
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
@@ -12,12 +11,11 @@ TEXT_MODEL = "deepseek-chat"
 
 
 @pytest.fixture(autouse=True)
-def models_file(monkeypatch):
-    """Use the repo's models.json regardless of the test's working directory."""
-    import api.routes.harness as h
+def models_file(monkeypatch, tmp_path):
+    """An install with no saved model configuration: the shipped defaults apply."""
+    import core.storage as storage
 
-    path = Path(__file__).resolve().parents[2] / "data" / "models.json"
-    monkeypatch.setattr(h, "_REGISTRY_PATH", path)
+    monkeypatch.setattr(storage, "data_root", lambda: tmp_path)
 
 
 @pytest.mark.asyncio

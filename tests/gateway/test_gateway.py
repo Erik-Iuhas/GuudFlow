@@ -246,6 +246,22 @@ async def test_non_stream_json_usage(client: httpx.AsyncClient, gateway: Gateway
     assert (second.input_tokens, second.output_tokens, second.cache_read_tokens) == (70, 30, 0)
 
 
+async def test_cache_writes_cost_their_own_price(
+        client: httpx.AsyncClient, gateway: Gateway, upstream: Upstreams) -> None:
+    """Anthropic bills cache writes at a premium: 1.25x input unless the model sets a price."""
+    body = json.dumps({"id": "m", "type": "message", "content": [], "usage": {
+        "input_tokens": 100, "cache_creation_input_tokens": 4000, "cache_read_input_tokens": 0,
+        "output_tokens": 10}})
+    upstream.respond(httpx.Response(200, content=body, headers={"content-type": "application/json"}))
+    key = gateway.issue_key("run1", "dev", [CLAUDE])
+    await client.post("/anthropic/messages", json=_anthropic_body(stream=False),
+                      headers=_anthropic_headers(key))
+    (rec,) = gateway.usage("run1")
+    assert rec.input_tokens == 4100  # the record still counts every input token
+    expected = (100 * 0.003 + 4000 * 0.003 * 1.25 + 10 * 0.015) / 1000
+    assert rec.cost_usd == pytest.approx(expected)
+
+
 async def test_unknown_model_price_is_zero_but_logged(
         client: httpx.AsyncClient, gateway: Gateway, upstream: Upstreams) -> None:
     key = gateway.issue_key("run1", "dev", ["mystery"])

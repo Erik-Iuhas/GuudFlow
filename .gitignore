@@ -14,6 +14,9 @@ htmlcov/
 data/runs/
 data/projects/
 data/projects.json
+# An install's own model configuration and provider keys (Settings → Models & providers).
+data/model_config.json
+data/secrets/
 # Runtime-seeded personas. The canonical seed manifest is at
 # `data/_seed/personas/` (committed); `scripts/seed_data.py` copies
 # from there into `data/personas/` on first install.

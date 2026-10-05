@@ -71,6 +71,8 @@ class Price:
     input_per_1k: float
     output_per_1k: float
     cache_read_per_1k: float = 0.0
+    # Cache writes (Anthropic bills them at a premium); None means 1.25x the input price.
+    cache_write_per_1k: float | None = None
 
 
 @dataclass
@@ -286,13 +288,15 @@ class Gateway:
         return list(self._records.get(run_id, []))
 
     def _record(self, call: _Call, status: int, usage: _Usage) -> None:
-        # QUESTION: Anthropic cache-write tokens are billed at a premium but ModelInfo has no
-        # cache-write price, so they are priced as ordinary input here.
         input_tokens = usage.input_tokens + usage.cache_creation_tokens
         price = self._prices(call.model)
         cost = 0.0
         if price is not None:
-            cost = (input_tokens * price.input_per_1k + usage.output_tokens * price.output_per_1k
+            write = (price.cache_write_per_1k if price.cache_write_per_1k is not None
+                     else price.input_per_1k * 1.25)
+            cost = (usage.input_tokens * price.input_per_1k
+                    + usage.cache_creation_tokens * write
+                    + usage.output_tokens * price.output_per_1k
                     + usage.cache_read_tokens * price.cache_read_per_1k) / 1000.0
         record = UsageRecord(
             ts=datetime.now(timezone.utc).isoformat(), run_id=call.key.run_id,
