@@ -183,7 +183,8 @@ export function Studio() {
           <Button variant="outline" onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
-          <Button onClick={() => void runNow(false, {})}>Run now</Button>
+          {/* Backlog runs start from the Work tab; this runs on the project goal alone. */}
+          <Button variant="outline" onClick={() => void runNow(false, {})}>Run on the goal only</Button>
         </div>
       </div>
 

@@ -76,6 +76,14 @@ class BacklogItem:
             lines.append(f"    - notes: {self.notes}")
         return "\n".join(lines)
 
+    def review_note(self) -> str | None:
+        """The human's note on the latest decided run that held this item (human text)."""
+        last = next((h for h in reversed(self.history) if h.get("decision") in
+                     ("accepted", "rejected")), None)
+        if not last or not last.get("note"):
+            return None
+        return f"when {last['decision']} run {last.get('run_id')}: {last['note']}"
+
     def last_summary(self) -> str | None:
         """What the most recent run that worked on it reported (agent text)."""
         last = next((h for h in reversed(self.history) if h.get("summary")), None)
@@ -245,8 +253,12 @@ class Backlog:
                 created.append(item)
         return created
 
-    def decide(self, run_id: str, accepted: bool) -> list[BacklogItem]:
-        """The run was accepted or rejected: finished items close, the rest reopen."""
+    def decide(self, run_id: str, accepted: bool, note: str = "") -> list[BacklogItem]:
+        """The run was accepted or rejected: finished items close, the rest reopen.
+
+        The human's `note` is kept on each item's history entry for that run and is
+        shown to the next run that works on the item (plan §14.2).
+        """
         changed: list[BacklogItem] = []
         now = time.time()
         with self.db.backlog_doc() as doc:
@@ -259,6 +271,8 @@ class Backlog:
                 for entry in reversed(row.get("history", [])):
                     if entry.get("run_id") == run_id:
                         entry["decision"] = "accepted" if accepted else "rejected"
+                        if note.strip():
+                            entry["note"] = note.strip()[:2000]
                         break
                 changed.append(BacklogItem(**row))
         return changed

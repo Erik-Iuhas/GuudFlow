@@ -50,6 +50,16 @@ async def invoke_project(
     body = body or {}
     confirm = bool(body.get("confirm", False))
     _check_project_work(request, project_id, body)
+    if not body.get("allow_parallel"):
+        # One active run per project (plan §14.5): a second run would build on the
+        # same main and collide at review time.
+        from worker.queue import JOB_QUEUED, JOB_RUNNING
+        jobs = await request.app.state.queue.list(project_id=project_id, limit=500)
+        active = [j for j in jobs if j.status in (JOB_QUEUED, JOB_RUNNING)]
+        if active:
+            raise HTTPException(status_code=409, detail=(
+                f"run {active[0].run_id} is still {active[0].status} for this project; wait for "
+                "it, or pass allow_parallel for work that does not overlap"))
 
     project_cfg = serialise_project(project)
     gates = project_cfg.approval_gates or {}

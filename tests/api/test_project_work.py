@@ -122,5 +122,16 @@ async def test_invoke_validates_backlog_and_continue_run(client, auth_header,
         r = await client.post("/api/invoke/p1", headers=auth_header, json={"confirm": True, **bad})
         assert r.status_code == 400, bad
     top = await client.post("/api/invoke/p1", headers=auth_header,
-                            json={"confirm": True, "backlog_items": "top"})
+                            json={"confirm": True, "backlog_items": "top", "allow_parallel": True})
     assert top.status_code == 202
+
+
+async def test_one_active_run_per_project(client, auth_header) -> None:
+    await _project(client, auth_header)
+    first = await client.post("/api/invoke/p1", headers=auth_header, json={"confirm": True})
+    assert first.status_code == 202
+    second = await client.post("/api/invoke/p1", headers=auth_header, json={"confirm": True})
+    assert second.status_code == 409 and first.json()["run_id"] in second.json()["detail"]
+    parallel = await client.post("/api/invoke/p1", headers=auth_header,
+                                 json={"confirm": True, "allow_parallel": True})
+    assert parallel.status_code == 202

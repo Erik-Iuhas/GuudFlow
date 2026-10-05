@@ -367,6 +367,9 @@ def _item_text(item: "BacklogItem") -> str:
     text = (item.brief_text() if not item.source.startswith("run:")
             else f"- **{item.id}**\n" + wrap_untrusted(f"backlog item {item.id} (from a run)",
                                                      item.brief_text()))
+    review = item.review_note()
+    if review:
+        text += f"\n    - the human reviewer said {review}"
     summary = item.last_summary()
     if summary:
         text += "\n" + wrap_untrusted(f"earlier work on {item.id}", summary)

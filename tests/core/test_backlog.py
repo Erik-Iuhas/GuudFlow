@@ -99,3 +99,17 @@ def test_card_outcomes_reads_board_cards() -> None:
              SimpleNamespace(task_id="X", story_id="legacy", title="old", column="done")]
     out = card_outcomes(cards, {"T1": "added login"})
     assert out == [CardOutcome("Login", "done", "B1", ("a",), "code", "added login")]
+
+
+def test_the_reviewers_note_reaches_the_next_run(tmp_path: Path) -> None:
+    from core.harness.task_flow import backlog_text
+    b = _backlog(tmp_path)
+    item = b.add("Login", ["works"])
+    b.take_for_run("run_1", ids=[item.id])
+    b.record_outcomes("run_1", [CardOutcome("Login", "done", item.id, summary="did it")])
+    b.decide("run_1", accepted=False, note="Use bcrypt, not sha1.")
+    again = b.get(item.id)
+    assert again.review_note() == "when rejected run run_1: Use bcrypt, not sha1."
+    text = backlog_text([again])
+    assert "the human reviewer said when rejected run run_1: Use bcrypt, not sha1." in text
+    assert text.index("Use bcrypt") < text.index("<untrusted-")   # human note is not wrapped

@@ -105,7 +105,7 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
     """A human accepts or rejects a pending run (raises ProjectRepoError / Conflict)."""
     repo = ProjectRepo(data_root, project_id)
     run = repo.accept(run_id, note) if accept else repo.reject(run_id, note)
-    items = Backlog(data_root, project_id).decide(run_id, accepted=accept)
+    items = Backlog(data_root, project_id).decide(run_id, accepted=accept, note=note)
     if accept:
         carry = Path(data_root) / "runs" / run_id / "carry_forward.json"
         target = Path(data_root) / "projects" / project_id / "context" / LAST_ACCEPTED_JSON

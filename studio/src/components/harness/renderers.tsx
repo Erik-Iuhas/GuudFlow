@@ -86,7 +86,7 @@ export function AgentResultCard({ info }: { info: AgentResultInfo }) {
   const stats: string[] = [];
   if (info.cost !== null) stats.push(formatUsd(info.cost));
   if (info.tokens !== null) stats.push(`${info.tokens.toLocaleString("en-US")} tokens`);
-  if (info.toolCalls !== null) stats.push(plural(info.toolCalls, "tool call", "tool calls"));
+  if (info.toolCalls !== null) stats.push(`${plural(info.toolCalls, "tool call", "tool calls")} this turn`);
   if (info.commits !== null) stats.push(plural(info.commits, "commit", "commits"));
 
   const reviewer = info.kind === "reviewer";
