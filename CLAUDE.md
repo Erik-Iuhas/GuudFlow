@@ -28,6 +28,19 @@ opens on the Work tab (review queue + backlog). Plan §14 adds remote sync/publi
 reconcile runs, item dependencies and grooming, autopilot (`core/autopilot.py`) and SQLite
 storage (`core/work_db.py`).
 
+**Named workers.** Every role has a worker name (`core/crew.py`): the name set on the team
+(`agents[].name`), the persona's, or a stable pick seeded by project and role (saving a project
+fills in missing names). Briefs introduce teammates by name, notes may be addressed by name or role,
+commits and quips use the name, and a `TEAM` signal at run start tells Studio who is who.
+`from_agent` on signals stays the role.
+
+**Models & providers.** Studio's Settings page edits providers, models, prices and each tier's
+model (`core/model_config.py`, `api/routes/model_config.py`). The install's choices live in
+`{data_root}/model_config.json` (the shipped `data/models.json` is the default); provider keys typed
+into Studio are stored host-only in `{data_root}/secrets/provider_keys.json` (0600), are never returned
+by the API, and an environment variable wins. Always load the registry with
+`ModelRegistry.for_data_root()`.
+
 **Opencode harness.** Agent work is done by [opencode](https://github.com/anomalyco/opencode)
 running headless, one sandboxed server per role. GuudFlow stays the manager: scheduler,
 task board, personas and memory, permissions, credentials, merges and Studio. The design is

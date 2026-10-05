@@ -103,13 +103,16 @@ export function PipelineGraph({ agents, liveStates, onClickAgent, onRemoveAgent,
             const state = (liveStates?.get(n.role)?.state as AgentLiveState) ?? "pending";
             c = STATE_COLORS[state];
           }
-          const sublabel = isConfigMode
+          const detail = isConfigMode
             ? (agent?.model_tier ?? "solid")
             : ((liveStates?.get(n.role)?.state as AgentLiveState) ?? "pending");
+          // A named worker reads "Arlo" over "planner · heavy".
+          const title = agent?.name || n.role;
+          const sublabel = agent?.name ? `${n.role} · ${detail}` : detail;
           return (
             <g key={n.role} transform={`translate(${n.x}, ${n.y})`} className={onClickAgent ? "cursor-pointer" : "cursor-default"} onClick={onClickAgent ? () => onClickAgent(n.role) : undefined}>
               <rect width={NODE_W} height={NODE_H} rx={8} ry={8} className={c.rect} strokeWidth={2} />
-              <text x={NODE_W / 2} y={24} textAnchor="middle" fontSize={13} fontWeight={600} className={c.text}>{n.role}</text>
+              <text x={NODE_W / 2} y={24} textAnchor="middle" fontSize={13} fontWeight={600} className={c.text}>{title}</text>
               <text x={NODE_W / 2} y={42} textAnchor="middle" fontSize={11} className={c.text}>{sublabel}</text>
               {isConfigMode && onRemoveAgent && (
                 <g
