@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { runsApi } from "../api";
 import type { ContextSnapshot, IterationMetrics } from "../api";
+import { cn } from "../lib/utils";
 
 interface Props {
   runId: string;
@@ -10,10 +11,10 @@ interface Props {
 // ── Stacked bar for context composition ────────────────────────────────────
 
 const SEGMENT_COLORS: Record<string, string> = {
-  repo_map: "#6366f1",
-  git_diff: "#f59e0b",
-  files: "#10b981",
-  other: "#94a3b8",
+  repo_map: "bg-status-running",
+  git_diff: "bg-status-blocked",
+  files: "bg-status-complete",
+  other: "bg-muted-foreground",
 };
 
 function ContextBar({ snap }: { snap: ContextSnapshot }) {
@@ -32,16 +33,14 @@ function ContextBar({ snap }: { snap: ContextSnapshot }) {
   ].filter((s) => s.tokens > 0);
 
   return (
-    <div style={{ display: "flex", height: 14, borderRadius: 3, overflow: "hidden", width: "100%", background: "#f1f5f9" }}>
+    <div className="flex h-3.5 w-full overflow-hidden rounded-sm bg-muted">
       {segments.map((seg) => (
         <div
           key={seg.label}
           title={`${seg.label}: ${seg.tokens} tokens`}
-          style={{
-            width: `${(seg.tokens / total) * 100}%`,
-            background: seg.color,
-            minWidth: seg.tokens > 0 ? 2 : 0,
-          }}
+          className={cn("min-w-[2px] w-[var(--seg)]", seg.color)}
+          // The width is a data-driven percentage, so it travels as a CSS variable.
+          style={{ "--seg": `${(seg.tokens / total) * 100}%` } as React.CSSProperties}
         />
       ))}
     </div>
@@ -52,10 +51,10 @@ function ContextBar({ snap }: { snap: ContextSnapshot }) {
 
 function BarLegend() {
   return (
-    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
+    <div className="mb-2 flex flex-wrap gap-3">
       {Object.entries(SEGMENT_COLORS).map(([label, color]) => (
-        <span key={label} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#64748b" }}>
-          <span style={{ width: 10, height: 10, borderRadius: 2, background: color, display: "inline-block" }} />
+        <span key={label} className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          <span className={cn("inline-block h-2.5 w-2.5 rounded-sm", color)} />
           {label}
         </span>
       ))}
@@ -73,6 +72,13 @@ function fmtCost(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
+const TABLE_CLS = "w-full border-collapse text-xs";
+const HEAD_ROW = "border-b border-border bg-muted";
+const TH = "whitespace-nowrap px-3 py-1.5 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground";
+const TH_LEFT = cn(TH, "text-left");
+const TD = "px-3 py-[5px] text-center text-xs text-foreground";
+const TD_LEFT = cn(TD, "text-left");
+
 function RoleTotals({ rows }: { rows: IterationMetrics[] }) {
   const byRole: Record<string, { input: number; output: number; cache: number; iters: number; cost: number }> = {};
   for (const r of rows) {
@@ -87,69 +93,45 @@ function RoleTotals({ rows }: { rows: IterationMetrics[] }) {
   const grandTotal = roles.reduce((s, r) => s + byRole[r].cost, 0);
 
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+    <table className={TABLE_CLS}>
       <thead>
-        <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-          <th style={TH_LEFT}>role</th>
-          <th style={TH}>iters</th>
-          <th style={TH}>input</th>
-          <th style={TH}>output</th>
-          <th style={TH}>cache_read</th>
-          <th style={TH} title="Estimated USD cost — Track 3d.5">cost</th>
+        <tr className={HEAD_ROW}>
+          <th className={TH_LEFT}>role</th>
+          <th className={TH}>iters</th>
+          <th className={TH}>input</th>
+          <th className={TH}>output</th>
+          <th className={TH}>cache_read</th>
+          <th className={TH} title="Estimated USD cost — Track 3d.5">cost</th>
         </tr>
       </thead>
       <tbody>
         {roles.map((role) => {
           const t = byRole[role];
           return (
-            <tr key={role} style={{ borderBottom: "1px solid #f1f5f9" }}>
-              <td style={TD_LEFT}><code style={{ fontSize: 11 }}>{role}</code></td>
-              <td style={TD}>{t.iters}</td>
-              <td style={TD}>{t.input.toLocaleString()}</td>
-              <td style={TD}>{t.output.toLocaleString()}</td>
-              <td style={TD}>{t.cache.toLocaleString()}</td>
-              <td style={TD}>{fmtCost(t.cost)}</td>
+            <tr key={role} className="border-b border-border">
+              <td className={TD_LEFT}><code className="text-[11px]">{role}</code></td>
+              <td className={TD}>{t.iters}</td>
+              <td className={TD}>{t.input.toLocaleString()}</td>
+              <td className={TD}>{t.output.toLocaleString()}</td>
+              <td className={TD}>{t.cache.toLocaleString()}</td>
+              <td className={TD}>{fmtCost(t.cost)}</td>
             </tr>
           );
         })}
         {grandTotal > 0 && (
-          <tr style={{ borderTop: "2px solid #e2e8f0", background: "#f8fafc" }}>
-            <td style={{ ...TD_LEFT, fontWeight: 600 }}>total</td>
-            <td style={TD}>—</td>
-            <td style={TD}>—</td>
-            <td style={TD}>—</td>
-            <td style={TD}>—</td>
-            <td style={{ ...TD, fontWeight: 600 }}>{fmtCost(grandTotal)}</td>
+          <tr className="border-t-2 border-border bg-muted">
+            <td className={cn(TD_LEFT, "font-semibold")}>total</td>
+            <td className={TD}>—</td>
+            <td className={TD}>—</td>
+            <td className={TD}>—</td>
+            <td className={TD}>—</td>
+            <td className={cn(TD, "font-semibold")}>{fmtCost(grandTotal)}</td>
           </tr>
         )}
       </tbody>
     </table>
   );
 }
-
-// ── Styles ─────────────────────────────────────────────────────────────────
-
-const TH: React.CSSProperties = {
-  padding: "6px 12px",
-  textAlign: "center",
-  fontWeight: 600,
-  fontSize: 11,
-  color: "#64748b",
-  textTransform: "uppercase",
-  letterSpacing: "0.03em",
-  whiteSpace: "nowrap",
-};
-
-const TH_LEFT: React.CSSProperties = { ...TH, textAlign: "left" };
-
-const TD: React.CSSProperties = {
-  padding: "5px 12px",
-  fontSize: 12,
-  color: "#334155",
-  textAlign: "center",
-};
-
-const TD_LEFT: React.CSSProperties = { ...TD, textAlign: "left" };
 
 // ── Main component ─────────────────────────────────────────────────────────
 
@@ -185,35 +167,34 @@ export function RunAnalytics({ runId, isActive }: Props) {
   }, [runId, isActive]);
 
   if (error) {
-    return <div style={{ padding: 16, color: "#ef4444", fontSize: 13 }}>{error}</div>;
+    return <div className="p-4 text-[13px] text-destructive">{error}</div>;
   }
 
   const sorted = [...metrics].reverse();
+  const SECTION_HEAD = "mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground";
 
   return (
-    <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 24 }}>
+    <div className="flex flex-col gap-6 px-4 py-3">
       {/* ── Per-iteration table ────────────────────────────────────────── */}
       <section>
-        <div style={{ fontWeight: 600, fontSize: 12, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-          Iterations ({metrics.length})
-        </div>
+        <div className={SECTION_HEAD}>Iterations ({metrics.length})</div>
         {metrics.length === 0 ? (
-          <div style={{ color: "#94a3b8", fontSize: 13 }}>No data yet.</div>
+          <div className="text-[13px] text-muted-foreground">No data yet.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <div className="overflow-x-auto">
+            <table className={TABLE_CLS}>
               <thead>
-                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                  <th style={TH_LEFT}>role</th>
-                  <th style={TH}>iter</th>
-                  <th style={TH}>model</th>
-                  <th style={TH}>input</th>
-                  <th style={TH}>output</th>
-                  <th style={TH}>cache_read</th>
-                  <th style={TH}>elapsed (s)</th>
-                  <th style={TH} title="Track 3d.5 — estimated USD cost">cost</th>
-                  <th style={TH_LEFT}>tools</th>
-                  <th style={TH}>no_op</th>
+                <tr className={HEAD_ROW}>
+                  <th className={TH_LEFT}>role</th>
+                  <th className={TH}>iter</th>
+                  <th className={TH}>model</th>
+                  <th className={TH}>input</th>
+                  <th className={TH}>output</th>
+                  <th className={TH}>cache_read</th>
+                  <th className={TH}>elapsed (s)</th>
+                  <th className={TH} title="Track 3d.5 — estimated USD cost">cost</th>
+                  <th className={TH_LEFT}>tools</th>
+                  <th className={TH}>no_op</th>
                 </tr>
               </thead>
               <tbody>
@@ -225,22 +206,22 @@ export function RunAnalytics({ runId, isActive }: Props) {
                     ? `Includes sub-LLM: ${subUseCases.map((uc) => `${uc} (${subBd[uc].calls})`).join(", ")}`
                     : undefined;
                   return (
-                    <tr key={i} style={{ borderBottom: "1px solid #f1f5f9", background: r.failed ? "#fff1f2" : undefined }}>
-                      <td style={TD_LEFT}><code style={{ fontSize: 11 }}>{r.role}</code></td>
-                      <td style={TD}>{r.iteration}</td>
-                      <td style={{ ...TD, fontSize: 11, color: "#64748b" }}>{r.model.split("-").slice(-2).join("-")}</td>
-                      <td style={TD}>{r.input_tokens.toLocaleString()}</td>
-                      <td style={TD}>{r.output_tokens.toLocaleString()}</td>
-                      <td style={TD}>{r.cache_read_tokens.toLocaleString()}</td>
-                      <td style={TD}>{r.elapsed_seconds.toFixed(1)}</td>
-                      <td style={TD} title={costTitle}>
+                    <tr key={i} className={cn("border-b border-border", r.failed && "bg-status-failed/10")}>
+                      <td className={TD_LEFT}><code className="text-[11px]">{r.role}</code></td>
+                      <td className={TD}>{r.iteration}</td>
+                      <td className={cn(TD, "text-[11px] text-muted-foreground")}>{r.model.split("-").slice(-2).join("-")}</td>
+                      <td className={TD}>{r.input_tokens.toLocaleString()}</td>
+                      <td className={TD}>{r.output_tokens.toLocaleString()}</td>
+                      <td className={TD}>{r.cache_read_tokens.toLocaleString()}</td>
+                      <td className={TD}>{r.elapsed_seconds.toFixed(1)}</td>
+                      <td className={TD} title={costTitle}>
                         {fmtCost(r.estimated_cost_usd ?? 0)}
                         {subUseCases.length > 0 && (
-                          <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: 4 }}>+sub</span>
+                          <span className="ml-1 text-[10px] text-muted-foreground">+sub</span>
                         )}
                       </td>
-                      <td style={{ ...TD_LEFT, fontSize: 11, color: "#64748b" }}>{r.tools_called.slice(-4).join(", ")}</td>
-                      <td style={TD}>{r.no_op ? "✓" : ""}</td>
+                      <td className={cn(TD_LEFT, "text-[11px] text-muted-foreground")}>{r.tools_called.slice(-4).join(", ")}</td>
+                      <td className={TD}>{r.no_op ? "✓" : ""}</td>
                     </tr>
                   );
                 })}
@@ -253,9 +234,7 @@ export function RunAnalytics({ runId, isActive }: Props) {
       {/* ── Token totals by role ───────────────────────────────────────── */}
       {metrics.length > 0 && (
         <section>
-          <div style={{ fontWeight: 600, fontSize: 12, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-            Totals by Role
-          </div>
+          <div className={SECTION_HEAD}>Totals by Role</div>
           <RoleTotals rows={metrics} />
         </section>
       )}
@@ -263,20 +242,18 @@ export function RunAnalytics({ runId, isActive }: Props) {
       {/* ── Context composition ────────────────────────────────────────── */}
       {ctxLog.length > 0 && (
         <section>
-          <div style={{ fontWeight: 600, fontSize: 12, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-            Context Composition ({ctxLog.length} calls)
-          </div>
+          <div className={SECTION_HEAD}>Context Composition ({ctxLog.length} calls)</div>
           <BarLegend />
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className="flex flex-col gap-1.5">
             {ctxLog.map((snap, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ fontSize: 11, color: "#64748b", width: 120, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div key={i} className="flex items-center gap-2">
+                <div className="w-[120px] shrink-0 truncate text-[11px] text-muted-foreground">
                   {snap.role} #{snap.iteration}
                 </div>
-                <div style={{ flex: 1 }}>
+                <div className="flex-1">
                   <ContextBar snap={snap} />
                 </div>
-                <div style={{ fontSize: 11, color: "#94a3b8", width: 60, textAlign: "right", flexShrink: 0 }}>
+                <div className="w-[60px] shrink-0 text-right text-[11px] text-muted-foreground">
                   {snap.used_tokens.toLocaleString()}t
                 </div>
               </div>

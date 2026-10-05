@@ -5,6 +5,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { runsApi, type WorkersSnapshot, type WorkerCognition } from "../api";
+import { errorCls } from "../lib/field";
+import { cn } from "../lib/utils";
+import { Badge, type BadgeProps } from "./ui/badge";
+import { Card } from "./ui/card";
 
 const POLL_INTERVAL_MS = 1500;
 
@@ -26,67 +30,54 @@ function fmtSeconds(s: number): string {
   return `${mins}m ${(s - mins * 60).toFixed(0)}s`;
 }
 
-const STATE_COLORS: Record<string, string> = {
-  running: "#16a34a",
-  complete: "#64748b",
-  pending: "#94a3b8",
-  failed: "#dc2626",
-  waiting_for_human: "#f59e0b",
-  waiting_for_peer: "#a855f7",
-  waiting_for_skip_confirm: "#a855f7",
-  sat_out: "#94a3b8",
+const STATE_VARIANTS: Record<string, BadgeProps["variant"]> = {
+  running: "complete",
+  complete: "secondary",
+  pending: "secondary",
+  failed: "failed",
+  waiting_for_human: "blocked",
+  waiting_for_peer: "waiting",
+  waiting_for_skip_confirm: "waiting",
+  sat_out: "secondary",
 };
+
+const SUBTASK_TONE: Record<string, string> = {
+  COMPLETE: "bg-status-complete/15",
+  IN_PROGRESS: "bg-status-running/15",
+  BLOCKED: "bg-status-blocked/15",
+};
+
+const LABEL_CLS = "mb-0.5 block text-xs text-muted-foreground";
 
 function WorkerCard({ w }: { w: WorkerCognition }) {
   const [historyOpen, setHistoryOpen] = useState(false);
-  const stateColor = STATE_COLORS[w.state] ?? "#64748b";
   return (
-    <div
-      style={{
-        border: "1px solid #e2e8f0",
-        borderRadius: 8,
-        padding: 14,
-        background: "#fff",
-        marginBottom: 12,
-      }}
-    >
+    <Card className="mb-3 p-3.5">
       {/* Header: role + state pill + iteration cost */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-        <code style={{ fontWeight: 600, fontSize: 14 }}>{w.role}</code>
-        <span
-          style={{
-            fontSize: 11,
-            padding: "2px 8px",
-            borderRadius: 12,
-            background: stateColor,
-            color: "#fff",
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-          }}
-        >
+      <div className="mb-2.5 flex items-center gap-2.5">
+        <code className="text-sm font-semibold">{w.role}</code>
+        <Badge variant={STATE_VARIANTS[w.state] ?? "secondary"} className="uppercase tracking-wide">
           {w.state}
-        </span>
-        <span className="muted small" style={{ marginLeft: "auto" }}>
+        </Badge>
+        <span className="ml-auto text-xs text-muted-foreground">
           iter {w.iteration} · {fmtCost(w.iteration_cost_usd)}
         </span>
       </div>
 
       {/* Active subtask */}
-      <div style={{ marginBottom: 8 }}>
-        <span className="muted small" style={{ display: "block", marginBottom: 2 }}>
-          Subtask
-        </span>
+      <div className="mb-2">
+        <span className={LABEL_CLS}>Subtask</span>
         {w.active_subtask ? (
           <div>
-            <div style={{ fontSize: 13 }}>{w.active_subtask.goal}</div>
-            <div className="muted small" style={{ fontFamily: "monospace", marginTop: 2 }}>
+            <div className="text-[13px]">{w.active_subtask.goal}</div>
+            <div className="mt-0.5 font-mono text-xs text-muted-foreground">
               {w.active_subtask.id}
               {w.active_subtask.parent_task_id && (
                 <> · parent {w.active_subtask.parent_task_id}</>
               )}
             </div>
             {w.active_subtask.acceptance.length > 0 && (
-              <ul style={{ marginTop: 4, marginBottom: 0, paddingLeft: 18, fontSize: 12, color: "#475569" }}>
+              <ul className="mb-0 mt-1 pl-[18px] text-xs text-muted-foreground">
                 {w.active_subtask.acceptance.map((a, i) => (
                   <li key={i}>{a}</li>
                 ))}
@@ -94,109 +85,76 @@ function WorkerCard({ w }: { w: WorkerCognition }) {
             )}
           </div>
         ) : (
-          <span className="muted small">— working against project goal directly —</span>
+          <span className="text-xs text-muted-foreground">— working against project goal directly —</span>
         )}
       </div>
 
       {/* Tool now / Last tool */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 8 }}>
+      <div className="mb-2 grid grid-cols-2 gap-3">
         <div>
-          <span className="muted small" style={{ display: "block", marginBottom: 2 }}>
-            Tool now
-          </span>
+          <span className={LABEL_CLS}>Tool now</span>
           {w.current_tool_call ? (
             <div>
-              <code style={{ fontSize: 12 }}>{w.current_tool_call.name}</code>
-              <span className="muted small" style={{ marginLeft: 6 }}>
+              <code className="text-xs">{w.current_tool_call.name}</code>
+              <span className="ml-1.5 text-xs text-muted-foreground">
                 {fmtSeconds(w.current_tool_call.elapsed_seconds)}
               </span>
               <div
-                className="muted small"
-                style={{
-                  fontFamily: "monospace",
-                  marginTop: 2,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
+                className="mt-0.5 truncate font-mono text-xs text-muted-foreground"
                 title={w.current_tool_call.arguments_preview}
               >
                 {w.current_tool_call.arguments_preview}
               </div>
             </div>
           ) : (
-            <span className="muted small">— thinking —</span>
+            <span className="text-xs text-muted-foreground">— thinking —</span>
           )}
         </div>
         <div>
-          <span className="muted small" style={{ display: "block", marginBottom: 2 }}>
-            Last tool
-          </span>
+          <span className={LABEL_CLS}>Last tool</span>
           {w.last_tool_summary ? (
             <div>
-              <code style={{ fontSize: 12 }}>{w.last_tool_summary.name}</code>
-              <span className="muted small" style={{ marginLeft: 6 }}>
+              <code className="text-xs">{w.last_tool_summary.name}</code>
+              <span className="ml-1.5 text-xs text-muted-foreground">
                 {fmtSeconds(w.last_tool_summary.ago_seconds)} ago
               </span>
               <div
-                className="muted small"
-                style={{
-                  marginTop: 2,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
+                className="mt-0.5 truncate text-xs text-muted-foreground"
                 title={w.last_tool_summary.summary}
               >
                 → {w.last_tool_summary.summary}
               </div>
             </div>
           ) : (
-            <span className="muted small">—</span>
+            <span className="text-xs text-muted-foreground">—</span>
           )}
         </div>
       </div>
 
       {/* Subtask history */}
       {w.subtask_history.length > 0 && (
-        <div style={{ marginTop: 8, borderTop: "1px solid #f1f5f9", paddingTop: 6 }}>
+        <div className="mt-2 border-t border-border pt-1.5">
           <button
+            type="button"
             onClick={() => setHistoryOpen((v) => !v)}
-            style={{
-              border: "none",
-              background: "none",
-              padding: 0,
-              cursor: "pointer",
-              color: "#64748b",
-              fontSize: 11,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              fontWeight: 500,
-            }}
+            className="cursor-pointer border-0 bg-transparent p-0 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
           >
             {historyOpen ? "▾" : "▸"} subtask history ({w.subtask_history.length})
           </button>
           {historyOpen && (
-            <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12, color: "#475569" }}>
+            <ul className="mb-0 mt-1.5 pl-[18px] text-xs text-muted-foreground">
               {w.subtask_history.map((t) => (
-                <li key={t.id} style={{ marginBottom: 2 }}>
+                <li key={t.id} className="mb-0.5">
                   <span
-                    style={{
-                      fontSize: 10,
-                      padding: "1px 5px",
-                      borderRadius: 3,
-                      marginRight: 6,
-                      background: t.status === "COMPLETE" ? "#dcfce7"
-                        : t.status === "IN_PROGRESS" ? "#dbeafe"
-                        : t.status === "BLOCKED" ? "#fef3c7"
-                        : "#f1f5f9",
-                      color: "#334155",
-                    }}
+                    className={cn(
+                      "mr-1.5 rounded-sm bg-muted px-[5px] py-px text-[10px] text-foreground",
+                      SUBTASK_TONE[t.status],
+                    )}
                   >
                     {t.status}
                   </span>
                   {t.goal}
-                  <span className="muted small" style={{ fontFamily: "monospace", marginLeft: 6 }}>
+                  <span className="ml-1.5 font-mono text-xs text-muted-foreground">
                     {t.id.slice(0, 8)}
                   </span>
                 </li>
@@ -205,7 +163,7 @@ function WorkerCard({ w }: { w: WorkerCognition }) {
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -241,33 +199,23 @@ export function WorkerCognitionView({ runId, isActive }: Props) {
   }, [runId, isActive]);
 
   if (error && !snap) {
-    return <div className="error">Failed to load workers: {error}</div>;
+    return <div className={errorCls}>Failed to load workers: {error}</div>;
   }
 
   if (!snap) {
-    return <p className="muted small">Loading workers…</p>;
+    return <p className="text-xs text-muted-foreground">Loading workers…</p>;
   }
 
   return (
-    <div style={{ padding: "12px 16px" }}>
+    <div className="px-4 py-3">
       {!snap.live && (
-        <div
-          style={{
-            background: "#f8fafc",
-            border: "1px solid #e2e8f0",
-            borderRadius: 6,
-            padding: "8px 12px",
-            marginBottom: 12,
-            fontSize: 12,
-            color: "#64748b",
-          }}
-        >
+        <div className="mb-3 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
           Run is no longer active — showing the final task layout from disk.
           Live cognition fields are unavailable for completed runs.
         </div>
       )}
       {snap.workers.length === 0 && (
-        <p className="muted small">No worker activity yet.</p>
+        <p className="text-xs text-muted-foreground">No worker activity yet.</p>
       )}
       {snap.workers.map((w) => (
         <WorkerCard key={w.role} w={w} />

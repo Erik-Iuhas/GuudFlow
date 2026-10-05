@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
 import { getToken } from "../api";
 import type { Signal } from "../types";
+import { fieldCls } from "../lib/field";
+import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
 
 interface FileEntry {
   path: string;
@@ -53,16 +56,23 @@ function groupByDir(files: Map<string, FileEntry>): Map<string, FileEntry[]> {
   return new Map([...dirs.entries()].sort(([a], [b]) => a.localeCompare(b)));
 }
 
-const AGENT_COLORS: Record<string, string> = {
-  game_designer: "#7c3aed",
-  pygame_backend_dev: "#0369a1",
-  pygame_frontend_dev: "#b45309",
-  meta_agent: "#374151",
-};
+// Agents get a stable tone from the status tokens, chosen by hashing the role.
+const AGENT_TONES = [
+  { text: "text-status-waiting", soft: "bg-status-waiting/10", dot: "bg-status-waiting" },
+  { text: "text-status-running", soft: "bg-status-running/10", dot: "bg-status-running" },
+  { text: "text-status-blocked", soft: "bg-status-blocked/10", dot: "bg-status-blocked" },
+  { text: "text-status-complete", soft: "bg-status-complete/10", dot: "bg-status-complete" },
+  { text: "text-status-failed", soft: "bg-status-failed/10", dot: "bg-status-failed" },
+  { text: "text-muted-foreground", soft: "bg-muted", dot: "bg-muted-foreground" },
+];
 
-function agentColor(role: string): string {
-  return AGENT_COLORS[role] ?? "#475569";
+function agentTone(role: string): (typeof AGENT_TONES)[number] {
+  let h = 0;
+  for (let i = 0; i < role.length; i++) h = (h * 31 + role.charCodeAt(i)) >>> 0;
+  return AGENT_TONES[h % AGENT_TONES.length];
 }
+
+const DIR_CLS = "px-3 py-0.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground";
 
 interface BranchFileEntry {
   path: string;
@@ -136,7 +146,7 @@ export function FileTreeTab({ signals, runId, onFileClick }: Props) {
   if (selectedBranch !== "__signals__" && runId) {
     const grouped = groupBranchFiles(branchFiles ?? []);
     return (
-      <div style={{ fontFamily: "monospace", fontSize: 13 }}>
+      <div className="font-mono text-[13px]">
         <BranchPicker
           branches={branches}
           selected={selectedBranch}
@@ -145,25 +155,22 @@ export function FileTreeTab({ signals, runId, onFileClick }: Props) {
           showRunId={!!runId}
         />
         {branchLoading ? (
-          <p className="muted small" style={{ padding: 12 }}>Loading…</p>
+          <p className="m-0 p-3 text-xs text-muted-foreground">Loading…</p>
         ) : branchFiles === null || branchFiles.length === 0 ? (
-          <p className="muted small" style={{ padding: 12 }}>No files on this branch yet.</p>
+          <p className="m-0 p-3 text-xs text-muted-foreground">No files on this branch yet.</p>
         ) : (
-          <div style={{ padding: "8px 0" }}>
+          <div className="py-2">
             {[...grouped.entries()].map(([dir, paths]) => (
-              <div key={dir} style={{ marginBottom: 4 }}>
-                <div style={{ padding: "2px 12px", color: "#64748b", fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  {dir}/
-                </div>
+              <div key={dir} className="mb-1">
+                <div className={DIR_CLS}>{dir}/</div>
                 {paths.map((p) => (
                   <div
                     key={p}
-                    className="row"
-                    style={{ padding: "3px 12px 3px 24px", gap: 8, cursor: onFileClick ? "pointer" : "default" }}
+                    className={cn("flex items-center gap-2 py-[3px] pl-6 pr-3", onFileClick && "cursor-pointer")}
                     onClick={onFileClick ? () => onFileClick(p) : undefined}
                   >
-                    <span style={{ color: "#16a34a", flexShrink: 0 }}>✓</span>
-                    <span style={{ flex: 1, color: "#1e293b" }}>{p.split("/").pop()}</span>
+                    <span className="shrink-0 text-status-complete">✓</span>
+                    <span className="flex-1 text-foreground">{p.split("/").pop()}</span>
                   </div>
                 ))}
               </div>
@@ -184,7 +191,7 @@ export function FileTreeTab({ signals, runId, onFileClick }: Props) {
     // imported repo state instead of staring at an empty pane.
     const hasMain = branches.includes("main") || branches.includes("master");
     return (
-      <div style={{ fontFamily: "monospace", fontSize: 13 }}>
+      <div className="font-mono text-[13px]">
         {runId && (
           <BranchPicker
             branches={branches}
@@ -194,16 +201,17 @@ export function FileTreeTab({ signals, runId, onFileClick }: Props) {
             showRunId={!!runId}
           />
         )}
-        <div style={{ padding: 12 }}>
-          <p className="muted small" style={{ marginBottom: 8 }}>
+        <div className="p-3">
+          <p className="mb-2 mt-0 text-xs text-muted-foreground">
             No files written yet by agents.
           </p>
           {hasMain && (
-            <button
+            <Button
+              variant="outline"
               onClick={() => setSelectedBranch(branches.includes("main") ? "main" : "master")}
             >
               View imported / seeded files on main →
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -214,7 +222,7 @@ export function FileTreeTab({ signals, runId, onFileClick }: Props) {
   const writtenCount = [...files.values()].filter((f) => f.status === "written").length;
 
   return (
-    <div style={{ fontFamily: "monospace", fontSize: 13 }}>
+    <div className="font-mono text-[13px]">
       {runId && (
         <BranchPicker
           branches={branches}
@@ -225,109 +233,71 @@ export function FileTreeTab({ signals, runId, onFileClick }: Props) {
         />
       )}
       {/* Summary bar */}
-      <div
-        className="row"
-        style={{
-          padding: "6px 12px",
-          background: "#f8fafc",
-          borderBottom: "1px solid #e2e8f0",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <span className="small muted">{files.size} files tracked</span>
-        <span className="small" style={{ color: "#16a34a" }}>
-          ✓ {writtenCount} written
-        </span>
+      <div className="flex flex-wrap items-center gap-4 border-b border-border bg-muted px-3 py-1.5">
+        <span className="text-xs text-muted-foreground">{files.size} files tracked</span>
+        <span className="text-xs text-status-complete">✓ {writtenCount} written</span>
         {activeClaims.length > 0 && (
-          <span className="small" style={{ color: "#b45309" }}>
-            ✎ {activeClaims.length} in progress
-          </span>
+          <span className="text-xs text-status-blocked">✎ {activeClaims.length} in progress</span>
         )}
       </div>
 
       {/* Active claims banner */}
       {activeClaims.length > 0 && (
-        <div style={{ padding: "8px 12px", borderBottom: "1px solid #fde68a", background: "#fefce8" }}>
-          {activeClaims.map((f) => (
-            <div key={f.path} className="row" style={{ gap: 8, marginBottom: 2 }}>
-              <span
-                style={{
-                  display: "inline-block",
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: agentColor(f.agent),
-                  animation: "pulse 1.5s infinite",
-                  flexShrink: 0,
-                  marginTop: 4,
-                }}
-              />
-              <span style={{ color: agentColor(f.agent), fontWeight: 600 }}>{f.agent}</span>
-              <span style={{ color: "#374151" }}>is writing</span>
-              <span style={{ color: "#1e40af" }}>{f.path}</span>
-            </div>
-          ))}
+        <div className="border-b border-status-blocked/30 bg-status-blocked/10 px-3 py-2">
+          {activeClaims.map((f) => {
+            const tone = agentTone(f.agent);
+            return (
+              <div key={f.path} className="mb-0.5 flex items-start gap-2">
+                <span className={cn("mt-1 inline-block h-2 w-2 shrink-0 animate-pulse rounded-full", tone.dot)} />
+                <span className={cn("font-semibold", tone.text)}>{f.agent}</span>
+                <span className="text-foreground">is writing</span>
+                <span className="text-status-running">{f.path}</span>
+              </div>
+            );
+          })}
         </div>
       )}
 
       {/* Directory tree */}
-      <div style={{ padding: "8px 0" }}>
+      <div className="py-2">
         {[...grouped.entries()].map(([dir, entries]) => (
-          <div key={dir} style={{ marginBottom: 4 }}>
-            <div
-              style={{
-                padding: "2px 12px",
-                color: "#64748b",
-                fontWeight: 700,
-                fontSize: 11,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              {dir}/
-            </div>
+          <div key={dir} className="mb-1">
+            <div className={DIR_CLS}>{dir}/</div>
             {entries.map((f) => {
               const filename = f.path.split("/").pop()!;
               const isClaimed = f.status === "claimed";
               const isDeleted = f.status === "deleted";
+              const tone = agentTone(f.agent);
               return (
                 <div
                   key={f.path}
-                  className="row"
-                  style={{
-                    padding: "3px 12px 3px 24px",
-                    gap: 8,
-                    background: isClaimed ? "#fefce8" : "transparent",
-                    opacity: isDeleted ? 0.4 : 1,
-                    cursor: onFileClick && !isDeleted ? "pointer" : "default",
-                  }}
+                  className={cn(
+                    "flex items-center gap-2 py-[3px] pl-6 pr-3",
+                    isClaimed && "bg-status-blocked/10",
+                    isDeleted && "opacity-40",
+                    onFileClick && !isDeleted && "cursor-pointer",
+                  )}
                   onClick={onFileClick && !isDeleted ? () => onFileClick(f.path) : undefined}
                   title={isClaimed ? `${f.agent} is writing this file` : undefined}
                 >
-                  <span style={{ color: isClaimed ? "#d97706" : isDeleted ? "#ef4444" : "#16a34a", flexShrink: 0 }}>
+                  <span
+                    className={cn(
+                      "shrink-0",
+                      isClaimed ? "text-status-blocked" : isDeleted ? "text-status-failed" : "text-status-complete",
+                    )}
+                  >
                     {isClaimed ? "✎" : isDeleted ? "✗" : "✓"}
                   </span>
                   <span
-                    style={{
-                      flex: 1,
-                      textDecoration: isDeleted ? "line-through" : "none",
-                      color: isClaimed ? "#92400e" : "#1e293b",
-                      fontWeight: isClaimed ? 600 : 400,
-                    }}
+                    className={cn(
+                      "flex-1",
+                      isDeleted && "line-through",
+                      isClaimed ? "font-semibold text-status-blocked" : "text-foreground",
+                    )}
                   >
                     {filename}
                   </span>
-                  <span
-                    className="small"
-                    style={{
-                      color: agentColor(f.agent),
-                      background: `${agentColor(f.agent)}18`,
-                      padding: "1px 6px",
-                      borderRadius: 4,
-                      flexShrink: 0,
-                    }}
-                  >
+                  <span className={cn("shrink-0 rounded px-1.5 py-px text-xs", tone.text, tone.soft)}>
                     {f.agent}
                   </span>
                 </div>
@@ -336,13 +306,6 @@ export function FileTreeTab({ signals, runId, onFileClick }: Props) {
           </div>
         ))}
       </div>
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.3; }
-        }
-      `}</style>
     </div>
   );
 }
@@ -361,12 +324,12 @@ function BranchPicker({
   showRunId?: boolean;
 }) {
   return (
-    <div style={{ padding: "6px 12px", borderBottom: "1px solid #e2e8f0", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-      <span className="muted small">Branch:</span>
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5">
+      <span className="text-xs text-muted-foreground">Branch:</span>
       <select
         value={selected}
         onChange={(e) => onChange(e.target.value)}
-        style={{ fontSize: 12, padding: "2px 6px", borderRadius: 6, border: "1px solid #cbd5e1" }}
+        className={cn(fieldCls, "w-auto px-1.5 py-0.5 text-xs")}
       >
         <option value="__signals__">All (signals view)</option>
         {branches.map((b) => (
@@ -374,13 +337,13 @@ function BranchPicker({
         ))}
       </select>
       {error ? (
-        <span className="muted small">
+        <span className="text-xs text-muted-foreground">
           {error === "404"
             ? "Branch picker not available on this server."
             : `Could not load branches (${error})`}
         </span>
       ) : branches.length === 0 && showRunId ? (
-        <span className="muted small">
+        <span className="text-xs text-muted-foreground">
           No agent branches yet — agents haven't committed.
         </span>
       ) : null}
