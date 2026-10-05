@@ -79,6 +79,8 @@ export interface RunMeta {
   pr_ready?: PrReadyInfo;
   /** Spend cap in USD, when the run meta carries it (else the project's `approval_gates`). */
   token_budget_usd?: number | null;
+  /** Review column WIP cap of the task board (server default). */
+  review_column_cap?: number;
   /** Harness the run used, when the run meta carries it. */
   harness?: "legacy" | "opencode";
 }

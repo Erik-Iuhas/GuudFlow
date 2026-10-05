@@ -13,7 +13,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRunCards } from "../../api/queries";
+import { useRunCards, useRunMeta } from "../../api/queries";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
@@ -57,8 +57,10 @@ const cellKey = (role: string, column: string): string => `${role}::${column}`;
  * Must be mounted under a `RunStoreProvider` and a `QueryClientProvider`. The UI never
  * changes a card's column: dragging a card only reorders it inside its cell, via PATCH priority.
  */
-export function TaskBoard({ runId, reviewCap = DEFAULT_REVIEW_CAP, className }: Props) {
+export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
   const store = useRunStoreApi();
+  const meta = useRunMeta(runId);
+  const reviewCap = capProp ?? meta.data?.review_column_cap ?? DEFAULT_REVIEW_CAP;
   const cardsQuery = useRunCards(runId);
   const cards = useRunStore((s) => s.cards);
   const agents = useRunStore((s) => s.agents);

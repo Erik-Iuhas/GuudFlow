@@ -164,7 +164,10 @@ async def get_run(request: Request, run_id: str) -> dict:
 
 async def _add_harness_meta(request: Request, meta: dict) -> None:
     """Fill `harness` and `token_budget_usd` from the project when the run meta lacks
-    them (Studio's cockpit picks its view and budget meter from these)."""
+    them (Studio's cockpit picks its view and budget meter from these), plus the
+    board's review-column WIP cap so Studio never hardcodes it."""
+    from core.harness.task_board import BoardLimits
+    meta.setdefault("review_column_cap", BoardLimits().review_column_cap)
     if "harness" in meta and "token_budget_usd" in meta:
         return
     store = getattr(request.app.state, "project_store", None)
@@ -545,9 +548,12 @@ async def get_git_diff(
     request: Request,
     run_id: str,
     ref: str = Query(..., description="commit SHA"),
+    base: str | None = Query(None, description="optional base SHA: diff base..ref"),
 ) -> dict:
-    """Return the unified diff for a single commit.
+    """Return the unified diff for a single commit, or for the range base..ref.
 
+    A card's merge is recorded as (base, head) on main, so `base` gives exactly
+    what that merge brought in, however many commits it had.
     Returns {sha, diff: str}. 404 if workspace missing or sha unknown.
     """
     from git import InvalidGitRepositoryError, NoSuchPathError, Repo
@@ -564,8 +570,17 @@ async def get_git_diff(
     except Exception:
         raise HTTPException(status_code=404, detail=f"sha {ref!r} not found")
 
+    base_commit = None
+    if base is not None:
+        try:
+            base_commit = repo.commit(base)
+        except Exception:
+            raise HTTPException(status_code=404, detail=f"sha {base!r} not found")
+
     try:
-        if commit.parents:
+        if base_commit is not None:
+            diff_text = repo.git.diff(base_commit.hexsha, commit.hexsha)
+        elif commit.parents:
             diff_text = repo.git.diff(commit.parents[0].hexsha, commit.hexsha)
         else:
             diff_text = repo.git.show(commit.hexsha, "--format=", "--patch")

@@ -757,10 +757,11 @@ export const cardsApi = {
       true,
     ),
   /** Unified diff of one commit (`GET /git/diff?ref=`). */
-  commitDiff: (runId: string, sha: string) =>
+  commitDiff: (runId: string, sha: string, base?: string) =>
     request<{ sha: string; diff: string }>(
       "GET",
-      `/api/runs/${encodeURIComponent(runId)}/git/diff?ref=${encodeURIComponent(sha)}`,
+      `/api/runs/${encodeURIComponent(runId)}/git/diff?ref=${encodeURIComponent(sha)}` +
+        (base ? `&base=${encodeURIComponent(base)}` : ""),
     ),
 };
 

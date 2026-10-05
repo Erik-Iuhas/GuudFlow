@@ -138,3 +138,4 @@ async def test_run_meta_reports_harness_and_budget(tmp_path, monkeypatch) -> Non
     new = {"project_id": "new"}
     await _add_harness_meta(request, new)  # type: ignore[arg-type]
     assert new["harness"] == "opencode" and new["token_budget_usd"] is None
+    assert new["review_column_cap"] == 3   # the board's WIP cap; Studio no longer hardcodes it

@@ -176,9 +176,8 @@ function MergeDiff({ runId, base, head }: { runId: string; base: string; head: s
   async function load(): Promise<void> {
     setState({ kind: "loading" });
     try {
-      // TODO: the backend only exposes a single-commit diff (`GET /git/diff?ref=`). Show the
-      // head commit of the merged range until a range diff (base..head) endpoint exists.
-      const res = await cardsApi.commitDiff(runId, head);
+      // Exactly what this merge brought into main, however many commits it had.
+      const res = await cardsApi.commitDiff(runId, head, base || undefined);
       setState({ kind: "ok", diff: res.diff });
     } catch (err) {
       setState({ kind: "error", message: err instanceof Error ? err.message : "Could not load the diff." });
