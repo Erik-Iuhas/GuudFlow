@@ -612,7 +612,7 @@ class AgentRunner:
         self._attach_personas()
         result = await OpencodeRun(self, self.harness_settings).run()
         if result.status is SchedulerStatus.STOPPED:
-            self._close_project_run(stopped=True)
+            await self._close_project_run(stopped=True)
             return result
         # Training rubric scoring runs before the memory writer so the
         # RUBRIC_SCORE signal is on the board before the episode is recorded.
@@ -656,14 +656,14 @@ class AgentRunner:
         data_root = (self.run_root.parent.parent
                      if self.run_root.parent.name == "runs" else None)
         finalize_run(self.run_root, self.run_id, self.project.project_id, data_root)
-        self._close_project_run(stopped=False)
+        await self._close_project_run(stopped=False)
         return result
 
     def _data_root(self) -> Path | None:
         """`<data>` when the run lives at `<data>/runs/<id>` (else tests / ad-hoc dirs)."""
         return self.run_root.parent.parent if self.run_root.parent.name == "runs" else None
 
-    def _close_project_run(self, *, stopped: bool) -> None:
+    async def _close_project_run(self, *, stopped: bool) -> None:
         """Hand the run back to its project (plan §13): submit it for a human decision
         and record what happened to the backlog items it took."""
         from core.backlog import card_outcomes
@@ -677,6 +677,19 @@ class AgentRunner:
                               self.git.working_dir,
                               card_outcomes(self.workspace.tasks.values(), summaries, costs),
                               stopped=stopped)
+        check = None
+        command = str((self.project.approval_gates or {}).get("check_command") or "").strip()
+        if submitted is not None and submitted.state == "pending" and command:
+            from dataclasses import asdict as _asdict
+            from core.project_checks import run_project_check
+            from core.project_repo import ProjectRepo
+            settings = self.harness_settings
+            check = await run_project_check(
+                self.git.working_dir, command,
+                sandbox=getattr(settings, "sandbox", "auto") if settings else "auto",
+                production=bool(getattr(settings, "production", False)) if settings else False)
+            ProjectRepo(data_root, self.project.project_id).record_check(self.run_id,
+                                                                         _asdict(check))
         if submitted is not None:
             from core.backlog import Backlog
             outcomes = {i.id: str(i.pending or "not_started") for i in
@@ -689,7 +702,8 @@ class AgentRunner:
                          else "run made no changes to the project"),
                 detail=json.dumps({"state": submitted.state, "base": submitted.base,
                                    "head": submitted.head, "commits": submitted.commits,
-                                   "files": submitted.files[:200], "backlog": outcomes})))
+                                   "files": submitted.files[:200], "backlog": outcomes,
+                                   **({"check": check.status} if check else {})})))
 
     def _build_teammate_brief(self, role: str) -> str:
         """Build the TEAM block (Layer 3.5) for `role`.

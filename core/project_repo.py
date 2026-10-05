@@ -28,7 +28,7 @@ from typing import Literal
 
 from core.work_db import WorkDB
 
-RunState = Literal["pending", "accepted", "rejected", "no_changes"]
+RunState = Literal["pending", "accepted", "rejected", "no_changes", "superseded"]
 MAIN = "main"
 _RUN_ID = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 _SAFE = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
@@ -63,6 +63,8 @@ class RunBranch:
     merged: str = ""               # main after the merge (accepted runs)
     note: str = ""
     parent_run: str | None = None  # the pending run it continued, if any
+    # `core.project_checks.CheckResult` as a dict, once the project's check ran (plan §14.3).
+    check: dict[str, object] | None = None
 
     @property
     def branch(self) -> str:
@@ -114,7 +116,39 @@ class ProjectRepo:
         """Commit sha of `ref` in the project repo."""
         return _git("rev-parse", "--verify", f"{ref}^{{commit}}", cwd=self.path)
 
-    def clone_into(self, working_dir: Path, run_id: str | None = None) -> str:
+    def continue_into(self, working_dir: Path, run_id: str, by_run: str) -> tuple[str, list[str]]:
+        """Start `by_run` from pending run `run_id` with the project's current main merged in.
+
+        Plan §14.4: a clean merge is committed; a conflicting one is committed with
+        its markers (the new run must resolve them) and the files are returned. The
+        continued run becomes `superseded`: its work reaches main through `by_run`.
+        Returns (HEAD, conflicted files).
+        """
+        _check_run_id(by_run)
+        self.clone_into(working_dir, run_id=run_id, keep_origin=True)
+        conflicts: list[str] = []
+        try:
+            _git(*_AUTHOR, "merge", "--no-ff", "--quiet", "-m",
+                 f"merge: project main into run {run_id}", f"origin/{MAIN}", cwd=working_dir)
+        except ProjectRepoError:
+            conflicts = sorted(f for f in _git("diff", "--name-only", "--diff-filter=U",
+                                                cwd=working_dir).splitlines() if f)
+            if not conflicts:
+                raise
+            _git("add", "-A", cwd=working_dir)
+            _git(*_AUTHOR, "commit", "--quiet", "-m",
+                 f"merge: project main into run {run_id} (conflicts to resolve: "
+                 f"{', '.join(conflicts)})", cwd=working_dir)
+        _git("remote", "remove", "origin", cwd=working_dir)
+        with self.db.runs_doc() as states:
+            row = states.get(run_id)
+            if isinstance(row, dict) and row.get("state") == "pending":
+                row.update(state="superseded", decided_at=time.time(),
+                           note=f"continued by {by_run}")
+        return _git("rev-parse", "HEAD", cwd=working_dir), conflicts
+
+    def clone_into(self, working_dir: Path, run_id: str | None = None,
+                   keep_origin: bool = False) -> str:
         """Replace `working_dir` with a clone of main (or of pending run `run_id`); return HEAD."""
         ref = MAIN
         if run_id is not None:
@@ -128,7 +162,8 @@ class ProjectRepo:
         _git("clone", "--quiet", "--no-local", str(self.path), str(working_dir))
         _git("checkout", "--quiet", "-B", MAIN, f"origin/{ref}", cwd=working_dir)
         # The run never pushes: the runner submits it from the project side.
-        _git("remote", "remove", "origin", cwd=working_dir)
+        if not keep_origin:
+            _git("remote", "remove", "origin", cwd=working_dir)
         _git("config", "user.name", "GuudFlow", cwd=working_dir)
         _git("config", "user.email", "runner@guudflow.local", cwd=working_dir)
         return _git("rev-parse", "HEAD", cwd=working_dir)
@@ -149,6 +184,15 @@ class ProjectRepo:
         with self.db.runs_doc() as states:
             states[run_id] = asdict(run)
         return run
+
+    def record_check(self, run_id: str, check: dict[str, object]) -> RunBranch:
+        """Store the check result of a submitted run."""
+        with self.db.runs_doc() as states:
+            row = states.get(run_id)
+            if not isinstance(row, dict):
+                raise ProjectRepoError(f"run {run_id} was never submitted to this project")
+            row["check"] = check
+            return RunBranch(**row)
 
     def runs(self) -> list[RunBranch]:
         """Every submitted run, newest first."""
@@ -173,6 +217,10 @@ class ProjectRepo:
         """Merge the run into main. Raises ProjectRepoConflict if main moved incompatibly."""
         with self.db.runs_doc() as states:
             run = self._pending(states, run_id)
+            marked = self._marker_files(run)
+            if marked:
+                raise ProjectRepoError(
+                    f"run {run_id} still has conflict markers in: {', '.join(marked)}")
             with tempfile.TemporaryDirectory() as tmp:
                 work = Path(tmp) / "merge"
                 _git("clone", "--quiet", "--no-local", "--branch", MAIN, str(self.path), str(work))
@@ -198,6 +246,19 @@ class ProjectRepo:
             run.state, run.decided_at, run.note = "rejected", time.time(), note
             states[run_id] = asdict(run)
         return run
+
+    def _marker_files(self, run: RunBranch) -> list[str]:
+        """Changed files of the run that still contain git conflict markers."""
+        changed = [f for f in _git("diff", "--name-only", f"{MAIN}...{run.branch}",
+                                   cwd=self.path).splitlines() if f]
+        if not changed:
+            return []
+        proc = subprocess.run(["git", *_SAFE, "grep", "-l", "-E", "^(<<<<<<<|>>>>>>>) ",
+                               run.branch, "--", *changed],
+                              cwd=self.path, capture_output=True, text=True)
+        prefix = f"{run.branch}:"
+        return sorted(line[len(prefix):] if line.startswith(prefix) else line
+                      for line in proc.stdout.splitlines() if line)
 
     def _require(self, run_id: str) -> RunBranch:
         run = self.get(run_id)

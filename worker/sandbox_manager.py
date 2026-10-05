@@ -493,6 +493,48 @@ class SandboxManager:
         except NotFound:
             pass
 
+    async def run_check(self, tree: Path, command: str, *, timeout: float = 600.0,
+                        image: str = DEFAULT_IMAGE) -> tuple[int | None, str]:
+        """Run `command` once on `tree` (mounted rw at /work) in a throwaway container.
+
+        Plan §14.3: no network at all, read-only root, every capability dropped,
+        memory/pid/CPU limits, unprivileged user. Returns (exit code or None on
+        timeout, combined output).
+        """
+        return await asyncio.to_thread(self._run_check, tree, command, timeout, image)
+
+    def _run_check(self, tree: Path, command: str, timeout: float,
+                   image: str) -> tuple[int | None, str]:
+        import requests
+
+        if os.getuid() == 0:
+            # The image's agent user must be able to write the export (test caches).
+            for path in [tree, *tree.rglob("*")]:
+                try:
+                    os.chown(path, AGENT_UID, AGENT_UID, follow_symlinks=False)
+                except OSError:
+                    pass
+        user = f"{AGENT_UID}:{AGENT_UID}" if os.getuid() == 0 else f"{os.getuid()}:{os.getgid()}"
+        container = self.client.containers.run(
+            # The image's entrypoint is `opencode serve`; a check runs a plain shell.
+            image, ["-c", command], entrypoint=["sh"], detach=True, network_mode="none",
+            read_only=True, cap_drop=["ALL"], security_opt=["no-new-privileges:true"],
+            mem_limit="1g", pids_limit=256, nano_cpus=1_000_000_000, user=user,
+            tmpfs={"/tmp": "rw,size=256m,mode=1777", _AGENT_HOME: "rw,size=256m,mode=1777"},
+            volumes={str(tree): {"bind": "/work", "mode": "rw"}}, working_dir="/work",
+            environment={"HOME": _AGENT_HOME, "PATH": _CONTAINER_PATH, "CI": "1"},
+            labels={LABEL_ROLE: "check"},
+            **({"runtime": "runsc"} if self.runtime() == "runsc" else {}))
+        try:
+            try:
+                code: int | None = int(container.wait(timeout=timeout).get("StatusCode", 1))
+            except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError):
+                code = None
+            output = container.logs(stdout=True, stderr=True).decode("utf-8", "replace")
+            return code, output
+        finally:
+            container.remove(force=True)
+
     async def stop_run(self, run_id: str) -> None:
         """Remove every container labelled with the run, then the run's network."""
         await asyncio.to_thread(self._remove_run_containers, run_id)

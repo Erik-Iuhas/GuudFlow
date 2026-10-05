@@ -224,6 +224,19 @@ class Backlog:
                 taken.append(BacklogItem(**row))
         return taken
 
+    def transfer(self, from_run: str, to_run: str) -> list[BacklogItem]:
+        """A run continues another: the items the earlier run held move to the new one."""
+        moved: list[BacklogItem] = []
+        with self.db.backlog_doc() as doc:
+            for row in doc.get("items", []):
+                if row.get("run_id") == from_run and row.get("status") == "in_run":
+                    row.update(run_id=to_run, pending=None, updated_at=time.time())
+                    row.setdefault("history", []).append(
+                        {"run_id": from_run, "decision": f"continued by {to_run}",
+                         "at": time.time()})
+                    moved.append(BacklogItem(**row))
+        return moved
+
     def check_selection(self, ids: Sequence[str]) -> None:
         """Raise BacklogError unless these items could start a run together now."""
         _check_selection(self.db.read_backlog_doc(), ids)

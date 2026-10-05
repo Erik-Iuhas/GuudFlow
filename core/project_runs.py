@@ -54,24 +54,44 @@ def prepare_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
 
     `payload` keys: `backlog_items` (list of ids, or "top"), `backlog_limit`
     (with "top", default 3), `continue_run` (a pending run to build on).
+
+    Continuing a run (plan §14.4) merges the project's current main into it; the
+    continued run's items move to this run, and conflicts become a "resolve the
+    merge" item the plan must cover.
     """
+    backlog = Backlog(data_root, project_id)
+    items: list[BacklogItem] = []
+    parent = str(payload["continue_run"]) if payload.get("continue_run") else None
     if not in_place:
         repo = ProjectRepo(data_root, project_id)
         repo.ensure(seed=working_dir if (working_dir / ".git").exists() else None)
-        parent = payload.get("continue_run")
-        parent = str(parent) if parent else None
-        base = repo.clone_into(working_dir, run_id=parent)
-        write_json(run_root / PROJECT_RUN_JSON, {"base": base, "parent_run": parent})
+        base = repo.sha("main")
+        conflicts: list[str] = []
+        if parent is None:
+            repo.clone_into(working_dir)
+        else:
+            _, conflicts = repo.continue_into(working_dir, parent, run_id)
+            items += backlog.transfer(parent, run_id)
+        write_json(run_root / PROJECT_RUN_JSON,
+                   {"base": base, "parent_run": parent, "conflicts": conflicts})
+        if conflicts:
+            fix = backlog.add(
+                f"Resolve the merge with main (continuing {parent})",
+                [f"No conflict markers remain in {f}" for f in conflicts]
+                + ["The changes from both sides are kept and the tests pass"],
+                kind="code", size="S", priority=10_000, source=f"reconcile:{parent}",
+                notes="Main changed while the earlier run waited for review. The listed files "
+                      "were committed with git conflict markers.")
+            items += backlog.take_for_run(run_id, [fix.id])
     wanted = payload.get("backlog_items")
-    if not wanted:
-        return []
-    backlog = Backlog(data_root, project_id)
     if wanted == "top":
         limit = payload.get("backlog_limit", DEFAULT_TAKE)
-        items = backlog.take_for_run(run_id, None, limit if isinstance(limit, int) else DEFAULT_TAKE)
-    else:
-        items = backlog.take_for_run(run_id, [str(i) for i in wanted])
-    write_json(run_root / SELECTION_JSON, [asdict(i) for i in items])
+        items += backlog.take_for_run(run_id, None,
+                                      limit if isinstance(limit, int) else DEFAULT_TAKE)
+    elif wanted:
+        items += backlog.take_for_run(run_id, [str(i) for i in wanted])
+    if items:
+        write_json(run_root / SELECTION_JSON, [asdict(i) for i in items])
     return items
 
 

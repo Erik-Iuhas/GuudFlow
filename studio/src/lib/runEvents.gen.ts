@@ -187,6 +187,7 @@ export interface RunSubmittedDetail {
   commits: number;
   files: string[];
   backlog?: Record<string, string>;
+  check?: "passed" | "failed" | "timed_out" | "skipped";
 }
 
 export interface ScreenshotReadyDetail {
