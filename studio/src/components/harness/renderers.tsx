@@ -3,6 +3,8 @@
 
 import { useState, type ReactNode } from "react";
 import type { Signal } from "../../types";
+import { cn } from "../../lib/utils";
+import { Badge } from "../ui/badge";
 import {
   CAPABILITY_ORDER,
   formatDuration,
@@ -18,33 +20,27 @@ import {
 
 const LONG_TEXT_CHARS = 240;
 
-const okColor = "#059669";
-const errColor = "#dc2626";
-const warnColor = "#b45309";
+type Tone = "complete" | "failed" | "blocked";
 
-function Badge({ color, children, title }: { color: string; children: ReactNode; title?: string }) {
+function ResultBadge({ tone, children, title }: { tone: Tone; children: ReactNode; title?: string }) {
   return (
-    <span
-      title={title}
-      style={{
-        padding: "1px 7px", borderRadius: 10, fontSize: 11, fontWeight: 600,
-        color: "#fff", background: color,
-      }}
-    >
+    <Badge variant={tone} title={title} className="shrink-0 whitespace-nowrap font-semibold">
       {children}
-    </span>
+    </Badge>
   );
 }
 
+const PRE_CLS = "m-0 mt-1.5 overflow-x-auto rounded bg-muted p-2 font-mono text-[11px] text-foreground";
+
 /** Long text collapsed behind a <details>; short text shown directly. */
 export function CollapsibleText({ text, label = "Show full text" }: { text: string; label?: string }) {
-  if (text.length <= LONG_TEXT_CHARS) return <pre>{text}</pre>;
+  if (text.length <= LONG_TEXT_CHARS) return <pre className={PRE_CLS}>{text}</pre>;
   return (
     <details className="harness-collapsible">
-      <summary className="small muted" style={{ cursor: "pointer" }}>
+      <summary className="cursor-pointer text-xs text-muted-foreground">
         {label} ({text.length} chars): {text.slice(0, 80).replace(/\s+/g, " ")}…
       </summary>
-      <pre>{text}</pre>
+      <pre className={PRE_CLS}>{text}</pre>
     </details>
   );
 }
@@ -58,28 +54,25 @@ export function ToolCallRow({ info, summary }: { info: ToolCallInfo; summary?: s
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        style={{
-          display: "flex", gap: 8, alignItems: "center", width: "100%", textAlign: "left",
-          background: "none", border: "none", padding: "2px 0", cursor: "pointer", font: "inherit",
-        }}
+        className="flex w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-0 py-0.5 text-left text-inherit"
         title={summary}
       >
-        <span className="small muted">{open ? "▾" : "▸"}</span>
-        <strong className="mono">{info.tool}</strong>
+        <span className="text-xs text-muted-foreground">{open ? "▾" : "▸"}</span>
+        <strong className="shrink-0 whitespace-nowrap font-mono">{info.tool}</strong>
         {info.target && (
-          <span className="mono small muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 360 }}>
+          <span className="min-w-0 max-w-[360px] truncate font-mono text-xs text-muted-foreground">
             {info.target}
           </span>
         )}
-        <Badge color={info.ok ? okColor : errColor}>{info.ok ? "ok" : "error"}</Badge>
-        {info.durationMs !== null && <span className="small muted">{formatDuration(info.durationMs)}</span>}
+        <ResultBadge tone={info.ok ? "complete" : "failed"}>{info.ok ? "ok" : "error"}</ResultBadge>
+        {info.durationMs !== null && <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{formatDuration(info.durationMs)}</span>}
       </button>
       {open && (
-        <div style={{ marginLeft: 16 }}>
-          <div className="small muted">Input</div>
-          <pre>{info.input || "(none)"}</pre>
-          <div className="small muted">{info.ok ? "Output" : "Error"}</div>
-          <pre>{body || "(none)"}</pre>
+        <div className="ml-4">
+          <div className="text-xs text-muted-foreground">Input</div>
+          <pre className={PRE_CLS}>{info.input || "(none)"}</pre>
+          <div className="text-xs text-muted-foreground">{info.ok ? "Output" : "Error"}</div>
+          <pre className={PRE_CLS}>{body || "(none)"}</pre>
         </div>
       )}
     </div>
@@ -101,28 +94,28 @@ export function AgentResultCard({ info }: { info: AgentResultInfo }) {
   const label = reviewer ? (info.verdict ?? "") : (info.status ?? "");
   const good = reviewer ? info.verdict === "pass" : info.status === "done";
   const bad = reviewer ? info.verdict === "fail" : info.status === "failed";
-  const color = good ? okColor : bad ? errColor : warnColor;
+  const tone: Tone = good ? "complete" : bad ? "failed" : "blocked";
 
   return (
     <div className="harness-agent-result">
-      <div className="row" style={{ gap: 8, alignItems: "center" }}>
-        {label && <Badge color={color}>{label}</Badge>}
-        {stats.length > 0 && <span className="small muted">{stats.join(" · ")}</span>}
+      <div className="flex items-center gap-2">
+        {label && <ResultBadge tone={tone}>{label}</ResultBadge>}
+        {stats.length > 0 && <span className="text-xs text-muted-foreground">{stats.join(" · ")}</span>}
       </div>
-      {info.summary && <p style={{ margin: "4px 0" }}>{info.summary}</p>}
+      {info.summary && <p className="my-1">{info.summary}</p>}
       {reviewer && info.issues.length > 0 && (
-        <ul aria-label="Review issues" style={{ margin: "4px 0", paddingLeft: 18 }}>
+        <ul aria-label="Review issues" className="my-1 pl-[18px]">
           {info.issues.map((i, n) => (
             <li key={n}>
-              <span className="mono small">{i.file}</span>: {i.detail}
+              <span className="font-mono text-xs">{i.file}</span>: {i.detail}
             </li>
           ))}
         </ul>
       )}
       {info.files.length > 0 && (
-        <div className="small">
-          <span className="muted">Files changed ({info.files.length}): </span>
-          <span className="mono">{info.files.join(", ")}</span>
+        <div className="text-xs">
+          <span className="text-muted-foreground">Files changed ({info.files.length}): </span>
+          <span className="font-mono">{info.files.join(", ")}</span>
         </div>
       )}
     </div>
@@ -138,19 +131,19 @@ const TODO_MARK: Record<string, string> = {
 
 export function TodoList({ items }: { items: TodoItem[] }) {
   return (
-    <ul aria-label="Agent todos" style={{ listStyle: "none", margin: "4px 0", padding: 0 }}>
+    <ul aria-label="Agent todos" className="my-1 list-none p-0">
       {items.map((t, i) => (
         <li
           key={i}
           data-status={t.status}
-          style={{
-            textDecoration: t.status === "completed" || t.status === "cancelled" ? "line-through" : undefined,
-            fontWeight: t.status === "in_progress" ? 600 : undefined,
-          }}
+          className={cn(
+            (t.status === "completed" || t.status === "cancelled") && "line-through",
+            t.status === "in_progress" && "font-semibold",
+          )}
         >
           <span aria-hidden>{TODO_MARK[t.status] ?? TODO_MARK.pending} </span>
           {t.content}
-          {t.priority === "high" && <span className="small" style={{ color: warnColor }}> (high)</span>}
+          {t.priority === "high" && <span className="text-xs text-status-blocked"> (high)</span>}
         </li>
       ))}
     </ul>
@@ -168,31 +161,28 @@ export function CapabilityChips({ info }: { info: CapabilitiesInfo }) {
         <div
           key={i}
           role="alert"
-          style={{
-            margin: "2px 0 6px", padding: "6px 10px", borderRadius: 6, fontWeight: 600,
-            color: "#92400e", background: "#fef3c7", border: `1px solid ${warnColor}`,
-          }}
+          className="mb-1.5 mt-0.5 rounded-md border border-status-blocked bg-status-blocked/10 px-2.5 py-1.5 font-semibold text-status-blocked"
         >
           ⚠ {w}
         </div>
       ))}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      <div className="flex flex-wrap gap-1.5">
         {keys.map((k) => {
           const v = info.effective[k];
           const off = v === "off";
           return (
-            <span
+            <Badge
               key={k}
-              className="tag"
+              variant="secondary"
               data-capability={k}
               data-value={v}
-              style={{ opacity: off ? 0.55 : 1 }}
+              className={cn(off && "opacity-55")}
             >
               {k}: {v}
-            </span>
+            </Badge>
           );
         })}
-        {info.model && <span className="small muted mono">{info.model}</span>}
+        {info.model && <span className="font-mono text-xs text-muted-foreground">{info.model}</span>}
       </div>
     </div>
   );

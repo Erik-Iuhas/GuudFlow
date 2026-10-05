@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AgentConfig, ModelTier } from "../types";
-import { modelsApi, type ModelEntry } from "../api";
+import { modelsApi, toolsApi, type ModelEntry } from "../api";
 import { checkCls, checkLabelCls, errorCls, fieldCls, labelCls, sectionHeadingCls } from "../lib/field";
 import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
@@ -39,8 +39,8 @@ let _modelsPromise: Promise<ModelEntry[]> | null = null;
 function fetchModels(): Promise<ModelEntry[]> {
   if (_modelsCache) return Promise.resolve(_modelsCache);
   if (!_modelsPromise) {
-    _modelsPromise = import("../api")
-      .then(({ modelsApi }) => modelsApi.list())
+    _modelsPromise = Promise.resolve()
+      .then(() => modelsApi.list())
       .then((m) => {
         _modelsCache = m;
         return m;
@@ -208,8 +208,8 @@ let _toolsPromise: Promise<ToolEntry[]> | null = null;
 function fetchTools(): Promise<ToolEntry[]> {
   if (_toolsCache) return Promise.resolve(_toolsCache);
   if (!_toolsPromise) {
-    _toolsPromise = import("../api")
-      .then(({ toolsApi }) => toolsApi.list())
+    _toolsPromise = Promise.resolve()
+      .then(() => toolsApi.list())
       .then((t) => {
         _toolsCache = t;
         return t;
@@ -546,11 +546,9 @@ export function WorkerSettingsPanel({
 
   const [baselineScopes, setBaselineScopes] = useState<string[]>([]);
   useEffect(() => {
-    import("../api").then(({ toolsApi }) =>
-      toolsApi.list().then((tools) => {
-        setBaselineScopes(tools.filter((t) => t.baseline).map((t) => t.scope));
-      }),
-    ).catch(() => {});
+    toolsApi.list().then((tools) => {
+      setBaselineScopes(tools.filter((t) => t.baseline).map((t) => t.scope));
+    }).catch(() => {});
   }, []);
 
   const effectiveScopes = [

@@ -58,12 +58,16 @@ describe("WorkerSettingsPanel", () => {
     expect(screen.getByText(/Agent settings — developer/)).toBeInTheDocument();
   });
 
-  it("closes on backdrop click", () => {
+  it("closes on backdrop click", async () => {
     const { onClose } = renderPanel();
-    // The Sheet overlay is the only element with the bg-foreground/50 scrim classes.
-    const backdrop = document.querySelector("[data-state=open].fixed.inset-0")!;
-    fireEvent.pointerDown(backdrop);
-    expect(onClose).toHaveBeenCalled();
+    // Radix registers its outside-pointer listener on the next tick.
+    await new Promise((r) => setTimeout(r, 10));
+    const overlay = document.querySelector("[data-state=open].fixed.inset-0") as HTMLElement;
+    expect(overlay).not.toBeNull();
+    fireEvent.pointerDown(overlay);
+    fireEvent.mouseDown(overlay);
+    fireEvent.click(overlay);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
   it("closes on Escape key", () => {
