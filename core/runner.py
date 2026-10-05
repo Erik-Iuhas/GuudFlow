@@ -179,9 +179,9 @@ class ProjectConfig:
     # every use_case falls back to ModelRegistry.cheapest_tool_capable() at
     # dispatch time. Validated at project-load — unknown ids fail loudly.
     sub_llm_models: dict[str, str] = field(default_factory=dict)
-    # Which agent harness runs this project: the original in-process loop
-    # ("legacy") or opencode sessions managed by core/harness ("opencode").
-    harness: Literal["legacy", "opencode"] = "legacy"
+    # Which agent harness runs this project. Only "opencode" can start a run;
+    # "legacy" is kept so old project configs load (and are refused clearly).
+    harness: Literal["legacy", "opencode"] = "opencode"
 
 
 def _detect_dependency_cycle(agents: list["AgentConfig"]) -> list[str] | None:
