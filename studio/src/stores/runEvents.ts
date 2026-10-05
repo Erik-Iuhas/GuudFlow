@@ -29,6 +29,8 @@ export interface AgentView {
   card?: string;
   /** Summary of the agent's last AGENT_RESULT. */
   lastResult?: string;
+  /** Id of the agent's last AGENT_RESULT signal (look it up in `byId` for the full result). */
+  lastResultSignalId?: string;
   capabilities?: CapabilitiesDetail;
   /** How many times the agent was started. */
   spawns: number;
@@ -87,6 +89,10 @@ export interface ArtifactView {
   servedPath: string | null;
   url: string | null;
   createdAt: string;
+  /** SCREENSHOT_READY from `request_visual_feedback`: the id the answer must carry. */
+  requestId?: string | null;
+  /** The question the requesting agent asked about the screenshot. */
+  question?: string | null;
 }
 
 export interface WebRequestView {
@@ -101,6 +107,24 @@ export interface WebRequestView {
   bytes: number;
   refused: string | null;
   timestamp: string;
+}
+
+/** Reviewer -> author rework round, from REJECTED signals (the review edge's round counter). */
+export interface ReviewRoundView {
+  reviewer: string;
+  author: string;
+  /** Highest round seen on this edge. */
+  round: number;
+  taskId?: string;
+}
+
+/** A role that reported BLOCKED on another role (a dashed arrow in the pipeline graph). */
+export interface BlockedOnView {
+  role: string;
+  on: string;
+  need?: string;
+  taskId?: string;
+  since: string;
 }
 
 export interface HumanNeededView {
@@ -131,6 +155,10 @@ export interface RunState {
   web: WebRequestView[];
   /** role -> TOOL_CALL signals, in order: the lane feed. */
   toolFeed: Record<string, TypedSignal[]>;
+  /** `"{reviewer}>{author}"` -> highest REJECTED round on that review edge. */
+  reviews: Record<string, ReviewRoundView>;
+  /** role -> its open BLOCKED-on-another-role report; cleared when the role starts or ends again. */
+  blockedOn: Record<string, BlockedOnView>;
   /** The latest unanswered HUMAN_NEEDED; drives the banner and comment-box focus. */
   humanNeeded: HumanNeededView | null;
   ingest(raw: RawSignal | RawSignal[]): void;
@@ -181,6 +209,8 @@ interface Draft {
   artifacts: ArtifactView[];
   web: WebRequestView[];
   toolFeed: Record<string, TypedSignal[]>;
+  reviews: Record<string, ReviewRoundView>;
+  blockedOn: Record<string, BlockedOnView>;
   humanNeeded: HumanNeededView | null;
   dirty: Set<keyof Draft>;
 }
@@ -189,7 +219,8 @@ function startDraft(s: RunState): Draft {
   return {
     signals: s.signals, agents: s.agents, cards: s.cards, approvals: s.approvals,
     interventions: s.interventions, costs: s.costs, artifacts: s.artifacts, web: s.web,
-    toolFeed: s.toolFeed, humanNeeded: s.humanNeeded, dirty: new Set(),
+    toolFeed: s.toolFeed, reviews: s.reviews, blockedOn: s.blockedOn,
+    humanNeeded: s.humanNeeded, dirty: new Set(),
   };
 }
 
@@ -208,6 +239,11 @@ function patchAgent(d: Draft, role: string, patch: (a: AgentView) => AgentView):
   agents[role] = patch(agents[role] ?? emptyAgent(role));
 }
 
+function clearBlockedOn(d: Draft, role: string): void {
+  if (!d.blockedOn[role]) return;
+  delete own(d, "blockedOn")[role];
+}
+
 function patchCard(d: Draft, id: string, patch: (c: CardView) => CardView): void {
   const cards = own(d, "cards");
   const existing = cards[id];
@@ -221,7 +257,8 @@ export function createRunStore(runId: string): RunStore {
   function initial(): Omit<RunState, "ingest" | "seedCards" | "setLive" | "reset"> {
     return {
       runId, live: true, signals: [], byId: new Map(), agents: {}, cards: {}, approvals: [],
-      interventions: [], costs: {}, artifacts: [], web: [], toolFeed: {}, humanNeeded: null,
+      interventions: [], costs: {}, artifacts: [], web: [], toolFeed: {}, reviews: {},
+      blockedOn: {}, humanNeeded: null,
     };
   }
 
@@ -231,17 +268,45 @@ export function createRunStore(runId: string): RunStore {
       case "STARTED":
         if (role) {
           patchAgent(d, role, (a) => ({ ...a, state: "running", spawns: a.spawns + 1 }));
+          clearBlockedOn(d, role);
         }
         break;
       case "COMPLETE":
-        if (role) patchAgent(d, role, (a) => ({ ...a, state: "complete" }));
+        if (role) {
+          patchAgent(d, role, (a) => ({ ...a, state: "complete" }));
+          clearBlockedOn(d, role);
+        }
         break;
       case "FAILED":
-        if (role) patchAgent(d, role, (a) => ({ ...a, state: "failed" }));
+        if (role) {
+          patchAgent(d, role, (a) => ({ ...a, state: "failed" }));
+          clearBlockedOn(d, role);
+        }
         break;
-      case "BLOCKED":
-        if (role) patchAgent(d, role, (a) => ({ ...a, state: "blocked" }));
+      case "BLOCKED": {
+        if (!role) break;
+        patchAgent(d, role, (a) => ({ ...a, state: "blocked" }));
+        const data: Data<"BLOCKED"> = sig.data;
+        if (data && typeof data.on === "string" && data.on) {
+          own(d, "blockedOn")[role] = {
+            role, on: data.on, need: data.need, taskId: data.task_id, since: sig.timestamp,
+          };
+        }
         break;
+      }
+      case "REJECTED": {
+        const data: Data<"REJECTED"> = sig.data;
+        if (!role || !data || !Array.isArray(data.authors)) break;
+        const round = typeof data.round === "number" ? data.round : 1;
+        for (const author of data.authors) {
+          if (typeof author !== "string") continue;
+          const key = `${role}>${author}`;
+          const prev = d.reviews[key];
+          if (prev && prev.round >= round) continue;
+          own(d, "reviews")[key] = { reviewer: role, author, round, taskId: data.task_id };
+        }
+        break;
+      }
       case "CAPABILITIES": {
         const data: Data<"CAPABILITIES"> = sig.data;
         if (role && data) patchAgent(d, role, (a) => ({ ...a, capabilities: data }));
@@ -258,7 +323,9 @@ export function createRunStore(runId: string): RunStore {
         const data: Data<"AGENT_RESULT"> = sig.data;
         const cost = typeof data?.cost === "number" && Number.isFinite(data.cost) ? data.cost : 0;
         if (role) {
-          patchAgent(d, role, (a) => ({ ...a, lastResult: sig.summary, cost: a.cost + cost }));
+          patchAgent(d, role, (a) => ({
+            ...a, lastResult: sig.summary, lastResultSignalId: sig.id, cost: a.cost + cost,
+          }));
           if (cost) {
             const costs = own(d, "costs");
             costs[role] = (costs[role] ?? 0) + cost;
@@ -449,6 +516,7 @@ function screenshotFromDetail(
   return {
     signalId, source: "screenshot", path: d.path, kind: "screenshot", role: d.role ?? role,
     taskId: null, size: null, servedPath: null, url: d.url ?? null, createdAt: timestamp,
+    requestId: d.request_id ?? null, question: d.question ?? null,
   };
 }
 

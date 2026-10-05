@@ -30,6 +30,10 @@ export interface AgentConfig {
    *  from the manifest even though they're in BASELINE_LOCAL_SCOPES.
    *  Studio's tool picker writes here when the user un-checks a baseline. */
   excluded_baseline_tools?: string[];
+  /** opencode harness: for a reviewer, the roles whose work it reviews (a review edge). */
+  review_of?: string[];
+  /** opencode harness: rework rounds a review edge allows before escalating. */
+  max_review_rounds?: number;
 }
 
 export interface RoleRBAC {
@@ -44,6 +48,8 @@ export interface ProjectConfig {
   mcp_servers?: unknown[];
   max_iterations?: number;
   approval_gates?: Partial<ApprovalGates>;
+  /** "legacy" only on request; a missing value means the opencode harness (plan O15). */
+  harness?: "legacy" | "opencode";
   pr_mode?: "manual" | "auto";
   /** Track 12 — per-use-case sub-LLM model picks. Maps use_case name
    *  (e.g. "summarise-subtask", "protocol-cleanup", "llm-dispatch")
@@ -71,6 +77,10 @@ export interface RunMeta {
   created_at?: string;
   pr_mode?: "manual" | "auto";
   pr_ready?: PrReadyInfo;
+  /** Spend cap in USD, when the run meta carries it (else the project's `approval_gates`). */
+  token_budget_usd?: number | null;
+  /** Harness the run used, when the run meta carries it. */
+  harness?: "legacy" | "opencode";
 }
 
 /** Signal types posted by the opencode harness. Their `detail` is a JSON
@@ -160,6 +170,8 @@ export interface MetaProposal {
   persona_hires?: PersonaHire[];
   warnings?: string[];
   deltas?: RoleDelta[];
+  /** Ids of the active playbook entries that were shown to the meta-agent. */
+  playbook_entries_used?: string[];
 }
 
 // ── Approval gates (Phase C.0.5) ───────────────────────────────────────────
@@ -299,4 +311,52 @@ export interface Task {
 export interface DesksData {
   desks: Record<string, Task[]>;
   tasksById: Record<string, Task>;
+}
+
+// ── One-shot launcher (POST /api/oneshot) ──────────────────────────────────
+
+export interface OneShotRequestBody {
+  goal: string;
+  web: "researcher" | "off";
+  /** USD; the backend accepts > 0 and <= 1000. */
+  budget: number;
+  demo: boolean;
+}
+
+export interface OneShotResponse {
+  accepted: boolean;
+  needs_approval: boolean;
+  project_id: string;
+  run_id?: string;
+  job_id?: string;
+  status_url?: string;
+  confirm_url?: string;
+  estimated_cost?: CostEstimate;
+  message?: string;
+}
+
+// ── Project playbook (GET /api/projects/{id}/playbook) ─────────────────────
+
+export type PlaybookSection =
+  | "team_adjustments"
+  | "brief_addenda"
+  | "known_pitfalls"
+  | "review_rounds"
+  | "capability_hints"
+  | "task_templates";
+
+export interface PlaybookEntry {
+  id: string;
+  section: PlaybookSection;
+  key: string;
+  value: unknown;
+  confidence: number;
+  state: "emerging" | "active" | "declining" | "archived" | "superseded";
+  evidence_runs: string[];
+  needs_review?: boolean;
+}
+
+export interface PlaybookResponse {
+  entries: PlaybookEntry[];
+  metrics: { run_id: string; recorded_at: string; metrics: Record<string, number> }[];
 }

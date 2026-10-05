@@ -203,7 +203,7 @@ export function CapabilityChips({ info }: { info: CapabilitiesInfo }) {
  * harness type or its detail cannot be parsed (the caller then falls back to
  * the plain summary / raw detail).
  */
-export function renderHarnessBody(signal: Signal): ReactNode {
+export function renderHarnessBody(signal: Pick<Signal, "type" | "detail" | "summary">): ReactNode {
   switch (signal.type) {
     case "TOOL_CALL": {
       const info = parseToolCall(signal.detail);

@@ -8,9 +8,10 @@ import { PipelineGraph } from "../components/PipelineGraph";
 import { ResumeButton } from "../components/ResumeButton";
 import { RoadmapTab } from "../components/RoadmapTab";
 import type { AgentConfig, ProjectConfig, RunMeta } from "../types";
+import { ProjectInsights } from "../features/project/ProjectInsights";
 import { Inputs } from "./Inputs";
 
-type Tab = "team" | "inputs" | "roadmap" | "settings";
+type Tab = "team" | "inputs" | "roadmap" | "insights" | "settings";
 
 const DEFAULT_GATES = {
   pre_run_cost_preview: true,
@@ -189,6 +190,12 @@ export function Studio() {
           onClick={() => setTab("roadmap")}
         >
           Roadmap
+        </button>
+        <button
+          className={`tab ${tab === "insights" ? "tab-active" : ""}`}
+          onClick={() => setTab("insights")}
+        >
+          Insights
         </button>
         <button
           className={`tab ${tab === "settings" ? "tab-active" : ""}`}
@@ -406,6 +413,8 @@ export function Studio() {
         id && <Inputs projectId={id} />
       ) : tab === "roadmap" ? (
         id && <RoadmapTab projectId={id} />
+      ) : tab === "insights" ? (
+        id && <ProjectInsights projectId={id} />
       ) : (
         <SettingsTab
           gates={{ ...DEFAULT_GATES, ...(project.approval_gates ?? {}) }}

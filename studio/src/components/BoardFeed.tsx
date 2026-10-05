@@ -21,8 +21,26 @@ function typeToGroup(type: string): string | null {
   return null;
 }
 
-export function BoardFeed({ signals }: { signals: Signal[] }) {
-  const board = signals.filter((s) => !isQuip(s));
+/** The fields the feed reads. A raw `Signal` and the store's `TypedSignal` both satisfy it. */
+export type FeedSignal = Pick<Signal, "id" | "type" | "summary" | "detail" | "from_agent" | "iteration" | "timestamp"> & {
+  from_user?: boolean;
+};
+
+export interface BoardFilterState<T extends FeedSignal> {
+  /** Groups present in the signal set, in filter-bar order. */
+  presentGroups: string[];
+  activeGroups: Set<string>;
+  agents: string[];
+  agentFilter: string;
+  toggleGroup: (label: string) => void;
+  setAgentFilter: (agent: string) => void;
+  visible: T[];
+  board: T[];
+}
+
+/** Group + agent filtering shared by `BoardFeed` and the cockpit's virtualized feed. */
+export function useBoardFilter<T extends FeedSignal>(signals: readonly T[]): BoardFilterState<T> {
+  const board = useMemo(() => signals.filter((s) => !isQuip(s)), [signals]);
 
   // Which groups are present in the current signal set
   const presentGroups = useMemo(() => {
@@ -57,55 +75,74 @@ export function BoardFeed({ signals }: { signals: Signal[] }) {
     });
   }
 
-  const visible = board.filter((s) => {
-    const g = typeToGroup(s.type) ?? "Other";
-    if (!activeGroups.has(g) && !activeGroups.has("Other")) return false;
-    if (g === "Other" && !activeGroups.has("Other")) return false;
-    if (!activeGroups.has(g)) return false;
-    if (agentFilter !== "all" && s.from_agent !== agentFilter && !s.from_user) return false;
-    return true;
-  });
+  const visible = useMemo(
+    () =>
+      board.filter((s) => {
+        const g = typeToGroup(s.type) ?? "Other";
+        if (!activeGroups.has(g) && !activeGroups.has("Other")) return false;
+        if (g === "Other" && !activeGroups.has("Other")) return false;
+        if (!activeGroups.has(g)) return false;
+        if (agentFilter !== "all" && s.from_agent !== agentFilter && !s.from_user) return false;
+        return true;
+      }),
+    [board, activeGroups, agentFilter],
+  );
+
+  return { presentGroups, activeGroups, agents, agentFilter, toggleGroup, setAgentFilter, visible, board };
+}
+
+export function BoardFilterBar<T extends FeedSignal>({ filter }: { filter: BoardFilterState<T> }) {
+  const { presentGroups, activeGroups, agents, agentFilter, toggleGroup, setAgentFilter } = filter;
+  return (
+    <div style={{ padding: "8px 12px", borderBottom: "1px solid #e2e8f0", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+      {presentGroups.map((label) => {
+        const group = TYPE_GROUPS.find((g) => g.label === label);
+        const active = activeGroups.has(label);
+        return (
+          <button
+            key={label}
+            onClick={() => toggleGroup(label)}
+            aria-pressed={active}
+            style={{
+              padding: "2px 8px",
+              borderRadius: 12,
+              border: `1px solid ${group?.color ?? "#94a3b8"}`,
+              background: active ? (group?.color ?? "#94a3b8") : "transparent",
+              color: active ? "#fff" : (group?.color ?? "#64748b"),
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all .1s",
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
+      {agents.length > 1 && (
+        <select
+          value={agentFilter}
+          onChange={(e) => setAgentFilter(e.target.value)}
+          aria-label="Filter by agent"
+          style={{ marginLeft: "auto", fontSize: 11, padding: "2px 6px", borderRadius: 6 }}
+        >
+          <option value="all">All agents</option>
+          {agents.map((a) => (
+            <option key={a} value={a}>{a}</option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
+
+export function BoardFeed({ signals }: { signals: Signal[] }) {
+  const filter = useBoardFilter(signals);
+  const { visible, board } = filter;
 
   return (
     <div>
-      {/* Filter bar */}
-      <div style={{ padding: "8px 12px", borderBottom: "1px solid #e2e8f0", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-        {presentGroups.map((label) => {
-          const group = TYPE_GROUPS.find((g) => g.label === label);
-          const active = activeGroups.has(label);
-          return (
-            <button
-              key={label}
-              onClick={() => toggleGroup(label)}
-              style={{
-                padding: "2px 8px",
-                borderRadius: 12,
-                border: `1px solid ${group?.color ?? "#94a3b8"}`,
-                background: active ? (group?.color ?? "#94a3b8") : "transparent",
-                color: active ? "#fff" : (group?.color ?? "#64748b"),
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: "pointer",
-                transition: "all .1s",
-              }}
-            >
-              {label}
-            </button>
-          );
-        })}
-        {agents.length > 1 && (
-          <select
-            value={agentFilter}
-            onChange={(e) => setAgentFilter(e.target.value)}
-            style={{ marginLeft: "auto", fontSize: 11, padding: "2px 6px", borderRadius: 6 }}
-          >
-            <option value="all">All agents</option>
-            {agents.map((a) => (
-              <option key={a} value={a}>{a}</option>
-            ))}
-          </select>
-        )}
-      </div>
+      <BoardFilterBar filter={filter} />
 
       <div className="feed">
         {visible.length === 0 && (
@@ -123,7 +160,8 @@ export function BoardFeed({ signals }: { signals: Signal[] }) {
   );
 }
 
-function SignalRow({ signal }: { signal: Signal }) {
+/** One board row. Exported for the cockpit's virtualized feed. */
+export function SignalRow({ signal }: { signal: FeedSignal }) {
   const time = signal.timestamp?.replace("T", " ").split(".")[0]?.slice(11) ?? "";
   const kind = classify(signal);
   // Structured body for opencode harness signals; null (bad or missing JSON,
@@ -158,7 +196,7 @@ function SignalRow({ signal }: { signal: Signal }) {
   );
 }
 
-function classify(s: Signal): string {
+function classify(s: FeedSignal): string {
   if (s.from_user) return "user";
   if (s.type === "PROTOCOL") return "protocol";
   return "";
@@ -171,6 +209,6 @@ function statusClass(type: string): string {
   return "queued";
 }
 
-function isQuip(_s: Signal): boolean {
+function isQuip(_s: FeedSignal): boolean {
   return false;
 }

@@ -54,27 +54,32 @@ export function QuipFeed({ runId }: Props) {
       <div className="muted small">In-character commentary on key events.</div>
       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
         {visible.length === 0 && <p className="muted small">No quips yet.</p>}
-        {visible.map((q, i) => {
-          const av = avatarFor(q.persona || "system");
-          return (
-            <div className="quip" key={`${q.ts}-${i}`} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <div
-                className="worker-avatar"
-                style={{ background: av.gradient, width: 24, height: 24, fontSize: 10, flexShrink: 0 }}
-                title={q.persona}
-              >
-                {av.initials}
-              </div>
-              <div>
-                <span className="who">{q.persona}</span>
-                <span className="muted small" style={{ margin: "0 4px" }}>
-                  {EVENT_LABEL[q.event] ?? q.event}
-                </span>
-                <em>{q.text}</em>
-              </div>
-            </div>
-          );
-        })}
+        {visible.map((q, i) => (
+          <QuipRow key={`${q.ts}-${i}`} quip={q} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** One quip line. Exported for the cockpit's virtualized quip feed. */
+export function QuipRow({ quip: q }: { quip: QuipWire }) {
+  const av = avatarFor(q.persona || "system");
+  return (
+    <div className="quip" style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+      <div
+        className="worker-avatar"
+        style={{ background: av.gradient, width: 24, height: 24, fontSize: 10, flexShrink: 0 }}
+        title={q.persona}
+      >
+        {av.initials}
+      </div>
+      <div>
+        <span className="who">{q.persona}</span>
+        <span className="muted small" style={{ margin: "0 4px" }}>
+          {EVENT_LABEL[q.event] ?? q.event}
+        </span>
+        <em>{q.text}</em>
       </div>
     </div>
   );

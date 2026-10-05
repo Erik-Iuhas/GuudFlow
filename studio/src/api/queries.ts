@@ -6,12 +6,12 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { approvalsApi, getCards, runsApi } from "../api";
+import { approvalsApi, getCards, projectsApi, runsApi } from "../api";
 import {
   decideToolPermission,
   type ToolPermissionChoice,
 } from "../components/harness/toolPermission";
-import type { CardWire, RunMeta } from "../types";
+import type { CardWire, ProjectConfig, RunMeta } from "../types";
 
 // REST reads and actions for the run view, as TanStack Query hooks over the existing
 // `api.ts` functions. Live state lives in the run-event store, not here.
@@ -41,6 +41,15 @@ export function useRunMeta(
     queryFn: () => runsApi.get(runId as string),
     enabled: Boolean(runId),
     refetchInterval: options.pollMs ?? false,
+  });
+}
+
+/** A project's config (`GET /api/projects/{id}`): the role list, review edges, budget cap. */
+export function useProject(projectId: string | undefined): UseQueryResult<ProjectConfig> {
+  return useQuery({
+    queryKey: ["projects", projectId ?? ""] as const,
+    queryFn: () => projectsApi.get(projectId as string),
+    enabled: Boolean(projectId),
   });
 }
 

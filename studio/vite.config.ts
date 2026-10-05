@@ -11,6 +11,8 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
+    // Playwright specs live in e2e/ and run with `npm run test:e2e`.
+    exclude: ["e2e/**", "node_modules/**"],
   },
   server: {
     port: 3001,

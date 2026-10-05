@@ -17,7 +17,11 @@ import { WorkerCognitionView } from "../components/WorkerCognitionView";
 import { FilePreviewPanel } from "../components/FilePreviewPanel";
 import { GitGraph } from "../components/GitGraph";
 import { GitDiffSideOver } from "../components/GitDiffSideOver";
-import { KanbanBoard } from "../components/KanbanBoard";
+import { TaskBoard } from "../features/board";
+import { useRunCards } from "../api/queries";
+import { createRunStore } from "../stores/runEvents";
+import { RunStoreProvider } from "../stores/runStoreContext";
+import type { RawSignal } from "../lib/runEvents.gen";
 import { PipelineGraph } from "../components/PipelineGraph";
 import { useRunGraph } from "../hooks/useRunGraph";
 import { useDesks } from "../hooks/useDesks";
@@ -30,6 +34,7 @@ import { WorkerSettingsPanel } from "../components/WorkerSettingsPanel";
 import { RunWsProvider } from "../contexts/RunWsContext";
 import type { RunWsSubscriber } from "../contexts/RunWsContext";
 import { summariseAgents, signalsForRoleIteration } from "../lib/iterations";
+import { isTerminalStatus } from "../lib/runStatus";
 import type { ProjectConfig, RunMeta, Signal } from "../types";
 
 /** Unresolved approval gates: APPROVAL_NEEDED signals whose matching
@@ -49,19 +54,7 @@ function unresolvedApprovals(signals: Signal[]): Signal[] {
   });
 }
 
-const TERMINAL_STATUSES = new Set([
-  "complete",
-  "max_iterations",
-  "stuck",
-  "deadline_exceeded",
-  "errored",
-  "failed",
-  "stopped",
-]);
-
-function isTerminal(status: string | undefined): boolean {
-  return !!status && TERMINAL_STATUSES.has(status);
-}
+const isTerminal = isTerminalStatus;
 
 export function Run() {
   const { runId } = useParams<{ runId: string }>();
@@ -264,6 +257,8 @@ export function Run() {
                 </span>
               )}
               {!meta && <span className="muted small">live (no on-disk meta yet)</span>}
+              {" "}
+              <Link to={`/runs/${runId}`} className="small">Cockpit view</Link>
             </div>
             <div className="row small muted">
               <span className={connected ? "tag tag-status-running" : "tag"}>
@@ -423,16 +418,7 @@ export function Run() {
           )}
           {boardTab === "kanban" && runId && (
             <>
-              <KanbanBoard
-                runId={runId}
-                agents={(project?.agents ?? []).map((a) => ({ role: a.role, persona_id: a.persona_id }))}
-                onCardClick={(role) => {
-                  setBoardTab("signals");
-                  // Smooth scroll to role in board feed is handled by BoardFeed itself
-                  const el = document.querySelector(`[data-role="${role}"]`);
-                  el?.scrollIntoView({ behavior: "smooth" });
-                }}
-              />
+              <LegacyTaskBoard runId={runId} signals={signals} />
               <div style={{ borderTop: "1px solid #e2e8f0", padding: "8px 0 0", marginTop: "auto" }}>
                 <CommentBox runId={runId} />
               </div>
@@ -617,5 +603,22 @@ export function Run() {
       )}
     </div>
     </RunWsProvider>
+  );
+}
+
+/** The task board inside the legacy view: it needs a run store, fed here from the view's own signal list. */
+function LegacyTaskBoard({ runId, signals }: { runId: string; signals: Signal[] }) {
+  const store = useMemo(() => createRunStore(runId), [runId]);
+  const cards = useRunCards(runId);
+  useEffect(() => {
+    store.getState().ingest(signals as unknown as RawSignal[]);
+  }, [store, signals]);
+  useEffect(() => {
+    if (cards.data) store.getState().seedCards(cards.data);
+  }, [store, cards.data]);
+  return (
+    <RunStoreProvider store={store}>
+      <TaskBoard runId={runId} />
+    </RunStoreProvider>
   );
 }

@@ -372,3 +372,30 @@ describe("run event store: performance", () => {
     expect(ms).toBeLessThan(200);
   });
 });
+
+describe("run event store: review rounds and blocked-on (cockpit)", () => {
+  it("tracks the highest REJECTED round per reviewer>author edge", () => {
+    const store = createRunStore("r1");
+    state(store).ingest([
+      sig("REJECTED", { from: "reviewer", detail: { task_id: "T1", authors: ["dev", "ui"], round: 1 } }),
+      sig("REJECTED", { from: "reviewer", detail: { task_id: "T1", authors: ["dev"], round: 2 } }),
+      sig("REJECTED", { from: "reviewer", detail: { authors: ["dev"], round: 1 } }),
+    ]);
+    expect(state(store).reviews["reviewer>dev"]).toMatchObject({ round: 2, author: "dev", reviewer: "reviewer" });
+    expect(state(store).reviews["reviewer>ui"].round).toBe(1);
+  });
+
+  it("records BLOCKED on a role and clears it when the role runs again", () => {
+    const store = createRunStore("r1");
+    state(store).ingest(sig("BLOCKED", { from: "dev", detail: { task_id: "T1", on: "api", need: "schema" } }));
+    expect(state(store).blockedOn.dev).toMatchObject({ on: "api", need: "schema", taskId: "T1" });
+    state(store).ingest(sig("STARTED", { from: "dev" }));
+    expect(state(store).blockedOn.dev).toBeUndefined();
+  });
+
+  it("keeps the last AGENT_RESULT signal id on the agent", () => {
+    const store = createRunStore("r1");
+    state(store).ingest(sig("AGENT_RESULT", { from: "dev", id: "res1", detail: { result: {}, cost: 0.1 } }));
+    expect(state(store).agents.dev.lastResultSignalId).toBe("res1");
+  });
+});
