@@ -1219,6 +1219,60 @@ untrusted) when it proposes a team, so the team fits the ongoing work. Not built
 start when a human or CI asks (CI can pass `backlog_items: "top"`), never on a schedule of
 their own.
 
+## 14. Ongoing projects, part 2: closing the loops
+
+Follow-ups to §13 after a design review with the user. Task ids are P8 / H1–H10 in the
+work breakdown. The legacy harness is unsupported from here on: new work does not keep it
+working, and it is not removed for its own sake.
+
+1. **Remote sync and publish (H1).** A project can name a git remote (`project_remote`:
+   `url`, `branch`, `publish`: `none` | `branch` | `pr` | `main`, `token_env`). Before each
+   run, and on demand, the remote branch is fetched and merged into the project repo's `main`
+   (fast-forward or merge; a conflict is reported and the sync is skipped, never forced).
+   Accepting a run publishes it: push to `guudflow/{run_id}`, open a pull request on GitHub,
+   or push to the branch itself. The token is read on the host from the named environment
+   variable (allow-listed prefix `GUUDFLOW_GIT_`), passed to git through an askpass helper
+   rather than in the URL, and never reaches a sandbox or a log. A local path works as a
+   remote, which covers the `local_path_in_place` use case without agents writing in the
+   user's directory.
+2. **Rejection notes reach the agents (H2).** The note you write when rejecting (or
+   accepting) a run goes into the history of every item the run held and into the next
+   brief for those items.
+3. **Checks before review (H3).** A project may set `check_command` (for example
+   `pytest -q`). At run end the command runs on an export of the run's code in a one-shot
+   sandbox (no network, read-only image, CPU, memory and time limits). In host mode it runs
+   on the host with the usual warning, and it is refused in production. The result
+   (passed, exit code, output tail) is stored with the run and shown in the review panel.
+4. **Reconcile runs (H4).** When accepting a run conflicts, Studio offers a reconcile run.
+   It continues the pending run with the project's current `main` merged in. The conflicted
+   files are committed with markers and become a "resolve the merge" item that the plan must
+   cover. A run whose code still has conflict markers can never be accepted.
+5. **One active run per project (H5).** Invoke refuses a second run while one is queued or
+   running for the project (409), unless `allow_parallel` is passed. That flag is for
+   parallel runs whose items are known not to overlap.
+6. **Backlog structure (H6).**
+   - Items can depend on other items. `"top"` skips items whose dependencies are not done.
+     An explicit selection with unmet dependencies is refused unless they are selected too.
+   - Every item tracks its cost across runs, summed from the gateway cost of its cards'
+     turns.
+   - **Groom:** the meta model proposes new items from the roadmap and the current backlog.
+     The proposals are returned for a human to add; nothing is added automatically.
+7. **Autopilot (H7).** Per project: `enabled`, `every_hours`, `take` (items per run),
+   `max_usd_per_run`, `max_usd_per_week`, `auto_accept`.
+   - The worker starts a run when one is due, nothing is active, there are open items and the
+     week's spend is under the cap.
+   - Auto-accept merges only when every item finished, no card needs attention, the checks
+     passed and the merge is clean. Otherwise the run waits for a human as usual.
+8. **SQLite storage (H8).** The backlog and run states move from locked JSON files to one
+   SQLite database per project (`work.db`, WAL mode), migrated from the JSON files on first
+   open.
+9. **UI leftovers (H9).**
+   - The tool-call count on a result card is labelled as that turn's count.
+   - The project header's "Run now" becomes "Run on the goal only"; the Work tab is the main
+     way to start a run.
+10. **Real-model validation (H10, you).** Run one project through two or three backlog runs
+    with an accept in between, on a real model.
+
 ## Appendix: how the research was done
 
 1. `npm i opencode-ai@1.18.34`; `opencode serve`; dumped `GET /doc` (OpenAPI, ~479 KB).

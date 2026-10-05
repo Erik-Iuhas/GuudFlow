@@ -110,6 +110,17 @@ retirement (S15) and final review (O15), and the rest of the Studio track (S24 t
 | P7 | G5 | Done | Studio Work tab (review queue + backlog), run start with selected items, review state on the run report |
 | P7 | G6 | Partly | The meta-agent reads the open backlog when proposing a team (done). Scheduled runs that take the top items on their own: not started (CI can invoke with `backlog_items: "top"`) |
 
+| P8 | H1 | Not started | Remote sync before runs and publish on accept (branch, PR, or main); host-only token (plan §14.1) |
+| P8 | H2 | Not started | Accept/reject notes go into item history and the next brief (§14.2) |
+| P8 | H3 | Not started | `check_command` runs on the run's code in a one-shot sandbox; result in the review panel (§14.3) |
+| P8 | H4 | Not started | Reconcile runs for conflicting accepts; runs with conflict markers cannot be accepted (§14.4) |
+| P8 | H5 | Not started | One active run per project unless `allow_parallel` (§14.5) |
+| P8 | H6 | Not started | Item dependencies, cost per item, groom proposals from the roadmap (§14.6) |
+| P8 | H7 | Not started | Autopilot: scheduled runs with budget caps, guarded auto-accept (§14.7) |
+| P8 | H8 | Not started | Backlog and run states in SQLite per project (§14.8) |
+| P8 | H9 | Not started | UI leftovers: per-turn tool-call label, "Run on the goal only" (§14.9) |
+| P8 | H10 | Deferred (you) | Real-model run of an ongoing project across two or three accepted runs (§14.10) |
+
 ### Final calls (closing the offline work)
 
 Decisions taken when the offline plan was finished, so nobody has to re-derive them:
@@ -124,6 +135,7 @@ Decisions taken when the offline plan was finished, so nobody has to re-derive t
 | Review-column cap | Served in run meta (`review_column_cap`), not hardcoded in Studio | `_add_harness_meta`, `TaskBoard.tsx` |
 | Artifact files and report | Report, runs-metrics and diffs need the bearer token; artifact files take the token or a signed, HttpOnly, run-scoped one-hour cookie from `POST /artifact-access` (the token never goes into a URL); dev without a token stays open | `api/auth.py`, `run_artifacts.py` |
 | Visual suite tolerance | 0.2% per screenshot (2% hid a real regression) | `studio/playwright.config.ts` |
+| Legacy harness | Unsupported: new work does not keep it working; it is not removed for its own sake | plan §14 |
 | Ongoing projects (with the user) | One long-lived repo per project (replaces "fresh history per run"); every run waits for a human to accept it; work lives on a persistent backlog the planner must cover | plan §13 |
 
 **What you need to do to finish the deferred work:** provide an API key (see "Before anything starts")
@@ -144,6 +156,7 @@ README's "Run the demo" section.
 | P5 | Meta-agent, personas, playbook, visuals, one-shot | O13, S11, S12, S13, S14, S22, O20, O24, S32, S20, O14, O17 | 3–4 days | All six examples run; the one-shot demo passes §10's exit criteria |
 | P6 | Make it the default | S15, S16, O15 | 1–2 days | `harness` default is `opencode`; legacy code retired |
 | P7 | Ongoing projects | G1–G6 | 2–3 days | A backlog item goes through a run, is accepted into the project repo, and the next run builds on it (plan §13) |
+| P8 | Ongoing projects, part 2 | H1–H10 | 3–4 days | Runs sync from and publish to the real remote, are checked before review, reconcile conflicts, and can run on autopilot within budget (plan §14) |
 | UI | Studio modernization (parallel) | O21, S23, S24, S25, S26, S27, S29, S33, O22 | runs alongside P2–P6 | §12.4 done criteria |
 
 Rough total: 4–5 weeks of focused work. P0–P2 alone already gives a watchable demo.
