@@ -17,6 +17,12 @@ from dataclasses import dataclass, field
 
 SUBMIT_TOOL_NAME = "guudflow_submit_result"
 
+CONFLICT_HOWTO = (
+    "Between `<<<<<<< ` and `=======` is your version; between `=======` and `>>>>>>> ` is "
+    "what teammates merged into main. Edit each file so both changes survive (never just "
+    "delete one side unless it is truly obsolete), remove every marker line, and run the "
+    "tests. GuudFlow completes the merge when you finish.")
+
 
 def wrap_untrusted(label: str, text: str) -> str:
     """Delimit untrusted content. A per-call nonce stops content forging the end marker."""
@@ -59,6 +65,7 @@ class BriefInputs:
     human_comments: tuple[str, ...] = ()
     task: str | None = None                          # task card text (P4)
     carry_forward: str | None = None                 # continuation brief (§11.4)
+    git_notes: tuple[str, ...] = ()                  # set-aside work, conflicts to resolve
     extra_sections: tuple[tuple[str, str], ...] = field(default=())
 
 
@@ -69,6 +76,9 @@ def _section(title: str, body: str) -> str:
 def build_brief(inp: BriefInputs) -> str:
     """Render the brief as markdown sections, most important first."""
     parts: list[str] = [f"# Your turn: {inp.role}\n"]
+    if inp.git_notes:
+        parts.append(_section("Before anything else: your folder",
+                              "\n\n".join(inp.git_notes)))
     if inp.review_issues:
         issues = "\n".join(f"- `{i.file}`: {i.detail}" for i in inp.review_issues)
         parts.append(_section(
@@ -128,3 +138,21 @@ def retry_brief(error: str | None) -> str:
     why = f" The last attempt was rejected:\n{error}\n" if error else ""
     return (f"Your turn ended without an accepted result.{why}\n"
             f"Call `{SUBMIT_TOOL_NAME}` now with your result. Do not redo work you already did.")
+
+
+def wrap_up_brief(reason: str | None) -> str:
+    """Follow-up after a turn ran out of time: keep what was done, report it now."""
+    why = f" ({reason})" if reason else ""
+    return (f"Time is up for this turn{why}. Stop exploring and do not start new changes. "
+            f"Call `{SUBMIT_TOOL_NAME}` now: `done` only if the work is really complete, "
+            "otherwise `failed` with a summary of what is finished, what is left and where "
+            "you stopped. Your changes so far are kept for the next turn.")
+
+
+def conflict_brief(files: list[str]) -> str:
+    """Follow-up when main moved while the agent worked and the merge conflicted."""
+    return ("Your result was accepted, but while you worked teammates merged changes into "
+            f"main that conflict with yours. These files now contain conflict markers: "
+            f"{', '.join(f'`{f}`' for f in files)}.\n\n{CONFLICT_HOWTO}\n\n"
+            f"Then call `{SUBMIT_TOOL_NAME}` again with your result (update the summary and "
+            "files if the merge changed them).")

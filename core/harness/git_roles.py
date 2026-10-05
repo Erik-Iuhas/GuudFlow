@@ -21,6 +21,15 @@ After every turn the runner (host side):
   4. merges it into `main`.
 Agents never merge. A failed check means the branch is not merged and the turn
 is reported as failed with the reason.
+
+Keeping the flow moving (no dead ends):
+  - A branch that fails a check is reset to `main` and its patch is saved under
+    the role's tool dir (`.guudflow/set_aside/`), so a rejected commit can never
+    block every later turn of that role.
+  - A merge conflict is not a failure on its own: `start_conflict_resolution`
+    merges `main` into the role's branch and leaves the conflict markers in the
+    worktree for the agent to resolve in the same session; `collect` refuses
+    files that still carry markers.
 """
 
 from __future__ import annotations
@@ -69,6 +78,8 @@ class CollectResult:
     problem: str | None = None
     base: str = ""      # main before the merge
     head: str = ""      # main after the merge (base..head is exactly what was merged)
+    conflict: bool = False          # main moved and the merge conflicted (resolvable)
+    set_aside: str | None = None    # tool-dir-relative patch of discarded commits
 
 
 class RoleClones:
@@ -116,16 +127,75 @@ class RoleClones:
             exclude.write_text("".join(f"{p}\n" for p in LOCAL_EXCLUDES))
         return work
 
-    def sync_from_main(self, role: str) -> bool:
-        """Merge the run's current `main` into the role's branch. False on conflict."""
+    def sync_from_main(self, role: str, keep_conflicts: bool = False) -> bool:
+        """Merge the run's current `main` into the role's branch. False on conflict.
+
+        With `keep_conflicts` the merge stays in progress and the conflicted files
+        keep their markers for the agent to resolve (see `conflicted_files`).
+        """
+        if self.merging(role):
+            if self.conflicted_files(role):
+                return False
+            self.commit_leftovers(role, "merge: main into the branch (conflicts resolved)")
         self.commit_leftovers(role, "chore: save work in progress before sync")
         self.git(role, "fetch", "--quiet", str(self.main.working_dir), "+main:refs/heads/main")
         try:
             self.git(role, "merge", "--quiet", "--no-edit", "main")
         except GitRoleError:
-            self.git(role, "merge", "--abort")
+            if not keep_conflicts or not self.conflicted_files(role):
+                self.git(role, "merge", "--abort")
+                return False
             return False
         return True
+
+    def merging(self, role: str) -> bool:
+        """Is a merge of main in progress in the role's checkout?"""
+        return (self.git_dir(role) / "MERGE_HEAD").exists()
+
+    def conflicted_files(self, role: str) -> list[str]:
+        """Files of an in-progress merge that still carry conflict markers.
+
+        The agent has no git, so the index never records its resolution: a file
+        counts as resolved once its markers are gone (or it was deleted).
+        """
+        if not self.merging(role):
+            return []
+        unmerged = self.git(role, "diff", "--name-only", "--diff-filter=U").splitlines()
+        return sorted(p for p in set(unmerged) if p and _has_markers(self.path(role) / p))
+
+    def start_conflict_resolution(self, role: str) -> list[str]:
+        """Merge main into the role's branch, keeping conflict markers for the agent.
+
+        Returns the conflicted files ([] when the merge went through cleanly).
+        """
+        self.sync_from_main(role, keep_conflicts=True)
+        return self.conflicted_files(role)
+
+    def abort_conflict_resolution(self, role: str) -> None:
+        """Give up on a conflict: back to the branch as it was before the merge."""
+        if self.merging(role):
+            self.git(role, "merge", "--abort")
+
+    def set_aside(self, role: str, reason: str) -> str | None:
+        """Reset the role's branch to main; save what was dropped as a patch.
+
+        Returns the patch path relative to the tool dir, or None if nothing was dropped.
+        """
+        self.abort_conflict_resolution(role)
+        self.commit_leftovers(role, "chore: work set aside")
+        self.git(role, "fetch", "--quiet", str(self.main.working_dir), "+main:refs/heads/main")
+        patch = self.git(role, "diff", "main", "HEAD")
+        rel = None
+        if patch.strip():
+            folder = self.tool_dir(role) / "set_aside"
+            folder.mkdir(parents=True, exist_ok=True)
+            n = len(list(folder.glob("*.patch"))) + 1
+            rel = f"set_aside/{n:02d}.patch"
+            (self.tool_dir(role) / rel).write_text(f"# set aside: {reason}\n{patch}\n",
+                                                   encoding="utf-8")
+        self.git(role, "reset", "--quiet", "--hard", "main")
+        self.git(role, "clean", "-fdq")
+        return rel
 
     def commit_leftovers(self, role: str, message: str) -> str | None:
         """Commit any changes in the worktree; returns the new sha or None."""
@@ -170,10 +240,25 @@ class RoleClones:
         return bad
 
     def collect(self, role: str, summary: str) -> CollectResult:
-        """Bring `agent/{role}` home: commit, fetch, check, merge into main."""
+        """Bring `agent/{role}` home: commit, fetch, check, merge into main.
+
+        A failed check sets the branch aside (reset to main, patch kept). A merge
+        conflict leaves the branch as is (`conflict=True`) so the caller can have
+        the agent resolve it; see `start_conflict_resolution`.
+        """
         branch = self.branch(role)
         first_line = summary.strip().splitlines()[0][:72] if summary.strip() else "update"
+        markers = self.conflicted_files(role)
+        if markers:
+            return CollectResult(merged=False, conflict=True, changed_files=markers,
+                                 problem=f"unresolved conflict markers in: {', '.join(markers)}")
         self.commit_leftovers(role, f"chore({role}): {first_line}")
+        result = self._collect(role, branch)
+        if not result.merged and not result.conflict and result.problem:
+            result.set_aside = self.set_aside(role, result.problem)
+        return result
+
+    def _collect(self, role: str, branch: str) -> CollectResult:
         repo = self.main.repo
         repo.git.checkout("main")
         before = repo.git.rev_parse("main")
@@ -192,6 +277,11 @@ class RoleClones:
             return CollectResult(merged=False, new_commits=new_commits, changed_files=changed,
                                  problem=f"symlinks pointing outside the repo: {', '.join(links)}")
         work = self.path(role)
+        marked = [p for p in changed if (work / p).is_file() and not (work / p).is_symlink()
+                  and _has_markers(work / p)]
+        if marked:
+            return CollectResult(merged=False, new_commits=new_commits, changed_files=changed,
+                                 problem=f"unresolved conflict markers in: {', '.join(marked)}")
         secrets = [f"{p} ({reason})" for p in changed
                    if (work / p).is_file() and not (work / p).is_symlink()
                    and (reason := classify_secret(work / p, p))]
@@ -205,6 +295,7 @@ class RoleClones:
                            "\n".join(changed))
         if not self.main.merge(branch, into="main"):
             return CollectResult(merged=False, new_commits=new_commits, changed_files=changed,
+                                 conflict=True,
                                  problem=f"merge conflict merging {branch} into main")
         return CollectResult(merged=True, new_commits=new_commits, changed_files=changed,
                              base=before, head=repo.git.rev_parse("main"))
@@ -218,3 +309,17 @@ class RoleClones:
             parts.append(f"# {base[:8]}..{head[:8]}\n{stat}\n\n{repo.git.diff(base, head)}")
         text = "\n\n".join(parts) if parts else "(nothing merged for this card yet)"
         return text if len(text) <= limit else text[:limit] + "\n[truncated]"
+
+
+_MARKER_PREFIXES = ("<<<<<<< ", ">>>>>>> ")
+
+
+def _has_markers(path: Path) -> bool:
+    """True if a text file still has git conflict markers (`<<<<<<< ` / `>>>>>>> ` lines)."""
+    try:
+        if not path.is_file() or path.is_symlink() or path.stat().st_size > 2_000_000:
+            return False
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return any(line.startswith(_MARKER_PREFIXES) for line in text.splitlines())

@@ -231,3 +231,85 @@ async def test_single_builder_prompt_layers_without_persona(tmp_path: Path,
     caps = next(s for s in runner.workspace.board if s.type is SignalType.CAPABILITIES)
     layers = json.loads(caps.detail or "{}")["prompt"]["layers"]
     assert layers[0] == "identity" and layers[-1] == "framing" and "character" not in layers
+
+
+def _when(cond: Any, then: ToolCall, wait: float = 30.0) -> Any:
+    """A scripted step that holds the model's reply until `cond()` is true."""
+    import time
+
+    def step(_body: dict[str, Any]) -> ToolCall:
+        deadline = time.monotonic() + wait
+        while not cond() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return then
+    return step
+
+
+async def test_parallel_conflict_is_resolved_in_the_same_session(tmp_path: Path,
+                                                                 fake_llm: FakeLLM) -> None:
+    runner = _runner(tmp_path, [AgentConfig(role="alpha"), AgentConfig(role="beta")], fake_llm)
+    beta_file = tmp_path / "run" / "roles" / "beta" / "work" / "same.py"
+    main_file = runner.git.working_dir / "same.py"
+    # The conflict follow-up quotes the brief, so its route must win: register it first.
+    fake_llm.route("now contain conflict markers",
+                   ToolCall("write", {"filePath": "same.py", "content": "alpha = 1\nbeta = 2\n"}),
+                   _done("Kept both: merged alpha's and beta's lines.", ["same.py"]))
+    # beta writes first; alpha writes once beta has, and merges first; beta then
+    # submits only after alpha's merge landed, so beta's merge must conflict.
+    fake_llm.route("Your turn: beta",
+                   ToolCall("write", {"filePath": "same.py", "content": "beta = 2\n"}),
+                   _when(main_file.exists, _done("Added beta's line to same.py.", ["same.py"])))
+    fake_llm.route("Your turn: alpha",
+                   _when(beta_file.exists, ToolCall("write", {"filePath": "same.py",
+                                                              "content": "alpha = 1\n"})),
+                   _done("Added alpha's line to same.py.", ["same.py"]))
+    result = await runner.run()
+    assert result.status is SchedulerStatus.COMPLETE, runner.workspace.board
+    assert main_file.read_text() == "alpha = 1\nbeta = 2\n"
+    conflicts = [s for s in runner.workspace.board if s.type is SignalType.GIT_CONFLICT]
+    assert any(s.from_agent == "beta" and "same.py" in (s.detail or "") for s in conflicts)
+    assert fake_llm.remaining("now contain conflict markers") == 0
+
+
+async def test_rejected_branch_does_not_poison_the_next_turn(tmp_path: Path,
+                                                             fake_llm: FakeLLM) -> None:
+    """A secret in the first turn is set aside; the re-armed turn merges cleanly."""
+    from core.harness.run import OpencodeRun
+    runner = _runner(tmp_path, [AgentConfig(role="builder")], fake_llm)
+    fake_llm.route("Your turn: builder",
+                   ToolCall("write", {"filePath": "app.py", "content": "print('ok')\n"}),
+                   ToolCall("write", {"filePath": "id_rsa",
+                                      "content": "-----BEGIN RSA PRIVATE KEY-----\nabc\n"}),
+                   _done("Added app.py and a deploy key.", ["app.py", "id_rsa"]))
+    result = await runner.run()
+    assert "builder" in result.failed                       # role mode: the turn fails...
+    run = OpencodeRun(runner, runner.harness_settings)
+    clones = run.clones
+    assert (clones.tool_dir("builder") / "set_aside" / "01.patch").is_file()
+    assert not (clones.path("builder") / "id_rsa").exists()  # ...but the branch is clean
+    assert clones.sync_from_main("builder")
+
+
+async def test_timed_out_turn_gets_one_wrap_up_and_keeps_its_report(tmp_path: Path,
+                                                                     fake_llm: FakeLLM) -> None:
+    import time
+    runner = _runner(tmp_path, [AgentConfig(role="builder")], fake_llm)
+    runner.harness_settings.turn_timeout = 4
+
+    def slow(_body: dict[str, Any]) -> ToolCall:
+        time.sleep(6)   # longer than the turn timeout: the session is aborted
+        return ToolCall("read", {"filePath": "notes.md"})
+
+    fake_llm.route("Time is up for this turn",
+                   ToolCall("guudflow_submit_result", {
+                       "status": "failed",
+                       "summary": "Wrote notes.md with the outline; the parser is still missing."}))
+    fake_llm.route("Your turn: builder",
+                   ToolCall("write", {"filePath": "notes.md", "content": "# outline\n"}),
+                   slow)
+    result = await runner.run()
+    assert "builder" in result.failed
+    results = [s for s in runner.workspace.board
+               if s.type is SignalType.AGENT_RESULT and s.from_agent == "builder"]
+    assert results and "parser is still missing" in results[-1].summary
+    assert (runner.git.working_dir / "notes.md").exists()   # the partial work was kept

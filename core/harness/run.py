@@ -7,8 +7,13 @@ own git clone, scheduled by the unchanged `core.scheduler.Scheduler`.
 
 Lifecycle of one spawn (`execute_turn`):
   sync clone with main → ensure server → open result slot → post STARTED and
-  CAPABILITIES → drive the turn → (one retry if no result) → collect the branch
-  → post AGENT_RESULT + COMPLETE / BLOCKED / FAILED.
+  CAPABILITIES → drive the turn → (one retry if no result; one wrap-up if the
+  turn timed out) → collect the branch (a merge conflict goes back to the agent
+  in the same session) → post AGENT_RESULT + COMPLETE / BLOCKED / FAILED.
+
+Git never dead-ends a role: a conflict found when syncing with main is handed
+to the agent as its first job, a rejected branch is set aside (reset to main,
+patch kept in `.guudflow/set_aside/`) and the next brief says so.
 """
 
 from __future__ import annotations
@@ -26,7 +31,16 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
-from core.harness.brief import BriefInputs, ReviewIssue, UpstreamResult, build_brief, retry_brief
+from core.harness.brief import (
+    CONFLICT_HOWTO as _CONFLICT_HOWTO,
+    BriefInputs,
+    ReviewIssue,
+    UpstreamResult,
+    build_brief,
+    conflict_brief,
+    retry_brief,
+    wrap_up_brief,
+)
 from core.harness.capabilities import (
     Capabilities,
     CompiledCapabilities,
@@ -37,7 +51,7 @@ from core.harness.capabilities import (
 )
 from core.harness.config_gen import ProviderBinding, agent_entry, build_config
 from core.harness.event_bridge import EventBridge
-from core.harness.git_roles import RoleClones
+from core.harness.git_roles import CollectResult, RoleClones
 from core.harness.mcp_server import McpIdentity, McpServer, McpTool, RunningHttpServer, ToolResult, serve_app
 from core.harness.opencode_client import OpencodeClient
 from core.harness import mcp_browser, mcp_tools, mcp_visual, mcp_web
@@ -89,6 +103,7 @@ class HarnessSettings:
 
     production: bool = field(default_factory=lambda: os.environ.get("GUUDFLOW_ENV") == "production")
     turn_timeout: float = 1200.0
+    followup_timeout: float = 300.0   # retry / wrap-up / conflict follow-ups in the same session
     steps: int = 60
     binding_factory: BindingFactory | None = None
     extra_providers: dict[str, dict[str, Any]] | None = None
@@ -155,6 +170,8 @@ class OpencodeRun:
         self._carry_text = ""
         self.images = ImageBudget()
         self._delivered_notes: set[str] = set()
+        # Per role: what the next brief must say about git (set-aside work, conflicts).
+        self._git_notes: dict[str, list[str]] = {}
         self._roles: dict[str, _Role] = {}
         self._http: RunningHttpServer | None = None
         self._gw_http: RunningHttpServer | None = None
@@ -540,9 +557,8 @@ class OpencodeRun:
         workdir = self.clones.ensure(role_name, self._author(cfg))
         if self.mode == "host":
             self._link_tool_dir(role_name, workdir)
-        if not self.clones.sync_from_main(role_name):
-            self._post(SignalType.FAILED, role_name, "could not merge main into the branch")
-            raise TurnFailed(f"{role_name}: merge conflict syncing with main")
+        if not self.clones.sync_from_main(role_name, keep_conflicts=True):
+            self._sync_conflict(role_name)
         if self._is_overseer(role_name):
             assert self.overseer is not None
             plan: TurnPlan | None = self.overseer.begin_turn(
@@ -559,6 +575,33 @@ class OpencodeRun:
         finally:
             if self.flow is not None:
                 self.flow.end_turn(role_name)
+
+    def _sync_conflict(self, role_name: str) -> None:
+        """Main could not be merged cleanly into the role's branch at turn start.
+
+        The markers stay in the worktree and resolving them becomes the first item
+        of the brief. If git left nothing to resolve, the old work is set aside.
+        """
+        files = self.clones.conflicted_files(role_name)
+        if files:
+            self._git_notes.setdefault(role_name, []).append(
+                "Your branch had unmerged work that conflicts with what teammates merged "
+                f"since. These files contain git conflict markers: {', '.join(files)}. "
+                + _CONFLICT_HOWTO)
+            self._post(SignalType.GIT_CONFLICT, role_name,
+                       f"{role_name}: resolve conflicts with main ({len(files)} file(s))",
+                       "\n".join(files))
+            return
+        patch = self.clones.set_aside(role_name, "could not merge main into the branch")
+        self._note_set_aside(role_name, "it could not be merged with main", patch)
+
+    def _note_set_aside(self, role_name: str, why: str, patch: str | None) -> None:
+        if patch is None:
+            return
+        self._git_notes.setdefault(role_name, []).append(
+            f"Your previous changes were set aside because {why}. Your folder now matches "
+            f"main. The dropped changes are in `.guudflow/{patch}` (read-only): reuse "
+            "whatever is still valid, and avoid what caused the problem.")
 
     async def _run_turn(self, role: _Role, workdir: Path, plan: TurnPlan | None) -> None:
         role_name = role.cfg.role
@@ -578,19 +621,36 @@ class OpencodeRun:
                                  on_event=on_event, on_permission=on_permission,
                                  timeout=self.settings.turn_timeout)
         result = self.inbox.take(self.run_id, role_name)
-        if result is None and not stats.timed_out:
+        if result is None:
+            # One follow-up in the same session: after a validation miss, the
+            # rejection; after a timeout, a short "wrap up now" (salvages the work).
             _, last_error = self.inbox.status(self.run_id, role_name)
-            more = await drive_turn(client, session["id"], retry_brief(last_error),
-                                    agent=role_name, on_event=on_event,
-                                    on_permission=on_permission, timeout=300)
+            text = wrap_up_brief(stats.errors[-1]) if stats.timed_out else retry_brief(last_error)
+            more = await drive_turn(client, session["id"], text, agent=role_name,
+                                    on_event=on_event, on_permission=on_permission,
+                                    timeout=self.settings.followup_timeout)
             _merge_stats(stats, more)
             result = self.inbox.take(self.run_id, role_name)
-        if not self.settings.keep_servers:
-            await self._stop_server(role)
-        await self._finish(role, result, stats, plan)
+
+        async def resolve(files: list[str]) -> BaseModel | None:
+            """Hand a merge conflict back to the agent in the same session."""
+            more = await drive_turn(client, session["id"], conflict_brief(files),
+                                    agent=role_name, on_event=on_event,
+                                    on_permission=on_permission,
+                                    timeout=self.settings.followup_timeout)
+            _merge_stats(stats, more)
+            return self.inbox.take(self.run_id, role_name)
+
+        try:
+            await self._finish(role, result, stats, plan, resolve=resolve)
+        finally:
+            if not self.settings.keep_servers:
+                await self._stop_server(role)
 
     async def _finish(self, role: _Role, result: BaseModel | None, stats: TurnStats,
-                      plan: TurnPlan | None = None) -> None:
+                      plan: TurnPlan | None = None,
+                      resolve: Callable[[list[str]], Awaitable[BaseModel | None]] | None = None,
+                      ) -> None:
         name = role.cfg.role
         card_id = plan.card_id if plan is not None else None
         if self._is_overseer(name):
@@ -616,6 +676,9 @@ class OpencodeRun:
             raise TurnFailed(f"{name}: {reason}")
         summary = getattr(result, "summary", "") or ""
         collected = self.clones.collect(name, summary)
+        if collected.conflict and resolve is not None:
+            collected, result = await self._resolve_conflict(name, collected, result, resolve)
+            summary = getattr(result, "summary", "") or ""
         self.artifacts.scan(name, self.clones.path(name), collected.changed_files,
                             tool_dir=self.clones.tool_dir(name))
         if self.gateway is not None:
@@ -629,9 +692,13 @@ class OpencodeRun:
         for to_role, note in getattr(result, "notes_for", {}).items():
             self._post_note(name, to_role, note)
         if not collected.merged:
+            if collected.set_aside:
+                self._note_set_aside(name, str(collected.problem), collected.set_aside)
             if card_id is not None and self.flow is not None:
+                where = (f" (changes set aside in .guudflow/{collected.set_aside})"
+                         if collected.set_aside else "")
                 self.flow.card_problem(name, card_id,
-                                       f"branch not merged: {collected.problem}")
+                                       f"branch not merged: {collected.problem}{where}")
                 self.flow.settle(current=name)
                 return
             self._post(SignalType.FAILED, name, f"{name}'s branch was not merged",
@@ -664,6 +731,29 @@ class OpencodeRun:
         self._post(SignalType.COMPLETE, name, f"{name} complete", summary or None)
         if self.flow is not None:
             self.flow.settle(current=name)
+
+    async def _resolve_conflict(
+            self, name: str, collected: CollectResult, result: BaseModel,
+            resolve: Callable[[list[str]], Awaitable[BaseModel | None]],
+    ) -> tuple[CollectResult, BaseModel]:
+        """Main moved under the role: let the agent merge, once, then collect again.
+
+        Unresolvable → the work is set aside (patch kept) so the role's next turn
+        starts from main instead of hitting the same conflict forever.
+        """
+        files = self.clones.start_conflict_resolution(name)
+        if files:
+            self._post(SignalType.GIT_CONFLICT, name,
+                       f"{name}: main moved; resolving {len(files)} conflicted file(s)",
+                       "\n".join(files))
+            again = await resolve(files)
+            if again is not None:
+                result = again
+        after = self.clones.collect(name, getattr(result, "summary", "") or "")
+        if after.conflict:
+            after.problem = f"merge conflict not resolved: {after.problem}"
+            after.set_aside = self.clones.set_aside(name, after.problem)
+        return after, result
 
     # ── review edges and blocking (plan §4.4, §4.5) ────────────────────────
     def _scheduler(self) -> Scheduler:
@@ -724,6 +814,7 @@ class OpencodeRun:
             elif isinstance(item, dict) and item.get("kind") == "need":
                 needs.append((str(item["from"]), str(item["need"])))
         notes = self._take_notes(cfg.role) + tuple(needs)
+        git_notes = self._git_notes.pop(cfg.role, [])
         research = self.clones.path(cfg.role) / "research" / "notes.md"
         return build_brief(BriefInputs(
             goal=self.runner.project.goal, role=cfg.role, description=cfg.description,
@@ -734,6 +825,7 @@ class OpencodeRun:
                             if role.role_type != "researcher" and research.is_file() else None),
             task=plan.task_text if plan is not None else None,
             carry_forward=self._carry_text or None,
+            git_notes=tuple(git_notes),
             extra_sections=(plan.extra_sections if plan is not None else ())
             + (self.overseer.brief_addenda(cfg.role) if self.overseer is not None
                and not self._is_overseer(cfg.role) else ()),

@@ -139,3 +139,65 @@ def test_relative_symlink_escape_refused(tmp_path: Path) -> None:
     (work / "sub" / "up").symlink_to("../../../secrets")
     result = clones.collect("builder", "climb")
     assert not result.merged and "sub/up" in (result.problem or "")
+
+
+def test_rejected_branch_is_set_aside_so_the_next_turn_starts_clean(tmp_path: Path) -> None:
+    main, clones, _ = _setup(tmp_path)
+    clone = clones.ensure("builder", "Sam")
+    (clone / ".github").mkdir()
+    (clone / ".github" / "ci.yml").write_text("on: push\n")
+    result = clones.collect("builder", "sneaky")
+    assert not result.merged and not result.conflict
+    assert result.set_aside == "set_aside/01.patch"
+    patch = (clones.tool_dir("builder") / result.set_aside).read_text()
+    assert "protected" in patch and "ci.yml" in patch
+    assert not (clone / ".github").exists()
+    # The next turn is not poisoned by the rejected commit.
+    (clone / "ok.py").write_text("x = 1\n")
+    assert clones.sync_from_main("builder")
+    again = clones.collect("builder", "fine now")
+    assert again.merged and again.changed_files == ["ok.py"]
+    assert not (main.working_dir / ".github").exists()
+
+
+def test_conflict_is_resolved_in_the_worktree_then_merged(tmp_path: Path) -> None:
+    main, clones, _ = _setup(tmp_path)
+    a, b = clones.ensure("a", "A"), clones.ensure("b", "B")
+    (a / "same.py").write_text("a\n")
+    (b / "same.py").write_text("b\n")
+    assert clones.collect("a", "a").merged
+    first = clones.collect("b", "b")
+    assert first.conflict and first.set_aside is None
+    assert clones.start_conflict_resolution("b") == ["same.py"]
+    text = (b / "same.py").read_text()
+    assert "<<<<<<< " in text and ">>>>>>> " in text
+    # Unresolved markers are never collected.
+    blocked = clones.collect("b", "b")
+    assert not blocked.merged and blocked.conflict and "same.py" in (blocked.problem or "")
+    (b / "same.py").write_text("a\nb\n")  # the agent resolves it
+    assert clones.conflicted_files("b") == []
+    done = clones.collect("b", "b, merged with a")
+    assert done.merged, done.problem
+    assert (main.working_dir / "same.py").read_text() == "a\nb\n"
+
+
+def test_sync_conflict_keeps_markers_for_the_agent(tmp_path: Path) -> None:
+    _, clones, _ = _setup(tmp_path)
+    a, b = clones.ensure("a", "A"), clones.ensure("b", "B")
+    (b / "same.py").write_text("b\n")      # unmerged work left from a turn with no result
+    (a / "same.py").write_text("a\n")
+    assert clones.collect("a", "a").merged
+    assert not clones.sync_from_main("b", keep_conflicts=True)
+    assert clones.conflicted_files("b") == ["same.py"]
+    (b / "same.py").write_text("ab\n")
+    assert clones.sync_from_main("b")      # resolved: the merge completes
+    assert not clones.merging("b")
+
+
+def test_markers_committed_outside_a_merge_are_refused(tmp_path: Path) -> None:
+    main, clones, _ = _setup(tmp_path)
+    clone = clones.ensure("builder", "Sam")
+    (clone / "x.py").write_text("<<<<<<< HEAD\na\n=======\nb\n>>>>>>> main\n")
+    result = clones.collect("builder", "oops")
+    assert not result.merged and "conflict markers" in (result.problem or "")
+    assert result.set_aside and not (main.working_dir / "x.py").exists()
