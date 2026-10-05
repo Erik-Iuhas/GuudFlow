@@ -95,6 +95,7 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             declared_local_tools=list(a.get("declared_local_tools") or []),
             declared_mcp_servers=list(a.get("declared_mcp_servers") or []),
             persona_id=a.get("persona_id"),
+            name=(str(a.get("name") or "").strip() or None),
             model_tier=a.get("model_tier", "solid"),
             model_id=str(a.get("model_id") or ""),
             agent_class_role_type=a.get("agent_class_role_type"),

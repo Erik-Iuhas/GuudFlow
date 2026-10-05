@@ -21,6 +21,9 @@ DETAIL_SHAPES: dict[str, dict[str, str]] = {
         "model": "string", "warnings": "string[]",
         "prompt?": "{ digest: string; layers: string[] }",
     },
+    "TEAM": {
+        "members": "{ role: string; name: string; role_type: string }[]",
+    },
     "AGENT_RESULT": {
         "result": "Record<string, unknown>", "cost?": "number",
         "tokens?": "Record<string, number>", "tool_calls?": "[string, string][]",

@@ -89,6 +89,13 @@ async def test_continuation_carries_cards_and_never_spirals(tmp_path: Path,
                  if "Your turn: game_logic_dev" in str(r["messages"]))
     assert "previous run, commit" in brief and "reset() is missing entirely" in brief
 
+    # Every worker has a name: the board says who is who, and the brief introduces the team.
+    team = next(s for s in board if s.type is SignalType.TEAM)
+    members = {m["role"]: m["name"] for m in json.loads(team.detail or "{}")["members"]}
+    assert set(members) == {"planner", "game_logic_dev", "reviewer", "overseer"}
+    assert f"You are **{members['game_logic_dev']}**" in brief
+    assert f"**{members['reviewer']}**, reviewer" in brief
+
     # No spiral: each role ran once, no notes ping-pong, no blocked cycles.
     starts = [s.from_agent for s in board if s.type is SignalType.STARTED]
     assert sorted(starts) == ["game_logic_dev", "reviewer"]

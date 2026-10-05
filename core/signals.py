@@ -129,6 +129,8 @@ class SignalType(str, Enum):
     # What an agent was allowed to do for this spawn: the effective capability
     # block plus a digest of the compiled permission rules (plan §5.7).
     CAPABILITIES = "CAPABILITIES"
+    # Who is on the team: each role's worker name (core/crew.py), posted at run start.
+    TEAM = "TEAM"
     # The validated structured result an agent submitted for a turn (plan §4.2).
     AGENT_RESULT = "AGENT_RESULT"
     # One finished opencode tool call (completed or error), from the event bridge.

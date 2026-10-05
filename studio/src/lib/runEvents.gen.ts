@@ -47,6 +47,7 @@ export type SignalType =
   | "PR_READY"
   | "PROTOCOL_CLEANUP_AUTO"
   | "CAPABILITIES"
+  | "TEAM"
   | "AGENT_RESULT"
   | "TOOL_CALL"
   | "AGENT_TODO"
@@ -85,6 +86,10 @@ export interface CapabilitiesDetail {
   model: string;
   warnings: string[];
   prompt?: { digest: string; layers: string[] };
+}
+
+export interface TeamDetail {
+  members: { role: string; name: string; role_type: string }[];
 }
 
 export interface AgentResultDetail {
@@ -204,6 +209,7 @@ export interface ScreenshotReadyDetail {
 
 export interface DetailByType {
   CAPABILITIES: CapabilitiesDetail;
+  TEAM: TeamDetail;
   AGENT_RESULT: AgentResultDetail;
   TOOL_CALL: ToolCallDetail;
   TASK_MOVED: TaskMovedDetail;
@@ -226,6 +232,7 @@ export type TypedSignal = {
 
 export const JSON_DETAIL_TYPES: ReadonlySet<SignalType> = new Set([
   "CAPABILITIES",
+  "TEAM",
   "AGENT_RESULT",
   "TOOL_CALL",
   "TASK_MOVED",

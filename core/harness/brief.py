@@ -13,7 +13,10 @@ per the project rule that external content is always delimited.
 from __future__ import annotations
 
 import secrets
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+
+from core.crew import label
 
 SUBMIT_TOOL_NAME = "guudflow_submit_result"
 
@@ -67,6 +70,9 @@ class BriefInputs:
     carry_forward: str | None = None                 # continuation brief (§11.4)
     git_notes: tuple[str, ...] = ()                  # set-aside work, conflicts to resolve
     extra_sections: tuple[tuple[str, str], ...] = field(default=())
+    names: Mapping[str, str] = field(default_factory=dict)  # role -> worker name (core/crew.py)
+    team: str | None = None                          # the "Your team" section
+    review_from: str | None = None                   # the reviewer whose findings these are
 
 
 def _section(title: str, body: str) -> str:
@@ -75,15 +81,21 @@ def _section(title: str, body: str) -> str:
 
 def build_brief(inp: BriefInputs) -> str:
     """Render the brief as markdown sections, most important first."""
-    parts: list[str] = [f"# Your turn: {inp.role}\n"]
+    who = lambda role: label(inp.names.get(role, role), role)  # noqa: E731 — local shorthand
+    # The role stays first: "Your turn: <role>" is what tooling and tests key on.
+    me = inp.names.get(inp.role, "")
+    parts: list[str] = [f"# Your turn: {inp.role}{f' — {me}' if me and me != inp.role else ''}\n"]
     if inp.git_notes:
         parts.append(_section("Before anything else: your folder",
                               "\n\n".join(inp.git_notes)))
     if inp.review_issues:
         issues = "\n".join(f"- `{i.file}`: {i.detail}" for i in inp.review_issues)
+        by = f" from {who(inp.review_from)}" if inp.review_from else ""
         parts.append(_section(
-            f"Fix these review findings first (review round {inp.review_round})", issues))
+            f"Fix these review findings{by} first (review round {inp.review_round})", issues))
     parts.append(_section("Project goal", inp.goal))
+    if inp.team:
+        parts.append(_section("Your team", inp.team))
     parts.append(_section("Your job", inp.description or f"Act as the team's {inp.role}."))
     if inp.task:
         parts.append(_section("Your task", inp.task))
@@ -93,11 +105,12 @@ def build_brief(inp: BriefInputs) -> str:
         lines = []
         for up in inp.upstream:
             files = f" Files: {', '.join(up.files_changed)}." if up.files_changed else ""
-            lines.append(f"- **{up.role}**: {up.summary}{files}")
+            lines.append(f"- **{who(up.role)}**: {up.summary}{files}")
         parts.append(_section("What your teammates already finished (merged into your branch)",
                               "\n".join(lines)))
     if inp.notes:
-        notes = "\n\n".join(wrap_untrusted(f"note from {who}", text) for who, text in inp.notes)
+        notes = "\n\n".join(wrap_untrusted(f"note from {who(sender)}", text)
+                              for sender, text in inp.notes)
         parts.append(_section("Notes addressed to you", notes))
     if inp.human_comments:
         parts.append(_section("Comments from the human",
@@ -130,7 +143,7 @@ def _how_to_work(is_reviewer: bool) -> str:
                   "(with why). If the call is rejected, fix the listed problems and call it again.")
     return (f"{doing}\n\nYou cannot talk to other agents directly and nobody will answer "
             f"questions mid-turn: decide sensibly, note assumptions in your summary, and use "
-            f"`notes_for` to leave a note for another role.\n\n{finish}")
+            f"`notes_for` to leave a note for a teammate (by name or role).\n\n{finish}")
 
 
 def retry_brief(error: str | None) -> str:

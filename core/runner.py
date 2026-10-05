@@ -67,6 +67,8 @@ class AgentConfig:
     declared_local_tools: list[str] = field(default_factory=list)
     declared_mcp_servers: list[str] = field(default_factory=list)
     persona_id: str | None = None
+    # The worker's name (core/crew.py). Unset: the persona's name, else a stable pick.
+    name: str | None = None
     model_tier: str = "solid"  # "heavy" | "solid" | "fast"
     # Optional explicit model id (e.g. "mistral-large-latest"). When set
     # AND the model's tier matches `model_tier`, the registry returns this
@@ -244,6 +246,8 @@ class AgentRunner:
         self.harness_settings: "HarnessSettings | None" = None
         self.llm = llm
         self._model_registry = model_registry
+        # role -> worker name (core/crew.py); filled when the run starts.
+        self.crew: dict[str, str] = {}
         self.memory_writer = memory_writer
         self.quip_engine = quip_engine
         self.max_wall_seconds = max_wall_seconds
@@ -562,11 +566,18 @@ class AgentRunner:
 
     def _attach_personas(self) -> None:
         """Record who plays each role: hired personas, commit authors, quip voices."""
+        from core.crew import crew_names
+
         personas = self._load_personas()
         for cfg in self.project.agents:
             if cfg.role in personas and cfg.persona_id:
                 self.workspace.hired_personas[cfg.role] = cfg.persona_id
-        # Each commit carries the persona's display name (e.g. "Sarah (developer)").
+        # Every worker has a name (core/crew.py): set on the team, the persona's, or a stable pick.
+        self.crew = crew_names(
+            self.project.project_id, [cfg.role for cfg in self.project.agents],
+            explicit={cfg.role: cfg.name for cfg in self.project.agents},
+            persona_names={role: p.profile.name for role, p in personas.items()})
+        # Legacy git workspace: persona names also name branches, so only persona-backed roles.
         self.git._hired_personas = {
             cfg.role: (personas[cfg.role].profile.name if cfg.role in personas else cfg.role)
             or cfg.role
@@ -579,14 +590,14 @@ class AgentRunner:
         voices = []
         for cfg in self.project.agents:
             persona = personas.get(cfg.role)
+            name = self.crew[cfg.role]
             if persona is not None:
-                name = persona.profile.name or cfg.role
                 char = persona.character_layer() or (
                     f"You are {name}, a specialist on a software team."
                 )
             else:
-                name = cfg.role.capitalize()
-                char = f"You are the {cfg.role} on a software team. {cfg.description}".strip()
+                char = (f"You are {name}, the {cfg.role} on a software team. "
+                        f"{cfg.description}").strip()
             voices.append(AgentVoice(role=cfg.role, name=name, character=char))
         self.quip_engine.set_voices(voices)
         # Dynamic voice synthesis needs workspace access.

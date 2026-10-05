@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
+from core.crew import Member, crew_names, label as crew_label, resolve_recipient, team_section
 from core.harness.brief import (
     CONFLICT_HOWTO as _CONFLICT_HOWTO,
     BriefInputs,
@@ -176,6 +177,8 @@ class OpencodeRun:
         self._git_notes: dict[str, list[str]] = {}
         self.backlog: list[BacklogItem] = []
         self._roles: dict[str, _Role] = {}
+        # role -> worker name (core/crew.py), set when the run starts.
+        self.names: dict[str, str] = {}
         self._http: RunningHttpServer | None = None
         self._gw_http: RunningHttpServer | None = None
         self._registry: ModelRegistry | None = runner._model_registry  # noqa: SLF001
@@ -207,6 +210,7 @@ class OpencodeRun:
                 post=lambda kind, role, summary, detail: self._post(kind, role, summary, detail),
                 escalate=lambda role, summary, detail: self._escalate(role, summary, detail))
         self._setup_overseer()
+        self._name_the_team()
         carried = self._load_carry_forward()
         # The project backlog items this run took (plan §13).
         self.backlog = project_runs.selection(self.runner.run_root)
@@ -257,6 +261,22 @@ class OpencodeRun:
             if unsubscribe is not None:
                 unsubscribe()
             await self.shutdown()
+
+    def _name_the_team(self) -> None:
+        """Give every role a worker name (the overseer too) and tell the board who is who."""
+        known = getattr(self.runner, "crew", {}) or {}
+        self.names = crew_names(
+            self.runner.project.project_id, [c.role for c in self.agents],
+            explicit={c.role: known.get(c.role) or c.name for c in self.agents})
+        members = [{"role": c.role, "name": self.names[c.role],
+                    "role_type": self._roles[c.role].role_type} for c in self.agents]
+        self._post(SignalType.TEAM, "runner",
+                   "the team: " + ", ".join(crew_label(m["name"], m["role"]) for m in members),
+                   json.dumps({"members": members}))
+
+    def _label(self, role: str) -> str:
+        """"Maya (builder)" for a role on this team."""
+        return crew_label(self.names.get(role, role), role)
 
     def _setup_overseer(self) -> None:
         """Add the overseer role when the settings call for one (plan §11.1)."""
@@ -713,8 +733,9 @@ class OpencodeRun:
                                "tokens": stats.tokens, "tool_calls": stats.tool_calls,
                                "commits": collected.new_commits,
                                "files": collected.changed_files}))
-        for to_role, note in getattr(result, "notes_for", {}).items():
-            self._post_note(name, to_role, note)
+        for to, note in getattr(result, "notes_for", {}).items():
+            # Notes may be addressed by a teammate's name or role.
+            self._post_note(name, resolve_recipient(to, self.names) or to, note)
         if not collected.merged:
             if collected.set_aside:
                 self._note_set_aside(name, str(collected.problem), collected.set_aside)
@@ -829,12 +850,14 @@ class OpencodeRun:
             for dep in cfg.depends_on if dep in self.results)
         issues: tuple[ReviewIssue, ...] = ()
         review_round = 0
+        review_from: str | None = None
         needs: list[tuple[str, str]] = []
         for item in self._scheduler().drain_pending_input(cfg.role):
             if isinstance(item, dict) and item.get("kind") == "review":
                 issues += tuple(ReviewIssue(str(i["file"]), str(i["detail"]))
                                 for i in item.get("issues", []))
                 review_round = self._scheduler().review_rounds(str(item["reviewer"]), cfg.role)
+                review_from = str(item["reviewer"])
             elif isinstance(item, dict) and item.get("kind") == "need":
                 needs.append((str(item["from"]), str(item["need"])))
         notes = self._take_notes(cfg.role) + tuple(needs)
@@ -850,6 +873,10 @@ class OpencodeRun:
             task=plan.task_text if plan is not None else None,
             carry_forward=self._carry_text or None,
             git_notes=tuple(git_notes),
+            names=self.names, review_from=review_from,
+            team=team_section(cfg.role, [
+                Member(c.role, self.names.get(c.role, c.role), self._roles[c.role].role_type,
+                       c.description) for c in self.agents if c.role in self._roles]),
             extra_sections=(plan.extra_sections if plan is not None else ())
             + ((("This run's backlog items", backlog_text(self.backlog)),)
                if self.backlog and self.flow is None else ())
@@ -872,7 +899,8 @@ class OpencodeRun:
         return tuple(notes)
 
     def _post_note(self, from_role: str, to_role: str, text: str) -> None:
-        self._post(SignalType.AGENT_MESSAGE, from_role, f"note → {to_role}",
+        self._post(SignalType.AGENT_MESSAGE, from_role,
+                   f"{self._label(from_role)} → {self._label(to_role)}: note",
                    json.dumps({"from": from_role, "to": to_role, "message": text}))
 
     def _link_tool_dir(self, role: str, workdir: Path) -> None:
@@ -921,19 +949,22 @@ class OpencodeRun:
 
     def _post_note_tool(self) -> McpTool:
         async def handler(identity: McpIdentity, args: dict[str, Any]) -> ToolResult:
-            to_role, text = str(args.get("to_role", "")), str(args.get("text", "")).strip()
+            to, text = str(args.get("to_role", "")), str(args.get("text", "")).strip()
+            to_role = resolve_recipient(to, self.names) or to
             if to_role not in self._roles or to_role == identity.role:
-                return ToolResult(f"unknown role {to_role!r}; roles: {', '.join(self._roles)}",
-                                  is_error=True)
+                team = ", ".join(self._label(r) for r in self._roles if r != identity.role)
+                return ToolResult(f"unknown teammate {to!r}; the team: {team}", is_error=True)
             if not text:
                 return ToolResult("text must not be empty", is_error=True)
             self._post_note(identity.role, to_role, text)
-            return ToolResult(f"Note posted for {to_role}; they will see it on their next turn.")
+            return ToolResult(f"Note posted for {self._label(to_role)}; "
+                              "they will see it on their next turn.")
 
         return McpTool(
             name="post_note",
-            description="Leave a note for another role. They read it at the start of their "
-                        "next turn. Nobody answers mid-turn, so do not wait for a reply.",
+            description="Leave a note for a teammate (by name or role). They read it at the "
+                        "start of their next turn. Nobody answers mid-turn, so do not wait "
+                        "for a reply.",
             input_schema={"type": "object", "additionalProperties": False,
                           "properties": {"to_role": {"type": "string"},
                                          "text": {"type": "string"}},
@@ -981,7 +1012,7 @@ class OpencodeRun:
         return int(getattr(scheduler, "_spawn_count", {}).get(role, 0)) if scheduler else 0
 
     def _author(self, cfg: "AgentConfig") -> str:
-        return (cfg.persona_id or cfg.role).split("-")[0].capitalize()
+        return self.names.get(cfg.role) or (cfg.persona_id or cfg.role).split("-")[0].capitalize()
 
 
 def _result_line(role: str, result: BaseModel) -> str:
