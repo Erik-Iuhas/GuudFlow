@@ -97,19 +97,30 @@ function ToolRow({ signal }: { signal: TypedSignal }): ReactNode {
 export interface AgentLaneProps {
   role: string;
   selected?: boolean;
+  /** Open the role's details (tool calls, full last result). */
+  onOpen?: (role: string) => void;
 }
 
-/** One agent's column: state, capability badge, current card, streaming tool calls, last result. */
-export const AgentLane = memo(function AgentLane({ role, selected }: AgentLaneProps) {
+/** Strip a result to one plain line for the compact card. */
+function oneLine(text: string | undefined): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * One agent as a compact card: state, capability badge, current card, counts and a
+ * short last result. Tool calls and the full result open in `AgentDetail`.
+ */
+export const AgentLane = memo(function AgentLane({ role, selected, onOpen }: AgentLaneProps) {
   const agent = useRunStore((s) => s.agents[role]);
-  const feed = useRunStore((s) => s.toolFeed[role]) ?? EMPTY_FEED;
   const card = useRunStore((s) => {
     const id = s.agents[role]?.card;
     return id ? s.cards[id] : undefined;
   });
-  const resultSignal = useRunStore((s) => {
+  const resultSummary = useRunStore((s) => {
     const id = s.agents[role]?.lastResultSignalId;
-    return id ? s.byId.get(id) : undefined;
+    const sig = id ? s.byId.get(id) : undefined;
+    const result = (sig?.data as { result?: { summary?: unknown } } | null | undefined)?.result;
+    return typeof result?.summary === "string" ? result.summary : sig?.summary;
   });
   const state: AgentState = agent?.state ?? "idle";
 
@@ -120,17 +131,17 @@ export const AgentLane = memo(function AgentLane({ role, selected }: AgentLanePr
       data-testid={`lane-${role}`}
       data-state={state}
       className={cn(
-        "flex h-full min-h-0 min-w-[18rem] max-w-md flex-1 basis-72 flex-col rounded-lg border bg-card text-card-foreground",
+        "flex min-w-0 flex-col rounded-lg border bg-card text-card-foreground",
         selected ? "border-ring ring-2 ring-ring" : "border-border",
       )}
     >
-      <header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+      <header className="flex flex-wrap items-center gap-2 px-3 pt-2">
         <h3 className="m-0 truncate text-sm font-semibold">{role}</h3>
         <Badge variant={STATE_VARIANT[state]}>{STATE_LABEL[state]}</Badge>
         {agent?.capabilities && <CapabilityBadge role={role} capabilities={agent.capabilities} />}
       </header>
 
-      <div className="border-b border-border px-3 py-2 text-xs" data-testid={`lane-card-${role}`}>
+      <div className="px-3 pt-1 text-xs" data-testid={`lane-card-${role}`}>
         {card ? (
           <div className="flex items-center gap-2">
             <Badge variant="outline" className={cn("shrink-0", COLUMN_CLASS[card.column])}>
@@ -146,6 +157,54 @@ export const AgentLane = memo(function AgentLane({ role, selected }: AgentLanePr
         )}
       </div>
 
+      <div className="px-3 pb-2 pt-1 text-sm" data-testid={`lane-result-${role}`}>
+        <p className="m-0 line-clamp-2 text-muted-foreground" title={oneLine(resultSummary)}>
+          {resultSummary ? oneLine(resultSummary) : "No result yet."}
+        </p>
+        <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>
+            {agent?.toolCalls ?? 0} calls · {formatUsd(agent?.cost ?? 0)}
+          </span>
+          {onOpen && (
+            <button
+              type="button"
+              onClick={() => onOpen(role)}
+              className="rounded px-1 text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`Details for ${role}`}
+            >
+              Details
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+});
+
+/** A role's tool calls and full last result (opened from its card or graph node). */
+export function AgentDetail({ role }: { role: string }) {
+  const agent = useRunStore((s) => s.agents[role]);
+  const feed = useRunStore((s) => s.toolFeed[role]) ?? EMPTY_FEED;
+  const resultSignal = useRunStore((s) => {
+    const id = s.agents[role]?.lastResultSignalId;
+    return id ? s.byId.get(id) : undefined;
+  });
+  return (
+    <div className="flex min-h-0 flex-1 flex-col" data-testid={`agent-detail-${role}`}>
+      <div className="max-h-[40%] shrink-0 overflow-y-auto border-b border-border px-3 py-2 text-sm">
+        <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+          <span>Last result</span>
+          <span>
+            {agent?.spawns ?? 0} turns · {agent?.toolCalls ?? 0} calls · {formatUsd(agent?.cost ?? 0)}
+          </span>
+        </div>
+        {resultSignal ? (
+          (renderHarnessBody(resultSignal) ?? <p className="m-0">{resultSignal.summary}</p>)
+        ) : (
+          <span className="text-muted-foreground">No result yet.</span>
+        )}
+      </div>
+      <div className="px-3 pt-2 text-xs font-medium text-muted-foreground">Tool calls</div>
       <VirtualFeed
         className="min-h-0 flex-1"
         label={`${role} tool calls`}
@@ -156,20 +215,6 @@ export const AgentLane = memo(function AgentLane({ role, selected }: AgentLanePr
         estimateSize={32}
         empty="No tool calls yet."
       />
-
-      <footer className="max-h-56 overflow-y-auto border-t border-border px-3 py-2 text-sm" data-testid={`lane-result-${role}`}>
-        <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-          <span>Last result</span>
-          <span>
-            {agent?.toolCalls ?? 0} calls · {formatUsd(agent?.cost ?? 0)}
-          </span>
-        </div>
-        {resultSignal ? (
-          (renderHarnessBody(resultSignal) ?? <p className="m-0">{resultSignal.summary}</p>)
-        ) : (
-          <span className="text-muted-foreground">No result yet.</span>
-        )}
-      </footer>
-    </section>
+    </div>
   );
-});
+}

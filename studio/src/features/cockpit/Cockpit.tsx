@@ -18,7 +18,7 @@ import { cn } from "../../lib/utils";
 import type { RunStore } from "../../stores/runEvents";
 import { RunStoreProvider, useRunStore } from "../../stores/runStoreContext";
 import type { ProjectConfig, RunMeta } from "../../types";
-import { AgentLane } from "./AgentLane";
+import { AgentDetail, AgentLane } from "./AgentLane";
 import { ApprovalsBar } from "./ApprovalsBar";
 import { BudgetMeter } from "./BudgetMeter";
 import { ArtifactGallery } from "../artifacts/ArtifactGallery";
@@ -121,12 +121,12 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
   const [panelOpen, setPanelOpen] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
+  const [detailRole, setDetailRole] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"stop" | "resume" | null>(null);
 
   const graphRef = useRef<HTMLDivElement>(null);
   const commentRef = useRef<HTMLInputElement>(null);
-  const lanesRef = useRef<HTMLDivElement>(null);
 
   const specs = useMemo(() => roleSpecs(project?.agents), [project]);
   const allSpecs = useMemo(() => mergeRoles(specs, Object.keys(agents)), [specs, agents]);
@@ -170,10 +170,10 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Clicking a node or an agent card opens that role's tool calls and full result.
   const selectRole = useCallback((role: string) => {
     setSelectedRole(role);
-    const lane = lanesRef.current?.querySelector<HTMLElement>(`[data-testid="lane-${CSS.escape(role)}"]`);
-    lane?.scrollIntoView?.({ behavior: "smooth", inline: "center", block: "nearest" });
+    setDetailRole(role);
   }, []);
 
   async function stop() {
@@ -218,7 +218,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
   );
 
   return (
-    <div className="flex h-[calc(100dvh-6rem)] min-h-[32rem] flex-col gap-2 text-foreground" data-testid="cockpit">
+    <div className="flex flex-col gap-2 text-foreground" data-testid="cockpit">
       {/* Header */}
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-card px-3 py-2">
         <h1 className="m-0 text-base font-semibold">
@@ -304,7 +304,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
       )}
 
       {/* Body */}
-      <div className={cn("flex min-h-0 flex-1 gap-2", desktop ? "flex-row" : "flex-col")}>
+      <div className={cn("flex gap-2", desktop ? "h-[34rem] flex-row" : "flex-col")}>
         {graphOpen && (
           <div
             ref={graphRef}
@@ -321,23 +321,24 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
         )}
 
         <div
-          ref={lanesRef}
-          className="flex min-h-0 min-w-0 flex-1 snap-x gap-2 overflow-x-auto pb-1 [scrollbar-gutter:stable]"
+          className="grid min-h-0 min-w-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-2 overflow-y-auto"
           data-testid="lanes"
-          aria-label="Agent lanes"
+          aria-label="Agents"
           role="group"
         >
           {anyStarted ? (
-            laneRoles.map((role) => <AgentLane key={role} role={role} selected={selectedRole === role} />)
+            laneRoles.map((role) => (
+              <AgentLane key={role} role={role} selected={selectedRole === role} onOpen={selectRole} />
+            ))
           ) : (
-            <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground" data-testid="waiting">
+            <div className="col-span-full flex min-h-32 items-center justify-center rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground" data-testid="waiting">
               {socket.status === "error" ? "The live feed is not connected." : "Waiting for the first agent…"}
             </div>
           )}
         </div>
 
         {desktop && panelOpen && (
-          <aside className="flex w-[380px] shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card" aria-label="Run panels">
+          <aside className="flex w-[400px] shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-card" aria-label="Run panels">
             {sidePanel}
           </aside>
         )}
@@ -352,6 +353,22 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           </SheetContent>
         </Sheet>
       )}
+
+      <Sheet
+        open={detailRole !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDetailRole(null);
+            setSelectedRole(null);
+          }
+        }}
+      >
+        <SheetContent side="right" className="flex w-full max-w-lg flex-col gap-0 p-0">
+          <SheetTitle className="px-4 pb-1 pt-4 text-base">{detailRole}</SheetTitle>
+          <SheetDescription className="px-4 pb-2 text-xs">Tool calls and the last result for this role.</SheetDescription>
+          {detailRole && <AgentDetail role={detailRole} />}
+        </SheetContent>
+      </Sheet>
 
       {/* Bottom bar */}
       <footer className="flex flex-col gap-2 rounded-lg border border-border bg-card px-3 py-2" data-testid="bottom-bar">
