@@ -7,12 +7,18 @@
 # pinned opencode binary is copied from the build context (worker/sandbox_manager.py
 # puts the host's .tools/opencode native binary there). Network clients are deleted;
 # the container has no egress anyway.
+#
+# The opencode binary is Bun-compiled; with BUN_BE_BUN=1 it runs as the Bun CLI. The
+# `bun` shim gives JavaScript projects a test runner (`bun test`) without Node or a
+# download. Installs (`bun install/add`, `bunx`) are denied by the permission ruleset.
 
 FROM buildpack-deps:bookworm-scm
 
 COPY opencode /usr/local/bin/opencode
 
 RUN chmod 0755 /usr/local/bin/opencode \
+ && printf '#!/bin/sh\nexec env BUN_BE_BUN=1 /usr/local/bin/opencode "$@"\n' > /usr/local/bin/bun \
+ && chmod 0755 /usr/local/bin/bun \
  && rm -f /usr/bin/curl /usr/bin/wget /usr/bin/ssh /usr/bin/scp /usr/bin/sftp \
           /usr/bin/ssh-keyscan /usr/bin/rsync /usr/bin/nc /bin/nc \
  && useradd --uid 10001 --create-home --home-dir /home/agent --shell /bin/bash agent \

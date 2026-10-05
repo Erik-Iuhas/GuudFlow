@@ -99,3 +99,15 @@ def test_to_ruleset() -> None:
     assert [r["permission"] for r in rs] == [
         k for k, v in p.items() for _ in ([0] if isinstance(v, str) else v)]
     assert [r["pattern"] for r in rs if r["permission"] == "edit"] == list(p["edit"])
+
+
+@pytest.mark.parametrize("role", ["builder", "reviewer", "tester"])
+def test_bun_runs_tests_but_never_installs(role: str) -> None:
+    """The sandbox's `bun` shim may run tests and scripts; package installs stay denied."""
+    bash = _perm(role)["bash"]
+    assert decide(bash, "bun test") == "allow"
+    assert decide(bash, "bun test tests/game.test.js") == "allow"
+    assert decide(bash, "bun run build.js") == "allow"
+    for cmd in ("bun install", "bun add left-pad", "bun i left-pad", "bunx cowsay hi",
+                "bun x cowsay", "bun upgrade", "bun pm cache", "bun create vite"):
+        assert decide(bash, cmd) == "deny", cmd

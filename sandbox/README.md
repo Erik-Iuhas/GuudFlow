@@ -6,7 +6,17 @@ The minimal image used as the per-run execution sandbox in production.
 at run start. Each run gets its own ephemeral container with the workspace
 mounted, the persona roster read-only, and §29's resource caps applied.
 
-## What's in the image
+## The opencode agent image (`agent-opencode.Dockerfile`)
+
+The image the opencode harness runs (one `opencode serve` per role). It holds git,
+python3 and the pinned opencode binary, plus a `bun` shim: opencode is Bun-compiled,
+and `BUN_BE_BUN=1 opencode` runs it as the Bun CLI. So JavaScript and TypeScript
+projects get `bun test` / `bun run` with no Node and no download. The permission
+ruleset allows `bun test*` and `bun run *` and denies `bun install/add/x`, `bunx`
+and the other package commands (`core/harness/capabilities.py`). The rest of this
+file describes the legacy image below.
+
+## What's in the legacy image
 
 - `python:3.11-slim` base
 - `bash` (for shell-mode `code-exec`)

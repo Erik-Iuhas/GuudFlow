@@ -52,12 +52,14 @@ READONLY_BASH = ("git status*", "git diff*", "git log*", "git show*", "git branc
 COMMIT_BASH = ("git add*", "git commit*", "git checkout -b *", "git switch *", "git restore *",
                "mkdir *")
 TEST_RUNNER_BASH = ("pytest*", "python -m pytest*", "python3 -m pytest*", "npm test*",
-                    "npm run *", "node *", "python *", "python3 *", "npx vitest*", "npx tsc*")
+                    "npm run *", "node *", "python *", "python3 *", "npx vitest*", "npx tsc*",
+                    "bun test*", "bun run *")
 # Always denied, rendered after the allows. Installs go through the IT agent.
 DENIED_BASH = ("git push*", "git remote*", "git config*", "pip *", "pip3 *", "python -m pip*",
                "python3 -m pip*", "npm install*", "npm i *", "npm ci*", "yarn *", "pnpm *",
                "uv *", "poetry *", "apt*", "curl *", "wget *", "ssh *", "scp *", "sudo *",
-               "docker *", "nc *")
+               "docker *", "nc *", "bun install*", "bun add*", "bun i *", "bun x *", "bunx *",
+               "bun upgrade*", "bun pm *", "bun create*", "bun link*")
 IT_AGENT_BASH = ("pip install *", "pip3 install *", "npm install *")
 
 ALWAYS_MCP = frozenset({"post_note", "read_board", "ask_human", "report_progress"})
