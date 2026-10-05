@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from api.auth import require_bearer
-from core.runner import LOCAL_TOOL_CLASSES
+from agents.tools.catalog import LOCAL_TOOL_CLASSES
 from core.tool_manifest import BASELINE_LOCAL_SCOPES
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])

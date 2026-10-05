@@ -439,48 +439,6 @@ def test_desk_seeds_with_missing_required_fields_warns(tmp_path):
     assert "tom-v1" not in result.desk_seeds
 
 
-def test_runner_materializes_desk_seeds_to_project_overlay(tmp_path):
-    """Spec §4: at run start, materialize desk_seeds from proposal into project overlay
-    BEFORE _build_agents() so DeskIndex sees them on first iteration.
-    """
-    from core.runner import AgentRunner, ProjectConfig, AgentConfig
-
-    project_dir = tmp_path / "data" / "projects" / "test-proj"
-    project_dir.mkdir(parents=True)
-
-    project = ProjectConfig(
-        project_id="test-proj",
-        goal="Test",
-        agents=[AgentConfig(role="backend", persona_id="tom-v1")],
-        desk_seeds={
-            "tom-v1": [
-                {
-                    "name": "graphql-conventions",
-                    "triggers": ["graphql", "schema"],
-                    "body": "# GraphQL\nUse PascalCase for types.",
-                    "kind": "convention",
-                    "priority": "high",
-                },
-            ]
-        },
-    )
-
-    # Build a minimal AgentRunner just to call _materialize_desk_seeds().
-    # We don't need a full runner — just project_dir + project on the instance.
-    runner = AgentRunner.__new__(AgentRunner)
-    runner.project = project
-    runner.project_dir = project_dir
-
-    runner._materialize_desk_seeds()
-
-    expected = project_dir / "persona_desks" / "tom-v1" / "graphql-conventions.md"
-    assert expected.exists(), "desk seed must be materialized to project overlay"
-    content = expected.read_text(encoding="utf-8")
-    assert "PascalCase" in content
-    assert "triggers:" in content
-    assert "graphql" in content
-
-
 def test_role_template_seeds_new_persona_desk(tmp_path):
     """Spec §9: bootstrap a new persona; assert persona desk contains role template files."""
     from worker.job_runner import _bootstrap_personas

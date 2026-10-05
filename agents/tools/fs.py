@@ -16,6 +16,7 @@ isolation). Stage 5's runner will wire up real claim/release emitters.
 
 from __future__ import annotations
 
+import difflib
 import json
 from typing import Any, Awaitable, Callable
 
@@ -33,6 +34,26 @@ ReleaseEmitter = Callable[[str, str, str | None], Awaitable[None]]
 "written" means the file was written to disk; git commit happens later
 in _auto_commit() and is signalled separately via GIT_COMMIT."""
 
+
+def closest_matches(search: str, file_content: str, top_n: int = 3) -> list[str]:
+    """Return up to `top_n` snippets from the file closest to the search string.
+
+    Uses difflib sequence matching over a window of lines equal to the search
+    line-count. Returns formatted snippet strings for the retry hint.
+    """
+    search_lines = search.splitlines()
+    win = max(len(search_lines), 1)
+    file_lines = file_content.splitlines()
+    candidates: list[tuple[float, str]] = []
+
+    for start in range(0, max(1, len(file_lines) - win + 1)):
+        chunk = "\n".join(file_lines[start:start + win])
+        ratio = difflib.SequenceMatcher(None, search, chunk).ratio()
+        lineno = start + 1
+        candidates.append((ratio, f"  Line {lineno}-{lineno + win - 1}: {chunk[:120]!r}"))
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return [c[1] for c in candidates[:top_n]]
 
 def _err(msg: str) -> dict[str, Any]:
     return {"error": msg}
@@ -660,8 +681,7 @@ class FsEdit(_ClaimingTool):
         if count == 0:
             # M1 §6: surface closest matches so the agent can correct on retry
             # without re-reading the file in full.
-            from core.edit_blocks import _closest_matches
-            close = _closest_matches(find, content, top_n=3)
+            close = closest_matches(find, content, top_n=3)
             hint = ("\nClosest matches in file:\n" + "\n".join(close)) if close else ""
             return _err(f"SEARCH_NOT_FOUND: {path}{hint}")
         if not replace_all and count > 1:

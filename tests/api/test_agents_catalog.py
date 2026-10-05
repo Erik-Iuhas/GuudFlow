@@ -19,7 +19,6 @@ async def test_get_catalog_returns_list_of_archetypes(client):
     assert "archetypes" in body
     names = {a["name"] for a in body["archetypes"]}
     assert "code_reviewer" in names
-    assert "tech_lead" in names
     assert "requirements_writer" in names
 
 
@@ -43,11 +42,11 @@ async def test_catalog_endpoint_does_not_require_auth(client):
 
 
 async def test_catalog_lookup_by_name(client):
-    r = await client.get("/api/agents/catalog/tech_lead")
+    r = await client.get("/api/agents/catalog/architect")
     assert r.status_code == 200
     body = r.json()
-    assert body["name"] == "tech_lead"
-    assert body["abstract_base"] == "escalation_handler"
+    assert body["name"] == "architect"
+    assert body["abstract_base"] == "reviewer"
     assert body["default_model_tier"] == "heavy"
 
 
@@ -91,7 +90,7 @@ async def test_catalog_status_marks_shipped_archetypes(client):
     by_name = {a["name"]: a for a in body["archetypes"]}
 
     assert by_name["code_reviewer"]["shipped"] is True
-    assert by_name["tech_lead"]["shipped"] is True
+    assert by_name["architect"]["shipped"] is True
     assert body["n_total"] >= body["n_shipped"]
     assert body["n_described_only"] == body["n_total"] - body["n_shipped"]
 

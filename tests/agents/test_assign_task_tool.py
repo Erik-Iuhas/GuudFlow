@@ -16,7 +16,6 @@ import pytest
 from agents.builtin.architect import Architect
 from agents.builtin.meta import MetaAgent
 from agents.builtin.requirements_writer import RequirementsWriter
-from agents.builtin.tech_lead import TechLead
 from agents.tools.board import AssignTask
 from core.signals import SignalType
 from core.tool_manifest import (
@@ -260,7 +259,6 @@ def test_planner_archetype_classes_declare_assign_task_scope() -> None:
     """The three in-pipeline planner archetypes hold the scope. Meta
     is excluded — it runs outside the scheduler at proposal time and
     its job is to set the team up, not to assign work mid-run."""
-    assert "assign-task" in TechLead.default_rbac_scopes
     assert "assign-task" in Architect.default_rbac_scopes
     assert "assign-task" in RequirementsWriter.default_rbac_scopes
     # Meta does not get this scope — verify by absence.
@@ -271,6 +269,5 @@ def test_planner_archetype_classes_declare_assign_task_tool() -> None:
     """default_tools must include assign-task so the LLM sees it on
     the manifest at runtime (declared_local_tools is sourced from
     archetype.default_tools by the meta-agent)."""
-    assert "assign-task" in TechLead.default_tools
     assert "assign-task" in Architect.default_tools
     assert "assign-task" in RequirementsWriter.default_tools
