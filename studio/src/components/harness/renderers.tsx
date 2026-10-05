@@ -3,6 +3,7 @@
 
 import { useState, type ReactNode } from "react";
 import type { Signal } from "../../types";
+import { formatUsd } from "../../lib/cost";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import {
@@ -79,16 +80,14 @@ export function ToolCallRow({ info, summary }: { info: ToolCallInfo; summary?: s
   );
 }
 
-function fmtCost(c: number): string {
-  return `$${c.toFixed(c < 0.1 ? 4 : 2)}`;
-}
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 export function AgentResultCard({ info }: { info: AgentResultInfo }) {
   const stats: string[] = [];
-  if (info.cost !== null) stats.push(fmtCost(info.cost));
+  if (info.cost !== null) stats.push(formatUsd(info.cost));
   if (info.tokens !== null) stats.push(`${info.tokens.toLocaleString("en-US")} tokens`);
-  if (info.toolCalls !== null) stats.push(`${info.toolCalls} tool calls`);
-  if (info.commits !== null) stats.push(`${info.commits} commits`);
+  if (info.toolCalls !== null) stats.push(plural(info.toolCalls, "tool call", "tool calls"));
+  if (info.commits !== null) stats.push(plural(info.commits, "commit", "commits"));
 
   const reviewer = info.kind === "reviewer";
   const label = reviewer ? (info.verdict ?? "") : (info.status ?? "");

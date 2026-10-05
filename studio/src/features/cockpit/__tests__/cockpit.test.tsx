@@ -246,9 +246,9 @@ describe("BudgetMeter", () => {
     expect(meter).toHaveTextContent("/ $5.00");
     expect(meter).toHaveTextContent("50%");
     expect(meter).toHaveAttribute("data-level", "ok");
-    const bar = meter.querySelector("progress");
-    expect(bar).toHaveAttribute("max", "5");
-    expect(bar).toHaveAttribute("value", "2.5");
+    const bar = within(meter).getByRole("progressbar", { name: "Budget spent" });
+    expect(bar).toHaveAttribute("aria-valuemax", "5");
+    expect(bar).toHaveAttribute("aria-valuenow", "2.5");
   });
 
   it("flags nearing the cap and over budget with text", () => {
@@ -257,7 +257,7 @@ describe("BudgetMeter", () => {
     unmount();
     wrap(costStore({ dev: 6 }), <BudgetMeter budgetUsd={5} />);
     expect(screen.getByTestId("budget-meter")).toHaveTextContent("over budget");
-    expect(screen.getByTestId("budget-meter").querySelector("progress")).toHaveAttribute("value", "5");
+    expect(screen.getByTestId("budget-meter").querySelector("[role=progressbar]")).toHaveAttribute("aria-valuenow", "5");
   });
 
   it("lists the per-agent breakdown on focus, largest first", async () => {
@@ -275,7 +275,7 @@ describe("BudgetMeter", () => {
     wrap(costStore({ dev: 1 }), <BudgetMeter />);
     const meter = screen.getByTestId("budget-meter");
     expect(meter).toHaveTextContent("no cap set");
-    expect(meter.querySelector("progress")).toBeNull();
+    expect(meter.querySelector("[role=progressbar]")).toBeNull();
   });
 });
 

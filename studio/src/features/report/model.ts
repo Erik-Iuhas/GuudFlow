@@ -9,9 +9,7 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
-export function formatUsd(n: number): string {
-  return n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(n === 0 ? 2 : 4)}`;
-}
+export { formatUsd } from "../../lib/cost";
 
 /** "12m 03s", "1h 05m", or null when either end is missing or unparsable. */
 export function formatSpan(startIso: string | null | undefined, endIso: string | null | undefined): string | null {

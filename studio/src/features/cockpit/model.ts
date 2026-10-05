@@ -234,9 +234,7 @@ export function computeBudget(costs: Readonly<Record<string, number>>, cap: numb
   };
 }
 
-export function formatUsd(n: number): string {
-  return `$${n.toFixed(n > 0 && n < 0.1 ? 4 : 2)}`;
-}
+export { formatUsd } from "../../lib/cost";
 
 // ── Misc formatters ──────────────────────────────────────────────────────────
 

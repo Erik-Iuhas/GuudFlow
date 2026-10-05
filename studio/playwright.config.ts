@@ -13,7 +13,7 @@ export default defineConfig({
   // Visual baselines (e2e/visual.e2e.ts) are committed, one set for the single Chromium project.
   snapshotPathTemplate: "{testDir}/__screenshots__/{arg}{ext}",
   expect: {
-    toHaveScreenshot: { maxDiffPixelRatio: 0.02, animations: "disabled", caret: "hide" },
+    toHaveScreenshot: { maxDiffPixelRatio: 0.002, animations: "disabled", caret: "hide" },
   },
   use: { baseURL: `http://localhost:${PORT}`, trace: "retain-on-failure" },
   webServer: {

@@ -9,11 +9,13 @@ const LEVEL_TEXT: Record<BudgetLevel, string> = {
   warn: "nearing the cap",
   over: "over budget",
 };
+// A div bar rather than <progress>: Chrome ignores accent-color there, so the fill
+// stayed green while the label said "nearing the cap".
 const LEVEL_COLOR: Record<BudgetLevel, string> = {
-  none: "accent-primary",
-  ok: "accent-status-running",
-  warn: "accent-status-blocked",
-  over: "accent-status-failed",
+  none: "bg-primary",
+  ok: "bg-status-running",
+  warn: "bg-status-blocked",
+  over: "bg-status-failed",
 };
 const LEVEL_TEXT_COLOR: Record<BudgetLevel, string> = {
   none: "text-muted-foreground",
@@ -53,13 +55,18 @@ export function BudgetMeter({ budgetUsd }: { budgetUsd?: number | null }) {
             </span>
           </div>
           {b.cap !== null && (
-            <progress
-              className={cn("h-2 w-full", LEVEL_COLOR[b.level])}
-              value={Math.min(b.spent, b.cap)}
-              max={b.cap}
+            <div
+              role="progressbar"
+              className="h-2 w-full overflow-hidden rounded-full bg-muted"
               aria-label="Budget spent"
+              aria-valuemin={0}
+              aria-valuemax={b.cap}
+              aria-valuenow={Math.min(b.spent, b.cap)}
               aria-valuetext={`${formatUsd(b.spent)} of ${formatUsd(b.cap)}`}
-            />
+            >
+              {/* Runtime width (exception to the no-inline-style rule). */}
+              <div className={cn("h-full rounded-full", LEVEL_COLOR[b.level])} style={{ width: `${Math.min(100, pct ?? 0)}%` }} />
+            </div>
           )}
         </div>
       </TooltipTrigger>

@@ -56,6 +56,14 @@ export function estimateAgentCost(tier: ModelTier, iterations: number): number {
   return inputCost + outputCost;
 }
 
+/**
+ * Measured spend, one rule everywhere (cockpit, report, result cards): two decimals,
+ * or four below ten cents so small per-agent costs do not read as $0.00.
+ */
+export function formatUsd(n: number): string {
+  return `$${n.toFixed(n > 0 && n < 0.1 ? 4 : 2)}`;
+}
+
 export function formatCost(usd: number): string {
   if (usd < 0.01) return "<$0.01";
   if (usd < 1) return `$${usd.toFixed(2)}`;

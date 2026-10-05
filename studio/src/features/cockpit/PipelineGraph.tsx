@@ -187,6 +187,7 @@ export function PipelineGraph({ specs, selectedRole, onSelectRole, className, di
         nodesConnectable={false}
         elementsSelectable={false}
         onNodeClick={(_, node) => onSelectRole?.(node.id)}
+        proOptions={{ hideAttribution: true }}
         aria-label="Pipeline graph"
       />
     </div>
