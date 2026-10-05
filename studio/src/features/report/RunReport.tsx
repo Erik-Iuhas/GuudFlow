@@ -8,6 +8,9 @@ import { createRunStore } from "../../stores/runEvents";
 import { RunStoreProvider, useRunStore } from "../../stores/runStoreContext";
 import { useArtifactAccess } from "../artifacts/access";
 import { buildItems, isImageItem } from "../artifacts/model";
+import { Alert } from "../../components/ui/form-controls";
+import { useProjectRuns } from "../work/api";
+import { changeSummary } from "../work/model";
 import { interventionLabel } from "../overseer/model";
 import { useRunReport, type BranchRow, type RunReportData } from "./api";
 import { CommitDiff } from "./DiffViewer";
@@ -337,6 +340,28 @@ export function RunReportView({ report }: { report: RunReportData }) {
 }
 
 /** Route `/runs/:id/report`: the finished-run report. */
+/** Where this run stands with its project (plan §13): waiting for review, accepted or rejected. */
+function ReviewStatus({ projectId, runId }: { projectId: string; runId: string }) {
+  const runs = useProjectRuns(projectId);
+  const mine = runs.data?.runs.find((r) => r.run_id === runId);
+  if (!mine || mine.state === "no_changes") return null;
+  const work = `/projects/${encodeURIComponent(projectId)}`;
+  if (mine.state === "pending") {
+    return (
+      <Alert variant="warn" data-testid="review-status">
+        This run is waiting for your review: {changeSummary(mine)}. Nothing reaches the project until you
+        accept it on the project's <Link to={work}>Work tab</Link>.
+      </Alert>
+    );
+  }
+  return (
+    <Alert variant={mine.state === "accepted" ? "success" : "info"} data-testid="review-status">
+      {mine.state === "accepted" ? "Accepted into the project" : "Rejected"}
+      {mine.note ? `: ${mine.note}` : "."}
+    </Alert>
+  );
+}
+
 export function RunReport() {
   const { id = "" } = useParams<{ id: string }>();
   const report = useRunReport(id);
@@ -360,6 +385,7 @@ export function RunReport() {
           </Link>
         )}
       </div>
+      {report.data?.meta.project_id && <ReviewStatus projectId={report.data.meta.project_id} runId={id} />}
       {report.isPending && <p role="status" className="text-sm text-muted-foreground">Loading report…</p>}
       {report.isError && <p role="alert" className="text-sm text-destructive">Could not load the report: {report.error.message}</p>}
       {report.data && (

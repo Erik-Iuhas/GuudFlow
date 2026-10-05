@@ -17,9 +17,10 @@ import { checkCls, runStatusVariant } from "../lib/field";
 import { cn } from "../lib/utils";
 import type { AgentConfig, ProjectConfig, RunMeta } from "../types";
 import { ProjectInsights } from "../features/project/ProjectInsights";
+import { ProjectWork, type RunRequest } from "../features/work/ProjectWork";
 import { Inputs } from "./Inputs";
 
-type Tab = "team" | "inputs" | "roadmap" | "insights" | "settings";
+type Tab = "work" | "team" | "inputs" | "roadmap" | "insights" | "settings";
 
 const DEFAULT_GATES = {
   pre_run_cost_preview: true,
@@ -35,7 +36,8 @@ export function Studio() {
   const [runs, setRuns] = useState<RunMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<Tab>("team");
+  // The project is ongoing work (plan §13): its backlog and review queue come first.
+  const [tab, setTab] = useState<Tab>("work");
   const [settingsRole, setSettingsRole] = useState<string | null>(null);
   const [slideOverPersonaId, setSlideOverPersonaId] = useState<string | null>(null);
   // Track 12 — model registry for the per-use-case sub-LLM picker.
@@ -131,15 +133,22 @@ export function Studio() {
     message: string;
   }>(null);
 
-  async function runNow(confirm = false) {
+  // What the run should take on (backlog items, a pending run to continue);
+  // kept across the cost-preview round trip.
+  const [runRequest, setRunRequest] = useState<RunRequest>({});
+  const [starting, setStarting] = useState(false);
+
+  async function runNow(confirm = false, request: RunRequest = runRequest) {
     if (!id || !project) return;
     // Always persist current agent config before invoking so model_tier
     // changes and other edits made in the UI are actually used by the run.
     if (!confirm) {
+      setRunRequest(request);
       await save();
     }
+    setStarting(true);
     try {
-      const res = await invokeApi.invoke(id, confirm ? { confirm: true } : {});
+      const res = await invokeApi.invoke(id, { ...request, ...(confirm ? { confirm: true } : {}) });
       if (res.accepted) {
         setCostGate(null);
         navigate(`/runs/${res.run_id}`);
@@ -152,6 +161,8 @@ export function Studio() {
       });
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -172,7 +183,7 @@ export function Studio() {
           <Button variant="outline" onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
-          <Button onClick={() => void runNow(false)}>Run now</Button>
+          <Button onClick={() => void runNow(false, {})}>Run now</Button>
         </div>
       </div>
 
@@ -180,6 +191,7 @@ export function Studio() {
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mb-4">
         <TabsList>
+          <TabsTrigger value="work">Work</TabsTrigger>
           <TabsTrigger value="team">Team</TabsTrigger>
           <TabsTrigger value="inputs">Inputs</TabsTrigger>
           <TabsTrigger value="roadmap">Roadmap</TabsTrigger>
@@ -188,7 +200,9 @@ export function Studio() {
         </TabsList>
       </Tabs>
 
-      {tab === "team" ? (
+      {tab === "work" ? (
+        id && <ProjectWork projectId={id} starting={starting} onStartRun={(r) => void runNow(false, r)} />
+      ) : tab === "team" ? (
         <>
           <Card className="mb-3 p-4">
             <Label>Goal</Label>

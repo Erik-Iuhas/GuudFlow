@@ -145,6 +145,50 @@ const PAGES: Array<{
     },
   },
   {
+    name: "project-work",
+    run: async (page) => {
+      const now = 1_780_000_000;
+      await page.route(/\/api\/(projects|runs|models)(\/|\?|$)/, (r) => json(r, { detail: "not mocked" }, 404));
+      await page.route("**/api/projects/billing-api", (r) =>
+        json(r, { project_id: "billing-api", goal: "A billing API", agents: [], harness: "opencode", approval_gates: {} }),
+      );
+      await page.route(/\/api\/runs\?project_id=/, (r) => json(r, []));
+      await page.route("**/api/models**", (r) => json(r, []));
+      await page.route("**/api/projects/billing-api/runs-review", (r) =>
+        json(r, {
+          main: "a".repeat(40),
+          runs: [
+            { run_id: "run_7c2e1", state: "pending", base: "a", head: "b", commits: 4,
+              files: ["api/auth.py", "api/tokens.py", "tests/test_auth.py"], submitted_at: now,
+              decided_at: null, merged: "", note: "", parent_run: null },
+            { run_id: "run_5a91d", state: "accepted", base: "c", head: "d", commits: 2, files: ["api/app.py"],
+              submitted_at: now - 86400, decided_at: now - 80000, merged: "d", note: "first slice", parent_run: null },
+          ],
+        }),
+      );
+      const item = (id: string, title: string, over: Record<string, unknown> = {}) => ({
+        id, title, acceptance: [], kind: "code", size: "M", priority: 0, status: "open", notes: "", files_hint: [],
+        source: "human", created_at: now, updated_at: now, run_id: null, pending: null, history: [], ...over,
+      });
+      await page.route("**/api/projects/billing-api/backlog", (r) =>
+        json(r, {
+          items: [
+            item("B3", "Refresh-token rotation", { status: "in_run", run_id: "run_7c2e1", pending: "done",
+              acceptance: ["Old refresh token is rejected after use"] }),
+            item("B4", "Rate-limit the login endpoint", { priority: 3, acceptance: ["429 after 5 failed tries in a minute"],
+              history: [{ run_id: "run_5a91d", summary: "Added the limiter middleware; tests still missing" }] }),
+            item("B6", "Invoice PDF export", { priority: 2, kind: "code", size: "L" }),
+            item("B7", "Document the auth flow", { priority: 1, kind: "docs", size: "S", source: "run:run_7c2e1" }),
+            item("B1", "Health endpoint", { status: "done" }),
+          ],
+        }),
+      );
+      await page.goto("/projects/billing-api");
+      await expect(page.getByTestId("review-run_7c2e1")).toBeVisible();
+      await expect(page.getByTestId("backlog-B4")).toBeVisible();
+    },
+  },
+  {
     name: "oneshot",
     run: async (page) => {
       await page.route("**/api/example-projects", (r) =>
