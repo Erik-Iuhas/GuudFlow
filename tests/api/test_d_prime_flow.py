@@ -256,9 +256,8 @@ async def test_full_dprime_flow_greenfield_no_inputs(
     readme = (inputs / "README.md").read_text(encoding="utf-8")
     assert "greenfield" in readme.lower()
 
-    # No source_repo means no working/ either — the runner's GitWorkspace
-    # will init that itself when the actual run starts.
-    assert not (new_run_root / "workspace" / "working").exists()
+    # No source_repo: the project repo starts empty and the run clones it (plan §13).
+    assert (new_run_root / "workspace" / "working" / ".git").is_dir()
 
 
 async def test_full_dprime_flow_secret_in_source_blocks_then_force_strips(
