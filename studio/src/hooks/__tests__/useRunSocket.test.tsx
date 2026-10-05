@@ -61,6 +61,15 @@ describe("useRunSocket", () => {
     expect(store.getState().signals).toHaveLength(2);
   });
 
+  it("a finished run's close ends the feed instead of reconnecting", () => {
+    const store = createRunStore("r1");
+    const { result } = renderHook(() => useRunSocket("r1", store));
+    act(() => conns[0].onMessage({ type: "snapshot", live: false, signals: [raw("a", "STARTED")] }));
+    act(() => conns[0].onState?.(false));
+    expect(result.current.status).toBe("open");
+    expect(conns[0].close).toHaveBeenCalled();
+  });
+
   it("dedupes the snapshot that follows a reconnect", () => {
     const store = createRunStore("r1");
     const { result } = renderHook(() => useRunSocket("r1", store));

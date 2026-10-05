@@ -41,12 +41,16 @@ export function useRunSocket(
     setStatus("connecting");
     setError(null);
     let handle: WsHandle | null = null;
+    // A finished run: the server sends one snapshot (live: false) and closes normally.
+    // That close is the end of the feed, not a drop, so do not reconnect.
+    let finished = false;
     const { ingest, setLive } = store.getState();
     handle = connectRunStream(
       runId,
       (msg) => {
         if (msg.type === "snapshot" && Array.isArray(msg.signals)) {
           setLive(msg.live ?? true);
+          finished = msg.live === false;
           ingest(msg.signals as unknown as RawSignal[]);
           setStatus("open");
         } else if (msg.type === "signal" && msg.signal) {
@@ -60,6 +64,10 @@ export function useRunSocket(
       },
       undefined,
       (connected) => {
+        if (!connected && finished) {
+          handle?.close();
+          return;
+        }
         // A drop after "error" keeps the error; otherwise we are retrying.
         setStatus((prev) => (connected ? prev : prev === "error" ? prev : "reconnecting"));
       },

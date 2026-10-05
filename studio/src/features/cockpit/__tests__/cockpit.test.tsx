@@ -354,6 +354,18 @@ describe("CockpitView", () => {
     expect(within(detail).getByTestId("toolfeed-dev")).toBeInTheDocument();
   });
 
+  it("a finished run's elapsed time runs from its first signal, not its saved meta", () => {
+    const store = createRunStore("r1");
+    store.getState().ingest([
+      { ...sig("STARTED", "dev"), timestamp: "2026-03-01T10:00:00+00:00" },
+      { ...sig("COMPLETE", "dev"), timestamp: "2026-03-01T10:12:30+00:00" },
+    ]);
+    store.getState().setLive(false);
+    // meta.created_at is written when the run is saved, i.e. at the end.
+    render(view(store, { meta: { run_id: "r1", project_id: "p1", status: "complete", created_at: "2026-03-01T10:12:31+00:00" } }));
+    expect(screen.getByTestId("elapsed")).toHaveTextContent("12:30");
+  });
+
   it("shows a socket error with a retry", () => {
     const retry = vi.fn();
     render(view(createRunStore("r1"), { socket: { status: "error", error: "run not found or finished", retry } }));

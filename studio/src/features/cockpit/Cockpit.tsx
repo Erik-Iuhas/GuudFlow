@@ -99,6 +99,12 @@ function useElapsed(startMs: number | null, endMs: number | null, ticking: boole
   return Math.max(0, (end - startMs) / 1000);
 }
 
+function earliest(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.min(a, b);
+}
+
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
   return t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName);
@@ -138,7 +144,8 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
 
   const status = meta?.status ?? (live ? "running" : "finished");
   const terminal = isTerminalStatus(meta?.status);
-  const startMs = parseTimestamp(meta?.created_at) ?? parseTimestamp(firstTs);
+  // The earliest of the two: a finished run's meta is written when it is saved (at the end).
+  const startMs = earliest(parseTimestamp(meta?.created_at), parseTimestamp(firstTs));
   const elapsed = useElapsed(startMs, parseTimestamp(lastTs), live && !terminal);
 
   // HUMAN_NEEDED: pull the cursor to the comment box so the answer is one keystroke away.
