@@ -403,8 +403,8 @@ describe("recorded run (2,000 signals)", () => {
     expect(renderMs).toBeLessThan(5000);
     expect(store.getState().signals).toHaveLength(2000);
     // Windowed: far fewer rows in the DOM than signals.
-    const rows = within(screen.getByTestId("board-feed")).queryAllByText(/./, { selector: ".signal" });
-    expect(document.querySelectorAll(".signal").length).toBeLessThan(400);
+    const rows = within(screen.getByTestId("board-feed")).queryAllByText(/./, { selector: "[data-signal]" });
+    expect(document.querySelectorAll("[data-signal]").length).toBeLessThan(400);
     expect(rows.length).toBeLessThan(400);
     expect(screen.getByRole("region", { name: "backend" })).toBeInTheDocument();
     expect(screen.getByTestId("budget-meter")).toHaveTextContent("/ $5.00");

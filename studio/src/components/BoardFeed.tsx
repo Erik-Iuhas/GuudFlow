@@ -168,9 +168,10 @@ export function SignalRow({ signal }: { signal: FeedSignal }) {
   const harness = renderHarnessBody(signal);
   return (
     <div
+      data-signal
       data-kind={kind || undefined}
       className={cn(
-        "signal rounded-md border border-border bg-card px-3 py-2.5 text-[13px] text-card-foreground",
+        "rounded-md border border-border bg-card px-3 py-2.5 text-[13px] text-card-foreground",
         kind === "user" && "border-l-[3px] border-l-status-blocked",
         kind === "protocol" && "bg-muted",
       )}

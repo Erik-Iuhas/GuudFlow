@@ -57,7 +57,7 @@ test("the cockpit renders the recorded run, windows the board and scrolls it", a
   // The board is windowed: far fewer rows in the DOM than signals, newest in view first.
   const board = page.getByTestId("board-feed");
   await expect(board.getByText("run complete").first()).toBeVisible();
-  const rows = await board.locator(".signal").count();
+  const rows = await board.locator("[data-signal]").count();
   expect(rows).toBeGreaterThan(0);
   expect(rows).toBeLessThan(300);
 
