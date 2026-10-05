@@ -20,7 +20,6 @@ from agents.base import BaseAgent
 from agents.builtin.architect import Architect
 from agents.builtin.code_reviewer import CodeReviewer
 from agents.builtin.requirements_writer import RequirementsWriter
-from agents.builtin.tech_lead import TechLead
 from core.signals import SignalType
 
 
@@ -62,13 +61,6 @@ def test_code_reviewer_extends_reviewer():
     assert "git-diff" in CodeReviewer.default_tools
 
 
-def test_tech_lead_extends_escalation_handler():
-    assert issubclass(TechLead, EscalationHandler)
-    assert TechLead.archetype_kind == "escalation_handler"
-    assert TechLead.default_model_tier == "heavy"
-    assert TechLead.wake_on_signal_type is SignalType.REJECTED
-
-
 def test_requirements_writer_extends_specialist():
     assert issubclass(RequirementsWriter, Specialist)
     assert RequirementsWriter.archetype_kind == "specialist"
@@ -91,7 +83,7 @@ def test_requirements_writer_does_not_grant_code_exec():
 
 
 def test_concrete_archetypes_all_extend_base_agent():
-    for cls in (CodeReviewer, TechLead, RequirementsWriter, Architect):
+    for cls in (CodeReviewer, RequirementsWriter, Architect):
         assert issubclass(cls, BaseAgent), cls
         assert issubclass(cls, AgentArchetype), cls
 
@@ -100,7 +92,7 @@ def test_concrete_archetypes_construct_with_defaults():
     """Each concrete subclass constructs without error using just role
     + the kwargs BaseAgent expects. Proves the inheritance chain
     doesn't add required positional args."""
-    for cls in (CodeReviewer, TechLead, RequirementsWriter, Architect):
+    for cls in (CodeReviewer, RequirementsWriter, Architect):
         agent = cls()
         assert isinstance(agent, BaseAgent)
         assert agent.role  # role is set by the subclass

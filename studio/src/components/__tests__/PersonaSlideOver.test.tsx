@@ -47,12 +47,11 @@ describe("PersonaSlideOver", () => {
     expect(totalRunsEl.length).toBeGreaterThan(0);
   });
 
-  it("closes on backdrop click", async () => {
+  it("closes via the close button", async () => {
     const onClose = vi.fn();
     render(<PersonaSlideOver personaId="mike-01" onClose={onClose} />);
     await waitFor(() => expect(screen.getByText("Mike")).toBeInTheDocument());
-    const backdrop = document.querySelector(".slide-over-backdrop")!;
-    fireEvent.click(backdrop);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -60,7 +59,7 @@ describe("PersonaSlideOver", () => {
     const onClose = vi.fn();
     render(<PersonaSlideOver personaId="mike-01" onClose={onClose} />);
     await waitFor(() => expect(screen.getByText("Mike")).toBeInTheDocument());
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
   });
 

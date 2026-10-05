@@ -82,10 +82,11 @@ export function AgentStateCard({
         className="flex items-center gap-2"
         onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
       >
-        {/* The gradient is generated per persona at runtime, so it cannot be a utility class. */}
+        {/* The gradient is generated per persona at runtime, so it cannot be a utility class:
+            it is handed over as the `--avatar-bg` CSS variable and painted by a class. */}
         <div
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[8px] font-bold text-white"
-          style={{ background: av.gradient }}
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-[image:var(--avatar-bg)] text-[8px] font-bold text-white"
+          style={{ "--avatar-bg": av.gradient } as React.CSSProperties}
           aria-hidden
         >
           {av.initials}

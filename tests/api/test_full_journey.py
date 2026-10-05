@@ -39,37 +39,40 @@ from pathlib import Path
 
 import pytest
 
-from agents.builtin.code_reviewer import CodeReviewer
-from agents.registry import registry
-from core.llm import MockLLMClient, MockTurn, ToolCall
+from collections.abc import Iterator
+
+from core.harness.config_gen import ProviderBinding
+from core.harness.run import HarnessSettings
+from core.llm import MockLLMClient, MockTurn
+from core.llm import ToolCall as MetaToolCall
+from core.llm.registry import ModelInfo
+from tests.harness.conftest import requires_opencode
+from tests.harness.fake_llm import FakeLLM, Text, ToolCall
 from worker.docker_manager import DockerManager
-from worker.job_runner import JobRunner, serialise_project
+from worker.job_runner import JobRunner, default_runner_factory, serialise_project
 from worker.queue import JOB_COMPLETE
 
-
-# ── Test-scoped fixtures ───────────────────────────────────────────────────
-
-
-@pytest.fixture(autouse=True)
-def _register_code_reviewer():
-    """The reviewer agent in the journey is the CodeReviewer builtin —
-    ensure it's in the registry before the test runs."""
-    if not registry.has("code_reviewer"):
-        registry.register("code_reviewer", CodeReviewer)
+FAKE_MODEL = ModelInfo(id="fake-model", provider="fake", tier="solid", supports_images=True)
 
 
-# Note: Phase G.7 auto-loads personas from `cfg.persona_id` in the
-# runner itself (`AgentRunner._build_agents` reads `personas_root` and
-# attaches), so this test relies on the default JobRunner factory.
-# It used to ship a custom factory that wrapped `_build_agents`; that
-# workaround is gone now that production does the right thing.
+@pytest.fixture
+def fake_llm() -> Iterator[FakeLLM]:
+    """A started scripted LLM that opencode talks to through the harness gateway."""
+    with FakeLLM() as fake:
+        yield fake
+
+
+# Note: the runner loads personas from `cfg.persona_id` itself (personas_root),
+# so this test uses the default JobRunner factory and only points the harness at
+# the fake LLM.
 
 
 # ── The journey ────────────────────────────────────────────────────────────
 
 
+@requires_opencode
 async def test_full_user_journey(
-    client, auth_header, app, data_root: Path, write_persona, monkeypatch
+    client, auth_header, app, data_root: Path, write_persona, monkeypatch, fake_llm: FakeLLM
 ):
     """One linear test of the whole machine. Each step's assertions are
     inline so a failure points directly at the joint that broke."""
@@ -84,7 +87,7 @@ async def test_full_user_journey(
     # so the journey test injects a mock that emits a developer +
     # reviewer team. Earlier the route returned a static skeleton when
     # no project_id was provided; that path is gone.
-    app.state.meta_llm = MockLLMClient([MockTurn(tool_calls=[ToolCall(
+    app.state.meta_llm = MockLLMClient([MockTurn(tool_calls=[MetaToolCall(
         id="meta_journey",
         name="propose_team",
         arguments={
@@ -135,13 +138,7 @@ async def test_full_user_journey(
             "agents": agents,
             "rbac": proposal["rbac"],
             "max_iterations": 2,
-            # Track 4.2 — this end-to-end journey asserts main was advanced
-            # after the reviewer approves; default flipped to "manual" so we
-            # opt back into the legacy auto-merge for this assertion.
             "pr_mode": "auto",
-            # This journey drives the legacy in-process loop with a mocked LLM;
-            # opencode is now the default harness (O15).
-            "harness": "legacy",
         },
         headers=auth_header,
     )
@@ -178,34 +175,40 @@ async def test_full_user_journey(
     assert r.json()["status"] == "queued"
 
     # ── 5. Worker drains the queue ─────────────────────────────────────
-    # Scripted LLM: developer writes hello.py → developer ends turn →
-    # reviewer pulls a diff → reviewer approves. Same script runner_e2e
-    # uses for a clean 2-agent run.
-    llm = MockLLMClient([
-        MockTurn(tool_calls=[ToolCall(
-            id="dev_t1",
-            name="fs-write",
-            arguments={"path": "hello.py", "content": "def greet():\n    return 'hi'\n"},
-        )]),
-        MockTurn(text="[COMMIT]\n  summary: wrote greet()\n  files: hello.py"),
-        MockTurn(tool_calls=[ToolCall(
-            id="rev_t1",
-            name="git-diff",
-            arguments={"branch_a": "agent/developer", "branch_b": "main"},
-        )]),
-        MockTurn(text="[VERIFY] PASS"),
-    ])
+    # Scripted LLM through real opencode: the developer writes hello.py and
+    # submits its result; the reviewer reads it and passes.
+    fake_llm.route("Your turn: developer",
+                   ToolCall("write", {"filePath": "hello.py",
+                                      "content": "def greet():\n    return 'hi'\n"}),
+                   ToolCall("guudflow_submit_result",
+                            {"status": "done", "summary": "Wrote greet() in hello.py.",
+                             "files_changed": ["hello.py"]}),
+                   Text("Done."))
+    fake_llm.route("Your turn: reviewer",
+                   ToolCall("read", {"filePath": "hello.py"}),
+                   ToolCall("guudflow_submit_result", {"verdict": "pass", "issues": []}),
+                   Text("Reviewed."))
 
     async def loader(project_id: str):
         return await app.state.project_store.get(project_id)
+
+    def runner_factory(project, rid, root, llm, **kwargs):
+        runner = default_runner_factory(project, rid, root, llm, **kwargs)
+        runner.harness_settings = HarnessSettings(
+            production=False, turn_timeout=60, sandbox="host",
+            binding_factory=lambda cfg: ProviderBinding(
+                "fake", FAKE_MODEL, "openai_compatible", base_url=fake_llm.base_url,
+                api_key="fake"))
+        return runner
 
     worker = JobRunner(
         queue=app.state.queue,
         project_loader=loader,
         data_root=data_root,
-        llm=llm,
+        llm=MockLLMClient([]),
         docker_manager=DockerManager(mode="dev"),
         run_registry=app.state.run_registry,
+        runner_factory=runner_factory,
     )
 
     job = await app.state.queue.get(job_id)
@@ -228,19 +231,17 @@ async def test_full_user_journey(
     assert r.status_code == 200, r.text
     board = r.json()
     types = {s["type"] for s in board}
-    # STARTED — every agent posts one when its run loop begins.
+    # STARTED — every role posts one when its turn begins.
     assert "STARTED" in types
-    # GIT_COMMIT — runner commits at end of each agent's iteration.
-    assert "GIT_COMMIT" in types
-    # FILE_CLAIM/FILE_RELEASE — fs:write auto-claims before writing.
-    assert "FILE_CLAIM" in types
-    assert "FILE_RELEASE" in types
-    # APPROVED — reviewer's terminal verdict that triggers merge to main.
-    assert "APPROVED" in types
+    # AGENT_RESULT — each role's validated structured result.
+    assert "AGENT_RESULT" in types
+    # GIT_MERGE — the runner merged the developer's branch into main.
+    assert "GIT_MERGE" in types
+    assert "COMPLETE" in types
 
     # ── 8. Persona memory was updated end-to-end ───────────────────────
-    # The memory_writer ran post-run because the runner_factory above
-    # attached the persona to the developer. Reputation should reflect
+    # The memory_writer ran post-run because the runner loaded the developer's
+    # persona from its persona_id. Reputation should reflect
     # one successful run; episodes.jsonl should have one entry.
     r = await client.get(f"/api/personas/{PERSONA_ID}")
     assert r.status_code == 200, r.text
@@ -256,12 +257,12 @@ async def test_full_user_journey(
     assert (run_workspace / "inputs" / "uploads" / "spec.md").read_bytes() == spec_body
     assert (run_workspace / "inputs" / "README.md").is_file()
 
-    # 9b. Developer agent wrote hello.py via fs:write → it's in working/.
+    # 9b. The developer wrote hello.py in its clone and the runner merged it → it's in working/.
     hello_py = run_workspace / "working" / "hello.py"
     assert hello_py.exists()
     assert "def greet" in hello_py.read_text(encoding="utf-8")
 
-    # 9c. Reviewer's APPROVED triggered a merge — main has more than the
+    # 9c. The runner merged the developer's branch — main has more than the
     #     initial seed commit and at least one merge commit message.
     from git import Repo
     repo = Repo(run_workspace / "working")

@@ -90,23 +90,22 @@ retirement (S15) and final review (O15), and the rest of the Studio track (S24 t
 | P5 | S20 | Done | `core/oneshot.py`, `cli/oneshot.py`, `api/routes/oneshot.py`, `data/teams/default_oneshot.json` |
 | P5 | O14 | Deferred (you) | All six example projects for real, quality gate on two; needs an API key |
 | P5 | O17 | Deferred (you) | The recorded demo on `api-client-library` with a real model; needs an API key |
-| P6 | S15 | Not started | Legacy code is still in the repo behind `harness: "legacy"` (plan §6.3) |
+| P6 | S15 | Done | Legacy tool loop, tech lead, loop guard and edit blocks removed (~13.5k lines; `core/runner.py` 5.5k → ~0.7k lines). `harness: "legacy"` is refused. `context_manager`, `repo_map`, `protocol` and `agents/tools` stay: host-side agents (meta, memory writer, persona chat) still import them. `core/llm/` stays for the same reason |
 | P6 | S16 | Done | This documentation update: CLAUDE.md, DESIGN.md, `docs/ARCHITECTURE.md`, README |
-| P6 | O15 | Partly | The `harness` default is flipped to `opencode` for new and stored projects. Still open: your review of S16's hard-constraint text (plan §6.4), the S15 retirement review, and the final full real-model run |
+| P6 | O15 | Partly | Default flipped (API, worker, `ProjectConfig`, approval screen); S16 reviewed and corrected; S15 reviewed and merged. Open: the final full real-model run (you) |
 | UI | O21 | Done | `docs/STUDIO_UI_SPEC.md`, generated `runEvents.gen.ts` |
 | UI | S23 | Done | U0: Tailwind and tokens, ui primitives, run-event store, shared components migrated |
-| UI | S24 | Not started | U1 Run cockpit |
-| UI | S25 | Not started | U2 one-shot launcher, team approval as a graph |
-| UI | S29 | Not started | U3 task board view |
-| UI | S33 | Not started | U3 artifact gallery |
-| UI | S26 | Not started | U3 overseer panel, run report, project page |
-| UI | S27 | Not started | U4 migrate remaining views, delete `styles.css` |
+| UI | S24 | Done | `features/cockpit/`; `/runs/:id` (legacy view at `?legacy=1`) |
+| UI | S25 | Done | `/oneshot`, `features/team/` (graph + playbook panel) |
+| UI | S29 | Done | `features/board/`, `/runs/:id/board` |
+| UI | S33 | Done | `features/artifacts/`, `/runs/:id/artifacts`, safe artifact-file endpoint |
+| UI | S26 | Done | `features/overseer/`, `/runs/:id/report`, project Insights tab |
+| UI | S27 | In progress | U4 migrate remaining views, delete `styles.css` |
 | UI | O22 | Not started | UX review passes |
 
 **What you need to do to finish the deferred work:** provide an API key (see "Before anything starts")
 and run O4, O12, O14 and O17, plus the real-model parts of O19 and O24, using the commands in the
-README's "Run the demo" section. Then review the CLAUDE.md changes marked "changed for the opencode
-harness, plan §6.4" and say whether S15 (retiring the legacy code) should go ahead.
+README's "Run the demo" section.
 
 ---
 

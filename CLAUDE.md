@@ -23,9 +23,11 @@ read the design doc. Every structural decision is intentional.
 running headless, one sandboxed server per role. GuudFlow stays the manager: scheduler,
 task board, personas and memory, permissions, credentials, merges and Studio. The design is
 in `docs/OPENCODE_HARNESS_PLAN.md`, the task list in `docs/OPENCODE_WORK_BREAKDOWN.md`, and
-the Studio spec in `docs/STUDIO_UI_SPEC.md`. `opencode` is the default harness for new and
-stored projects; `harness: "legacy"` (the original in-process tool loop) still exists until the
-legacy code is retired (work breakdown S15). Where DESIGN.md and the plan disagree, the plan
+the Studio spec in `docs/STUDIO_UI_SPEC.md`. `opencode` is the only harness that runs; the
+original in-process tool loop was retired (work breakdown S15) and a project that still says
+`harness: "legacy"` is refused with a clear error. Old runs stay viewable from their saved boards.
+`core/context_manager.py`, `core/repo_map.py`, `core/protocol.py` and `agents/tools/` remain only
+because host-side agents (meta-agent, memory writer, persona chat) still use them. Where DESIGN.md and the plan disagree, the plan
 wins for the opencode harness.
 
 ---

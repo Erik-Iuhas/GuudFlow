@@ -25,6 +25,7 @@ from agents.tools.fs import (
     ReleaseEmitter,
     _err,
     _ok,
+    closest_matches,
 )
 from core.file_workspace import FileWorkspace, PathSafetyError
 
@@ -383,8 +384,7 @@ class FsEditBatch(BaseTool):
 
             count = content.count(find)
             if count == 0:
-                from core.edit_blocks import _closest_matches
-                close = _closest_matches(find, content, top_n=3)
+                close = closest_matches(find, content, top_n=3)
                 hint = (" (closest: " + " | ".join(close) + ")") if close else ""
                 failures.append({"path": path, "error": f"SEARCH_NOT_FOUND{hint}"})
                 continue
