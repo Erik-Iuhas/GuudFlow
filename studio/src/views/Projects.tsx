@@ -1,7 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError, exampleProjectsApi, projectsApi, runsApi } from "../api";
 import type { ExampleProjectSummary, ProjectConfig, RunMeta } from "../types";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "../components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
+import { Alert, Input, Label, Page, SectionTitle, Table, Td, Textarea, Th, linkClass } from "../components/ui/form-controls";
+import { runStatusVariant } from "../lib/field";
+import { cn } from "../lib/utils";
 
 export function Projects() {
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
@@ -9,7 +17,6 @@ export function Projects() {
   const [examples, setExamples] = useState<ExampleProjectSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [blankOpen, setBlankOpen] = useState(false);
   const [blankId, setBlankId] = useState("");
   const [blankGoal, setBlankGoal] = useState("");
@@ -17,7 +24,6 @@ export function Projects() {
   const [demoBusy, setDemoBusy] = useState(false);
   const [openTemplate, setOpenTemplate] =
     useState<ExampleProjectSummary | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -56,18 +62,6 @@ export function Projects() {
       /* non-fatal */
     }
   }
-
-  // Close the menu when clicking outside.
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-    window.addEventListener("mousedown", onClick);
-    return () => window.removeEventListener("mousedown", onClick);
-  }, [menuOpen]);
 
   async function load() {
     try {
@@ -176,95 +170,64 @@ export function Projects() {
   }
 
   return (
-    <div className="page">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>Projects</h1>
-        <div className="dropdown" ref={menuRef}>
-          <button className="primary" onClick={() => navigate("/propose")}>
+    <Page
+      title="Projects"
+      actions={
+        <div className="flex">
+          <Button className="rounded-r-none" onClick={() => navigate("/propose")}>
             + New project
-          </button>
-          <button
-            className="primary dropdown-toggle"
-            aria-label="More options"
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            ▾
-          </button>
-          {menuOpen && (
-            <ul className="dropdown-menu">
-              <li
-                onClick={() => {
-                  setMenuOpen(false);
-                  navigate("/propose");
-                }}
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                className="rounded-l-none border-l border-l-primary-foreground/25 px-2"
+                aria-label="More options"
               >
+                ▾
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => navigate("/propose")}>
                 Propose with goal
-              </li>
-              <li
-                onClick={() => {
-                  setMenuOpen(false);
-                  setBlankOpen(true);
-                }}
-              >
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setBlankOpen(true)}>
                 Create blank project
-              </li>
-            </ul>
-          )}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      </div>
-
-      {error && <div className="error">{error}</div>}
+      }
+    >
+      {error && <Alert variant="error" className="mb-3">{error}</Alert>}
 
       {activeRuns.length > 0 && (
-        <div className="card" style={{ marginBottom: 16, padding: "12px 16px" }}>
-          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-            <span
-              style={{
-                display: "inline-block",
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: "#16a34a",
-                animation: "pulse 1.5s infinite",
-              }}
-            />
-            <strong className="small">Active runs</strong>
+        <Card className="mb-4 px-4 py-3">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-status-complete" />
+            <strong className="text-xs">Active runs</strong>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className="flex flex-col gap-1.5">
             {activeRuns.map((r) => (
               <Link
                 key={r.run_id}
                 to={`/runs/${r.run_id}`}
-                style={{ textDecoration: "none" }}
+                className="flex items-center gap-3 rounded-md border border-status-complete/30 bg-status-complete/10 px-3 py-2 text-foreground no-underline hover:no-underline"
               >
-                <div
-                  className="row"
-                  style={{
-                    padding: "8px 12px",
-                    background: "#f0fdf4",
-                    border: "1px solid #bbf7d0",
-                    borderRadius: 6,
-                    gap: 12,
-                  }}
-                >
-                  <span className={`tag tag-status-${r.status}`}>{r.status}</span>
-                  <span className="mono small" style={{ flex: 1, color: "#1e40af" }}>
-                    {r.run_id}
-                  </span>
-                  <span className="small muted">{r.project_id}</span>
-                  <span className="small muted">
-                    {r.created_at ? new Date(r.created_at).toLocaleTimeString() : ""}
-                  </span>
-                  <span className="small" style={{ color: "#6b7280" }}>Watch →</span>
-                </div>
+                <Badge variant={runStatusVariant(r.status)}>{r.status}</Badge>
+                <span className="flex-1 font-mono text-xs text-status-running">{r.run_id}</span>
+                <span className="text-xs text-muted-foreground">{r.project_id}</span>
+                <span className="text-xs text-muted-foreground">
+                  {r.created_at ? new Date(r.created_at).toLocaleTimeString() : ""}
+                </span>
+                <span className="text-xs text-muted-foreground">Watch →</span>
               </Link>
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
       {loading ? (
-        <p className="muted">loading…</p>
+        <p className="text-muted-foreground">loading…</p>
       ) : projects.length === 0 ? (
         <>
           <OnboardingPanel onTryDemo={() => void createDemo()} busy={demoBusy} />
@@ -278,48 +241,49 @@ export function Projects() {
           )}
         </>
       ) : (
-        <table className="list">
+        <Table>
           <thead>
             <tr>
-              <th>Project</th>
-              <th>Goal</th>
-              <th>Agents</th>
-              <th></th>
+              <Th>Project</Th>
+              <Th>Goal</Th>
+              <Th>Agents</Th>
+              <Th></Th>
             </tr>
           </thead>
           <tbody>
             {projects.map((p) => (
               <tr key={p.project_id}>
-                <td>
-                  <Link to={`/projects/${p.project_id}`} className="mono">
+                <Td>
+                  <Link to={`/projects/${p.project_id}`} className={cn(linkClass, "font-mono")}>
                     {p.project_id}
                   </Link>
-                </td>
-                <td>{p.goal}</td>
-                <td className="small">
+                </Td>
+                <Td>{p.goal}</Td>
+                <Td className="text-xs">
                   {(p.agents ?? []).map((a) => a.role).join(", ") || "—"}
-                </td>
-                <td>
-                  <div className="row" style={{ justifyContent: "flex-end" }}>
-                    <Link to={`/projects/${p.project_id}`}>
-                      <button>Open</button>
-                    </Link>
-                    <button
-                      className="danger"
+                </Td>
+                <Td>
+                  <div className="flex items-center justify-end gap-3">
+                    <Button asChild variant="outline">
+                      <Link to={`/projects/${p.project_id}`}>Open</Link>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="border-destructive/40 text-destructive hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
                       onClick={() => handleDelete(p.project_id)}
                     >
                       Delete
-                    </button>
+                    </Button>
                   </div>
-                </td>
+                </Td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
 
       {!loading && projects.length > 0 && examples.length > 0 && (
-        <div style={{ marginTop: 24 }}>
+        <div className="mt-6">
           <ExampleProjectGallery
             examples={examples}
             onPick={setOpenTemplate}
@@ -339,44 +303,44 @@ export function Projects() {
       )}
 
       {blankOpen && (
-        <div className="modal-backdrop" onClick={() => setBlankOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Create blank project</h3>
-            <p className="muted small">
+        <Dialog open onOpenChange={(o) => !o && setBlankOpen(false)}>
+          <DialogContent>
+            <DialogTitle>Create blank project</DialogTitle>
+            <DialogDescription>
               Skip the meta-agent proposal. You'll land in Studio with an
               empty agent list and can build the team yourself.
-            </p>
-            <label>Project ID</label>
-            <input
-              type="text"
-              autoFocus
-              placeholder="my-blank-project"
-              value={blankId}
-              onChange={(e) => setBlankId(e.target.value)}
-            />
-            <label style={{ marginTop: 8 }}>Goal (optional)</label>
-            <textarea
-              rows={3}
-              placeholder="What is this project for?"
-              value={blankGoal}
-              onChange={(e) => setBlankGoal(e.target.value)}
-            />
-            <div className="row" style={{ marginTop: 12, gap: 8 }}>
-              <button
-                className="primary"
-                onClick={() => void createBlank()}
-                disabled={blankBusy || !blankId.trim()}
-              >
-                {blankBusy ? "Creating…" : "Create"}
-              </button>
-              <button onClick={() => setBlankOpen(false)} disabled={blankBusy}>
-                Cancel
-              </button>
+            </DialogDescription>
+            <div>
+              <Label htmlFor="blank-id">Project ID</Label>
+              <Input
+                id="blank-id"
+                type="text"
+                autoFocus
+                placeholder="my-blank-project"
+                value={blankId}
+                onChange={(e) => setBlankId(e.target.value)}
+              />
+              <Label htmlFor="blank-goal" className="mt-2">Goal (optional)</Label>
+              <Textarea
+                id="blank-goal"
+                rows={3}
+                placeholder="What is this project for?"
+                value={blankGoal}
+                onChange={(e) => setBlankGoal(e.target.value)}
+              />
             </div>
-          </div>
-        </div>
+            <DialogFooter className="justify-start">
+              <Button onClick={() => void createBlank()} disabled={blankBusy || !blankId.trim()}>
+                {blankBusy ? "Creating…" : "Create"}
+              </Button>
+              <Button variant="outline" onClick={() => setBlankOpen(false)} disabled={blankBusy}>
+                Cancel
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -393,47 +357,44 @@ function OnboardingPanel({
   busy: boolean;
 }) {
   return (
-    <div className="card onboarding-card">
-      <h2 style={{ marginTop: 0 }}>Welcome to GuudFlow</h2>
-      <p className="muted">
+    <Card className="mb-3 border-primary/30 bg-primary/5 p-6">
+      <h2 className="m-0 text-base font-semibold">Welcome to GuudFlow</h2>
+      <p className="my-2 text-muted-foreground">
         Two paths to your first run, depending on what you want:
       </p>
 
-      <div className="grid-2 onboarding-options">
-        <div className="onboarding-option">
-          <h3>Try the demo</h3>
-          <p className="small muted">
+      <div className="mt-4 grid grid-cols-2 gap-4">
+        <div className="rounded-lg border border-border bg-card p-4">
+          <h3 className="m-0 mb-2 text-base font-semibold">Try the demo</h3>
+          <p className="mb-2 mt-0 text-xs text-muted-foreground">
             One-click: a curated project (Add a `hello.py` module) with
             the seed personas (Mike + Alex) pre-staged. Watch a 2-agent
             run end-to-end before bringing your own work.
           </p>
-          <button
-            className="primary"
-            onClick={onTryDemo}
-            disabled={busy}
-          >
+          <Button onClick={onTryDemo} disabled={busy}>
             {busy ? "Setting up…" : "Try the demo"}
-          </button>
+          </Button>
         </div>
 
-        <div className="onboarding-option">
-          <h3>Describe your goal</h3>
-          <p className="small muted">
+        <div className="rounded-lg border border-border bg-card p-4">
+          <h3 className="m-0 mb-2 text-base font-semibold">Describe your goal</h3>
+          <p className="mb-2 mt-0 text-xs text-muted-foreground">
             The meta-agent reads your goal (and any inputs you attach
             — PDFs, a git repo, a prior run) and proposes a tailored
             team. You approve before anything runs.
           </p>
-          <Link to="/propose">
-            <button className="primary">Propose a team</button>
-          </Link>
+          <Button asChild>
+            <Link to="/propose">Propose a team</Link>
+          </Button>
         </div>
       </div>
 
-      <p className="small muted" style={{ marginTop: 16 }}>
+      <p className="mb-0 mt-4 text-xs text-muted-foreground">
         Have personas already? Visit the{" "}
-        <Link to="/roster">Roster</Link> to see them and chat directly,
+        <Link className={linkClass} to="/roster">Roster</Link> to see them and chat directly,
         or browse the{" "}
         <a
+          className={linkClass}
           href="https://github.com/Erik-Iuhas/GuudFlow#readme"
           target="_blank"
           rel="noreferrer"
@@ -442,7 +403,7 @@ function OnboardingPanel({
         </a>{" "}
         for the full architecture.
       </p>
-    </div>
+    </Card>
   );
 }
 
@@ -464,62 +425,29 @@ function ExampleProjectGallery({
   subheading?: string;
 }) {
   return (
-    <section className="example-gallery" style={{ marginTop: 16 }}>
-      <h2 style={{ marginBottom: 4 }}>{heading}</h2>
+    <section className="mt-4">
+      <SectionTitle className="mb-1 mt-0">{heading}</SectionTitle>
       {subheading && (
-        <p className="muted small" style={{ marginTop: 0, marginBottom: 12 }}>
-          {subheading}
-        </p>
+        <p className="mb-3 mt-0 text-xs text-muted-foreground">{subheading}</p>
       )}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-          gap: 12,
-        }}
-      >
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
         {examples.map((t) => (
           <button
             key={t.id}
-            className="card example-card"
+            type="button"
             onClick={() => onPick(t)}
-            style={{
-              textAlign: "left",
-              cursor: "pointer",
-              background: "white",
-              padding: 16,
-              border: "1px solid #e2e8f0",
-              borderRadius: 8,
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-              fontFamily: "inherit",
-              fontSize: "inherit",
-              transition: "border-color 0.15s, box-shadow 0.15s",
-            }}
+            className="flex cursor-pointer flex-col gap-1.5 rounded-lg border border-border bg-card p-4 text-left font-[inherit] text-[length:inherit] text-card-foreground transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 22 }}>{t.icon}</span>
-              <strong style={{ flex: 1 }}>{t.title}</strong>
-              <span className="tag" style={{ fontSize: "0.75em" }}>
+            <div className="flex items-center gap-2">
+              <span className="text-[22px]">{t.icon}</span>
+              <strong className="flex-1">{t.title}</strong>
+              <Badge variant="secondary" className="text-[0.75em]">
                 {t.category}
-              </span>
+              </Badge>
             </div>
-            <p
-              className="small"
-              style={{ margin: "4px 0 0", color: "#475569" }}
-            >
-              {t.summary}
-            </p>
+            <p className="m-0 mt-1 text-xs text-muted-foreground">{t.summary}</p>
             {t.requires.source_repo && (
-              <p
-                className="small"
-                style={{
-                  margin: "4px 0 0",
-                  color: "#9333ea",
-                  fontWeight: 500,
-                }}
-              >
+              <p className="m-0 mt-1 text-xs font-medium text-status-waiting">
                 Requires source repo
               </p>
             )}
@@ -580,33 +508,24 @@ function ExampleTemplateModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
-        className="modal"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 640 }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 28 }}>{template.icon}</span>
-          <div style={{ flex: 1 }}>
-            <h3 style={{ margin: 0 }}>{template.title}</h3>
-            <p className="small muted" style={{ margin: 0 }}>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-[640px]">
+        <div className="flex items-center gap-2.5">
+          <span className="text-[28px]">{template.icon}</span>
+          <div className="flex-1">
+            <DialogTitle>{template.title}</DialogTitle>
+            <DialogDescription className="text-xs">
               {template.category} · {template.summary}
-            </p>
+            </DialogDescription>
           </div>
         </div>
 
         {template.details && (
-          <p className="small" style={{ marginTop: 12, whiteSpace: "pre-wrap" }}>
-            {template.details}
-          </p>
+          <p className="m-0 whitespace-pre-wrap text-xs">{template.details}</p>
         )}
 
         {template.requires.hints.length > 0 && (
-          <ul
-            className="small muted"
-            style={{ marginTop: 8, paddingLeft: 18 }}
-          >
+          <ul className="m-0 pl-[18px] text-xs text-muted-foreground">
             {template.requires.hints.map((h, i) => (
               <li key={i}>{h}</li>
             ))}
@@ -614,55 +533,44 @@ function ExampleTemplateModal({
         )}
 
         {template.requires.source_repo && (
-          <p
-            className="small"
-            style={{
-              marginTop: 8,
-              color: "#9333ea",
-              background: "#faf5ff",
-              border: "1px solid #e9d5ff",
-              padding: "6px 10px",
-              borderRadius: 4,
-            }}
-          >
+          <p className="m-0 rounded border border-status-waiting/30 bg-status-waiting/10 px-2.5 py-1.5 text-xs text-status-waiting">
             This template expects a source repo. After creating the
             project, attach one via Inputs → Git URL or Local path
             before running.
           </p>
         )}
 
-        {error && <div className="error">{error}</div>}
+        {error && <Alert variant="error">{error}</Alert>}
 
-        <label style={{ marginTop: 12 }}>Project ID</label>
-        <input
-          type="text"
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-          disabled={busy}
-        />
+        <div>
+          <Label htmlFor="tpl-id">Project ID</Label>
+          <Input
+            id="tpl-id"
+            type="text"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            disabled={busy}
+          />
 
-        <label style={{ marginTop: 8 }}>Goal</label>
-        <textarea
-          rows={8}
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-          disabled={busy}
-          style={{ fontFamily: "inherit" }}
-        />
-
-        <div className="row" style={{ marginTop: 12, gap: 8 }}>
-          <button
-            className="primary"
-            onClick={() => void submit()}
-            disabled={busy || !projectId.trim() || !goal.trim()}
-          >
-            {busy ? "Creating…" : "Create project"}
-          </button>
-          <button onClick={onClose} disabled={busy}>
-            Cancel
-          </button>
+          <Label htmlFor="tpl-goal" className="mt-2">Goal</Label>
+          <Textarea
+            id="tpl-goal"
+            rows={8}
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            disabled={busy}
+          />
         </div>
-      </div>
-    </div>
+
+        <DialogFooter className="justify-start">
+          <Button onClick={() => void submit()} disabled={busy || !projectId.trim() || !goal.trim()}>
+            {busy ? "Creating…" : "Create project"}
+          </Button>
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
