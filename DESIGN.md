@@ -4451,6 +4451,12 @@ on completed agents during the merge phase, not as a special signal.
 
 ## 33. Run Initialization — Inputs, Continuation, and Existing Codebases
 
+> **Superseded in part (plan §13, ongoing projects).** Runs now start from the project's
+> long-lived repo (`data/projects/{id}/repo.git`) with full history, and reach its `main`
+> only when a human accepts them. Rule 85 below ("fresh git history in `working/`") no
+> longer holds for projects with a project repo; `local_path_in_place` projects are unchanged.
+> Open work carries over through the project backlog rather than per-run continuation.
+
 Real work is rarely greenfield. A run might start from a one-line goal,
 or from a 30-page spec PDF, or from an existing repo that needs a feature
 added, or from the deliverables of a prior run that needs revision. The

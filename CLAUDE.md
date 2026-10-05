@@ -19,6 +19,12 @@ the agent team before any run starts. Projects become callable API endpoints for
 Full architecture is in DESIGN.md. Do not infer architecture from existing code —
 read the design doc. Every structural decision is intentional.
 
+**Ongoing projects.** A project is software under continuous development; a run is one
+working session on it (plan §13). Each project has a long-lived repo (`core/project_repo.py`)
+and a backlog (`core/backlog.py`). A run takes backlog items, starts from the project's `main`,
+and waits for a human to accept it before anything reaches `main`. The Studio project page
+opens on the Work tab (review queue + backlog).
+
 **Opencode harness.** Agent work is done by [opencode](https://github.com/anomalyco/opencode)
 running headless, one sandboxed server per role. GuudFlow stays the manager: scheduler,
 task board, personas and memory, permissions, credentials, merges and Studio. The design is
@@ -226,7 +232,7 @@ These are from DESIGN.md sections 13, 14, and 19. They are not preferences.
 18. **One tool policy.** (changed for the opencode harness, plan §6.4) The policy is the generated opencode permission ruleset plus MCP RBAC, both compiled from the role's capabilities (`core/harness/capabilities.py`, `permissions.py`). Agents never see credentials (rule 17 is unchanged). The role's MCP identity comes from its bearer token, never from tool arguments. `BaseAgent.call_tool` and `ToolManifest` apply only to the legacy harness. See plan §5.1, §5.6, §5.7.
 19. **Scopes keep their names.** (changed for the opencode harness, plan §6.4) The RBAC scope names (`fs:*`, `doc:*`, `code:*`, `web:*`, `git:*`, `vis:*`, `mcp:*`) are unchanged. `core/harness/permissions.py` maps them onto opencode permission keys, and `capabilities.py` onto MCP tool grants. Read access is baseline; anything that writes, runs a shell, uses the web, installs packages or takes screenshots needs an explicit capability. Default-deny.
 20. **No file claims: each role has its own clone and branch.** (changed for the opencode harness, plan §6.4) Advisory file claims are dropped, because there is no shared working tree to claim. Overlap is prevented before it happens: the task board never runs two cards with overlapping `files_hint` at the same time (plan §4.6), and the runner merges `agent/{role}` branches into `main`, never the agents.
-21. **`inputs/` is read-only at runtime.** Only the runner writes there, once, at initialization. Continuation runs preserve persona memory, not git history. The meta-agent reads `inputs/README.md` first before proposing a team. See DESIGN §33.
+21. **`inputs/` is read-only at runtime.** Only the runner writes there, once, at initialization. The meta-agent reads `inputs/README.md` first before proposing a team. See DESIGN §33. (changed for ongoing projects, plan §13) Runs are sessions of ongoing project work: every run starts from the project repo's `main` with full history (not a fresh history), its changes reach `main` only when a human accepts the run, and work items live on the persistent project backlog.
 22. **Memory is dynamic, not append-only-forever.** Patterns have lifecycle states (emerging/active/declining/archived/superseded). Confidence is recency-weighted (90d half-life default). Failure clusters narrow `applies_when` before decaying global confidence. Patterns can flip to anti-patterns. Reconciliation runs in the memory_writer at end-of-run. See DESIGN §34.
 23. **Training and production reputation are segregated; episodes are unified.** Both feed `recall()`; reputation aggregates split. Training mode is a flag, not a separate runner. Graduation is a soft gate. See DESIGN §35.
 24. **Project rules live with the project, not the persona.** `data/projects/{id}/persona_rules/{persona_id}.md` and `_shared.md`. Loaded at Layer 3.7 of `effective_system_prompt()`, ABOVE memory. Rules trump memory on conflict. Auto-suggestion never auto-applies. See DESIGN §36.
@@ -523,6 +529,7 @@ From plan §4.2–§4.6 (replaces the Protocol Rules, DESIGN.md section 18, for 
 From plan §5.4 and §5.5 (replaces DESIGN.md sections 19 and 21 for the opencode harness).
 
 **Git:**
+- Every project has one long-lived repo (`data/projects/{id}/repo.git`, plan §13). A run's repo is a clone of its `main`; at run end the run is stored as `runs/{run_id}` and merged into the project's `main` only when a human accepts it. Agents and runs never push to the project repo.
 - Every run has one run repo. Every role works in its own checkout under `<run_root>/roles/<role>/` on its own branch `agent/{role}`. The worktree (`work/`, mounted at `/work`) has no `.git`; the git directory is host-only and never mounted, so nothing the agent writes can configure git on the host.
 - Agents only ever change their own branch. They have no remote credentials, `git push` is denied, and they never merge or touch `main` or another role's branch.
 - After each turn the runner (host side) commits leftover changes with a conventional message, fetches only `agent/{role}`, checks it (protected paths, symlinks, `core/secret_scan.py`), and merges it into `main`. A failed check means no merge and a failed turn with the reason; the branch is then *set aside* (reset to `main`, patch kept at `.guudflow/set_aside/`, reason in the next brief) so it never poisons later turns.

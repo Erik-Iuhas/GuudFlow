@@ -165,6 +165,27 @@ poll. Without `"demo": true` the project is stored but not started: the `202` ca
 `{"confirm": true}` to that URL) to start the run. Open Studio to watch the run live (board, quip feed,
 task cards, pending approvals). `GUUDFLOW_API_TOKEN` can be unset in dev mode.
 
+### Ongoing work on a project
+
+A project is software under continuous development; each run is one working session on it.
+Open the project in Studio: the **Work** tab holds the backlog and the runs waiting for your
+review. Add items (one acceptance check per line), pick the ones for the next run and start it.
+When the run finishes it waits for you: look at its changes, then accept it into the project
+(merged into the project's own repo, `data/projects/{id}/repo.git`; its finished items close) or
+reject it (nothing changes; its items reopen). The next run starts from the accepted code. From
+the API or CI:
+
+```bash
+curl -X POST http://localhost:8000/api/projects/my-app/backlog -H "Authorization: Bearer $GUUDFLOW_API_TOKEN" \
+  -H "Content-Type: application/json" -d '{"title": "Rate-limit login", "acceptance": ["429 after 5 tries"]}'
+curl -X POST http://localhost:8000/api/invoke/my-app -H "Authorization: Bearer $GUUDFLOW_API_TOKEN" \
+  -H "Content-Type: application/json" -d '{"confirm": true, "backlog_items": "top"}'
+curl -X POST http://localhost:8000/api/projects/my-app/runs-review/RUN_ID/accept \
+  -H "Authorization: Bearer $GUUDFLOW_API_TOKEN"
+```
+
+See plan §13 in `docs/OPENCODE_HARNESS_PLAN.md` for how it works.
+
 ### Quality gate
 
 An offline check of a finished run (no network, no model):

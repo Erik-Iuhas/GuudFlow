@@ -1172,6 +1172,51 @@ permission ask, and reading the run report.
 
 ---
 
+## 13. Ongoing projects: runs are sessions of continuing work
+
+A GuudFlow project is a piece of software under continuous development, not a one-off
+job. A run is one working session on it. Three decisions (taken with the user after the
+offline plan was finished) make that the default:
+
+1. **One long-lived repo per project** (`core/project_repo.py`). `data/projects/{id}/repo.git`
+   is seeded once (from the project's source repo, or empty). Every run starts as a clone of
+   its `main` with full history, or of a pending run's branch when it continues that run.
+   This replaces DESIGN §33 rule 85 ("fresh git history per run"). Projects whose source is
+   `local_path_in_place` keep working in the user's own directory and skip the project repo.
+2. **A human accepts every run** (`core/project_runs.py`). At run end the run's `main` is
+   stored as `runs/{run_id}` and a `RUN_SUBMITTED` signal is posted. The project's `main`
+   changes only when a human accepts the run (`--no-ff` merge). A conflicting accept is
+   refused with the files; the human continues the run to reconcile it, or rejects it.
+   Rejecting leaves `main` untouched and keeps the branch for reference.
+3. **A persistent backlog** (`core/backlog.py`, `data/projects/{id}/backlog.json`). Humans
+   add, edit, reprioritise, drop and reopen items at any time. A run takes the items chosen
+   when it starts (`backlog_items`: ids or `"top"`). The planner sees them (agent-written
+   text wrapped as untrusted), and its plan must give every item at least one card
+   (`backlog_id`, enforced by `check_plan`). Teams without a planner get the items in every
+   brief. At run end each item gets a pending outcome (`done` / `partial` / `not_started`),
+   and unfinished extra cards become new items (`source: run:<id>`). An item becomes `done`
+   only when the run that finished it is accepted; otherwise it reopens, with the run's
+   summary in its history for the next attempt.
+
+Continuity between runs: the last accepted run's carry-forward
+(`data/projects/{id}/context/last_accepted.json`) goes into every brief of the next run.
+Its open work lives on the backlog, not on the next run's board. Persona memory, the
+playbook and the roadmap carry over as before.
+
+API (bearer token on every route): `GET/POST /api/projects/{id}/backlog`,
+`PATCH /api/projects/{id}/backlog/{item}` (fields, `status: dropped|open`),
+`GET /api/projects/{id}/runs-review`, `GET …/runs-review/{run}/changes`,
+`POST …/runs-review/{run}/accept|reject` (409 + `files` on conflict), and
+`POST /api/invoke/{id}` with `backlog_items` and `continue_run`.
+
+Studio: the project page opens on **Work**, with runs waiting for review on top (diff,
+note, accept, reject, continue) and the backlog below (select items for the next run,
+reorder, add with one acceptance check per line). The run report shows the run's review
+state.
+
+Not built yet: the meta-agent does not read the backlog when proposing a team; runs are
+started by a human or CI, never on a schedule by themselves.
+
 ## Appendix: how the research was done
 
 1. `npm i opencode-ai@1.18.34`; `opencode serve`; dumped `GET /doc` (OpenAPI, ~479 KB).
