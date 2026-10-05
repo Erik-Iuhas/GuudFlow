@@ -28,9 +28,67 @@ export interface BacklogItemWire {
   run_id: string | null;
   pending: ItemOutcome | null;
   history: Record<string, unknown>[];
+  depends_on: string[];
+  /** Gateway spend on the item across runs (listing only). */
+  total_cost_usd?: number;
 }
 
-export type RunState = "pending" | "accepted" | "rejected" | "no_changes";
+export type RunState = "pending" | "accepted" | "rejected" | "no_changes" | "superseded";
+
+export interface CheckWire {
+  command: string;
+  status: "passed" | "failed" | "timed_out" | "skipped";
+  exit_code: number | null;
+  output: string;
+  duration_s: number;
+  where: "docker" | "host" | "none";
+  reason: string;
+}
+
+export interface SyncWire {
+  status: "seeded" | "up_to_date" | "fast_forward" | "merged" | "conflict" | "error";
+  main: string;
+  detail: string;
+  at: number;
+}
+
+export interface PublishWire {
+  status: "skipped" | "pushed" | "pr_opened" | "error";
+  ref: string;
+  url: string;
+  detail: string;
+}
+
+export interface RemoteSummary {
+  url: string;
+  branch: string;
+  publish: "none" | "branch" | "pr" | "main";
+  token: boolean;
+}
+
+export interface AutopilotStatus {
+  enabled: boolean;
+  last_start?: number | null;
+  next_due?: number;
+  week_spend_usd?: number;
+  max_usd_per_week?: number;
+  error?: string;
+}
+
+export interface RunsReview {
+  main: string | null;
+  runs: RunBranchWire[];
+  remote?: RemoteSummary | null;
+  autopilot?: AutopilotStatus;
+}
+
+export interface Proposal {
+  title: string;
+  acceptance: string[];
+  kind: string;
+  size: string;
+  why: string;
+}
 
 export interface RunBranchWire {
   run_id: string;
@@ -44,6 +102,9 @@ export interface RunBranchWire {
   merged: string;
   note: string;
   parent_run: string | null;
+  check?: CheckWire | null;
+  sync?: SyncWire | null;
+  published?: PublishWire | null;
 }
 
 export interface NewItem {
@@ -52,6 +113,7 @@ export interface NewItem {
   kind: string;
   size: string;
   priority?: number;
+  depends_on?: string[];
 }
 
 export type ItemPatch = Partial<Pick<BacklogItemWire, "title" | "acceptance" | "kind" | "size" | "priority" | "notes">> & {
@@ -104,8 +166,12 @@ export const workApi = {
     send<BacklogItemWire>("POST", `/api/projects/${enc(projectId)}/backlog`, item),
   patch: (projectId: string, itemId: string, patch: ItemPatch) =>
     send<BacklogItemWire>("PATCH", `/api/projects/${enc(projectId)}/backlog/${enc(itemId)}`, patch),
-  runs: (projectId: string) =>
-    send<{ main: string | null; runs: RunBranchWire[] }>("GET", `/api/projects/${enc(projectId)}/runs-review`),
+  runs: (projectId: string) => send<RunsReview>("GET", `/api/projects/${enc(projectId)}/runs-review`),
+  groom: (projectId: string) =>
+    send<{ proposals: Proposal[] }>("POST", `/api/projects/${enc(projectId)}/backlog/groom`, {}).then(
+      (r) => r.proposals,
+    ),
+  syncRemote: (projectId: string) => send<SyncWire>("POST", `/api/projects/${enc(projectId)}/remote/sync`, {}),
   changes: (projectId: string, runId: string) =>
     send<{ diff: string }>("GET", `/api/projects/${enc(projectId)}/runs-review/${enc(runId)}/changes`).then(
       (r) => r.diff,
@@ -122,7 +188,7 @@ export function useBacklog(projectId: string): UseQueryResult<BacklogItemWire[]>
   return useQuery({ queryKey: workKeys.backlog(projectId), queryFn: () => workApi.backlog(projectId) });
 }
 
-export function useProjectRuns(projectId: string): UseQueryResult<{ main: string | null; runs: RunBranchWire[] }> {
+export function useProjectRuns(projectId: string): UseQueryResult<RunsReview> {
   return useQuery({ queryKey: workKeys.runs(projectId), queryFn: () => workApi.runs(projectId) });
 }
 
@@ -154,6 +220,15 @@ export function usePatchItem(
     mutationFn: ({ itemId, patch }) => workApi.patch(projectId, itemId, patch),
     onSuccess: invalidate,
   });
+}
+
+export function useGroom(projectId: string): UseMutationResult<Proposal[], Error, void> {
+  return useMutation({ mutationFn: () => workApi.groom(projectId) });
+}
+
+export function useSyncRemote(projectId: string): UseMutationResult<SyncWire, Error, void> {
+  const invalidate = useInvalidate(projectId);
+  return useMutation({ mutationFn: () => workApi.syncRemote(projectId), onSuccess: invalidate });
 }
 
 export function useDecideRun(

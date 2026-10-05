@@ -64,3 +64,8 @@ export function changeSummary(run: Pick<RunBranchWire, "commits" | "files">): st
   const f = run.files.length === 1 ? "1 file" : `${run.files.length} files`;
   return `${c}, ${f}`;
 }
+
+/** "B2, b5 B7" → ["B2", "B5", "B7"] (anything that is not an item id is ignored). */
+export function parseItemIds(text: string): string[] {
+  return [...new Set((text.toUpperCase().match(/\bB\d+\b/g) ?? []))];
+}

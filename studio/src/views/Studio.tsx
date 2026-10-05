@@ -18,6 +18,7 @@ import { cn } from "../lib/utils";
 import type { AgentConfig, ProjectConfig, RunMeta } from "../types";
 import { ProjectInsights } from "../features/project/ProjectInsights";
 import { ProjectWork, type RunRequest } from "../features/work/ProjectWork";
+import { WorkSettings } from "../features/work/WorkSettings";
 import { Inputs } from "./Inputs";
 
 type Tab = "work" | "team" | "inputs" | "roadmap" | "insights" | "settings";
@@ -404,15 +405,23 @@ export function Studio() {
       ) : tab === "insights" ? (
         id && <ProjectInsights projectId={id} />
       ) : (
-        <SettingsTab
-          gates={{ ...DEFAULT_GATES, ...(project.approval_gates ?? {}) }}
-          onChange={(next) =>
-            setProject({
-              ...project,
-              approval_gates: next,
-            })
-          }
-        />
+        <>
+          <SettingsTab
+            gates={{ ...DEFAULT_GATES, ...(project.approval_gates ?? {}) }}
+            onChange={(next) =>
+              setProject({
+                ...project,
+                approval_gates: next,
+              })
+            }
+          />
+          <WorkSettings
+            gates={project.approval_gates ?? {}}
+            onChange={(patch) =>
+              setProject({ ...project, approval_gates: { ...(project.approval_gates ?? {}), ...patch } })
+            }
+          />
+        </>
       )}
 
       {/* Phase C.0.5: pre-run cost preview gate. Studio shows the

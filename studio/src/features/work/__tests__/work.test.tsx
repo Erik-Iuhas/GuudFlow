@@ -4,13 +4,13 @@ import { MemoryRouter } from "react-router-dom";
 import type { BacklogItemWire, RunBranchWire } from "../api";
 import { BacklogList } from "../BacklogList";
 import { ReviewList } from "../ReviewList";
-import { changeSummary, groupBacklog, movedPriority, parseAcceptance, splitRuns, topOpen } from "../model";
+import { changeSummary, groupBacklog, movedPriority, parseAcceptance, parseItemIds, splitRuns, topOpen } from "../model";
 
 function item(id: string, over: Partial<BacklogItemWire> = {}): BacklogItemWire {
   return {
     id, title: `Item ${id}`, acceptance: [], kind: "code", size: "M", priority: 0, status: "open",
     notes: "", files_hint: [], source: "human", created_at: 0, updated_at: 0, run_id: null,
-    pending: null, history: [], ...over,
+    pending: null, history: [], depends_on: [], ...over,
   };
 }
 
@@ -108,5 +108,62 @@ describe("ReviewList", () => {
     render(<MemoryRouter><ReviewList pending={[]} decided={[]} changes={{}} onViewChanges={vi.fn()}
       onDecide={vi.fn()} onContinue={vi.fn()} /></MemoryRouter>);
     expect(screen.getByText(/No run is waiting for review/)).toBeInTheDocument();
+  });
+});
+
+describe("plan 14 additions", () => {
+  it("shows a failed check with its output and offers a reconcile run on conflict", () => {
+    const onContinue = vi.fn();
+    render(<MemoryRouter><ReviewList pending={[run("run_a", {
+      check: { command: "pytest -q", status: "failed", exit_code: 1, output: "1 failed", duration_s: 3,
+        where: "docker", reason: "" } })]} decided={[run("run_0", { state: "superseded" })]} changes={{}}
+      onViewChanges={vi.fn()} onDecide={vi.fn()} onContinue={onContinue}
+      error={{ runId: "run_a", message: "main changed", files: ["same.py"] }} /></MemoryRouter>);
+    expect(screen.getByText("check failed")).toBeInTheDocument();
+    expect(screen.getByText("`pytest -q` exited with 1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reconcile in a new run" }));
+    expect(onContinue).toHaveBeenCalled();
+    expect(screen.getByText("continued by a later run")).toBeInTheDocument();
+  });
+
+  it("labels dependencies and spend on items, and parses 'after' ids", () => {
+    render(<BacklogList onToggle={vi.fn()} onMove={vi.fn()} onDrop={vi.fn()} onReopen={vi.fn()}
+      onAdd={vi.fn()} onStart={vi.fn()} selected={[]}
+      items={[item("B2", { depends_on: ["B1"], total_cost_usd: 1.5 })]} />);
+    expect(screen.getByText("after B1")).toBeInTheDocument();
+    expect(screen.getByText("$1.50 spent")).toBeInTheDocument();
+    expect(parseItemIds("b2, B5 x B2")).toEqual(["B2", "B5"]);
+  });
+
+  it("header: remote, sync result and autopilot budget", async () => {
+    const { WorkHeader, Suggestions } = await import("../WorkHeader");
+    const onSync = vi.fn();
+    render(<WorkHeader remote={{ url: "https://github.com/acme/app.git", branch: "main", publish: "pr", token: false }}
+      autopilot={{ enabled: true, next_due: 1_800_000_000, week_spend_usd: 4, max_usd_per_week: 20 }}
+      lastSync={{ status: "conflict", main: "x", detail: "README.md", at: 1 }} onSync={onSync} />);
+    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    expect(onSync).toHaveBeenCalled();
+    expect(screen.getByText("no token set")).toBeInTheDocument();
+    expect(screen.getByText("not synced: conflict: README.md")).toBeInTheDocument();
+    expect(screen.getByTestId("autopilot-status")).toHaveTextContent("$4.00 of $20.00 this week");
+    const onAdd = vi.fn();
+    render(<Suggestions proposals={[{ title: "Audit log", acceptance: ["logged"], kind: "code", size: "M", why: "" }]}
+      onAdd={onAdd} onDismiss={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ title: "Audit log" }));
+  });
+
+  it("settings: remote clears when the url is emptied; auto-accept warns without a check", async () => {
+    const { WorkSettings } = await import("../WorkSettings");
+    const onChange = vi.fn();
+    const { rerender } = render(<WorkSettings gates={{}} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("URL"), { target: { value: "/srv/git/app.git" } });
+    expect(onChange).toHaveBeenLastCalledWith({ project_remote: { url: "/srv/git/app.git", branch: "main", publish: "none" } });
+    rerender(<WorkSettings gates={{ project_remote: { url: "/srv/git/app.git" } }} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("URL"), { target: { value: "" } });
+    expect(onChange).toHaveBeenLastCalledWith({ project_remote: null });
+    rerender(<WorkSettings gates={{ autopilot: { enabled: true, every_hours: 6, take: 2, max_usd_per_run: 3,
+      max_usd_per_week: 10, auto_accept: true } }} onChange={onChange} />);
+    expect(screen.getByText(/Auto-accept needs a check before review/)).toBeInTheDocument();
   });
 });

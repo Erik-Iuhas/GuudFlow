@@ -6,11 +6,16 @@ import {
   useAddItem,
   useBacklog,
   useDecideRun,
+  useGroom,
   usePatchItem,
   useProjectRuns,
+  useSyncRemote,
   workApi,
   workKeys,
+  type Proposal,
 } from "./api";
+import { Button } from "../../components/ui/button";
+import { Suggestions, WorkHeader } from "./WorkHeader";
 import { BacklogList } from "./BacklogList";
 import { groupBacklog, splitRuns, topOpen } from "./model";
 import { ReviewList, type DecisionError } from "./ReviewList";
@@ -37,7 +42,10 @@ export function ProjectWork({
   const add = useAddItem(projectId);
   const patch = usePatchItem(projectId);
   const decide = useDecideRun(projectId);
+  const groom = useGroom(projectId);
+  const syncRemote = useSyncRemote(projectId);
   const client = useQueryClient();
+  const [proposals, setProposals] = useState<Proposal[] | null>(null);
 
   const [selected, setSelected] = useState<string[] | null>(null);
   const [changes, setChanges] = useState<Record<string, string | undefined>>({});
@@ -79,11 +87,26 @@ export function ProjectWork({
     });
   }
 
-  const loadError = backlog.error ?? runs.error ?? add.error ?? patch.error;
+  const loadError = backlog.error ?? runs.error ?? add.error ?? patch.error ?? groom.error
+    ?? syncRemote.error;
+
+  function addProposal(p: Proposal) {
+    add.mutate({ title: p.title, acceptance: p.acceptance, kind: p.kind, size: p.size });
+    setProposals((list) => (list ?? []).filter((x) => x.title !== p.title));
+  }
 
   return (
     <div className="flex flex-col gap-6" data-testid="project-work">
       {loadError && <Alert variant="error">{loadError.message}</Alert>}
+      {runs.data && (
+        <WorkHeader
+          remote={runs.data.remote}
+          autopilot={runs.data.autopilot}
+          lastSync={syncRemote.data ?? null}
+          onSync={() => syncRemote.mutate()}
+          syncing={syncRemote.isPending}
+        />
+      )}
       <div>
         <SectionTitle className="mt-0">Waiting for your review</SectionTitle>
         <ReviewList
@@ -98,7 +121,18 @@ export function ProjectWork({
         />
       </div>
       <div>
-        <SectionTitle className="mt-0">Backlog</SectionTitle>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <SectionTitle className="m-0">Backlog</SectionTitle>
+          <Button size="sm" variant="outline" disabled={groom.isPending}
+            onClick={() => groom.mutate(undefined, { onSuccess: (p) => setProposals(p) })}>
+            {groom.isPending ? "Thinking…" : "Suggest items from the roadmap"}
+          </Button>
+        </div>
+        {proposals && (
+          <div className="mb-3">
+            <Suggestions proposals={proposals} onAdd={addProposal} onDismiss={() => setProposals(null)} />
+          </div>
+        )}
         {backlog.isLoading ? (
           <p className="m-0 text-sm text-muted-foreground">Loading the backlog…</p>
         ) : (

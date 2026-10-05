@@ -2,8 +2,9 @@ import { useState, type FormEvent } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input, Label, Select, Textarea } from "../../components/ui/form-controls";
+import { formatUsd } from "../../lib/cost";
 import type { BacklogItemWire, NewItem } from "./api";
-import { OUTCOME_LABEL, groupBacklog, movedPriority, parseAcceptance } from "./model";
+import { OUTCOME_LABEL, groupBacklog, movedPriority, parseAcceptance, parseItemIds } from "./model";
 
 // A disabled arrow just fades: no muted box at the ends of the list.
 const ARROW = "disabled:border-transparent disabled:bg-transparent";
@@ -126,8 +127,14 @@ function ItemRow({
           <span className={muted ? "text-muted-foreground" : "font-medium"}>{item.title}</span>
           <Badge variant="outline">{item.kind}</Badge>
           <Badge variant="outline">size {item.size}</Badge>
+          {item.depends_on.length > 0 && (
+            <span className="text-xs text-muted-foreground">after {item.depends_on.join(", ")}</span>
+          )}
           {item.source.startsWith("run:") && (
             <span className="text-xs text-muted-foreground">from {item.source.slice(4)}</span>
+          )}
+          {(item.total_cost_usd ?? 0) > 0 && (
+            <span className="text-xs text-muted-foreground">{formatUsd(item.total_cost_usd ?? 0)} spent</span>
           )}
         </div>
         {item.acceptance.length > 0 && (
@@ -151,13 +158,17 @@ function AddItemForm({ onAdd, adding }: { onAdd: (item: NewItem) => void; adding
   const [acceptance, setAcceptance] = useState("");
   const [kind, setKind] = useState("code");
   const [size, setSize] = useState("M");
+  const [after, setAfter] = useState("");
 
   function submit(e: FormEvent) {
     e.preventDefault();
     if (title.trim().length < 3) return;
-    onAdd({ title: title.trim(), acceptance: parseAcceptance(acceptance), kind, size });
+    const dependsOn = parseItemIds(after);
+    onAdd({ title: title.trim(), acceptance: parseAcceptance(acceptance), kind, size,
+      ...(dependsOn.length ? { depends_on: dependsOn } : {}) });
     setTitle("");
     setAcceptance("");
+    setAfter("");
   }
 
   return (
@@ -185,6 +196,11 @@ function AddItemForm({ onAdd, adding }: { onAdd: (item: NewItem) => void; adding
           <Select id="backlog-size" value={size} onChange={(e) => setSize(e.target.value)} className="w-24">
             {["S", "M", "L"].map((s) => <option key={s} value={s}>{s}</option>)}
           </Select>
+        </div>
+        <div>
+          <Label htmlFor="backlog-after">After (items)</Label>
+          <Input id="backlog-after" placeholder="B2, B5" value={after} className="w-32"
+            onChange={(e) => setAfter(e.target.value)} />
         </div>
         <Button type="submit" size="sm" disabled={adding || title.trim().length < 3}>
           {adding ? "Adding…" : "Add to backlog"}

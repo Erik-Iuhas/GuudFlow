@@ -6,7 +6,7 @@ import { REPORT_FIXTURE } from "../src/features/report/__fixtures__/report";
 // Baselines live in e2e/__screenshots__ (see snapshotPathTemplate in playwright.config.ts).
 // Regenerate them deliberately with `npm run e2e -- visual --update-snapshots`.
 
-test.use({ viewport: { width: 1280, height: 800 } });
+test.use({ viewport: { width: 1280, height: 800 }, timezoneId: "UTC", locale: "en-US" });
 
 const THEMES = ["light", "dark"] as const;
 type Theme = (typeof THEMES)[number];
@@ -157,10 +157,15 @@ const PAGES: Array<{
       await page.route("**/api/projects/billing-api/runs-review", (r) =>
         json(r, {
           main: "a".repeat(40),
+          remote: { url: "https://github.com/acme/billing-api.git", branch: "main", publish: "pr", token: true },
+          autopilot: { enabled: true, last_start: now - 3600, next_due: now + 5 * 3600, week_spend_usd: 6.4,
+            max_usd_per_week: 20 },
           runs: [
             { run_id: "run_7c2e1", state: "pending", base: "a", head: "b", commits: 4,
               files: ["api/auth.py", "api/tokens.py", "tests/test_auth.py"], submitted_at: now,
-              decided_at: null, merged: "", note: "", parent_run: null },
+              decided_at: null, merged: "", note: "", parent_run: null,
+              check: { command: "pytest -q", status: "failed", exit_code: 1, duration_s: 41, where: "docker",
+                reason: "", output: "FAILED tests/test_auth.py::test_refresh_reuse - assert 200 == 401\n1 failed, 37 passed" } },
             { run_id: "run_5a91d", state: "accepted", base: "c", head: "d", commits: 2, files: ["api/app.py"],
               submitted_at: now - 86400, decided_at: now - 80000, merged: "d", note: "first slice", parent_run: null },
           ],
@@ -168,7 +173,8 @@ const PAGES: Array<{
       );
       const item = (id: string, title: string, over: Record<string, unknown> = {}) => ({
         id, title, acceptance: [], kind: "code", size: "M", priority: 0, status: "open", notes: "", files_hint: [],
-        source: "human", created_at: now, updated_at: now, run_id: null, pending: null, history: [], ...over,
+        source: "human", created_at: now, updated_at: now, run_id: null, pending: null, history: [], depends_on: [],
+        ...over,
       });
       await page.route("**/api/projects/billing-api/backlog", (r) =>
         json(r, {
@@ -177,7 +183,8 @@ const PAGES: Array<{
               acceptance: ["Old refresh token is rejected after use"] }),
             item("B4", "Rate-limit the login endpoint", { priority: 3, acceptance: ["429 after 5 failed tries in a minute"],
               history: [{ run_id: "run_5a91d", summary: "Added the limiter middleware; tests still missing" }] }),
-            item("B6", "Invoice PDF export", { priority: 2, kind: "code", size: "L" }),
+            item("B6", "Invoice PDF export", { priority: 2, kind: "code", size: "L", depends_on: ["B4"],
+              total_cost_usd: 1.85 }),
             item("B7", "Document the auth flow", { priority: 1, kind: "docs", size: "S", source: "run:run_7c2e1" }),
             item("B1", "Health endpoint", { status: "done" }),
           ],

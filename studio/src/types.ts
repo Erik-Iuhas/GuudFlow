@@ -184,6 +184,27 @@ export interface ApprovalGates {
   iteration_breach_at: number | null;
   per_iteration: boolean;
   token_budget_usd: number | null;
+  /** Ongoing projects (plan §14): run on the run's code before review, e.g. "pytest -q". */
+  check_command?: string;
+  project_remote?: ProjectRemote | null;
+  autopilot?: AutopilotSettings | null;
+}
+
+export interface ProjectRemote {
+  url: string;
+  branch?: string;
+  publish?: "none" | "branch" | "pr" | "main";
+  /** Name of a host environment variable (GUUDFLOW_GIT_*) holding the token; never the token. */
+  token_env?: string | null;
+}
+
+export interface AutopilotSettings {
+  enabled: boolean;
+  every_hours: number;
+  take: number;
+  max_usd_per_run: number;
+  max_usd_per_week: number;
+  auto_accept: boolean;
 }
 
 export interface CostEstimate {

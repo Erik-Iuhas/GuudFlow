@@ -4,7 +4,7 @@ import { Badge, type BadgeProps } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Alert, Textarea } from "../../components/ui/form-controls";
 import { cn } from "../../lib/utils";
-import type { RunBranchWire, RunState } from "./api";
+import type { CheckWire, PublishWire, RunBranchWire, RunState } from "./api";
 import { changeSummary } from "./model";
 
 const STATE_VARIANT: Record<RunState, BadgeProps["variant"]> = {
@@ -12,12 +12,27 @@ const STATE_VARIANT: Record<RunState, BadgeProps["variant"]> = {
   accepted: "complete",
   rejected: "failed",
   no_changes: "outline",
+  superseded: "outline",
 };
 const STATE_LABEL: Record<RunState, string> = {
   pending: "waiting for review",
   accepted: "accepted",
   rejected: "rejected",
   no_changes: "no changes",
+  superseded: "continued by a later run",
+};
+
+const CHECK_VARIANT: Record<CheckWire["status"], BadgeProps["variant"]> = {
+  passed: "complete",
+  failed: "failed",
+  timed_out: "failed",
+  skipped: "outline",
+};
+const CHECK_LABEL: Record<CheckWire["status"], string> = {
+  passed: "check passed",
+  failed: "check failed",
+  timed_out: "check timed out",
+  skipped: "check skipped",
 };
 
 export interface DecisionError {
@@ -81,6 +96,7 @@ export function ReviewList({
                 </Link>
                 <Badge variant={STATE_VARIANT[run.state]}>{STATE_LABEL[run.state]}</Badge>
                 {run.state !== "no_changes" && <span className="text-muted-foreground">{changeSummary(run)}</span>}
+                {run.published && <Published result={run.published} />}
                 {run.note && <span className="text-muted-foreground">— {run.note}</span>}
               </li>
             ))}
@@ -113,7 +129,18 @@ function PendingRun({
         <Badge variant={STATE_VARIANT[run.state]}>{STATE_LABEL[run.state]}</Badge>
         <span className="text-sm text-muted-foreground">{changeSummary(run)}</span>
         {run.parent_run && <span className="text-xs text-muted-foreground">continues {run.parent_run}</span>}
+        {run.check && <Badge variant={CHECK_VARIANT[run.check.status]}>{CHECK_LABEL[run.check.status]}</Badge>}
       </div>
+      {run.check && run.check.status !== "passed" && (
+        <details className="mt-1">
+          <summary className="cursor-pointer text-xs text-muted-foreground">
+            {run.check.reason || `\`${run.check.command}\` exited with ${run.check.exit_code ?? "a timeout"}`}
+          </summary>
+          <pre className="m-0 mt-1 max-h-60 overflow-auto rounded-md border border-border bg-muted p-2 font-mono text-xs">
+            {run.check.output || "(no output)"}
+          </pre>
+        </details>
+      )}
       {run.files.length > 0 && (
         <p className="m-0 mt-1 truncate font-mono text-xs text-muted-foreground" title={run.files.join(", ")}>
           {run.files.slice(0, 8).join(", ")}{run.files.length > 8 ? " …" : ""}
@@ -147,14 +174,30 @@ function PendingRun({
         <Alert variant="error" className="mt-2">
           {error.message}
           {error.files.length > 0 && (
-            <ul className="m-0 mt-1 pl-4 font-mono text-xs">
-              {error.files.map((f) => <li key={f}>{f}</li>)}
-            </ul>
+            <>
+              <ul className="m-0 mt-1 pl-4 font-mono text-xs">
+                {error.files.map((f) => <li key={f}>{f}</li>)}
+              </ul>
+              <Button size="sm" variant="outline" className="mt-2" onClick={onContinue}>
+                Reconcile in a new run
+              </Button>
+            </>
           )}
         </Alert>
       )}
     </li>
   );
+}
+
+function Published({ result }: { result: PublishWire }) {
+  if (result.status === "skipped") return null;
+  if (result.status === "error") {
+    return <span className="text-xs text-status-failed">publish failed: {result.detail}</span>;
+  }
+  if (result.url) {
+    return <a href={result.url} target="_blank" rel="noreferrer" className="text-xs">pull request</a>;
+  }
+  return <span className="font-mono text-xs text-muted-foreground">pushed {result.ref}</span>;
 }
 
 function DiffBlock({ text }: { text: string }) {
