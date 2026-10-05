@@ -35,7 +35,7 @@ export interface AgentView {
   /** How many times the agent was started. */
   spawns: number;
   toolCalls: number;
-  /** USD, summed from AGENT_RESULT.cost. */
+  /** USD so far: AGENT_RESULT.cost is the role's running total at the gateway. */
   cost: number;
 }
 
@@ -149,7 +149,7 @@ export interface RunState {
   cards: Record<string, CardView>;
   approvals: ApprovalView[];
   interventions: InterventionView[];
-  /** role -> USD, from AGENT_RESULT.cost. */
+  /** role -> USD so far (the latest running total from AGENT_RESULT.cost). */
   costs: Record<string, number>;
   artifacts: ArtifactView[];
   web: WebRequestView[];
@@ -324,11 +324,11 @@ export function createRunStore(runId: string): RunStore {
         const cost = typeof data?.cost === "number" && Number.isFinite(data.cost) ? data.cost : 0;
         if (role) {
           patchAgent(d, role, (a) => ({
-            ...a, lastResult: sig.summary, lastResultSignalId: sig.id, cost: a.cost + cost,
+            ...a, lastResult: sig.summary, lastResultSignalId: sig.id, cost: Math.max(a.cost, cost),
           }));
           if (cost) {
             const costs = own(d, "costs");
-            costs[role] = (costs[role] ?? 0) + cost;
+            costs[role] = Math.max(costs[role] ?? 0, cost);
           }
           // The overseer's result belongs with the intervention it just made.
           if (role === "overseer") {

@@ -167,16 +167,18 @@ describe("run event store: mapping table", () => {
     expect(state(store).toolFeed.qa).toBeUndefined();
   });
 
-  it("AGENT_RESULT sets lastResult and accumulates cost per role", () => {
+  it("AGENT_RESULT sets lastResult and keeps the role's running cost total", () => {
     const store = createRunStore("r1");
     state(store).ingest([
       sig("AGENT_RESULT", { from: "dev", summary: "first", detail: { result: {}, cost: 0.25 } }),
       sig("AGENT_RESULT", { from: "dev", summary: "second", detail: { result: {}, cost: 0.5 } }),
+      // A late or replayed result never moves the total backwards.
+      sig("AGENT_RESULT", { from: "dev", summary: "third", detail: { result: {}, cost: 0.4 } }),
       sig("AGENT_RESULT", { from: "qa", summary: "qa done", detail: { result: {} } }),
     ]);
-    expect(state(store).agents.dev.lastResult).toBe("second");
-    expect(state(store).agents.dev.cost).toBeCloseTo(0.75);
-    expect(state(store).costs.dev).toBeCloseTo(0.75);
+    expect(state(store).agents.dev.lastResult).toBe("third");
+    expect(state(store).agents.dev.cost).toBeCloseTo(0.5);
+    expect(state(store).costs.dev).toBeCloseTo(0.5);
     expect(state(store).costs.qa).toBeUndefined();
     expect(state(store).agents.qa.lastResult).toBe("qa done");
   });
