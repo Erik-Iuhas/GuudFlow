@@ -85,9 +85,8 @@ The scheduler enforces one-outstanding-ASK and parks agents via
 confirmations have wall-clock deadlines (`PEER_TIMEOUT`,
 `SKIP_TIMEOUT`).
 
-**Multi-model.** Nine models across Anthropic (Opus 4.7 / Sonnet 4.6 /
-Haiku 4.5), Groq (Llama 3.1), DeepSeek, Mistral (Large / Medium /
-Small / Codestral) — see `data/models.json`, seven providers total
+**Multi-model.** Anthropic (Opus 5.5 / Sonnet 5.5 / Haiku 4.5 and older), Groq (Llama 3.1),
+DeepSeek, Mistral (Large / Medium / Small / Codestral) — shipped in `data/models.json`, seven providers
 including local endpoints (Ollama, LM Studio). Tier resolution
 (`heavy` / `solid` / `fast`) plus per-agent `model_id` override
 (persisted by the studio's ModelPicker). Sub-LLM dispatch (Track 12)
@@ -120,7 +119,11 @@ in parallel, and a reviewer with a two-round review loop. An overseer is added a
    ```
    Set `OPENCODE_BIN` to use a binary somewhere else. A binary on your `PATH` is deliberately not used.
 3. A model key on the **host only**: `ANTHROPIC_API_KEY` (or another provider's key from
-   `data/models.json`). It is read by the LLM gateway on the host. It is never put in a project, a
+   `data/models.json`), or paste it into Studio's **Settings → Models & providers**, which stores it
+   on the host in `{data_root}/secrets/provider_keys.json` (owner-only; an environment variable wins).
+   The same page picks each tier's model, adds providers and models, and sets the prices that budgets,
+   cost previews and the gateway's spend use (saved to `{data_root}/model_config.json`; reset returns to
+   the shipped defaults). It is read by the LLM gateway on the host. It is never put in a project, a
    sandbox or an agent's environment; agents get a per-role virtual key instead. The API loads `.env`;
    the CLI reads the process environment, so export it first:
    ```bash
