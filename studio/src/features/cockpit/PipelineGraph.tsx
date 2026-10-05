@@ -18,10 +18,12 @@ import {
   STATE_LABEL,
   buildGraph,
   type EdgeKind,
+  type GraphDirection,
   type RoleSpec,
 } from "./model";
 
 type RoleNodeData = {
+  direction: GraphDirection;
   role: string;
   state: AgentState;
   pulsing: boolean;
@@ -70,12 +72,11 @@ function RoleNode({ data }: NodeProps<RoleNodeType>) {
       data-testid={`graph-node-${data.role}`}
       data-state={data.state}
     >
-      <Handle id="in" type="target" position={Position.Left} className="!h-2 !w-2 !border-border !bg-muted-foreground" />
-      <Handle id="out" type="source" position={Position.Right} className="!h-2 !w-2 !border-border !bg-muted-foreground" />
-      <Handle id="review-out" type="source" position={Position.Bottom} className="!left-1/3 !h-2 !w-2 !border-border !bg-status-waiting" />
-      <Handle id="review-in" type="target" position={Position.Bottom} className="!left-2/3 !h-2 !w-2 !border-border !bg-status-waiting" />
-      <Handle id="blocked-out" type="source" position={Position.Top} className="!left-1/3 !h-2 !w-2 !border-border !bg-status-blocked" />
-      <Handle id="blocked-in" type="target" position={Position.Top} className="!left-2/3 !h-2 !w-2 !border-border !bg-status-blocked" />
+      {/* Edge anchors only: the graph is read-only, so the dots stay invisible (O22). */}
+      {handleGeometry(data.direction).map((h) => (
+        <Handle key={h.id} id={h.id} type={h.type} position={h.position}
+          className={cn("!pointer-events-none !opacity-0", HANDLE_OFFSET[h.id])} />
+      ))}
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-sm font-semibold">{data.role}</span>
         <span className={cn("shrink-0 text-xs font-medium", STATE_TEXT[data.state])}>
@@ -111,6 +112,8 @@ export interface PipelineGraphProps {
   selectedRole?: string | null;
   onSelectRole?: (role: string) => void;
   className?: string;
+  /** Layout direction; the cockpit uses "TB" in its tall desktop column. */
+  direction?: GraphDirection;
 }
 
 /**
@@ -118,12 +121,13 @@ export interface PipelineGraphProps {
  * solid depends_on edges, review edges (reviewer -> author) carrying the rework round,
  * dashed blocked-on arrows, and the overseer as a detached node that pulses while it runs.
  */
-export function PipelineGraph({ specs, selectedRole, onSelectRole, className }: PipelineGraphProps) {
+export function PipelineGraph({ specs, selectedRole, onSelectRole, className, direction = "LR" }: PipelineGraphProps) {
   const agents = useRunStore((s) => s.agents);
   const reviews = useRunStore((s) => s.reviews);
   const blockedOn = useRunStore((s) => s.blockedOn);
 
-  const model = useMemo(() => buildGraph(specs, agents, reviews, blockedOn), [specs, agents, reviews, blockedOn]);
+  const model = useMemo(() => buildGraph(specs, agents, reviews, blockedOn, direction),
+    [specs, agents, reviews, blockedOn, direction]);
 
   const { nodes, edges } = useMemo(() => {
     const nodes: RoleNodeType[] = model.nodes.map((n) => ({
@@ -134,9 +138,10 @@ export function PipelineGraph({ specs, selectedRole, onSelectRole, className }: 
       initialWidth: NODE_WIDTH,
       initialHeight: NODE_HEIGHT,
       // Handle geometry up front so edges draw on the first paint (and under jsdom).
-      handles: handleGeometry(),
+      handles: handleGeometry(direction),
       ariaLabel: `${n.role}: ${STATE_LABEL[n.state]}`,
       data: {
+        direction,
         role: n.role, state: n.state, pulsing: n.pulsing, detached: n.detached, card: n.card,
         selected: selectedRole === n.role,
       },
@@ -154,10 +159,10 @@ export function PipelineGraph({ specs, selectedRole, onSelectRole, className }: 
       focusable: false,
     }));
     return { nodes, edges };
-  }, [model, selectedRole]);
+  }, [model, selectedRole, direction]);
 
   // Re-fit when the set of roles changes; layout of existing roles never moves.
-  const roleKey = model.nodes.map((n) => n.id).join("|");
+  const roleKey = `${direction}:${model.nodes.map((n) => n.id).join("|")}`;
 
   if (model.nodes.length === 0) {
     return (
@@ -188,16 +193,41 @@ export function PipelineGraph({ specs, selectedRole, onSelectRole, className }: 
   );
 }
 
-/** Positions of the six handles in a node's box, matching the classes in `RoleNode`. */
-function handleGeometry() {
+/**
+ * The six edge anchors per node. LR: dependencies enter left / leave right, review edges use
+ * the bottom, blocked-on arrows the top. TB rotates that: dependencies top → bottom, review on
+ * the right, blocked-on on the left, so edges of one kind never overlap another's.
+ */
+function handleGeometry(direction: GraphDirection) {
   const size = 8;
-  const mid = NODE_HEIGHT / 2 - size / 2;
-  return [
-    { id: "in", type: "target" as const, position: Position.Left, x: -size / 2, y: mid, width: size, height: size },
-    { id: "out", type: "source" as const, position: Position.Right, x: NODE_WIDTH - size / 2, y: mid, width: size, height: size },
-    { id: "review-out", type: "source" as const, position: Position.Bottom, x: NODE_WIDTH / 3 - size / 2, y: NODE_HEIGHT - size / 2, width: size, height: size },
-    { id: "review-in", type: "target" as const, position: Position.Bottom, x: (NODE_WIDTH * 2) / 3 - size / 2, y: NODE_HEIGHT - size / 2, width: size, height: size },
-    { id: "blocked-out", type: "source" as const, position: Position.Top, x: NODE_WIDTH / 3 - size / 2, y: -size / 2, width: size, height: size },
-    { id: "blocked-in", type: "target" as const, position: Position.Top, x: (NODE_WIDTH * 2) / 3 - size / 2, y: -size / 2, width: size, height: size },
+  const w = NODE_WIDTH;
+  const h = NODE_HEIGHT;
+  const at = (side: Position, frac: number) => {
+    switch (side) {
+      case Position.Left: return { x: -size / 2, y: h * frac - size / 2 };
+      case Position.Right: return { x: w - size / 2, y: h * frac - size / 2 };
+      case Position.Top: return { x: w * frac - size / 2, y: -size / 2 };
+      default: return { x: w * frac - size / 2, y: h - size / 2 };
+    }
+  };
+  const lr = direction === "LR";
+  const spec: [string, "source" | "target", Position, number][] = [
+    ["in", "target", lr ? Position.Left : Position.Top, 0.5],
+    ["out", "source", lr ? Position.Right : Position.Bottom, 0.5],
+    ["review-out", "source", lr ? Position.Bottom : Position.Right, 1 / 3],
+    ["review-in", "target", lr ? Position.Bottom : Position.Right, 2 / 3],
+    ["blocked-out", "source", lr ? Position.Top : Position.Left, 1 / 3],
+    ["blocked-in", "target", lr ? Position.Top : Position.Left, 2 / 3],
   ];
+  return spec.map(([id, type, position, frac]) => ({
+    id, type, position, ...at(position, frac), width: size, height: size,
+  }));
 }
+
+// Where React Flow's <Handle> sits along its side (it centres by default).
+const HANDLE_OFFSET: Record<string, string> = {
+  "review-out": "data-[handlepos=bottom]:!left-1/3 data-[handlepos=right]:!top-1/3",
+  "review-in": "data-[handlepos=bottom]:!left-2/3 data-[handlepos=right]:!top-2/3",
+  "blocked-out": "data-[handlepos=top]:!left-1/3 data-[handlepos=left]:!top-1/3",
+  "blocked-in": "data-[handlepos=top]:!left-2/3 data-[handlepos=left]:!top-2/3",
+};

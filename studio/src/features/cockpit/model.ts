@@ -109,28 +109,37 @@ export function reviewLabel(round: number, max: number | null): string {
  * (reviewer -> author) labelled with the rework round, dashed blocked-on arrows, and the
  * overseer parked below the pipeline with no edges.
  */
+/** "LR": layers left to right (wide containers); "TB": top to bottom (tall side panel). */
+export type GraphDirection = "LR" | "TB";
+
 export function buildGraph(
   specs: readonly RoleSpec[],
   agents: Readonly<Record<string, AgentView>>,
   reviews: Readonly<Record<string, ReviewRoundView>>,
   blockedOn: Readonly<Record<string, BlockedOnView>>,
+  direction: GraphDirection = "LR",
 ): GraphModel {
+  const place = (layer: number, row: number) => direction === "LR"
+    ? { x: layer * (NODE_WIDTH + COL_GAP), y: row * (NODE_HEIGHT + ROW_GAP) }
+    : { x: row * (NODE_WIDTH + ROW_GAP), y: layer * (NODE_HEIGHT + COL_GAP) };
   const pipeline = specs.filter((s) => s.role !== OVERSEER_ROLE);
   const overseer = specs.find((s) => s.role === OVERSEER_ROLE);
   const depth = layers(pipeline);
   const rows = new Map<number, number>();
   const nodes: GraphNodeModel[] = [];
   let maxRow = 0;
+  let maxLayer = 0;
 
   for (const s of pipeline) {
     const layer = depth.get(s.role) ?? 0;
     const row = rows.get(layer) ?? 0;
     rows.set(layer, row + 1);
     maxRow = Math.max(maxRow, row);
+    maxLayer = Math.max(maxLayer, layer);
     const a = agents[s.role];
     nodes.push({
       id: s.role, role: s.role, state: a?.state ?? "idle", detached: false, pulsing: false,
-      x: layer * (NODE_WIDTH + COL_GAP), y: row * (NODE_HEIGHT + ROW_GAP), card: a?.card,
+      ...place(layer, row), card: a?.card,
     });
   }
   if (overseer || agents[OVERSEER_ROLE]) {
@@ -138,7 +147,11 @@ export function buildGraph(
     const state = a?.state ?? "idle";
     nodes.push({
       id: OVERSEER_ROLE, role: OVERSEER_ROLE, state, detached: true, pulsing: state === "running",
-      x: 0, y: (maxRow + 1) * (NODE_HEIGHT + ROW_GAP) + ROW_GAP, card: a?.card,
+      // Parked away from the pipeline: below it (LR) or after its last layer (TB).
+      ...(direction === "LR"
+        ? { x: 0, y: (maxRow + 1) * (NODE_HEIGHT + ROW_GAP) + ROW_GAP }
+        : { x: 0, y: (maxLayer + 1) * (NODE_HEIGHT + COL_GAP) + ROW_GAP }),
+      card: a?.card,
     });
   }
 

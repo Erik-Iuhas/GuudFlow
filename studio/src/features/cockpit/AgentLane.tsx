@@ -88,7 +88,7 @@ export function CapabilityBadge({ role, capabilities }: { role: string; capabili
 
 function ToolRow({ signal }: { signal: TypedSignal }): ReactNode {
   return (
-    <div className="border-b border-border px-2 py-1 text-sm">
+    <div className="min-w-0 overflow-hidden border-b border-border px-2 py-1 text-sm">
       {renderHarnessBody(signal) ?? <span className="text-muted-foreground">{signal.summary}</span>}
     </div>
   );
@@ -120,7 +120,7 @@ export const AgentLane = memo(function AgentLane({ role, selected }: AgentLanePr
       data-testid={`lane-${role}`}
       data-state={state}
       className={cn(
-        "flex h-full min-h-0 w-80 shrink-0 flex-col rounded-lg border bg-card text-card-foreground",
+        "flex h-full min-h-0 min-w-[18rem] max-w-md flex-1 basis-72 flex-col rounded-lg border bg-card text-card-foreground",
         selected ? "border-ring ring-2 ring-ring" : "border-border",
       )}
     >
