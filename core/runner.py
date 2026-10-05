@@ -667,24 +667,15 @@ class AgentRunner:
         """Hand the run back to its project (plan §13): submit it for a human decision
         and record what happened to the backlog items it took."""
         from core.backlog import card_outcomes
-        from core.project_runs import close_run
+        from core.project_runs import card_results, close_run
 
         data_root = self._data_root()
         if data_root is None or not self.project.project_id:
             return
-        summaries: dict[str, str] = {}
-        for sig in self.workspace.board:
-            if sig.type is not SignalType.AGENT_RESULT:
-                continue
-            try:
-                res = (json.loads(sig.detail or "{}").get("result") or {})
-            except (ValueError, AttributeError):
-                continue
-            if isinstance(res, dict) and res.get("task_id") and res.get("summary"):
-                summaries[str(res["task_id"])] = str(res["summary"])[:300]
+        summaries, costs = card_results(self.workspace.board)
         submitted = close_run(data_root, self.project.project_id, self.run_id, self.run_root,
                               self.git.working_dir,
-                              card_outcomes(self.workspace.tasks.values(), summaries),
+                              card_outcomes(self.workspace.tasks.values(), summaries, costs),
                               stopped=stopped)
         if submitted is not None:
             from core.backlog import Backlog

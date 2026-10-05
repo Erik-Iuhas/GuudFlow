@@ -123,13 +123,10 @@ def _check_project_work(request: Request, project_id: str, body: dict) -> None:
         raise HTTPException(status_code=400,
                             detail="backlog_items must be a list of item ids or \"top\"")
     if isinstance(wanted, list):
-        backlog = Backlog(data_root, project_id)
         try:
-            busy = [i for i in wanted if backlog.get(i).status != "open"]
+            Backlog(data_root, project_id).check_selection(wanted)
         except BacklogError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
-        if busy:
-            raise HTTPException(status_code=400, detail=f"not open: {', '.join(busy)}")
     parent = body.get("continue_run")
     if parent is not None:
         run = ProjectRepo(data_root, project_id).get(str(parent))

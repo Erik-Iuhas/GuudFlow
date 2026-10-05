@@ -22,6 +22,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from core.json_store import file_lock
+
 BUSY_TIMEOUT_S = 15.0
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS backlog_items (
@@ -47,13 +49,23 @@ class WorkDB:
 
     def _connect(self) -> sqlite3.Connection:
         self.project_dir.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_S, isolation_level=None)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute(f"PRAGMA busy_timeout={int(BUSY_TIMEOUT_S * 1000)}")
         if not self._ready:
-            conn.executescript(_SCHEMA)
-            self._migrate(conn)
+            # Switching to WAL does not wait on the busy timeout, so the one-time
+            # setup (WAL, schema, JSON import) runs under a file lock.
+            with file_lock(self.path):
+                conn = self._open()
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.executescript(_SCHEMA)
+                    self._migrate(conn)
+                finally:
+                    conn.close()
             self._ready = True
+        return self._open()
+
+    def _open(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_S, isolation_level=None)
+        conn.execute(f"PRAGMA busy_timeout={int(BUSY_TIMEOUT_S * 1000)}")
         return conn
 
     @contextmanager

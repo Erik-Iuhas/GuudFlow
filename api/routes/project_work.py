@@ -36,6 +36,13 @@ class BacklogCreate(BaseModel):
     priority: int = 0
     notes: str = ""
     files_hint: list[str] = Field(default_factory=list)
+    depends_on: list[str] = Field(default_factory=list)
+
+
+class GroomRequest(BaseModel):
+    """Body of POST /backlog/groom."""
+
+    meta_model: str | None = None
 
 
 class BacklogPatch(BaseModel):
@@ -48,6 +55,7 @@ class BacklogPatch(BaseModel):
     priority: int | None = None
     notes: str | None = None
     files_hint: list[str] | None = None
+    depends_on: list[str] | None = None
     status: Literal["open", "dropped"] | None = None
 
 
@@ -77,7 +85,8 @@ async def _run_is_live(request: Request, run_id: str) -> bool:
 async def list_backlog(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
     """Every item in working order (in a run, open by priority, done, dropped)."""
     data_root = await _project(request, project_id)
-    return {"items": [asdict(i) for i in Backlog(data_root, project_id).items()]}
+    return {"items": [{**asdict(i), "total_cost_usd": i.total_cost()}
+                      for i in Backlog(data_root, project_id).items()]}
 
 
 @router.post("/{project_id}/backlog", status_code=201)
@@ -88,10 +97,29 @@ async def add_backlog_item(request: Request, project_id: str,
     try:
         item = Backlog(data_root, project_id).add(
             body.title, body.acceptance, kind=body.kind, size=body.size,
-            priority=body.priority, notes=body.notes, files_hint=body.files_hint)
+            priority=body.priority, notes=body.notes, files_hint=body.files_hint,
+            depends_on=body.depends_on)
     except BacklogError as exc:
         raise _bad(exc) from None
     return asdict(item)
+
+
+@router.post("/{project_id}/backlog/groom")
+async def groom_backlog(request: Request, project_id: str,
+                        body: GroomRequest | None = None) -> dict[str, Any]:  # Any: JSON
+    """Proposed new items from the roadmap and the backlog. Nothing is added: a human
+    adds the ones they want with POST /backlog."""
+    from api.routes.meta import _build_meta_llm
+    from core.groom import propose_items
+
+    data_root = await _project(request, project_id)
+    project = await request.app.state.project_store.get(project_id) or {}
+    llm = _build_meta_llm(request, meta_model=(body or GroomRequest()).meta_model)
+    try:
+        proposals = await propose_items(llm, data_root, project_id, str(project.get("goal", "")))
+    except Exception as exc:  # noqa: BLE001 — an LLM failure is a 502, not a crash
+        raise HTTPException(status_code=502, detail=f"the model could not groom: {exc}") from None
+    return {"proposals": [asdict(p) for p in proposals]}
 
 
 @router.patch("/{project_id}/backlog/{item_id}")

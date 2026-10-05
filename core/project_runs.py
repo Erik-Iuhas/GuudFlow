@@ -22,7 +22,10 @@ import logging
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Any
+
+from core.signals import Signal, SignalType
 
 from core.backlog import Backlog, BacklogItem, CardOutcome
 from core.json_store import read_json, write_json
@@ -98,6 +101,37 @@ def close_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
     except Exception:  # noqa: BLE001 — closing must never fail a finished run
         log.exception("closing run %s for project %s failed", run_id, project_id)
     return submitted
+
+
+def card_results(board: Iterable[Signal]) -> tuple[dict[str, str], dict[str, float]]:
+    """Per card: the latest result summary, and the gateway cost of its turns.
+
+    An AGENT_RESULT's `cost` is the role's running total at the gateway, so a turn
+    costs the difference from that role's previous result.
+    """
+    summaries: dict[str, str] = {}
+    costs: dict[str, float] = {}
+    role_spend: dict[str, float] = {}
+    for sig in board:
+        if sig.type is not SignalType.AGENT_RESULT:
+            continue
+        try:
+            detail = json.loads(sig.detail or "{}")
+        except ValueError:
+            continue
+        res = detail.get("result") if isinstance(detail, dict) else None
+        if not isinstance(res, dict):
+            continue
+        role = str(sig.from_agent or "")
+        spent = float(detail.get("cost") or 0.0)
+        turn_cost = max(0.0, spent - role_spend.get(role, 0.0))
+        role_spend[role] = max(spent, role_spend.get(role, 0.0))
+        task_id = str(res.get("task_id") or "")
+        if task_id:
+            costs[task_id] = round(costs.get(task_id, 0.0) + turn_cost, 6)
+            if res.get("summary"):
+                summaries[task_id] = str(res["summary"])[:300]
+    return summaries, costs
 
 
 def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,

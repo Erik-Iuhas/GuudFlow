@@ -135,3 +135,30 @@ async def test_one_active_run_per_project(client, auth_header) -> None:
     parallel = await client.post("/api/invoke/p1", headers=auth_header,
                                  json={"confirm": True, "allow_parallel": True})
     assert parallel.status_code == 202
+
+
+async def test_groom_returns_proposals_and_adds_nothing(client, auth_header, app) -> None:
+    from core.llm.client import MockLLMClient, MockTurn, ToolCall
+    await _project(client, auth_header)
+    app.state.meta_llm = MockLLMClient([MockTurn(tool_calls=[ToolCall("1", "propose_items", {
+        "items": [{"title": "Password reset", "acceptance": ["mail is sent"]}]})])])
+    r = await client.post("/api/projects/p1/backlog/groom", headers=auth_header)
+    assert r.status_code == 200 and r.json()["proposals"][0]["title"] == "Password reset"
+    items = (await client.get("/api/projects/p1/backlog", headers=auth_header)).json()["items"]
+    assert items == []
+
+
+async def test_dependencies_and_cost_over_the_api(client, auth_header) -> None:
+    await _project(client, auth_header)
+    await client.post("/api/projects/p1/backlog", headers=auth_header, json={"title": "Schema"})
+    r = await client.post("/api/projects/p1/backlog", headers=auth_header,
+                          json={"title": "API", "depends_on": ["B1"]})
+    assert r.json()["depends_on"] == ["B1"]
+    bad = await client.patch("/api/projects/p1/backlog/B1", headers=auth_header,
+                             json={"depends_on": ["B2"]})
+    assert bad.status_code == 400 and "cycle" in bad.json()["detail"]
+    nope = await client.post("/api/invoke/p1", headers=auth_header,
+                             json={"confirm": True, "backlog_items": ["B2"]})
+    assert nope.status_code == 400 and "needs B1" in nope.json()["detail"]
+    items = (await client.get("/api/projects/p1/backlog", headers=auth_header)).json()["items"]
+    assert items[0]["total_cost_usd"] == 0.0

@@ -113,3 +113,31 @@ def test_the_reviewers_note_reaches_the_next_run(tmp_path: Path) -> None:
     text = backlog_text([again])
     assert "the human reviewer said when rejected run run_1: Use bcrypt, not sha1." in text
     assert text.index("Use bcrypt") < text.index("<untrusted-")   # human note is not wrapped
+
+
+def test_dependencies_gate_selection(tmp_path: Path) -> None:
+    b = _backlog(tmp_path)
+    schema = b.add("Schema", ["tables exist"])
+    api = b.add("API", ["endpoints"], priority=9, depends_on=[schema.id])
+    with pytest.raises(BacklogError):
+        b.add("Ghost", [], depends_on=["B99"])
+    with pytest.raises(BacklogError):
+        b.update(schema.id, depends_on=[api.id])             # cycle
+    assert [i.id for i in b.take_for_run("run_0", limit=5)] == [schema.id]   # API waits
+    b.release("run_0", "test")
+    with pytest.raises(BacklogError, match="B2 needs B1"):
+        b.take_for_run("run_1", ids=[api.id])
+    both = b.take_for_run("run_1", ids=[api.id, schema.id])    # together is fine
+    assert {i.id for i in both} == {schema.id, api.id}
+    assert "after B1" in b.get(api.id).brief_text()
+
+
+def test_cost_per_item_adds_up_across_runs(tmp_path: Path) -> None:
+    b = _backlog(tmp_path)
+    item = b.add("Login", ["works"])
+    for run, cost in (("run_1", 0.4), ("run_2", 0.25)):
+        b.take_for_run(run, ids=[item.id])
+        b.record_outcomes(run, [CardOutcome("Login", "todo", item.id, cost_usd=cost / 2),
+                                CardOutcome("Login tests", "todo", item.id, cost_usd=cost / 2)])
+        b.decide(run, accepted=False)
+    assert b.get(item.id).total_cost() == 0.65

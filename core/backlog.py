@@ -37,7 +37,8 @@ KINDS = frozenset({"code", "test", "docs", "research", "visual"})
 SIZES = frozenset({"S", "M", "L"})
 _ID = re.compile(r"^B[0-9]+$")
 _STATUS_ORDER = {"in_run": 0, "open": 1, "done": 2, "dropped": 3}
-_EDITABLE = frozenset({"title", "acceptance", "kind", "size", "priority", "notes", "files_hint"})
+_EDITABLE = frozenset({"title", "acceptance", "kind", "size", "priority", "notes", "files_hint",
+                       "depends_on"})
 
 
 class BacklogError(ValueError):
@@ -57,6 +58,7 @@ class BacklogItem:
     status: ItemStatus = "open"
     notes: str = ""
     files_hint: list[str] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)   # items that must be done first
     source: str = "human"              # human | run:<run_id>
     created_at: float = 0.0
     updated_at: float = 0.0
@@ -70,11 +72,16 @@ class BacklogItem:
         Items a run created (`source` "run:…") carry agent-written text; callers
         building prompts wrap those, and `last_summary()`, as untrusted.
         """
-        lines = [f"- **{self.id}** {self.title} ({self.kind}, size {self.size})"]
+        after = f", after {', '.join(self.depends_on)}" if self.depends_on else ""
+        lines = [f"- **{self.id}** {self.title} ({self.kind}, size {self.size}{after})"]
         lines += [f"    - [ ] {a}" for a in self.acceptance]
         if self.notes:
             lines.append(f"    - notes: {self.notes}")
         return "\n".join(lines)
+
+    def total_cost(self) -> float:
+        """Gateway spend on this item across every run that worked on it (USD)."""
+        return round(sum(float(h.get("cost_usd") or 0.0) for h in self.history), 4)
 
     def review_note(self) -> str | None:
         """The human's note on the latest decided run that held this item (human text)."""
@@ -100,6 +107,7 @@ class CardOutcome:
     acceptance: tuple[str, ...] = ()
     kind: str = "code"
     summary: str = ""
+    cost_usd: float = 0.0
 
 
 def _clean_lines(values: Iterable[object]) -> list[str]:
@@ -150,13 +158,16 @@ class Backlog:
     # ── human edits ─────────────────────────────────────────────────────────
     def add(self, title: str, acceptance: Sequence[str] = (), *, kind: str = "code",
             size: str = "M", priority: int = 0, notes: str = "",
-            files_hint: Sequence[str] = (), source: str = "human") -> BacklogItem:
+            files_hint: Sequence[str] = (), depends_on: Sequence[str] = (),
+            source: str = "human") -> BacklogItem:
         """Add an open item."""
         fields = self._validated({"title": title, "acceptance": list(acceptance), "kind": kind,
                                   "size": size, "priority": priority, "notes": notes,
-                                  "files_hint": list(files_hint)})
+                                  "files_hint": list(files_hint),
+                                  "depends_on": list(depends_on)})
         now = time.time()
         with self.db.backlog_doc() as doc:
+            _check_deps(doc, f"B{int(doc.get('next', 1))}", fields["depends_on"])
             item = BacklogItem(id=f"B{int(doc.get('next', 1))}", source=source,
                                created_at=now, updated_at=now, **fields)
             doc["next"] = int(doc.get("next", 1)) + 1
@@ -173,6 +184,8 @@ class Backlog:
             row = self._row(doc, item_id)
             if row["status"] == "done":
                 raise BacklogError(f"{item_id} is done; add a new item instead")
+            if "depends_on" in clean:
+                _check_deps(doc, item_id, clean["depends_on"])
             row.update(clean)
             row["updated_at"] = time.time()
             return BacklogItem(**row)
@@ -188,25 +201,32 @@ class Backlog:
     # ── runs ────────────────────────────────────────────────────────────────
     def take_for_run(self, run_id: str, ids: Sequence[str] | None = None,
                      limit: int = 3) -> list[BacklogItem]:
-        """Mark items as in this run: the given ids, or the top `limit` open ones."""
+        """Mark items as in this run: the given ids, or the top `limit` open ones.
+
+        An item whose dependencies are not done is skipped by "top" and refused in an
+        explicit selection unless the selection also takes those dependencies.
+        """
         taken: list[BacklogItem] = []
         with self.db.backlog_doc() as doc:
             rows = doc.get("items", [])
+            done = {r["id"] for r in rows if r.get("status") == "done"}
             if ids is None:
-                open_rows = sorted((r for r in rows if r.get("status") == "open"),
+                open_rows = sorted((r for r in rows if r.get("status") == "open"
+                                    and set(r.get("depends_on") or []) <= done),
                                    key=lambda r: (-int(r.get("priority", 0)),
                                                   int(str(r["id"])[1:])))
                 chosen = open_rows[:max(0, limit)]
             else:
-                chosen = [self._row(doc, i) for i in dict.fromkeys(ids)]
-                busy = [r["id"] for r in chosen if r.get("status") != "open"]
-                if busy:
-                    raise BacklogError(f"not open: {', '.join(busy)}")
+                chosen = _check_selection(doc, ids)
             now = time.time()
             for row in chosen:
                 row.update(status="in_run", run_id=run_id, pending=None, updated_at=now)
                 taken.append(BacklogItem(**row))
         return taken
+
+    def check_selection(self, ids: Sequence[str]) -> None:
+        """Raise BacklogError unless these items could start a run together now."""
+        _check_selection(self.db.read_backlog_doc(), ids)
 
     def in_run(self, run_id: str) -> list[BacklogItem]:
         """Items a run holds."""
@@ -229,11 +249,13 @@ class Backlog:
                 outcome: Outcome = ("done" if mine and done == len(mine)
                                     else "partial" if done else "not_started")
                 summary = "; ".join(c.summary for c in mine if c.summary)[:400]
+                cost = round(sum(c.cost_usd for c in mine), 4)
                 row["pending"] = outcome
                 row["updated_at"] = now
                 row.setdefault("history", []).append({
                     "run_id": run_id, "outcome": outcome, "cards_done": done,
-                    "cards_open": len(mine) - done, "summary": summary, "at": now})
+                    "cards_open": len(mine) - done, "summary": summary, "cost_usd": cost,
+                    "at": now})
             known = {str(r.get("title", "")).casefold() for r in rows
                      if r.get("status") in ("open", "in_run")}
             for card in cards:
@@ -336,17 +358,64 @@ class Backlog:
                 out[key] = value
             elif key == "notes":
                 out[key] = str(value)[:2000]
+            elif key == "depends_on":
+                if not isinstance(value, (list, tuple)) or not all(
+                        isinstance(v, str) and _ID.match(v) for v in value):
+                    raise BacklogError("depends_on must be a list of item ids like B3")
+                out[key] = list(dict.fromkeys(value))
         return out
 
 
-def card_outcomes(cards: Iterable[Any], summaries: dict[str, str] | None = None
+def _check_selection(doc: dict[str, Any], ids: Sequence[str]
+                     ) -> list[dict[str, Any]]:  # Any: JSON rows
+    """Rows for `ids`: every one open, and its dependencies done or selected too."""
+    rows = {str(r["id"]): r for r in doc.get("items", [])}
+    unknown = [i for i in ids if i not in rows]
+    if unknown:
+        raise BacklogError(f"unknown backlog item {unknown[0]!r}")
+    chosen = [rows[i] for i in dict.fromkeys(ids)]
+    busy = [r["id"] for r in chosen if r.get("status") != "open"]
+    if busy:
+        raise BacklogError(f"not open: {', '.join(busy)}")
+    done = {k for k, r in rows.items() if r.get("status") == "done"}
+    picked = {r["id"] for r in chosen}
+    waiting = [f"{r['id']} needs {', '.join(sorted(missing))}" for r in chosen
+               if (missing := set(r.get("depends_on") or []) - done - picked)]
+    if waiting:
+        raise BacklogError("dependencies not done: " + "; ".join(waiting))
+    return chosen
+
+
+def _check_deps(doc: dict[str, Any], item_id: str, deps: Sequence[str]) -> None:  # Any: JSON
+    """Dependencies must exist, not include the item, and not form a cycle."""
+    graph = {str(r["id"]): list(r.get("depends_on") or []) for r in doc.get("items", [])}
+    unknown = [d for d in deps if d not in graph]
+    if unknown:
+        raise BacklogError(f"unknown dependencies: {', '.join(unknown)}")
+    if item_id in deps:
+        raise BacklogError(f"{item_id} cannot depend on itself")
+    graph[item_id] = list(deps)
+    stack, seen = list(deps), set()
+    while stack:
+        node = stack.pop()
+        if node == item_id:
+            raise BacklogError(f"dependency cycle through {item_id}")
+        if node not in seen:
+            seen.add(node)
+            stack.extend(graph.get(node, []))
+
+
+def card_outcomes(cards: Iterable[Any], summaries: dict[str, str] | None = None,
+                  costs: dict[str, float] | None = None
                   ) -> list[CardOutcome]:  # Any: core.workspace.Task (avoids an import cycle)
     """Board cards → CardOutcome (cards from the plan and board stories only)."""
     summaries = summaries or {}
+    costs = costs or {}
     return [CardOutcome(title=str(getattr(c, "title", "") or getattr(c, "goal", "")),
                         column=str(getattr(c, "column", "todo")),
                         backlog_id=getattr(c, "backlog_id", None) or None,
                         acceptance=tuple(getattr(c, "acceptance_criteria", []) or ()),
                         kind=str(getattr(c, "kind", "code")),
-                        summary=summaries.get(str(getattr(c, "task_id", "")), ""))
+                        summary=summaries.get(str(getattr(c, "task_id", "")), ""),
+                        cost_usd=float(costs.get(str(getattr(c, "task_id", "")), 0.0)))
             for c in cards if getattr(c, "story_id", "") in ("plan", "board")]
