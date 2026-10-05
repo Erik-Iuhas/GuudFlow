@@ -6,6 +6,7 @@ import { useRunSocket } from "../../hooks/useRunSocket";
 import { statusVariant } from "../../lib/runStatus";
 import { createRunStore } from "../../stores/runEvents";
 import { RunStoreProvider, useRunStore } from "../../stores/runStoreContext";
+import { useArtifactAccess } from "../artifacts/access";
 import { buildItems, isImageItem } from "../artifacts/model";
 import { interventionLabel } from "../overseer/model";
 import { useRunReport, type BranchRow, type RunReportData } from "./api";
@@ -165,9 +166,12 @@ function BranchesSection({ report }: { report: RunReportData }) {
 function ScreenshotStrip({ runId }: { runId: string }) {
   const artifacts = useRunStore((s) => s.artifacts);
   const items = useMemo(() => buildItems(artifacts, runId).filter(isImageItem), [artifacts, runId]);
+  const ready = useArtifactAccess(runId);
   return (
     <Section title="Screenshots" id="screenshots">
-      {items.length === 0 ? (
+      {!ready && items.length > 0 ? (
+        <Empty>Loading images...</Empty>
+      ) : items.length === 0 ? (
         <Empty>No screenshots or images in this run.</Empty>
       ) : (
         <ul className="m-0 flex list-none gap-2 overflow-x-auto p-0" data-testid="screenshot-strip">

@@ -17,6 +17,25 @@ SVG = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
 HTML = b"<html><body><script>window.x=1</script></body></html>"
 
 
+
+@pytest.fixture
+async def client(app):
+    """These routes need the API token now (S33 follow-up): an authenticated client."""
+    import httpx
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test",
+                                 headers={"Authorization": "Bearer test-token"}) as c:
+        yield c
+
+
+@pytest.fixture
+async def anon(app):
+    """A client without the token."""
+    import httpx
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
 @pytest.fixture
 def run_root(data_root: Path) -> Path:
     root = data_root / "runs" / "run_a"
@@ -111,9 +130,10 @@ async def test_visual_feedback_posts_signal(client, app, auth_header) -> None:
     assert sig.from_user
 
 
-async def test_visual_feedback_needs_token_and_active_run(client, app, auth_header) -> None:
+async def test_visual_feedback_needs_token_and_active_run(client, anon, app,
+                                                          auth_header) -> None:
     body = {"request_id": "rq1", "feedback": "x"}
-    assert (await client.post("/api/runs/run_v/visual_feedback", json=body)).status_code == 401
+    assert (await anon.post("/api/runs/run_v/visual_feedback", json=body)).status_code == 401
     r = await client.post("/api/runs/gone/visual_feedback", headers=auth_header, json=body)
     assert r.status_code == 410
     r = await client.post("/api/runs/gone/visual_feedback", headers=auth_header,
@@ -139,3 +159,35 @@ async def test_run_meta_reports_harness_and_budget(tmp_path, monkeypatch) -> Non
     await _add_harness_meta(request, new)  # type: ignore[arg-type]
     assert new["harness"] == "opencode" and new["token_budget_usd"] is None
     assert new["review_column_cap"] == 3   # the board's WIP cap; Studio no longer hardcodes it
+
+
+async def test_files_need_the_token_or_the_run_cookie(app, anon, client, run_root) -> None:
+    url = "/api/runs/run_a/artifact-files/artifacts/backend/shot.png"
+    assert (await anon.get(url)).status_code == 401
+    grant = await client.post("/api/runs/run_a/artifact-access")
+    assert grant.status_code == 200 and grant.json()["expires_at"]
+    cookie = grant.headers["set-cookie"]
+    assert "HttpOnly" in cookie and "SameSite=strict" in cookie
+    assert "Path=/api/runs/run_a/artifact-files" in cookie
+    value = cookie.split(";")[0].split("=", 1)[1]
+    ok = await anon.get(url, cookies={"gf_artifacts": value})
+    assert ok.status_code == 200 and ok.content == PNG
+    # The cookie is bound to its run and its signature.
+    other = await anon.get("/api/runs/run_b/artifact-files/artifacts/x.png",
+                           cookies={"gf_artifacts": value})
+    assert other.status_code == 401
+    forged = value.split(".")[0] + ".00"
+    assert (await anon.get(url, cookies={"gf_artifacts": forged})).status_code == 401
+    assert (await anon.post("/api/runs/run_a/artifact-access")).status_code == 401
+
+
+def test_artifact_cookie_expires(monkeypatch) -> None:
+    from api.auth import ARTIFACT_TTL_SECONDS, artifact_cookie_valid, issue_artifact_cookie
+    monkeypatch.setenv("GUUDFLOW_API_TOKEN", "k")
+    issued = issue_artifact_cookie("r", now=1000)
+    assert issued is not None
+    value, _ = issued
+    assert artifact_cookie_valid("r", value, now=1000 + ARTIFACT_TTL_SECONDS - 1)
+    assert not artifact_cookie_valid("r", value, now=1000 + ARTIFACT_TTL_SECONDS + 1)
+    monkeypatch.delenv("GUUDFLOW_API_TOKEN")
+    assert issue_artifact_cookie("r") is None   # dev mode: open, nothing to sign

@@ -762,6 +762,8 @@ export const cardsApi = {
       "GET",
       `/api/runs/${encodeURIComponent(runId)}/git/diff?ref=${encodeURIComponent(sha)}` +
         (base ? `&base=${encodeURIComponent(base)}` : ""),
+      undefined,
+      true,
     ),
 };
 

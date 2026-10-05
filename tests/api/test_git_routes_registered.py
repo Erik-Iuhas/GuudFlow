@@ -53,10 +53,14 @@ async def test_diff_with_base_covers_the_whole_merged_range(app, data_root):
     head = repo.index.commit("two").hexsha
 
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    auth = {"Authorization": "Bearer test-token"}
+    async with httpx.AsyncClient(transport=transport, base_url="http://test",
+                                 headers=auth) as client:
         single = (await client.get(f"/api/runs/r1/git/diff?ref={head}")).json()["diff"]
         ranged = (await client.get(f"/api/runs/r1/git/diff?ref={head}&base={base}")).json()["diff"]
         missing = await client.get(f"/api/runs/r1/git/diff?ref={head}&base=deadbeef")
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as anon:
+        assert (await anon.get(f"/api/runs/r1/git/diff?ref={head}")).status_code == 401
     assert "c.py" in single and "b.py" not in single
     assert "b.py" in ranged and "c.py" in ranged
     assert missing.status_code == 404

@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Badge } from "../../components/ui/badge";
 import { cn } from "../../lib/utils";
 import { useRunStore } from "../../stores/runStoreContext";
+import { useArtifactAccess } from "./access";
 import { ArtifactViewer } from "./ArtifactViewer";
 import { KindIcon, kindLabel } from "./KindIcon";
 import {
@@ -155,6 +156,14 @@ export function ArtifactGallery({ runId, className }: { runId: string; className
     item.taskId ? (cards[item.taskId]?.title ? `${item.taskId} ${cards[item.taskId].title}` : item.taskId) : null;
   const opened = openId ? items.find((i) => i.id === openId) ?? null : null;
   const virtualize = visible.length > VIRTUALIZE_THRESHOLD;
+  const ready = useArtifactAccess(runId);
+  if (!ready && items.length > 0) {
+    return (
+      <section aria-label="Artifact gallery" className={cn("flex flex-col gap-3", className)}>
+        <p className="m-0 text-sm text-muted-foreground">Loading artifacts...</p>
+      </section>
+    );
+  }
 
   return (
     <section aria-label="Artifact gallery" className={cn("flex flex-col gap-3", className)}>

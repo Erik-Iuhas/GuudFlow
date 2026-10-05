@@ -543,7 +543,7 @@ async def list_git_commits(request: Request, run_id: str) -> list[dict]:
     return out
 
 
-@router.get("/{run_id}/git/diff")
+@router.get("/{run_id}/git/diff", dependencies=[Depends(require_bearer)])
 async def get_git_diff(
     request: Request,
     run_id: str,

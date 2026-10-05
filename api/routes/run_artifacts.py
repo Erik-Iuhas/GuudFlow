@@ -6,16 +6,29 @@ baselines to Studio's gallery. Only these folders under the run root are reachab
 root with `safe_resolve` (no `..`, no absolute paths, no symlinks on the way), and only
 allow-listed extensions are served. SVG and HTML carry `Content-Security-Policy: sandbox`
 and every response carries `X-Content-Type-Options: nosniff`, so a hostile file cannot run
-script even if opened directly. Like the deliverables route this is a plain GET: `<img>`
-and `<iframe>` cannot send a bearer header.
+script even if opened directly. `<img>` and `<iframe>` cannot send a bearer header, so
+reads accept either the bearer token or the run's artifact cookie, which Studio gets from
+`POST /api/runs/{run_id}/artifact-access` (bearer; signed, HttpOnly, one hour, scoped to
+this run's `artifact-files` path). With no API token configured (dev) both are open.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
+
+from api.auth import (
+    ARTIFACT_COOKIE,
+    ARTIFACT_TTL_SECONDS,
+    artifact_cookie_path,
+    issue_artifact_cookie,
+    require_bearer,
+    require_bearer_or_artifact_cookie,
+)
 
 from core.harness.artifacts import safe_resolve
 
@@ -34,7 +47,21 @@ _ACTIVE_CSP = ("sandbox; default-src 'none'; img-src data:; style-src 'unsafe-in
                "font-src data:")
 
 
-@router.get("/{run_id}/artifact-files/{path:path}")
+@router.post("/{run_id}/artifact-access", dependencies=[Depends(require_bearer)])
+async def grant_artifact_access(run_id: str, response: Response) -> dict[str, int | None]:
+    """Trade the bearer token for this run's artifact cookie (see the module docstring)."""
+    issued = issue_artifact_cookie(run_id)
+    if issued is None:
+        return {"expires_at": None}
+    value, expires = issued
+    response.set_cookie(ARTIFACT_COOKIE, value, max_age=ARTIFACT_TTL_SECONDS,
+                        path=artifact_cookie_path(run_id), httponly=True, samesite="strict",
+                        secure=os.environ.get("GUUDFLOW_MODE") == "production")
+    return {"expires_at": expires}
+
+
+@router.get("/{run_id}/artifact-files/{path:path}",
+            dependencies=[Depends(require_bearer_or_artifact_cookie)])
 async def get_artifact_file(request: Request, run_id: str, path: str) -> FileResponse:
     """Serve one visual file of a run. 404 for anything outside the allow-list."""
     runs_root = Path(request.app.state.data_root) / "runs"

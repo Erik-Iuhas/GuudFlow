@@ -20,7 +20,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from api.auth import require_bearer
 
 from api.routes.runs import _run_working_dir
 from core.harness.artifacts import safe_resolve
@@ -152,7 +154,7 @@ def _run_root(request: Request, run_id: str) -> Path:
     return root
 
 
-@router.get("/api/runs/{run_id}/report")
+@router.get("/api/runs/{run_id}/report", dependencies=[Depends(require_bearer)])
 async def get_run_report(request: Request, run_id: str) -> dict[str, Any]:  # Any: JSON document
     """Everything the run report page shows, in one read-only payload."""
     root = _run_root(request, run_id)
@@ -199,7 +201,7 @@ def _playbook(request: Request, project_id: str) -> Playbook:
         raise HTTPException(status_code=500, detail=f"playbook unreadable: {exc}")
 
 
-@router.get("/api/projects/{project_id}/runs-metrics")
+@router.get("/api/projects/{project_id}/runs-metrics", dependencies=[Depends(require_bearer)])
 async def get_runs_metrics(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
     """The playbook's per-run metrics history, oldest first (the overseer's trend line)."""
     return {"project_id": project_id, "runs": _playbook(request, project_id).metrics_history()}

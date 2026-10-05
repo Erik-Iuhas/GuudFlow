@@ -27,6 +27,25 @@ def _git(repo: Path, *args: str) -> None:
                    check=True, capture_output=True)
 
 
+
+@pytest.fixture
+async def client(app):
+    """These routes need the API token now (S33 follow-up): an authenticated client."""
+    import httpx
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test",
+                                 headers={"Authorization": "Bearer test-token"}) as c:
+        yield c
+
+
+@pytest.fixture
+async def anon(app):
+    """A client without the token."""
+    import httpx
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
 @pytest.fixture
 def run_root(data_root: Path) -> Path:
     root = data_root / "runs" / "run_a"
@@ -147,3 +166,8 @@ async def test_metrics_for_project_without_playbook_is_empty(client) -> None:
 
 async def test_metrics_path_unsafe_project_is_404(client) -> None:
     assert (await client.get("/api/projects/..%5Cx/runs-metrics")).status_code == 404
+
+
+async def test_report_and_metrics_need_the_token(anon) -> None:
+    assert (await anon.get("/api/runs/whatever/report")).status_code == 401
+    assert (await anon.get("/api/projects/p/runs-metrics")).status_code == 401
