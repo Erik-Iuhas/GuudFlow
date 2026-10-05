@@ -167,6 +167,39 @@ def test_env_is_built_from_scratch(manager: SandboxManager, tmp_path: Path,
     assert set(env) == expected
 
 
+def test_remove_tolerates_a_removal_already_in_progress() -> None:
+    """Docker answers 409 when it is already removing the container: that is success."""
+    from docker.errors import APIError
+
+    class Response:
+        status_code = 409
+        reason = "Conflict"
+
+    class Dying:
+        def remove(self, force: bool = False) -> None:
+            raise APIError("removal of container x is already in progress", response=Response())
+
+    class Broken:
+        def remove(self, force: bool = False) -> None:
+            Response.status_code = 500
+            raise APIError("daemon error", response=Response())
+
+    class Containers:
+        def __init__(self, c: object) -> None:
+            self.c = c
+
+        def get(self, _id: str) -> object:
+            return self.c
+
+    class Client:
+        def __init__(self, c: object) -> None:
+            self.containers = Containers(c)
+
+    SandboxManager(client=Client(Dying()))._remove_container("x")  # type: ignore[arg-type]
+    with pytest.raises(APIError):
+        SandboxManager(client=Client(Broken()))._remove_container("x")  # type: ignore[arg-type]
+
+
 def test_sandbox_base_url() -> None:
     box = Sandbox(container_id="c", name="n", ip="172.30.0.2", password="p")
     assert box.base_url == f"http://172.30.0.2:{OPENCODE_PORT}"

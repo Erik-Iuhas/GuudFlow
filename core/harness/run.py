@@ -354,8 +354,13 @@ class OpencodeRun:
 
     async def shutdown(self) -> None:
         """Stop every opencode server/sandbox, the MCP server and gateway; revoke tokens."""
+        # One sandbox that fails to stop must not skip revoking the run's
+        # credentials below, nor fail a run whose work is already done.
         for role in self._roles.values():
-            await self._stop_server(role)
+            try:
+                await self._stop_server(role)
+            except Exception:  # noqa: BLE001 - cleanup; logged, never silent
+                log.exception("could not stop the sandbox for %s in %s", role.cfg.role, self.run_id)
         self.mcp.revoke_run(self.run_id)
         self.inbox.close_run(self.run_id)
         if self.gateway is not None:

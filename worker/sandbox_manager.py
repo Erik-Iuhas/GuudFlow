@@ -487,11 +487,15 @@ class SandboxManager:
         await asyncio.to_thread(self._remove_container, sandbox.container_id)
 
     def _remove_container(self, container_id: str) -> None:
-        from docker.errors import NotFound
+        from docker.errors import APIError, NotFound
         try:
             self.client.containers.get(container_id).remove(force=True)
         except NotFound:
             pass
+        except APIError as exc:
+            # 409 "removal ... is already in progress": Docker is removing it already.
+            if exc.status_code != 409:
+                raise
 
     async def run_check(self, tree: Path, command: str, *, timeout: float = 600.0,
                         image: str = DEFAULT_IMAGE) -> tuple[int | None, str]:
