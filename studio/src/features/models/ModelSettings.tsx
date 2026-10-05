@@ -15,7 +15,7 @@ import {
   type TestResult,
   type Tier,
 } from "./api";
-import { envNameFor, fromPerMillion, perMillion, tierModel, toDoc } from "./model";
+import { envNameFor, fromPerMillion, perMillion, tierModels, toDoc } from "./model";
 
 const KEY_VARIANT: Record<KeyStatus, BadgeProps["variant"]> = {
   env: "complete",
@@ -120,7 +120,7 @@ export function ModelSettings() {
         </div>
       </div>
 
-      <TierPickers doc={doc} onChange={(tier, id) => edit((d) => ({ ...d, tiers: { ...d.tiers, [tier]: id } }))} />
+      <TierPickers doc={doc} onChange={(tier, ids) => edit((d) => ({ ...d, tiers: { ...d.tiers, [tier]: ids } }))} />
 
       <Providers
         providers={view.providers}
@@ -136,7 +136,13 @@ export function ModelSettings() {
         dirty={dirty}
       />
 
-      <Models doc={doc} onChange={(models) => edit((d) => ({ ...d, models }))} />
+      <Models doc={doc} onChange={(models) => edit((d) => ({
+        ...d,
+        models,
+        // A removed model leaves every tier it was in.
+        tiers: Object.fromEntries(Object.entries(d.tiers).map(([t, ids]) =>
+          [t, (ids ?? []).filter((id) => models.some((m) => m.id === id))])),
+      }))} />
 
       <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-background py-3">
         <Button onClick={onSave} disabled={!dirty || save.isPending}>
@@ -153,24 +159,52 @@ export function ModelSettings() {
   );
 }
 
-function TierPickers({ doc, onChange }: { doc: ConfigDoc; onChange: (tier: Tier, id: string) => void }) {
+function TierPickers({ doc, onChange }: { doc: ConfigDoc; onChange: (tier: Tier, ids: string[]) => void }) {
   const usable = doc.models.filter((m) => !m.deprecated);
   return (
     <div>
-      <h3 className="m-0 mb-2 text-sm font-semibold">Tiers</h3>
+      <h3 className="m-0 mb-1 text-sm font-semibold">Tiers</h3>
+      <p className="m-0 mb-2 text-xs text-muted-foreground">
+        Pick one or more models per tier. With several, the tier&apos;s roles are spread across them and a
+        reviewer gets a different model from the work it reviews when it can. The first is the default
+        (used for cost estimates).
+      </p>
       <div className="grid gap-3 sm:grid-cols-3">
-        {TIERS.map((tier) => (
-          <div key={tier}>
-            <Label htmlFor={`tier-${tier}`}>{tier}</Label>
-            <Select id={`tier-${tier}`} value={tierModel(doc.models, doc.tiers, tier)}
-              onChange={(e) => onChange(tier, e.target.value)}>
-              {usable.map((m) => (
-                <option key={m.id} value={m.id}>{m.id}{m.tier !== tier ? ` (${m.tier})` : ""}</option>
-              ))}
-            </Select>
-            <p className="m-0 mt-1 text-xs text-muted-foreground">{TIER_HELP[tier]}</p>
-          </div>
-        ))}
+        {TIERS.map((tier) => {
+          const chosen = tierModels(doc.models, doc.tiers, tier);
+          const rest = usable.filter((m) => !chosen.includes(m.id));
+          return (
+            <div key={tier} className="rounded-lg border border-border bg-card p-2.5" data-testid={`tier-${tier}`}>
+              <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                <span className="text-sm font-semibold">{tier}</span>
+                <span className="text-xs text-muted-foreground">{TIER_HELP[tier]}</span>
+              </div>
+              <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0" aria-label={`${tier} models`}>
+                {chosen.map((id, i) => (
+                  <li key={id}>
+                    <Badge variant={i === 0 ? "secondary" : "outline"} className="gap-1 pr-1 font-mono">
+                      {id}{i === 0 && chosen.length > 1 ? " · default" : ""}
+                      {chosen.length > 1 && (
+                        <button type="button" aria-label={`Remove ${id} from ${tier}`}
+                          className="rounded px-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => onChange(tier, chosen.filter((x) => x !== id))}>×</button>
+                      )}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+              {rest.length > 0 && (
+                <Select aria-label={`Add a model to ${tier}`} value="" className="mt-2 h-8 py-0 text-xs"
+                  onChange={(e) => e.target.value && onChange(tier, [...chosen, e.target.value])}>
+                  <option value="">+ add a model…</option>
+                  {rest.map((m) => (
+                    <option key={m.id} value={m.id}>{m.id}{m.tier !== tier ? ` (${m.tier})` : ""}</option>
+                  ))}
+                </Select>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

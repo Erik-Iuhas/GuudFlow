@@ -1,9 +1,11 @@
 """Model registry — loads data/models.json and resolves tier → model + client."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -89,9 +91,14 @@ class ModelRegistry:
                 base_url=pdata.get("base_url", ""),
             )
 
-        # The model each tier uses when a role names no model (Studio's tier pickers).
-        self._tiers: dict[str, str] = {
-            t: mid for t, mid in (data.get("tiers") or {}).items() if mid in self._models}
+        # The models each tier uses when a role names no model (Studio's tier pickers).
+        # Several per tier is allowed: roles are spread across them (model diversity).
+        from core.model_config import tier_list
+        self._tiers: dict[str, list[str]] = {}
+        for t, value in (data.get("tiers") or {}).items():
+            ids = [mid for mid in tier_list(value) if mid in self._models]
+            if ids:
+                self._tiers[t] = ids
 
         for m in self._models.values():
             if m.deprecated:
@@ -121,12 +128,17 @@ class ModelRegistry:
         """The model a tier uses for estimates: the saved tier choice, else the first
         non-deprecated model of that tier (keys are not needed to price a model)."""
         if tier in self._tiers:
-            return self._models[self._tiers[tier]]
+            return self._models[self._tiers[tier][0]]
         return next((m for m in self._models.values() if m.tier == tier and not m.deprecated), None)
 
-    def tiers(self) -> dict[str, str]:
-        """The saved tier choices (tier -> model id)."""
-        return dict(self._tiers)
+    def tiers(self) -> dict[str, list[str]]:
+        """The saved tier choices (tier -> model ids)."""
+        return {t: list(ids) for t, ids in self._tiers.items()}
+
+    def tier_pool(self, tier: str) -> list[ModelInfo]:
+        """The tier's chosen models whose provider has a key, in the saved order."""
+        return [self._models[mid] for mid in self._tiers.get(tier, [])
+                if self._has_api_key(self._models[mid].provider)]
 
     def list_models(self) -> list[ModelInfo]:
         return list(self._models.values())
@@ -138,18 +150,25 @@ class ModelRegistry:
     def get(self, model_id: str) -> ModelInfo | None:
         return self._models.get(model_id)
 
-    def resolve(self, tier: str, preference: str | None = None) -> ModelInfo:
+    def resolve(self, tier: str, preference: str | None = None, *, seat: str | None = None,
+                avoid: Iterable[str] = ()) -> ModelInfo:
         """Pick a model for the given tier.
 
-        With no preference, the tier choice saved in Studio (`tiers`) wins when its
-        provider has a key. If preference is a model_id with matching tier, return it (with a
+        With no preference, the tier's saved models (`tiers`) win when their provider has a
+        key. With several, `seat` (e.g. "project:role") picks one stably, so roles of the same
+        tier spread across the models, and models in `avoid` (say, the model of the work a
+        reviewer checks) are skipped while another one is left. If preference is a model_id with matching tier, return it (with a
         deprecation warning if needed). Otherwise fall back to the first
         non-deprecated model matching tier whose provider has an API key set.
         """
-        if not preference and tier in self._tiers:
-            chosen = self._models[self._tiers[tier]]
-            if self._has_api_key(chosen.provider):
-                return chosen
+        pool = self.tier_pool(tier) if not preference else []
+        if pool:
+            avoided = set(avoid)
+            options = [m for m in pool if m.id not in avoided] or pool
+            if seat is None or len(options) == 1:
+                return options[0]
+            digest = int(hashlib.sha256(seat.encode()).hexdigest(), 16)
+            return options[digest % len(options)]
         if preference and preference in self._models:
             m = self._models[preference]
             if m.tier == tier:

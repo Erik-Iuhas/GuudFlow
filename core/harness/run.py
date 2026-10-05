@@ -201,8 +201,12 @@ class OpencodeRun:
         """Run every role through the scheduler and tear everything down after."""
         self.mode = await self._resolve_mode()
         self._started = time.time()
-        for cfg in self.agents:
-            self._roles[cfg.role] = self._prepare_role(cfg)
+        # Authors first, so a reviewer can be given a different model from the work it
+        # reviews (model diversity); the role order stays as configured.
+        prepared: dict[str, _Role] = {}
+        for cfg in sorted(self.agents, key=lambda c: bool(c.review_of)):
+            prepared[cfg.role] = self._roles[cfg.role] = self._prepare_role(cfg)
+        self._roles = {cfg.role: prepared[cfg.role] for cfg in self.agents}
         if self.settings.task_board == "auto":
             self.flow = TaskFlow.build(
                 self.agents, {n: r.role_type for n, r in self._roles.items()},
@@ -493,7 +497,12 @@ class OpencodeRun:
             return self.settings.binding_factory(cfg)
         registry = self._registry or ModelRegistry.for_data_root(None)
         model = registry.get(cfg.model_id) if cfg.model_id else None
-        model = model or registry.resolve(cfg.model_tier)
+        # A tier with several models spreads roles across them; a reviewer avoids the
+        # models of the roles it reviews when the tier has another one.
+        avoid = [self._roles[r].binding.model.id for r in cfg.review_of if r in self._roles]
+        model = model or registry.resolve(cfg.model_tier,
+                                          seat=f"{self.runner.project.project_id}:{cfg.role}",
+                                          avoid=avoid)
         provider = registry.provider(model.provider)
         if provider is None:
             raise TurnFailed(f"no provider config for {model.provider!r}")

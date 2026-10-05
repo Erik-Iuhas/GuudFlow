@@ -38,7 +38,7 @@ def test_defaults_apply_until_an_install_saves_its_own(tmp_path: Path) -> None:
     assert not model_config.is_custom(tmp_path)
     model_config.save(tmp_path, _doc())
     assert model_config.effective_path(tmp_path) == tmp_path / "model_config.json"
-    assert model_config.load(tmp_path)["tiers"] == {"heavy": "acme-small"}
+    assert model_config.load(tmp_path)["tiers"] == {"heavy": ["acme-small"]}  # a list now
     model_config.reset(tmp_path)
     assert model_config.effective_path(tmp_path) == model_config.DEFAULTS_PATH
 
@@ -100,3 +100,21 @@ def test_registry_uses_tier_choices_stored_keys_and_cache_write_prices(tmp_path:
     assert registry.api_key("acme") == "sk-stored-123"
     assert registry.get("acme-small").cache_write_price == pytest.approx(0.0011)
     assert registry.get("acme-big").cache_write_price == pytest.approx(0.003 * 1.25)
+
+
+def test_a_tier_with_several_models_spreads_roles_and_reviewers_differ(tmp_path: Path,
+                                                                        monkeypatch) -> None:
+    doc = _doc()
+    doc["tiers"] = {"heavy": ["acme-small", "acme-big", "acme-small"]}  # duplicates dropped
+    model_config.save(tmp_path, doc)
+    assert model_config.load(tmp_path)["tiers"]["heavy"] == ["acme-small", "acme-big"]
+    KeyStore(tmp_path).set("acme", "sk-stored-123")
+    registry = ModelRegistry.for_data_root(tmp_path)
+    picks = {registry.resolve("heavy", seat=f"proj:role{i}").id for i in range(20)}
+    assert picks == {"acme-small", "acme-big"}                      # roles spread across both
+    assert registry.resolve("heavy", seat="proj:x").id == registry.resolve("heavy", seat="proj:x").id
+    for i in range(10):                                             # a reviewer avoids the author's
+        author = registry.resolve("heavy", seat=f"proj:a{i}").id
+        assert registry.resolve("heavy", seat=f"proj:r{i}", avoid=[author]).id != author
+    assert registry.resolve("heavy").id == "acme-small"            # no seat: the first choice
+    assert registry.tier_model("heavy").id == "acme-small"          # estimates use the first

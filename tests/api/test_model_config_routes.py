@@ -37,12 +37,12 @@ async def test_defaults_then_save_then_reset(client, auth_header):
 
     doc = {"providers": {p["name"]: {k: p[k] for k in ("client", "base_url", "api_key_env")}
                          for p in body["providers"]},
-           "models": body["models"], "tiers": {"heavy": "claude-opus-5-5"}}
+           "models": body["models"], "tiers": {"heavy": ["claude-opus-5-5", "claude-sonnet-5-5"]}}
     r = await client.put("/api/model-config", json=doc, headers=auth_header)
     assert r.status_code == 200 and r.json()["custom"] is True
-    assert r.json()["tiers"] == {"heavy": "claude-opus-5-5"}
+    assert r.json()["tiers"] == {"heavy": ["claude-opus-5-5", "claude-sonnet-5-5"]}
 
-    doc["tiers"] = {"heavy": "no-such-model"}
+    doc["tiers"] = {"heavy": ["claude-opus-5-5", "no-such-model"]}
     r = await client.put("/api/model-config", json=doc, headers=auth_header)
     assert r.status_code == 422 and "unknown model" in r.json()["detail"]
 

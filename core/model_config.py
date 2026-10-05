@@ -149,17 +149,30 @@ def validate(doc: dict[str, Any]) -> dict[str, Any]:  # Any: caller-supplied JSO
     tiers_in = doc.get("tiers") or {}
     if not isinstance(tiers_in, dict):
         raise ModelConfigError("tiers must be an object")
-    tiers: dict[str, str] = {}
+    # A tier may use several models (model diversity): roles are spread across them.
+    tiers: dict[str, list[str]] = {}
     by_id = {m["id"]: m for m in models}
-    for tier, mid in tiers_in.items():
+    for tier, chosen in tiers_in.items():
         if tier not in TIERS:
             raise ModelConfigError(f"unknown tier {tier!r}")
-        if not mid:
-            continue
-        if mid not in by_id:
-            raise ModelConfigError(f"tier {tier}: unknown model {mid!r}")
-        tiers[tier] = str(mid)
+        ids = tier_list(chosen)
+        for mid in ids:
+            if mid not in by_id:
+                raise ModelConfigError(f"tier {tier}: unknown model {mid!r}")
+        if ids:
+            tiers[tier] = ids
     return {"providers": providers, "models": models, "tiers": tiers}
+
+
+def tier_list(value: object) -> list[str]:
+    """A tier's models as a de-duplicated list (an older config stores one id as a string)."""
+    items = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+    out: list[str] = []
+    for item in items:
+        mid = str(item or "").strip()
+        if mid and mid not in out:
+            out.append(mid)
+    return out
 
 
 def _positive_int(m: dict[str, Any], key: str, default: int, mid: str) -> int:  # Any: JSON

@@ -39,13 +39,14 @@ export interface ModelConfigView {
   custom: boolean;
   providers: ProviderWire[];
   models: ModelWire[];
-  tiers: Partial<Record<Tier, string>>;
+  /** tier -> its models; several spread the tier's roles across them (model diversity). */
+  tiers: Partial<Record<Tier, string[]>>;
 }
 
 export interface ConfigDoc {
   providers: Record<string, { client: ClientKind; base_url?: string; api_key_env: string }>;
   models: ModelWire[];
-  tiers: Partial<Record<Tier, string>>;
+  tiers: Partial<Record<Tier, string[]>>;
 }
 
 export interface TestResult {

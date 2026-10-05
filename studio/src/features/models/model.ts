@@ -30,9 +30,13 @@ export function envNameFor(provider: string): string {
   return `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "")}_API_KEY`;
 }
 
-/** The model a tier uses: the saved choice, else the first non-deprecated model of that tier. */
-export function tierModel(models: readonly ModelWire[], tiers: ConfigDoc["tiers"], tier: string): string {
-  const chosen = tiers[tier as keyof ConfigDoc["tiers"]];
-  if (chosen && models.some((m) => m.id === chosen)) return chosen;
-  return models.find((m) => m.tier === tier && !m.deprecated)?.id ?? "";
+/**
+ * The models a tier uses: the saved choice (known models only), else the first
+ * non-deprecated model of that tier. The first one is the tier's default.
+ */
+export function tierModels(models: readonly ModelWire[], tiers: ConfigDoc["tiers"], tier: string): string[] {
+  const chosen = (tiers[tier as keyof ConfigDoc["tiers"]] ?? []).filter((id) => models.some((m) => m.id === id));
+  if (chosen.length) return chosen;
+  const first = models.find((m) => m.tier === tier && !m.deprecated)?.id;
+  return first ? [first] : [];
 }

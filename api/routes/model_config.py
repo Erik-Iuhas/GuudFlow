@@ -50,7 +50,7 @@ def _view(request: Request) -> dict[str, Any]:  # Any: a JSON document
             for name, p in providers.items() if isinstance(p, dict)
         ],
         "models": doc.get("models") or [],
-        "tiers": doc.get("tiers") or {},
+        "tiers": {t: model_config.tier_list(v) for t, v in (doc.get("tiers") or {}).items()},
     }
 
 
@@ -71,7 +71,7 @@ async def get_config(request: Request) -> dict[str, Any]:
 class ConfigBody(BaseModel):
     providers: dict[str, dict[str, Any]]
     models: list[dict[str, Any]]
-    tiers: dict[str, str] = Field(default_factory=dict)
+    tiers: dict[str, list[str] | str] = Field(default_factory=dict)
 
 
 @router.put("")

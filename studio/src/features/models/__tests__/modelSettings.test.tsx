@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ModelSettings } from "../ModelSettings";
-import { envNameFor, fromPerMillion, perMillion, tierModel, toDoc } from "../model";
+import { envNameFor, fromPerMillion, perMillion, tierModels, toDoc } from "../model";
 import type { ModelConfigView } from "../api";
 
 const VIEW: ModelConfigView = {
@@ -31,8 +31,9 @@ describe("model helpers", () => {
 
   it("names env vars, picks tier models and builds the document without key status", () => {
     expect(envNameFor("my-llm")).toBe("MY_LLM_API_KEY");
-    expect(tierModel(VIEW.models, {}, "solid")).toBe("claude-sonnet-5-5");
-    expect(tierModel(VIEW.models, { solid: "claude-opus-5-5" }, "solid")).toBe("claude-opus-5-5");
+    expect(tierModels(VIEW.models, {}, "solid")).toEqual(["claude-sonnet-5-5"]);
+    expect(tierModels(VIEW.models, { solid: ["claude-opus-5-5", "gone", "acme-small"] }, "solid"))
+      .toEqual(["claude-opus-5-5", "acme-small"]);
     const doc = toDoc(VIEW);
     expect(doc.providers.anthropic).toEqual({ client: "anthropic", api_key_env: "ANTHROPIC_API_KEY" });
     expect(JSON.stringify(doc)).not.toContain("\"key\"");
@@ -53,7 +54,7 @@ describe("ModelSettings", () => {
       const method = init?.method ?? "GET";
       if (method === "PUT" && url === "/api/model-config") {
         const doc = JSON.parse(String(init?.body));
-        if (doc.tiers.heavy === "bad") return new Response(JSON.stringify({ detail: "tier heavy: unknown model 'bad'" }), { status: 422 });
+        if ((doc.tiers.heavy ?? []).includes("bad")) return new Response(JSON.stringify({ detail: "tier heavy: unknown model 'bad'" }), { status: 422 });
         view = { ...view, custom: true, models: doc.models, tiers: doc.tiers };
       }
       if (method === "PUT" && url.endsWith("/key")) {
@@ -108,7 +109,11 @@ describe("ModelSettings", () => {
     const price = await screen.findByLabelText("Input price for claude-sonnet-5-5");
     fireEvent.change(price, { target: { value: "3" } });
     fireEvent.blur(price);
-    fireEvent.change(screen.getByLabelText("solid"), { target: { value: "claude-opus-5-5" } });
+    // Several models per tier: add one, then the first can be removed.
+    fireEvent.change(screen.getByLabelText("Add a model to solid"), { target: { value: "claude-opus-5-5" } });
+    expect(within(screen.getByTestId("tier-solid")).getByText(/claude-sonnet-5-5 · default/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Add a model to solid"), { target: { value: "acme-small" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove claude-sonnet-5-5 from solid" }));
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
     // Keys can't change while the draft is unsaved (the key routes would save a stale view).
     expect(within(screen.getByTestId("provider-acme")).getByRole("button", { name: "Set key" })).toBeDisabled();
@@ -117,15 +122,15 @@ describe("ModelSettings", () => {
     const put = calls().find((c) => c.method === "PUT" && c.url === "/api/model-config");
     const sonnet = put?.body.models.find((m: { id: string }) => m.id === "claude-sonnet-5-5");
     expect(sonnet.cost_per_1k_input).toBeCloseTo(0.003);
-    expect(put?.body.tiers.solid).toBe("claude-opus-5-5");
+    expect(put?.body.tiers.solid).toEqual(["claude-opus-5-5", "acme-small"]);
     expect(screen.getByText("custom")).toBeInTheDocument();
   });
 
   it("shows the server's reason when a save is refused", async () => {
     renderPage();
     await screen.findByTestId("provider-acme");
-    // Force an invalid tier through the select's value.
-    const heavy = screen.getByLabelText("heavy") as HTMLSelectElement;
+    // Force an invalid tier choice through the add-model select.
+    const heavy = screen.getByLabelText("Add a model to heavy") as HTMLSelectElement;
     const bad = document.createElement("option");
     bad.value = "bad";
     heavy.appendChild(bad);
@@ -145,5 +150,14 @@ describe("ModelSettings", () => {
     fireEvent.change(screen.getByLabelText("Add a model"), { target: { value: "llama-4" } });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByTestId("model-llama-4")).toBeInTheDocument();
+  });
+
+  it("removing a model drops it from the tiers it was in", async () => {
+    renderPage();
+    await screen.findByTestId("provider-acme");
+    fireEvent.change(screen.getByLabelText("Add a model to fast"), { target: { value: "claude-opus-5-5" } });
+    expect(within(screen.getByTestId("tier-fast")).getByText(/claude-opus-5-5/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove claude-opus-5-5" }));
+    expect(within(screen.getByTestId("tier-fast")).queryByText(/claude-opus-5-5/)).toBeNull();
   });
 });
