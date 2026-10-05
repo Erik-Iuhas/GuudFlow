@@ -293,3 +293,21 @@ def test_task_old_row_without_new_fields_loads(tmp_path: Path) -> None:
     assert (loaded.title, loaded.kind, loaded.size, loaded.column) == ("", "code", "M", "todo")
     assert loaded.files_hint == [] and loaded.depends_on == [] and loaded.thread == []
     assert loaded.review_round == 0
+
+
+def test_plan_must_cover_the_runs_backlog_items() -> None:
+    from core.harness.tasks import PlanResult, check_plan
+    plan = PlanResult.model_validate({"tasks": [
+        {"id": "T1", "title": "Login endpoint", "owner_role": "dev", "acceptance": ["works"],
+         "size": "S", "kind": "code", "backlog_id": "B1"},
+        {"id": "T2", "title": "Tidy imports", "owner_role": "dev", "acceptance": ["clean"],
+         "size": "S", "kind": "code"},
+        {"id": "T3", "title": "Stray item work", "owner_role": "dev", "acceptance": ["x"],
+         "size": "S", "kind": "code", "backlog_id": "B9"}]})
+    problems = check_plan(plan, ["dev"], backlog_ids=["B1", "B2"])
+    assert any("B2 has no task" in p for p in problems)
+    assert any("T3: backlog_id 'B9'" in p for p in problems)
+    assert check_plan(plan, ["dev"]) != []               # B9 is not a run item either
+    ok = PlanResult.model_validate({"tasks": [plan.tasks[0].model_dump(),
+                                              plan.tasks[1].model_dump()]})
+    assert check_plan(ok, ["dev"], backlog_ids=["B1"]) == []

@@ -1,0 +1,129 @@
+"""A run as one session of ongoing project work (plan §13).
+
+The glue between a run and its project's long-lived state:
+
+  prepare_run   (worker, before the run)   working/ becomes a clone of the project
+                repo's main (or of a pending run it continues); the backlog items
+                the run takes are snapshotted into the run folder.
+  close_run     (runner, after the run)    the run's main is submitted as
+                `runs/{run_id}` for a human decision; backlog outcomes recorded.
+  decide_run    (API, the human)           accept: merge into main, finished items
+                done, the run's carry-forward becomes the project's "last accepted";
+                reject: main untouched, items reopen.
+
+Projects whose source is `local_path_in_place` keep working in the user's
+directory and skip the project repo; the backlog still works for them.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import shutil
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+from core.backlog import Backlog, BacklogItem, CardOutcome
+from core.json_store import read_json, write_json
+from core.project_repo import ProjectRepo, RunBranch
+
+log = logging.getLogger(__name__)
+
+SELECTION_JSON = "backlog_selection.json"
+PROJECT_RUN_JSON = "project_run.json"
+LAST_ACCEPTED_JSON = "last_accepted.json"
+DEFAULT_TAKE = 3
+
+
+@dataclass
+class RunDecision:
+    """What a human decision did."""
+
+    run: RunBranch
+    items: list[BacklogItem]
+
+
+def prepare_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
+                working_dir: Path, payload: dict[str, Any], *,  # Any: job payload JSON
+                in_place: bool) -> list[BacklogItem]:
+    """Set the run up on the project's current state; returns the backlog items taken.
+
+    `payload` keys: `backlog_items` (list of ids, or "top"), `backlog_limit`
+    (with "top", default 3), `continue_run` (a pending run to build on).
+    """
+    if not in_place:
+        repo = ProjectRepo(data_root, project_id)
+        repo.ensure(seed=working_dir if (working_dir / ".git").exists() else None)
+        parent = payload.get("continue_run")
+        parent = str(parent) if parent else None
+        base = repo.clone_into(working_dir, run_id=parent)
+        write_json(run_root / PROJECT_RUN_JSON, {"base": base, "parent_run": parent})
+    wanted = payload.get("backlog_items")
+    if not wanted:
+        return []
+    backlog = Backlog(data_root, project_id)
+    if wanted == "top":
+        limit = payload.get("backlog_limit", DEFAULT_TAKE)
+        items = backlog.take_for_run(run_id, None, limit if isinstance(limit, int) else DEFAULT_TAKE)
+    else:
+        items = backlog.take_for_run(run_id, [str(i) for i in wanted])
+    write_json(run_root / SELECTION_JSON, [asdict(i) for i in items])
+    return items
+
+
+def selection(run_root: Path) -> list[BacklogItem]:
+    """The backlog items this run took (empty if none)."""
+    rows = read_json(Path(run_root) / SELECTION_JSON, [])
+    return [BacklogItem(**r) for r in rows if isinstance(r, dict)]
+
+
+def close_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
+              working_dir: Path, cards: list[CardOutcome], *, stopped: bool = False
+              ) -> RunBranch | None:
+    """Submit the run to the project repo and record backlog outcomes. Never raises."""
+    submitted: RunBranch | None = None
+    try:
+        info = read_json(Path(run_root) / PROJECT_RUN_JSON, None)
+        if isinstance(info, dict) and not stopped:
+            submitted = ProjectRepo(data_root, project_id).submit(
+                run_id, working_dir, str(info["base"]), info.get("parent_run"))
+        backlog = Backlog(data_root, project_id)
+        if stopped:
+            backlog.release(run_id, "run stopped")
+        else:
+            backlog.record_outcomes(run_id, cards)
+            if submitted is not None and submitted.state == "no_changes":
+                backlog.release(run_id, "run made no changes")
+    except Exception:  # noqa: BLE001 — closing must never fail a finished run
+        log.exception("closing run %s for project %s failed", run_id, project_id)
+    return submitted
+
+
+def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
+               note: str = "") -> RunDecision:
+    """A human accepts or rejects a pending run (raises ProjectRepoError / Conflict)."""
+    repo = ProjectRepo(data_root, project_id)
+    run = repo.accept(run_id, note) if accept else repo.reject(run_id, note)
+    items = Backlog(data_root, project_id).decide(run_id, accepted=accept)
+    if accept:
+        carry = Path(data_root) / "runs" / run_id / "carry_forward.json"
+        target = Path(data_root) / "projects" / project_id / "context" / LAST_ACCEPTED_JSON
+        if carry.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(carry, target)
+    return RunDecision(run=run, items=items)
+
+
+def last_accepted_text(data_root: Path, project_id: str) -> str:
+    """The carry-forward text of the project's last accepted run ("" if none)."""
+    doc = read_json(Path(data_root) / "projects" / project_id / "context" / LAST_ACCEPTED_JSON,
+                    {})
+    text = doc.get("text") if isinstance(doc, dict) else None
+    return str(text).strip() if text else ""
+
+
+def pending_summary(data_root: Path, project_id: str) -> list[dict[str, Any]]:  # Any: JSON rows
+    """Runs waiting for a decision, newest first (for Studio and the meta-agent)."""
+    return [json.loads(json.dumps(asdict(r))) for r in ProjectRepo(data_root, project_id).runs()
+            if r.state == "pending"]

@@ -277,6 +277,7 @@ def _deserialise_task(payload: dict[str, Any]) -> Task:
         priority=int(payload.get("priority") or 0),
         column_since=float(payload.get("column_since") or 0.0),
         thread=[dict(e) for e in payload.get("thread") or [] if isinstance(e, dict)],
+        backlog_id=str(payload["backlog_id"]) if payload.get("backlog_id") else None,
     )
 
 

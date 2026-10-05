@@ -49,6 +49,8 @@ class PlannedTask(BaseModel):
     size: Literal["S", "M", "L"]
     kind: Literal["code", "test", "docs", "research", "visual"]
     visual_refs: list[str] = []
+    # The project backlog item this task works on (plan §13); omit for extra work.
+    backlog_id: str | None = Field(default=None, pattern=r"^B[0-9]+$")
 
     @field_validator("acceptance")
     @classmethod
@@ -97,9 +99,23 @@ def _find_cycle(graph: dict[str, list[str]]) -> list[str] | None:
     return None
 
 
-def check_plan(plan: PlanResult, team_roles: Collection[str]) -> list[str]:
-    """Check a schema-valid plan against the team; return one problem per line (empty = ok)."""
+def check_plan(plan: PlanResult, team_roles: Collection[str],
+               backlog_ids: Collection[str] = ()) -> list[str]:
+    """Check a schema-valid plan against the team; return one problem per line (empty = ok).
+
+    With `backlog_ids` (the run's backlog items, plan §13) every item must be
+    covered by at least one task, and tasks may only name those items.
+    """
     problems: list[str] = []
+    wanted = set(backlog_ids)
+    for task in plan.tasks:
+        if task.backlog_id is not None and task.backlog_id not in wanted:
+            problems.append(f"{task.id}: backlog_id '{task.backlog_id}' is not one of this "
+                            f"run's items ({', '.join(sorted(wanted)) or 'none'})")
+    covered = {t.backlog_id for t in plan.tasks}
+    for item in sorted(wanted - covered):
+        problems.append(f"backlog item {item} has no task: add at least one task with "
+                        f"backlog_id \"{item}\"")
     roles = set(team_roles)
     seen: set[str] = set()
     for task in plan.tasks:

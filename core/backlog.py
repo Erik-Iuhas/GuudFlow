@@ -64,15 +64,21 @@ class BacklogItem:
     history: list[dict[str, Any]] = field(default_factory=list)  # Any: JSON rows
 
     def brief_text(self) -> str:
-        """How the item reads in a planner's or agent's brief."""
+        """The item's own text (title, checklist, notes) for a brief.
+
+        Items a run created (`source` "run:…") carry agent-written text; callers
+        building prompts wrap those, and `last_summary()`, as untrusted.
+        """
         lines = [f"- **{self.id}** {self.title} ({self.kind}, size {self.size})"]
         lines += [f"    - [ ] {a}" for a in self.acceptance]
         if self.notes:
             lines.append(f"    - notes: {self.notes}")
-        last = next((h for h in reversed(self.history) if h.get("summary")), None)
-        if last:
-            lines.append(f"    - earlier run {last.get('run_id')}: {last.get('summary')}")
         return "\n".join(lines)
+
+    def last_summary(self) -> str | None:
+        """What the most recent run that worked on it reported (agent text)."""
+        last = next((h for h in reversed(self.history) if h.get("summary")), None)
+        return f"run {last.get('run_id')}: {last.get('summary')}" if last else None
 
 
 @dataclass(frozen=True)

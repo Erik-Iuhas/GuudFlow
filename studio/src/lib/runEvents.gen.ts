@@ -54,7 +54,8 @@ export type SignalType =
   | "ARTIFACT"
   | "OVERSEER_INTERVENTION"
   | "TASK_MOVED"
-  | "TASK_THREAD";
+  | "TASK_THREAD"
+  | "RUN_SUBMITTED";
 
 export type TaskColumn = "todo" | "in_progress" | "review" | "done" | "blocked" | "needs_attention";
 
@@ -179,6 +180,15 @@ export interface ArtifactDetail {
   served_path: string;
 }
 
+export interface RunSubmittedDetail {
+  state: "pending" | "no_changes";
+  base: string;
+  head: string;
+  commits: number;
+  files: string[];
+  backlog?: Record<string, string>;
+}
+
 export interface ScreenshotReadyDetail {
   role?: string;
   path: string;
@@ -201,6 +211,7 @@ export interface DetailByType {
   BLOCKED: BlockedDetail;
   WEB_REQUEST: WebRequestDetail;
   ARTIFACT: ArtifactDetail;
+  RUN_SUBMITTED: RunSubmittedDetail;
   SCREENSHOT_READY: ScreenshotReadyDetail;
 }
 
@@ -222,5 +233,6 @@ export const JSON_DETAIL_TYPES: ReadonlySet<SignalType> = new Set([
   "BLOCKED",
   "WEB_REQUEST",
   "ARTIFACT",
+  "RUN_SUBMITTED",
   "SCREENSHOT_READY",
 ]);

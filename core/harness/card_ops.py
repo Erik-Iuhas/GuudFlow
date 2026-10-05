@@ -188,4 +188,5 @@ def card_view(task: Task) -> dict[str, Any]:
         "visual_refs": list(task.visual_refs),
         "column_since": task.column_since,
         "thread": [thread_entry_view(e) for e in task.thread],
+        "backlog_id": task.backlog_id,
     }

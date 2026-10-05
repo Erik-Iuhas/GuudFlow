@@ -145,6 +145,9 @@ class SignalType(str, Enum):
     # cards), and a typed entry was added to a card's thread.
     TASK_MOVED = "TASK_MOVED"
     TASK_THREAD = "TASK_THREAD"
+    # Ongoing projects (plan §13): the run was handed back to its project and
+    # waits for a human to accept or reject it.
+    RUN_SUBMITTED = "RUN_SUBMITTED"
 
 
 Priority = Literal["normal", "high"]

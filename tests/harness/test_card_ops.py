@@ -191,6 +191,6 @@ def test_card_view_shape() -> None:
     view = card_view(ws.tasks["T2"])
     assert set(view) == {"id", "title", "owner", "column", "kind", "size", "priority",
                          "review_round", "acceptance", "depends_on", "files_hint",
-                         "visual_refs", "column_since", "thread"}
+                         "visual_refs", "column_since", "thread", "backlog_id"}
     assert view["id"] == "T2" and view["owner"] == "frontend" and view["depends_on"] == ["T1"]
     assert view["thread"][0]["text"] == "note"

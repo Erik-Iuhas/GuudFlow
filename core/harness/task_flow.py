@@ -35,6 +35,7 @@ from core.signals import Signal, SignalType
 from core.workspace import AgentState, HumanRequest, Workspace
 
 if TYPE_CHECKING:
+    from core.backlog import BacklogItem
     from core.runner import AgentConfig
     from core.scheduler import Scheduler
 
@@ -90,6 +91,8 @@ class TaskFlow:
     _visual: dict[str, PrecheckResult] = field(default_factory=dict)
     _precheck_fails: dict[str, int] = field(default_factory=dict)
     _feedback_roles: dict[str, str] = field(default_factory=dict)   # request id → role
+    # The project backlog items this run took (plan §13); the plan must cover each.
+    backlog: list["BacklogItem"] = field(default_factory=list)
 
     @classmethod
     def build(cls, agents: Sequence["AgentConfig"], role_types: dict[str, str],
@@ -151,10 +154,16 @@ class TaskFlow:
         """Plan one spawn. None → not task-driven (use role mode)."""
         if role == self.planner:
             owners = self.owners()
+            items = [i.id for i in self.backlog]
+            sections: tuple[tuple[str, str], ...] = (
+                ("Your output: the task list", _planner_instructions(owners)),)
+            if self.backlog:
+                sections = (("This run's backlog items", backlog_text(self.backlog)),) + sections
             return TurnPlan(
                 model=PlanResult,
-                check=lambda r: check_plan(r, owners) if isinstance(r, PlanResult) else [],
-                extra_sections=(("Your output: the task list", _planner_instructions(owners)),))
+                check=lambda r: (check_plan(r, owners, items) if isinstance(r, PlanResult)
+                                 else []),
+                extra_sections=sections)
         if role not in self.card_roles:
             return None
         if self.role_types.get(role) == "reviewer":
@@ -340,6 +349,28 @@ def _json_detail(detail: str | None) -> dict[str, object]:
 def _check_done(result: AgentResult, task_id: str, criteria: list[str]) -> list[str]:
     """Owners must name their card; a `done` result answers every checklist item."""
     return check_task_result(result, task_id, criteria)
+
+
+def backlog_text(items: Sequence["BacklogItem"]) -> str:
+    """The run's backlog items as a brief section (plan §13)."""
+    return ("This project is ongoing work; this run takes these items from its backlog. "
+            "Each task that works on an item sets `backlog_id` to it, and every item needs "
+            "at least one task. You may add tasks without `backlog_id` for work you find on "
+            "the way; unfinished ones go back to the backlog. Earlier runs' notes on an "
+            "item tell you what was tried.\n\n" + "\n\n".join(_item_text(i) for i in items))
+
+
+def _item_text(item: "BacklogItem") -> str:
+    """Human-written items as they are; agent-written text (run-created items and
+    earlier runs' summaries) wrapped as untrusted data."""
+    from core.harness.brief import wrap_untrusted
+    text = (item.brief_text() if not item.source.startswith("run:")
+            else f"- **{item.id}**\n" + wrap_untrusted(f"backlog item {item.id} (from a run)",
+                                                     item.brief_text()))
+    summary = item.last_summary()
+    if summary:
+        text += "\n" + wrap_untrusted(f"earlier work on {item.id}", summary)
+    return text
 
 
 def _planner_instructions(owners: list[str]) -> str:

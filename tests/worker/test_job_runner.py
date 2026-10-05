@@ -504,8 +504,11 @@ def test_initialize_run_greenfield_project(tmp_path: Path):
     assert inputs.is_dir()
     readme = (inputs / "README.md").read_text(encoding="utf-8")
     assert "greenfield" in readme.lower()
-    # No source_repo → no working/ either.
-    assert not (run_root / "workspace" / "working").exists()
+    # No source_repo: the project repo starts empty and the run clones it (plan §13).
+    working = run_root / "workspace" / "working"
+    assert (working / ".git").is_dir()
+    assert (tmp_path / "projects" / "p_blank" / "repo.git" / "HEAD").is_file()
+    assert (run_root / "project_run.json").is_file()
 
 
 @requires_opencode

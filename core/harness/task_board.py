@@ -117,7 +117,8 @@ class TaskBoard:
                         size=planned.size, files_hint=list(planned.files_hint),
                         depends_on=list(planned.depends_on),
                         visual_refs=list(planned.visual_refs), column="todo",
-                        priority=-i, column_since=self.clock())
+                        priority=-i, column_since=self.clock(),
+                        backlog_id=planned.backlog_id)
             self.workspace.add_task(card)
             cards.append(card)
         self.planned = True

@@ -282,6 +282,8 @@ class Task:
     column_since: float = 0.0  # unix time the card entered `column` (card aging, §11.2)
     # ThreadEntry.to_dict() payloads (core.harness.tasks.ThreadEntry).
     thread: list[dict[str, Any]] = field(default_factory=list)
+    # Project backlog item this card works on (plan §13); None for extra cards.
+    backlog_id: str | None = None
 
 
 # Map a TaskStatus transition to the SignalType the runner posts when

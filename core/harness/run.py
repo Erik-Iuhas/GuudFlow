@@ -62,7 +62,9 @@ from core.harness.opencode_runner import EventHook, PermissionHook, PermissionRe
 from core.harness.result_inbox import ResultInbox
 from core.harness.results import AgentResult, ReviewResult
 from core.harness.server import OpencodeServer
-from core.harness.task_flow import TaskFlow, TurnPlan
+from core import project_runs
+from core.backlog import BacklogItem
+from core.harness.task_flow import TaskFlow, TurnPlan, backlog_text
 from core.harness.detectors import DetectorConfig, RunView
 from core.harness.overseer import OverseerCaps, OverseerResult
 from core.harness.overseer_flow import OverseerFlow
@@ -172,6 +174,7 @@ class OpencodeRun:
         self._delivered_notes: set[str] = set()
         # Per role: what the next brief must say about git (set-aside work, conflicts).
         self._git_notes: dict[str, list[str]] = {}
+        self.backlog: list[BacklogItem] = []
         self._roles: dict[str, _Role] = {}
         self._http: RunningHttpServer | None = None
         self._gw_http: RunningHttpServer | None = None
@@ -205,8 +208,11 @@ class OpencodeRun:
                 escalate=lambda role, summary, detail: self._escalate(role, summary, detail))
         self._setup_overseer()
         carried = self._load_carry_forward()
+        # The project backlog items this run took (plan §13).
+        self.backlog = project_runs.selection(self.runner.run_root)
         flow = self.flow
         if flow is not None:
+            flow.backlog = list(self.backlog)
             flow.tool_dir_for = self.clones.tool_dir
             flow.ref_roots = [self.runner.run_root / "inputs", self.runner.git.working_dir]
             flow.run_root = self.runner.run_root
@@ -283,6 +289,12 @@ class OpencodeRun:
         """
         docs = load_prior_carry_forward(self.runner.run_root)
         if not docs:
+            # An ongoing project: brief everyone on where the last accepted run left
+            # the code. Its open work lives on the backlog, not on this board.
+            data_root = self._data_root()
+            if data_root is not None and self.runner.project.project_id:
+                self._carry_text = project_runs.last_accepted_text(
+                    data_root, self.runner.project.project_id)
             return 0
         self._carry_text = "\n\n".join(str(d.get("text") or "") for d in docs).strip()
         if self.flow is None:
@@ -306,6 +318,10 @@ class OpencodeRun:
                                      f"(card {old.get('task_id')}, was {old.get('column')})")
                 carried += 1
         return carried
+
+    def _data_root(self) -> Path | None:
+        root = self.runner.run_root
+        return root.parent.parent if root.parent.name == "runs" else None
 
     def _is_overseer(self, role: str) -> bool:
         return self.overseer is not None and role == self.overseer.overseer_role
@@ -829,6 +845,8 @@ class OpencodeRun:
             carry_forward=self._carry_text or None,
             git_notes=tuple(git_notes),
             extra_sections=(plan.extra_sections if plan is not None else ())
+            + ((("This run's backlog items", backlog_text(self.backlog)),)
+               if self.backlog and self.flow is None else ())
             + (self.overseer.brief_addenda(cfg.role) if self.overseer is not None
                and not self._is_overseer(cfg.role) else ()),
         ))

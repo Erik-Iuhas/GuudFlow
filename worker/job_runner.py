@@ -380,6 +380,7 @@ def serialise_task(task) -> dict[str, Any]:
         "priority": task.priority,
         "column_since": task.column_since,
         "thread": [dict(e) for e in task.thread],
+        "backlog_id": task.backlog_id,
     }
 
 
@@ -615,16 +616,24 @@ class JobRunner:
           3. bundle_prior_history: per attached prior run with a working/ on
              disk, bundle its history under inputs/from_run_{id}/.history.bundle
           4. generate_inputs_readme: last so it sees the bundles too
+          5. project_runs.prepare_run (plan §13): working/ becomes a clone of
+             the project repo's main (seeded from step 2 the first time) and
+             the backlog items the run takes are snapshotted
         """
+        from core import project_runs
+        from core.project_repo import ProjectRepo
+
         project_dir = self.data_root / "projects" / job.project_id
         run_initializer.seed_run(project_dir, run_root)
 
         run_inputs = run_root / "workspace" / "inputs"
         working_dir = run_root / "workspace" / "working"
+        in_place = _is_in_place_source(project_dir)
 
         # Track 4.3 — when this project's source repo is `local_path_in_place`,
         # agents work directly in the user's directory; do not seed/clobber it.
-        if not _is_in_place_source(project_dir):
+        # Once the project repo exists, it (not the original source) is the seed.
+        if not in_place and not ProjectRepo(self.data_root, job.project_id).exists():
             run_initializer.seed_working_from_source(
                 working_dir, run_inputs / "source_repo"
             )
@@ -645,6 +654,8 @@ class JobRunner:
                 run_initializer.bundle_prior_history(prior_working, bundle_path)
 
         run_initializer.generate_inputs_readme(run_inputs)
+        project_runs.prepare_run(self.data_root, job.project_id, job.run_id, run_root,
+                                 working_dir, dict(job.payload or {}), in_place=in_place)
 
     async def run_one(self, job: Job) -> None:
         """Execute a single job end-to-end. Idempotent on status updates."""

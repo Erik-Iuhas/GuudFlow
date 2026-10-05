@@ -612,6 +612,7 @@ class AgentRunner:
         self._attach_personas()
         result = await OpencodeRun(self, self.harness_settings).run()
         if result.status is SchedulerStatus.STOPPED:
+            self._close_project_run(stopped=True)
             return result
         # Training rubric scoring runs before the memory writer so the
         # RUBRIC_SCORE signal is on the board before the episode is recorded.
@@ -655,7 +656,49 @@ class AgentRunner:
         data_root = (self.run_root.parent.parent
                      if self.run_root.parent.name == "runs" else None)
         finalize_run(self.run_root, self.run_id, self.project.project_id, data_root)
+        self._close_project_run(stopped=False)
         return result
+
+    def _data_root(self) -> Path | None:
+        """`<data>` when the run lives at `<data>/runs/<id>` (else tests / ad-hoc dirs)."""
+        return self.run_root.parent.parent if self.run_root.parent.name == "runs" else None
+
+    def _close_project_run(self, *, stopped: bool) -> None:
+        """Hand the run back to its project (plan §13): submit it for a human decision
+        and record what happened to the backlog items it took."""
+        from core.backlog import card_outcomes
+        from core.project_runs import close_run
+
+        data_root = self._data_root()
+        if data_root is None or not self.project.project_id:
+            return
+        summaries: dict[str, str] = {}
+        for sig in self.workspace.board:
+            if sig.type is not SignalType.AGENT_RESULT:
+                continue
+            try:
+                res = (json.loads(sig.detail or "{}").get("result") or {})
+            except (ValueError, AttributeError):
+                continue
+            if isinstance(res, dict) and res.get("task_id") and res.get("summary"):
+                summaries[str(res["task_id"])] = str(res["summary"])[:300]
+        submitted = close_run(data_root, self.project.project_id, self.run_id, self.run_root,
+                              self.git.working_dir,
+                              card_outcomes(self.workspace.tasks.values(), summaries),
+                              stopped=stopped)
+        if submitted is not None:
+            from core.backlog import Backlog
+            outcomes = {i.id: str(i.pending or "not_started") for i in
+                        Backlog(data_root, self.project.project_id).in_run(self.run_id)}
+            self.workspace.post_signal(Signal(
+                type=SignalType.RUN_SUBMITTED, from_agent="runner",
+                summary=(f"run submitted to the project: {submitted.commits} commit(s), "
+                         f"{len(submitted.files)} file(s), waiting for your review"
+                         if submitted.state == "pending"
+                         else "run made no changes to the project"),
+                detail=json.dumps({"state": submitted.state, "base": submitted.base,
+                                   "head": submitted.head, "commits": submitted.commits,
+                                   "files": submitted.files[:200], "backlog": outcomes})))
 
     def _build_teammate_brief(self, role: str) -> str:
         """Build the TEAM block (Layer 3.5) for `role`.

@@ -62,6 +62,10 @@ DETAIL_SHAPES: dict[str, dict[str, str]] = {
         "path": "string", "kind": "string", "role": "string", "task_id": "string | null",
         "size": "number", "sha256": "string", "created_at": "string", "served_path": "string",
     },
+    "RUN_SUBMITTED": {
+        "state": "\"pending\" | \"no_changes\"", "base": "string", "head": "string",
+        "commits": "number", "files": "string[]", "backlog?": "Record<string, string>",
+    },
     "SCREENSHOT_READY": {
         "role?": "string", "path": "string", "url?": "string", "request_id?": "string",
         "question?": "string", "clone_path?": "string", "width?": "number",

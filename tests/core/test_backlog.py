@@ -79,7 +79,7 @@ def test_rejected_run_reopens_everything(tmp_path: Path) -> None:
     b.decide("run_1", accepted=False)
     again = b.get(item.id)
     assert again.status == "open" and again.history[-1]["decision"] == "rejected"
-    assert "earlier run run_1: did it" in again.brief_text()   # the next run learns from it
+    assert again.last_summary() == "run run_1: did it"         # the next run learns from it
 
 
 def test_release_and_duplicate_leftovers(tmp_path: Path) -> None:
