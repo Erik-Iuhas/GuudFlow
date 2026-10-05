@@ -23,7 +23,10 @@ read the design doc. Every structural decision is intentional.
 working session on it (plan §13). Each project has a long-lived repo (`core/project_repo.py`)
 and a backlog (`core/backlog.py`). A run takes backlog items, starts from the project's `main`,
 and waits for a human to accept it before anything reaches `main`. The Studio project page
-opens on the Work tab (review queue + backlog).
+opens on the Work tab (review queue + backlog). Plan §14 adds remote sync/publish
+(`core/project_remote.py`, host-only token), checks before review (`core/project_checks.py`),
+reconcile runs, item dependencies and grooming, autopilot (`core/autopilot.py`) and SQLite
+storage (`core/work_db.py`).
 
 **Opencode harness.** Agent work is done by [opencode](https://github.com/anomalyco/opencode)
 running headless, one sandboxed server per role. GuudFlow stays the manager: scheduler,

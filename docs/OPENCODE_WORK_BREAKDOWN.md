@@ -110,15 +110,15 @@ retirement (S15) and final review (O15), and the rest of the Studio track (S24 t
 | P7 | G5 | Done | Studio Work tab (review queue + backlog), run start with selected items, review state on the run report |
 | P7 | G6 | Partly | The meta-agent reads the open backlog when proposing a team (done). Scheduled runs that take the top items on their own: not started (CI can invoke with `backlog_items: "top"`) |
 
-| P8 | H1 | Not started | Remote sync before runs and publish on accept (branch, PR, or main); host-only token (plan §14.1) |
-| P8 | H2 | Not started | Accept/reject notes go into item history and the next brief (§14.2) |
-| P8 | H3 | Not started | `check_command` runs on the run's code in a one-shot sandbox; result in the review panel (§14.3) |
-| P8 | H4 | Not started | Reconcile runs for conflicting accepts; runs with conflict markers cannot be accepted (§14.4) |
-| P8 | H5 | Not started | One active run per project unless `allow_parallel` (§14.5) |
-| P8 | H6 | Not started | Item dependencies, cost per item, groom proposals from the roadmap (§14.6) |
-| P8 | H7 | Not started | Autopilot: scheduled runs with budget caps, guarded auto-accept (§14.7) |
-| P8 | H8 | Not started | Backlog and run states in SQLite per project (§14.8) |
-| P8 | H9 | Not started | UI leftovers: per-turn tool-call label, "Run on the goal only" (§14.9) |
+| P8 | H1 | Done | `core/project_remote.py`: sync (seed from the remote, fast-forward, merge, conflict skipped), publish on accept (branch, GitHub PR, main never forced), askpass token; `POST /remote/sync`; Studio header + Settings |
+| P8 | H2 | Done | Notes on the item's history; shown to the next run as the reviewer's words |
+| P8 | H3 | Done | `core/project_checks.py`, `SandboxManager.run_check` (no network); result on the run, `RUN_SUBMITTED.check`, review badge |
+| P8 | H4 | Done | Continuing merges main in; conflicts committed with markers + a resolve item; continued run `superseded`; accept refuses markers; Studio 'Reconcile in a new run' |
+| P8 | H5 | Done | 409 from `POST /api/invoke` unless `allow_parallel` |
+| P8 | H6 | Done | `depends_on` (selection rules, cycles refused), `total_cost_usd`, `core/groom.py` + `POST /backlog/groom` + Studio suggestions |
+| P8 | H7 | Done | `core/autopilot.py` (API background loop), per-run cap tightens the budget, auto-accept needs a passing check; Studio status + Settings |
+| P8 | H8 | Done | `core/work_db.py` (WAL, one transaction per change, JSON import) |
+| P8 | H9 | Done | 'tool calls this turn'; 'Run on the goal only' |
 | P8 | H10 | Deferred (you) | Real-model run of an ongoing project across two or three accepted runs (§14.10) |
 
 ### Final calls (closing the offline work)

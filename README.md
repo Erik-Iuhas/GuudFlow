@@ -184,7 +184,17 @@ curl -X POST http://localhost:8000/api/projects/my-app/runs-review/RUN_ID/accept
   -H "Authorization: Bearer $GUUDFLOW_API_TOKEN"
 ```
 
-See plan §13 in `docs/OPENCODE_HARNESS_PLAN.md` for how it works.
+In **Settings → Project work** you can also set:
+
+- a check command (for example `pytest -q`), run on each finished run's code in a sandbox
+  with no network; its result shows in the review queue;
+- the project's real remote: it is synced into the project before every run, and an
+  accepted run is pushed as a branch, opened as a GitHub pull request, or pushed to the
+  branch. The token stays in a `GUUDFLOW_GIT_*` environment variable on the server;
+- the autopilot: start runs on a schedule within per-run and weekly budgets, optionally
+  accepting a run by itself when every item finished and the check passed.
+
+See plan §13 and §14 in `docs/OPENCODE_HARNESS_PLAN.md` for how it works.
 
 ### Quality gate
 

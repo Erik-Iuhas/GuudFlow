@@ -1270,6 +1270,20 @@ working, and it is not removed for its own sake.
    - The tool-call count on a result card is labelled as that turn's count.
    - The project header's "Run now" becomes "Run on the goal only"; the Work tab is the main
      way to start a run.
+Decisions made while building §14 (so nobody re-derives them):
+
+- Continuing a pending run always merges the project's current `main` into it, so a
+  "reconcile run" is just a continuation. The continued run becomes `superseded` and its
+  backlog items move to the new run.
+- Auto-accept also requires a configured `check_command` that passed. Without a check
+  there is no evidence the code works, so the run waits for a human.
+- A team without a planner has no cards linked to items. Its items count as finished
+  when the run completes.
+- When a project with a remote has no project repo yet, the repo is seeded from the
+  remote, so histories always match. A repo that was started from a copy reports
+  "no shared history" instead of forcing a merge.
+- Autopilot spend counts the gateway cost of the runs the autopilot started.
+
 10. **Real-model validation (H10, you).** Run one project through two or three backlog runs
     with an accept in between, on a real model.
 
