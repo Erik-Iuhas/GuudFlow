@@ -347,6 +347,8 @@ checkbox restyle.
 | P7 Studio Work/Sessions/Team | done (Work Overview/Technical, routed-to-you, spec results and co-sign in review, follow panel in the session Team view, seats and rules panels with adherence) |
 | P8 Record | done (`core/record.py` trace/export/spec files, `api/routes/record.py`, Record tab); `SPEC.md` and `docs/decisions/` committed to main on accept when `record.keep_in_repo` is on (`core/project_runs.write_record_files`) |
 | P9 MCP Studio | done (Settings → MCP servers, per-agent MCP tools field) |
+| P10 Team changes in drafts | in progress |
+| P11 Jack: persona, memory, naming | in progress |
 
 **Known gaps after this pass:**
 - Runs with no planner (no task board) get no spec sections in briefs.
@@ -357,3 +359,52 @@ checkbox restyle.
 - Visual e2e baselines (`studio/e2e/__screenshots__`) predate the new tabs and checkboxes, and
   need regenerating.
 - The escape suite needs Docker. It did not run in this environment; CI's Docker job covers it.
+
+## 10. Addendum: Jack, a growing team, and the manager's own memory (2026-10-06)
+
+### 10.1 The project manager is Jack
+- The project manager is a persona: `jack-project-manager-v1`, seeded like the other personas in
+  `data/_seed/personas/`. Its display name is the persona's profile name, which defaults to
+  "Jack" and can be renamed on the persona's profile. There is one Jack per install, working
+  across every project.
+- Studio shows the persona name wherever it said "Project manager", with the role in small text.
+  `GET /api/pm` returns `{persona_id, name, episodes, patterns}`.
+
+### 10.2 Jack can grow the team (P10)
+New draft ops: `add_role`, `edit_role` and `remove_role`. They work on the project's `agents`,
+which are the same fields as the team approval screen.
+- `add_role` carries: role, role_type, description, model_tier, depends_on, `review_of`, and
+  optional capability overrides. Defaults come from the role type, as on the approval screen.
+- **A human always approves team changes.** Team ops start unticked whatever the seats, so Lead
+  being empty does not pre-accept them. This follows hard rule 24 and the overseer's
+  `propose_team_change`.
+- On approval the project doc's `agents` change. The new team applies from the next session
+  (plan §5.7: widening applies from the next spawn), and a running session is never changed.
+- **When Jack proposes a change:**
+  - the scope grows past the team, for example a new kind of work (frontend, data) or a
+    research need;
+  - the start mode changes, for example test-first adds a tester;
+  - sessions keep failing review in one area;
+  - the playbook or Jack's own memory says this kind of project goes better with a role.
+
+  Every team change needs a reason of at least 20 characters.
+- The overseer's in-session `propose_team_change` intervention becomes a draft team change, so
+  the human sees it in the Plan tab.
+
+### 10.3 Jack's memory (P11)
+Rules 15, 16 and 22 apply, as for any persona.
+- **Episodes** are written deterministically, with no LLM call, when:
+  - a session is accepted or rejected: project type (from the goal), start mode, seats, team
+    roles, spec size, items in the session, review rounds, rule issues, checks met/unmet, cost,
+    outcome and the human's note;
+  - a draft is approved or discarded: how many changes were accepted, rejected or edited by the
+    human, and which ops. This is the signal for where Jack's proposals miss.
+- **Patterns** are distilled by the existing memory writer once 3+ episodes share a theme, with
+  `source_episodes`, recency-weighted confidence and lifecycle states. For example: "web games
+  in prototype-first need a renderer builder from session 1", or "humans reject drafts that add
+  more than 6 requirements at once".
+- **Recall:** each PM turn calls `persona.recall(goal + latest message)` and injects
+  `render_for_prompt()` as "What you have learned on earlier projects". It sits below the
+  project's own rules and spec, because rules trump memory (rule 24).
+- **Reputation:** sessions accepted and rejected, and drafts approved with no human edits. It is
+  shown on Jack's profile.
