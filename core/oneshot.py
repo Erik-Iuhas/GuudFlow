@@ -88,6 +88,8 @@ def _agent_from_dict(raw: dict[str, Any]) -> AgentConfig:
         capabilities={str(k): str(v) for k, v in (raw.get("capabilities") or {}).items()},
         review_of=[str(r) for r in raw.get("review_of") or []],
         max_review_rounds=int(raw.get("max_review_rounds", 2)),
+        mcp_tools=([str(t) for t in raw["mcp_tools"]]
+                   if isinstance(raw.get("mcp_tools"), list) else None),
     )
 
 

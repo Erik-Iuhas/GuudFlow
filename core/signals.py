@@ -139,6 +139,9 @@ class SignalType(str, Enum):
     AGENT_TODO = "AGENT_TODO"
     # A host-side web_search / web_fetch call (plan §5.8).
     WEB_REQUEST = "WEB_REQUEST"
+    # A proxied third-party MCP tool call (docs/MCP_PLAN.md): role, server, tool, timing, ok.
+    # Never carries the call's arguments.
+    MCP_CALL = "MCP_CALL"
     # A visual or document artifact was produced (plan §5.10).
     ARTIFACT = "ARTIFACT"
     # The overseer changed course (plan §11.3).

@@ -113,6 +113,8 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             capabilities={str(k): str(v) for k, v in (a.get("capabilities") or {}).items()},
             review_of=[str(r) for r in (a.get("review_of") or [])],
             max_review_rounds=int(a.get("max_review_rounds", 2)),
+            mcp_tools=([str(t) for t in a["mcp_tools"]]
+                       if isinstance(a.get("mcp_tools"), list) else None),
         ))
 
     rbac: dict[str, RoleRBAC] = {}
