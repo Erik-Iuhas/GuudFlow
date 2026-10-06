@@ -6,6 +6,8 @@ import { Alert, Textarea } from "../../components/ui/form-controls";
 import { cn } from "../../lib/utils";
 import type { CheckWire, PublishWire, RunBranchWire, RunState } from "./api";
 import { changeSummary } from "./model";
+import { COSIGN_WHY, Cosign, canAccept } from "./Cosign";
+import { SpecResults } from "./SpecResults";
 
 const STATE_VARIANT: Record<RunState, BadgeProps["variant"]> = {
   pending: "waiting",
@@ -51,6 +53,8 @@ export interface ReviewListProps {
   onContinue: (runId: string) => void;
   busyRunId?: string | null;
   error?: DecisionError | null;
+  /** When given, each waiting run shows how it did against the spec and, if needed, the co-sign area. */
+  projectId?: string;
 }
 
 /**
@@ -58,7 +62,7 @@ export interface ReviewListProps {
  * until a human accepts it here; the diff is what accepting would bring in.
  */
 export function ReviewList({
-  pending, decided, changes, onViewChanges, onDecide, onContinue, busyRunId, error,
+  pending, decided, changes, onViewChanges, onDecide, onContinue, busyRunId, error, projectId,
 }: ReviewListProps) {
   return (
     <section aria-label="Runs waiting for review" className="flex flex-col gap-3">
@@ -72,6 +76,7 @@ export function ReviewList({
             <PendingRun
               key={run.run_id}
               run={run}
+              projectId={projectId}
               diff={changes[run.run_id]}
               requested={run.run_id in changes}
               busy={busyRunId === run.run_id}
@@ -108,9 +113,10 @@ export function ReviewList({
 }
 
 function PendingRun({
-  run, diff, requested, busy, error, onViewChanges, onDecide, onContinue,
+  run, projectId, diff, requested, busy, error, onViewChanges, onDecide, onContinue,
 }: {
   run: RunBranchWire;
+  projectId?: string;
   diff: string | undefined;
   requested: boolean;
   busy: boolean;
@@ -120,6 +126,7 @@ function PendingRun({
   onContinue: () => void;
 }) {
   const [note, setNote] = useState("");
+  const allowed = canAccept(run);
   return (
     <li className="rounded-lg border border-border bg-card p-3 text-card-foreground" data-testid={`review-${run.run_id}`}>
       <div className="flex flex-wrap items-center gap-2">
@@ -153,6 +160,8 @@ function PendingRun({
         <Button variant="outline" size="sm" onClick={onContinue}>Continue this run</Button>
       </div>
       {diff !== undefined && <DiffBlock text={diff} />}
+      {projectId && <SpecResults runId={run.run_id} />}
+      {projectId && run.needs_cosign && <Cosign projectId={projectId} run={run} onViewChanges={onViewChanges} />}
       <div className="mt-2 grid gap-2">
         <Textarea
           aria-label={`Note for ${run.run_id}`}
@@ -162,12 +171,19 @@ function PendingRun({
           onChange={(e) => setNote(e.target.value)}
         />
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => onDecide(true, note)} disabled={busy}>
-            Accept into the project
-          </Button>
+          <span title={allowed ? undefined : COSIGN_WHY}>
+            <Button size="sm" onClick={() => onDecide(true, note)} disabled={busy || !allowed}
+              aria-describedby={allowed ? undefined : `why-${run.run_id}`}>
+              Accept into the project
+            </Button>
+          </span>
+          {!allowed && <span id={`why-${run.run_id}`} className="sr-only">{COSIGN_WHY}</span>}
           <Button size="sm" variant="outline" onClick={() => onDecide(false, note)} disabled={busy}>
             Reject
           </Button>
+          {projectId && (
+            <Link to="?tab=plan" className="self-center text-sm">Open as plan draft</Link>
+          )}
         </div>
       </div>
       {error && (

@@ -19,6 +19,13 @@ import { Suggestions, WorkHeader } from "./WorkHeader";
 import { BacklogList } from "./BacklogList";
 import { groupBacklog, splitRuns, topOpen } from "./model";
 import { ReviewList, type DecisionError } from "./ReviewList";
+import { WorkNotice, WorkOverview } from "./WorkOverview";
+import { WorkTechnical } from "./WorkTechnical";
+import { useDetailLevel } from "../project/useDetailLevel";
+import { planKeys } from "../plan/api";
+import { specApi } from "../spec/api";
+import type { ProjectSeats } from "../../types";
+import { Link } from "react-router-dom";
 
 export interface RunRequest {
   backlog_items?: string[];
@@ -31,9 +38,10 @@ export interface RunRequest {
  * the cost-preview flow).
  */
 export function ProjectWork({
-  projectId, onStartRun, starting,
+  projectId, onStartRun, starting, seats,
 }: {
   projectId: string;
+  seats?: ProjectSeats;
   onStartRun: (request: RunRequest) => void;
   starting?: boolean;
 }) {
@@ -45,6 +53,8 @@ export function ProjectWork({
   const groom = useGroom(projectId);
   const syncRemote = useSyncRemote(projectId);
   const client = useQueryClient();
+  const [detail] = useDetailLevel(projectId);
+  const [afterSession, setAfterSession] = useState(false);
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
 
   const [selected, setSelected] = useState<string[] | null>(null);
@@ -78,6 +88,14 @@ export function ProjectWork({
     setDecisionError(null);
     setBusyRun(runId);
     decide.mutate({ runId, accept, note }, {
+      onSuccess: () => {
+        if (!accept) return;
+        // The project manager drafts spec suggestions from the session; the answer shows up in Plan.
+        setAfterSession(true);
+        void specApi.afterSession(projectId, runId)
+          .then(() => client.invalidateQueries({ queryKey: planKeys.plan(projectId) }))
+          .catch(() => undefined);
+      },
       onError: (e) => setDecisionError({
         runId,
         message: e.message,
@@ -95,21 +113,12 @@ export function ProjectWork({
     setProposals((list) => (list ?? []).filter((x) => x.title !== p.title));
   }
 
-  return (
-    <div className="flex flex-col gap-6" data-testid="project-work">
-      {loadError && <Alert variant="error">{loadError.message}</Alert>}
-      {runs.data && (
-        <WorkHeader
-          remote={runs.data.remote}
-          autopilot={runs.data.autopilot}
-          lastSync={syncRemote.data ?? null}
-          onSync={() => syncRemote.mutate()}
-          syncing={syncRemote.isPending}
-        />
-      )}
+  const technicalBody = (
+    <>
       <div>
         <SectionTitle className="mt-0">Waiting for your review</SectionTitle>
         <ReviewList
+          projectId={projectId}
           pending={pending}
           decided={decided}
           changes={changes}
@@ -150,6 +159,49 @@ export function ProjectWork({
           />
         )}
       </div>
+    </>
+  );
+
+  function reviewPanel(runId: string) {
+    return (
+      <ReviewList
+        projectId={projectId}
+        pending={pending.filter((r) => r.run_id === runId)}
+        decided={[]}
+        changes={changes}
+        onViewChanges={(id) => void viewChanges(id)}
+        onDecide={onDecide}
+        onContinue={(id) => onStartRun({ continue_run: id, backlog_items: chosen.length ? chosen : undefined })}
+        busyRunId={busyRun}
+        error={decisionError}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-6" data-testid="project-work">
+      {loadError && <Alert variant="error">{loadError.message}</Alert>}
+      {runs.data && (
+        <WorkHeader
+          remote={runs.data.remote}
+          autopilot={runs.data.autopilot}
+          lastSync={syncRemote.data ?? null}
+          onSync={() => syncRemote.mutate()}
+          syncing={syncRemote.isPending}
+        />
+      )}
+      {afterSession && (
+        <WorkNotice>
+          The project manager is reviewing the session for spec changes. <Link to="?tab=plan">See Plan.</Link>
+        </WorkNotice>
+      )}
+      {detail === "overview" ? (
+        <WorkOverview projectId={projectId} items={items} pendingRuns={pending} renderReview={reviewPanel} />
+      ) : (
+        <WorkTechnical projectId={projectId} items={items} seats={seats} pendingRuns={pending}>
+          {technicalBody}
+        </WorkTechnical>
+      )}
     </div>
   );
 }

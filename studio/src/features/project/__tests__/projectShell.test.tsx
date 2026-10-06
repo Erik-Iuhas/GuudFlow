@@ -30,6 +30,8 @@ vi.mock("../../../components/ResumeButton", () => ({ ResumeButton: () => <button
 vi.mock("../../../components/WorkerSettingsPanel", () => ({ WorkerSettingsPanel: () => <div /> }));
 vi.mock("../../../components/PersonaSlideOver", () => ({ PersonaSlideOver: () => <div /> }));
 vi.mock("../../work/WorkSettings", () => ({ WorkSettings: () => <div /> }));
+vi.mock("../../team/SeatsPanel", () => ({ SeatsPanel: () => <div>seats panel</div> }));
+vi.mock("../../team/RulesPanel", () => ({ RulesPanel: () => <div>rules panel</div> }));
 
 import { Studio } from "../../../views/Studio";
 

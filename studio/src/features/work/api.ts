@@ -29,6 +29,8 @@ export interface BacklogItemWire {
   pending: ItemOutcome | null;
   history: Record<string, unknown>[];
   depends_on: string[];
+  /** Requirement ids this item serves. */
+  serves?: string[];
   /** Gateway spend on the item across runs (listing only). */
   total_cost_usd?: number;
 }
@@ -90,6 +92,13 @@ export interface Proposal {
   why: string;
 }
 
+export interface CosignWire {
+  verdict: "cosign" | "changes";
+  by: string;
+  at: number;
+  comments: { file?: string; line?: number; text: string; severity: "note" | "should_fix" | "blocking" }[];
+}
+
 export interface RunBranchWire {
   run_id: string;
   state: RunState;
@@ -105,6 +114,9 @@ export interface RunBranchWire {
   check?: CheckWire | null;
   sync?: SyncWire | null;
   published?: PublishWire | null;
+  /** A reviewer's co-sign is needed before the owner can accept. */
+  needs_cosign?: boolean;
+  cosign?: CosignWire | null;
 }
 
 export interface NewItem {
@@ -114,6 +126,7 @@ export interface NewItem {
   size: string;
   priority?: number;
   depends_on?: string[];
+  serves?: string[];
 }
 
 export type ItemPatch = Partial<Pick<BacklogItemWire, "title" | "acceptance" | "kind" | "size" | "priority" | "notes">> & {

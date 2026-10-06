@@ -1,6 +1,7 @@
 import { cn } from "../../lib/utils";
 import type { AgentState } from "../../stores/runEvents";
 import { useRunStore } from "../../stores/runStoreContext";
+import { FollowPanel } from "./FollowPanel";
 import { resultSummary } from "./AgentDetail";
 import { STATE_LABEL, formatUsd, type RoleSpec } from "./model";
 
@@ -28,11 +29,13 @@ export interface TeamViewProps {
   selectedRole?: string | null;
   /** Called with the role when its card is clicked (opens the agent detail). */
   onSelectRole: (role: string) => void;
+  /** When given, the spec the run follows is shown beside the cards. */
+  runId?: string;
 }
 
 /** One card per role: name and role, model, state, and the current card or last summary. */
-export function TeamView({ specs, models = {}, selectedRole, onSelectRole }: TeamViewProps) {
-  return (
+export function TeamView({ specs, models = {}, selectedRole, onSelectRole, runId }: TeamViewProps) {
+  const cards = (
     <ul
       className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2 xl:grid-cols-3"
       aria-label="Team"
@@ -44,6 +47,13 @@ export function TeamView({ specs, models = {}, selectedRole, onSelectRole }: Tea
         </li>
       ))}
     </ul>
+  );
+  if (!runId) return cards;
+  return (
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+      <div className="min-w-0 flex-1">{cards}</div>
+      <FollowPanel runId={runId} />
+    </div>
   );
 }
 
