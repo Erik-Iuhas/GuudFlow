@@ -204,3 +204,34 @@ def test_team_change_is_offered_to_the_run_for_the_project_draft() -> None:
                         "rationale": "nobody writes tests"}))
     assert seen == ["Add a tester role to the team"]
     assert ws.pending_approvals and ws.pending_approvals[-1].kind == "team_change"
+
+
+def _burn_view(board: TaskBoard, ws: Workspace, spent: float, budget: float = 10.0,
+               now: float = 1000.0) -> RunView:
+    return RunView(signals=ws.board, cards=board.cards(), role_states={"a": "ready"},
+                   running=[], spent_usd=spent, budget_usd=budget, now=now, started_at=now - 60)
+
+
+def test_burn_wake_is_debounced_until_spend_rises_again() -> None:
+    flow, board, ws, _ = _setup()
+    flow.watch.max_wakes = 10
+    assert flow.check(_burn_view(board, ws, 6.0))
+    flow.begin_turn(_burn_view(board, ws, 6.0), {})
+    # Same pressure, a little more spend: no new wake (even long after the cooldown).
+    assert not flow.check(_burn_view(board, ws, 7.0, now=5000.0))
+    assert not flow.watch.pending
+    # Spend rose by 25% of the budget since the wake: wake again.
+    assert flow.check(_burn_view(board, ws, 8.5, now=9000.0))
+    flow.begin_turn(_burn_view(board, ws, 8.5, now=9000.0), {})
+    # A changed budget re-arms the detector immediately.
+    assert flow.check(_burn_view(board, ws, 8.6, budget=12.0, now=13000.0))
+
+
+def test_suppressed_burn_does_not_pause_the_run_when_wakes_are_exhausted() -> None:
+    flow, board, ws, posted = _setup()
+    assert flow.check(_burn_view(board, ws, 6.0))
+    flow.begin_turn(_burn_view(board, ws, 6.0), {})
+    flow.watch.wakes = flow.watch.max_wakes                 # wakes used up
+    assert not flow.check(_burn_view(board, ws, 6.5, now=5000.0))
+    assert ws.pending_human is None
+    assert not any(k is SignalType.HUMAN_NEEDED for k, _ in posted)

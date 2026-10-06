@@ -123,7 +123,8 @@ def test_planner_without_spec_or_mode_is_unchanged() -> None:
     flow, _ = _flow(None, [_item()])
     turn = flow.begin_turn("planner")
     assert turn is not None
-    assert list(_sections(turn)) == ["This run's backlog items", "Your output: the task list"]
+    assert list(_sections(turn)) == ["This run's backlog items", "Budget and card size",
+                                     "Your output: the task list"]
 
 
 def test_soft_coverage_warning(tmp_path: Path) -> None:

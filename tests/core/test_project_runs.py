@@ -126,3 +126,27 @@ def test_a_crashed_run_gives_its_items_back(tmp_path: Path) -> None:
     after = backlog.get(item.id)
     assert after.status == "open" and after.run_id is None
     assert "run errored: APIError: 409" in after.history[-1]["decision"]
+
+
+def test_session_stats_are_recorded_and_averaged(tmp_path: Path) -> None:
+    from core.project_runs import average_card_cost, record_session_stats, target_card_count
+
+    assert average_card_cost(tmp_path, "p") is None
+    done = lambda c: CardOutcome(title="t", column="done", cost_usd=c)  # noqa: E731
+    record_session_stats(tmp_path, "p", "r1", [done(1.0), done(3.0), CardOutcome(
+        title="x", column="needs_attention", cost_usd=2.0)])
+    record_session_stats(tmp_path, "p", "r2", [done(2.0)])
+    rows = (tmp_path / "projects/p/context/session_stats.jsonl").read_text().splitlines()
+    assert json.loads(rows[0]) == {"run_id": "r1", "cards_done": 2, "cost_usd_done_cards": 4.0,
+                                   "total_cost": 6.0}
+    assert average_card_cost(tmp_path, "p") == 2.0          # (4 + 2) / 3
+    assert target_card_count(10.0, 2.0) == 4 and target_card_count(1.0, 2.0) == 3
+    assert target_card_count(None, 2.0) == 8
+
+
+def test_close_run_records_stats_even_when_the_repo_step_fails(tmp_path: Path) -> None:
+    from core.project_runs import average_card_cost, close_run
+
+    close_run(tmp_path, "p", "r1", tmp_path / "nope", tmp_path / "nope",
+              [CardOutcome(title="t", column="done", cost_usd=1.5)])
+    assert average_card_cost(tmp_path, "p") == 1.5

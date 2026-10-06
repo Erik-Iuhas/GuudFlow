@@ -104,6 +104,8 @@ class TaskBoard:
     clock: Callable[[], float] = time.time
     active: dict[str, str] = field(default_factory=dict)      # role → card in a turn now
     planned: bool = False
+    # Cards smaller than this (S < M < L) skip review; visual cards are always reviewed.
+    review_min_size: str = "S"
 
     # ── creation ──────────────────────────────────────────────────────────
     def create_from_plan(self, plan: PlanResult, planner: str) -> list[Task]:
@@ -302,12 +304,21 @@ class TaskBoard:
         for check in result.acceptance:
             self.note(task_id, "note", card.assigned_to,
                       f"{'✓' if check.met else '✗'} {check.item} — {check.evidence}".strip(" —"))
-        if card.assigned_to in self.reviewers_of:
+        if card.assigned_to in self.reviewers_of and self._skips_review(card):
+            self.note(task_id, "note", "runner",
+                      f"review skipped by size (card size {card.size}, "
+                      f"review_min_size {self.review_min_size.upper()})")
+        elif card.assigned_to in self.reviewers_of:
             self._move(card, "review", "result done and branch merged")
             return "review"
         self._move(card, "done", "result done (no reviewer)", closed_by_commit=commit)
         self._release_unblocked()
         return "done"
+
+    def _skips_review(self, card: Task) -> bool:
+        order = {"S": 0, "M": 1, "L": 2}
+        return (card.kind != "visual"
+                and order.get(card.size, 1) < order.get(str(self.review_min_size).upper(), 0))
 
     def reviewed(self, task_id: str, reviewer: str, result: ReviewResult) -> ReviewOutcome:
         """Apply a reviewer's per-item verdict to a card."""

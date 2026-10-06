@@ -94,6 +94,8 @@ class OverseerFlow:
     restarts_used: dict[str, int] = field(default_factory=dict)
     paused_for_cap: bool = False
     _current: list[Stall] = field(default_factory=list)
+    # (spent, budget) at the last burn_without_output wake; debounces re-wakes.
+    _burn_woken: tuple[float, float] | None = None
 
     def __post_init__(self) -> None:
         self.watch.cooldown_seconds = self.caps.wake_cooldown_seconds
@@ -104,13 +106,24 @@ class OverseerFlow:
         """Run the detectors; True when the overseer should be (re)armed now."""
         if self.scheduler().is_running(self.overseer_role):
             return False
-        self.watch.offer(detect(view, self.detector_cfg), now=view.now)
+        stalls = [s for s in detect(view, self.detector_cfg)
+                  if s.detector != "burn_without_output" or not self._burn_suppressed(view)]
+        self.watch.offer(stalls, now=view.now)
         if not self.watch.pending:
             return False
         if self.watch.exhausted:
             self._pause_for_cap(view)
             return False
         return True
+
+    def _burn_suppressed(self, view: RunView) -> bool:
+        """A burn wake already happened and spend has not risen enough since (same budget)."""
+        if self._burn_woken is None:
+            return False
+        spent, budget = self._burn_woken
+        if view.budget_usd != budget:
+            return False
+        return view.spent_usd < spent + self.detector_cfg.burn_rewake_fraction * budget
 
     def _pause_for_cap(self, view: RunView) -> None:
         if self.paused_for_cap or self.workspace.pending_human:
@@ -144,6 +157,8 @@ class OverseerFlow:
         from core.harness.task_flow import TurnPlan
 
         self._current = self.watch.take()
+        if any(s.detector == "burn_without_output" for s in self._current):
+            self._burn_woken = (view.spent_usd, view.budget_usd or 0.0)
         report = situation_report(view, self._current, last_results)
         team, caps = self.team_view(), self.caps
         return TurnPlan(

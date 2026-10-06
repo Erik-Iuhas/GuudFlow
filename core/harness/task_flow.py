@@ -97,6 +97,8 @@ class TaskFlow:
     backlog: list["BacklogItem"] = field(default_factory=list)
     # The project's spec and start mode (project-flow plan §4); None for projects without.
     spec: SpecBrief | None = None
+    # Planner sizing: (session budget, measured average finished-card cost).
+    size_budget: tuple[float | None, float | None] = (None, None)
 
     @classmethod
     def build(cls, agents: Sequence["AgentConfig"], role_types: dict[str, str],
@@ -149,6 +151,20 @@ class TaskFlow:
             return self.board.next_review(role) is not None
         return self.board.next_for(role) is not None
 
+    def _sizing_text(self) -> str:
+        """The planner's "Budget and card size" section, from measured card cost."""
+        from core.project_runs import target_card_count
+
+        budget, avg = self.size_budget
+        target = target_card_count(budget, avg)
+        lines = [f"- This session's budget: " + (f"${budget:.2f}" if budget else "not set"),
+                 "- Measured average cost of a finished card in recent sessions: "
+                 + (f"${avg:.2f}" if avg else "no history yet"),
+                 f"- Target: plan at most {target} cards."]
+        lines.append("Every card costs a fresh turn plus review, so prefer fewer, larger cards "
+                     "that each deliver a testable vertical slice over many tiny ones.")
+        return "\n".join(lines)
+
     def owners(self) -> list[str]:
         """Roles that may own cards."""
         return sorted(r for r in self.card_roles if self.role_types.get(r) not in _NON_OWNERS)
@@ -160,7 +176,8 @@ class TaskFlow:
             owners = self.owners()
             items = [i.id for i in self.backlog]
             sections: tuple[tuple[str, str], ...] = (
-                ("Your output: the task list", _planner_instructions(owners)),)
+                ("Budget and card size", self._sizing_text()),
+                ("Your output: the task list", _planner_instructions(owners)))
             if self.spec is not None:
                 text = self.spec.planner_section(self.backlog)
                 if text:

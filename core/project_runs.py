@@ -38,6 +38,8 @@ log = logging.getLogger(__name__)
 
 SELECTION_JSON = "backlog_selection.json"
 PROJECT_RUN_JSON = "project_run.json"
+SESSION_STATS_JSONL = "session_stats.jsonl"
+DEFAULT_TARGET_CARDS = 8
 LAST_ACCEPTED_JSON = "last_accepted.json"
 DEFAULT_TAKE = 3
 
@@ -112,6 +114,7 @@ def close_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
               ) -> RunBranch | None:
     """Submit the run to the project repo and record backlog outcomes. Never raises."""
     submitted: RunBranch | None = None
+    record_session_stats(data_root, project_id, run_id, cards)
     try:
         info = read_json(Path(run_root) / PROJECT_RUN_JSON, None)
         if isinstance(info, dict) and not stopped:
@@ -127,6 +130,54 @@ def close_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
     except Exception:  # noqa: BLE001 — closing must never fail a finished run
         log.exception("closing run %s for project %s failed", run_id, project_id)
     return submitted
+
+
+def _stats_path(data_root: Path, project_id: str) -> Path:
+    return Path(data_root) / "projects" / project_id / "context" / SESSION_STATS_JSONL
+
+
+def record_session_stats(data_root: Path, project_id: str, run_id: str,
+                         cards: list[CardOutcome]) -> None:
+    """Append this session's measured card cost to the project's stats. Never raises."""
+    try:
+        done = [c for c in cards if c.column == "done"]
+        row = {"run_id": run_id, "cards_done": len(done),
+               "cost_usd_done_cards": round(sum(c.cost_usd for c in done), 6),
+               "total_cost": round(sum(c.cost_usd for c in cards), 6)}
+        path = _stats_path(data_root, project_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+    except Exception:  # noqa: BLE001 — stats are advisory
+        log.exception("recording session stats for run %s failed", run_id)
+
+
+def average_card_cost(data_root: Path, project_id: str, last: int = 3) -> float | None:
+    """Mean cost of a finished card over the project's last `last` sessions (None: no data)."""
+    try:
+        lines = _stats_path(data_root, project_id).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and float(row.get("cards_done") or 0) > 0:
+            rows.append(row)
+    rows = rows[-max(1, last):]
+    cards = sum(float(r["cards_done"]) for r in rows)
+    if not cards:
+        return None
+    return sum(float(r.get("cost_usd_done_cards") or 0.0) for r in rows) / cards
+
+
+def target_card_count(budget_usd: float | None, avg_cost: float | None) -> int:
+    """How many cards a session should plan: max(3, floor(budget*0.8/avg)), default 8."""
+    if not budget_usd or not avg_cost or avg_cost <= 0:
+        return DEFAULT_TARGET_CARDS
+    return max(3, int(budget_usd * 0.8 / avg_cost))
 
 
 def release_crashed_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
