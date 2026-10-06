@@ -290,6 +290,9 @@ class OpencodeRun:
         flow = self.flow
         if flow is not None:
             flow.backlog = list(self.backlog)
+            flow.size_budget = self._size_budget()
+            flow.board.review_min_size = str(
+                self.runner.project.approval_gates.get("review_min_size") or "S")
             # The spec and the start mode (plan §4); None keeps briefs as they were.
             flow.spec = SpecBrief.load(self._data_root(), self.runner.project.project_id,
                                        getattr(self.runner.project, "start_mode", None))
@@ -432,6 +435,15 @@ class OpencodeRun:
                                      f"(card {old.get('task_id')}, was {old.get('column')})")
                 carried += 1
         return carried
+
+    def _size_budget(self) -> tuple[float | None, float | None]:
+        """(session budget, measured average finished-card cost) for the planner's sizing."""
+        raw = self.runner.project.approval_gates.get("token_budget_usd")
+        budget = float(raw) if isinstance(raw, (int, float)) and raw else None
+        data_root, project_id = self._data_root(), self.runner.project.project_id
+        avg = (project_runs.average_card_cost(data_root, project_id)
+               if data_root is not None and project_id else None)
+        return budget, avg
 
     def _data_root(self) -> Path | None:
         root = self.runner.run_root

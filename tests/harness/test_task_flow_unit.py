@@ -82,3 +82,16 @@ def test_human_card_for_a_finished_role_rearms_it() -> None:
     assert "ui" in sched.rearmed and flow.has_work("ui")
     human_comment(ws, card.task_id, "Use the existing colour tokens.")
     assert "Use the existing colour tokens." in flow.board.brief_for(card.task_id)
+
+
+def test_planner_brief_carries_the_measured_card_target() -> None:
+    flow, _, _ = _flow()
+    flow.size_budget = (10.0, 0.5)
+    plan = flow.begin_turn("planner")
+    assert plan is not None
+    text = dict(plan.extra_sections)["Budget and card size"]
+    assert "at most 16 cards" in text and "$0.50" in text and "$10.00" in text
+    flow.size_budget = (None, None)
+    plan = flow.begin_turn("planner")
+    assert plan is not None
+    assert "at most 8 cards" in dict(plan.extra_sections)["Budget and card size"]

@@ -192,3 +192,29 @@ def test_unknown_card_raises() -> None:
     board, _, _ = _board(_task("T1", "a"))
     with pytest.raises(KeyError):
         board.card("T9")
+
+
+def test_cards_below_review_min_size_skip_review_with_a_note() -> None:
+    board, _, _ = _board(_task("T1", "a", size="S"), _task("T2", "a", size="M"),
+                         _task("T3", "a", size="L"), reviewers={"a": "rev"})
+    board.review_min_size = "M"
+    board.start("a", "T1")
+    assert board.submitted("T1", _done("T1")) == "done"
+    assert any("review skipped by size" in e["text"] for e in board.card("T1").thread)
+    board.finish_turn("a")
+    board.start("a", "T2")
+    assert board.submitted("T2", _done("T2")) == "review"
+    board.finish_turn("a")
+    board.start("a", "T3")
+    assert board.submitted("T3", _done("T3")) == "review"
+
+
+def test_default_reviews_everything_and_visual_cards_keep_review() -> None:
+    board, _, _ = _board(_task("T1", "a", size="S"), _task("T2", "a", size="S", kind="visual"),
+                         reviewers={"a": "rev"})
+    board.start("a", "T1")
+    assert board.submitted("T1", _done("T1")) == "review"
+    board.finish_turn("a")
+    board.review_min_size = "L"
+    board.start("a", "T2")
+    assert board.submitted("T2", _done("T2")) == "review"

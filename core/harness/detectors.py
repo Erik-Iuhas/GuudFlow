@@ -73,6 +73,8 @@ class DetectorConfig:
 
     no_progress_minutes: float = 10.0
     burn_fraction: float = 0.5
+    # After a burn wake, wake again only once spend rose by this fraction of the budget.
+    burn_rewake_fraction: float = 0.25
     permission_denials: int = 3
     validation_failures: int = 2
     max_chain: int = 2
