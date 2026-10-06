@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Any, Literal
 
@@ -63,6 +64,26 @@ DENIED_BASH = ("git push*", "git remote*", "git config*", "pip *", "pip3 *", "py
 IT_AGENT_BASH = ("pip install *", "pip3 install *", "npm install *")
 
 ALWAYS_MCP = frozenset({"post_note", "read_board", "ask_human", "report_progress"})
+
+# Third-party MCP tools (docs/MCP_PLAN.md) are named `{server}__{tool}`; no GuudFlow tool
+# contains the separator, so a third-party name can never shadow a built-in one.
+MCP_TOOL_SEP = "__"
+
+
+def resolve_mcp_grants(requested: Iterable[str] | None, role_type: str,
+                       offers: Mapping[str, Iterable[str]]) -> frozenset[str]:
+    """Third-party MCP tools a role gets: its project config, narrowed by what the registry offers.
+
+    `offers` maps each namespaced tool the registry offers (enabled servers, cached tools) to
+    the role types that get it by default. `requested` is the agent's `mcp_tools` list:
+    None means "the registry's defaults for this role type"; a list is explicit (an empty list
+    grants nothing). Names the registry does not offer are dropped, so a stale or invented
+    name never becomes a grant. Default-deny: no entry in `offers` means no access.
+    """
+    if requested is None:
+        return frozenset(name for name, roles in offers.items() if role_type in set(roles))
+    return frozenset(name for name in requested
+                     if MCP_TOOL_SEP in name and name in offers)
 
 
 class CapabilityError(ValueError):
@@ -254,8 +275,12 @@ def _bash_allow(caps: Capabilities, role_type: str, runners: bool) -> tuple[str,
 
 
 def compile_capabilities(caps: Capabilities, role_type: str, *,
-                         production: bool = False) -> CompiledCapabilities:
-    """Compile a capability block for `role_type` (plan §5.7 compile table)."""
+                         production: bool = False,
+                         extra_mcp_tools: Iterable[str] = ()) -> CompiledCapabilities:
+    """Compile a capability block for `role_type` (plan §5.7 compile table).
+
+    `extra_mcp_tools` are third-party grants already resolved by `resolve_mcp_grants`.
+    """
     if role_type not in ROLE_TYPES:
         raise CapabilityError(f"unknown role type {role_type!r}")
     if caps.sandbox == "host_dev" and production:
@@ -293,6 +318,7 @@ def compile_capabilities(caps: Capabilities, role_type: str, *,
         tools.update({"screenshot", "request_visual_feedback"})
     if caps.vision == "on":
         tools.add("visual_diff")
+    tools.update(t for t in extra_mcp_tools if MCP_TOOL_SEP in t)
     warnings = (HOST_DEV_WARNING,) if caps.sandbox == "host_dev" else ()
     return CompiledCapabilities(role_type=role_type, capabilities=caps, permission=permission,
                                 container=container, mcp_tools=frozenset(tools),

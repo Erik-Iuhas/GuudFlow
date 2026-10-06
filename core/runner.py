@@ -116,6 +116,9 @@ class AgentConfig:
     # its depends_on) and how many rework rounds before escalation.
     review_of: list[str] = field(default_factory=list)
     max_review_rounds: int = 2
+    # Third-party MCP tools (`{server}__{tool}`, docs/MCP_PLAN.md). None = the registry's
+    # default grants for this role type; a list is explicit and may narrow them.
+    mcp_tools: list[str] | None = None
 
 
 @dataclass

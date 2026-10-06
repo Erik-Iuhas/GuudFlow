@@ -49,10 +49,13 @@ from core.harness.capabilities import (
     defaults_for,
     gate_vision,
     infer_role_type,
+    resolve_mcp_grants,
 )
 from core.harness.config_gen import ProviderBinding, agent_entry, build_config
 from core.harness.event_bridge import EventBridge
 from core.harness.git_roles import CollectResult, RoleClones
+from core.harness import mcp_proxy
+from core.mcp_registry import McpRegistry
 from core.harness.mcp_server import McpIdentity, McpServer, McpTool, RunningHttpServer, ToolResult, serve_app
 from core.harness.opencode_client import OpencodeClient
 from core.harness import mcp_browser, mcp_tools, mcp_visual, mcp_web
@@ -201,6 +204,12 @@ class OpencodeRun:
         self.network: "RunNetwork | None" = None
         self.gateway: Gateway | None = None
         self.artifacts = ArtifactRegistry(runner.run_root, self._artifact_post)
+        # Third-party MCP servers (docs/MCP_PLAN.md): registry offers are read once per run.
+        data_root = self._data_root()
+        self._mcp_registry: McpRegistry | None = McpRegistry(data_root) if data_root else None
+        self._mcp_offers: dict[str, frozenset[str]] = (
+            self._mcp_registry.offers() if self._mcp_registry else {})
+        self.mcp_proxy: mcp_proxy.McpProxy | None = None
         gates = runner.project.approval_gates
         self.tool_ctx = RunToolContext(
             run_id=self.run_id, workspace=self.workspace, run_root=runner.run_root,
@@ -400,6 +409,12 @@ class OpencodeRun:
             except Exception:  # noqa: BLE001 - cleanup; logged, never silent
                 log.exception("could not stop the sandbox for %s in %s", role.cfg.role, self.run_id)
         self.mcp.revoke_run(self.run_id)
+        if self.mcp_proxy is not None:
+            try:
+                await self.mcp_proxy.aclose()
+            except Exception:  # noqa: BLE001 - cleanup; logged, never silent
+                log.exception("could not close third-party MCP connections for %s", self.run_id)
+            self.mcp_proxy = None
         self.inbox.close_run(self.run_id)
         if self.gateway is not None:
             self.gateway.revoke_run(self.run_id)
@@ -438,6 +453,8 @@ class OpencodeRun:
             bind = self.network.gateway_ip
         for tool in self._host_tools():
             self.mcp.register(tool)
+        for tool in self._third_party_tools():
+            self.mcp.register(tool)
         self._http = await serve_app(self.mcp.app(), host=bind)
         self.gateway = Gateway(self._upstreams(), self._price,
                                cost_log=self.runner.run_root / "llm_costs.jsonl")
@@ -458,6 +475,17 @@ class OpencodeRun:
         return [*mcp_tools.tools(self.tool_ctx, **overrides.get("mcp_tools", {})),
                 *mcp_web.tools(self.tool_ctx, **overrides.get("mcp_web", {})),
                 *browser, *mcp_visual.tools(self.tool_ctx)]
+
+    def _third_party_tools(self) -> list[McpTool]:
+        """Proxied third-party tools that at least one role is granted (docs/MCP_PLAN.md)."""
+        if self._mcp_registry is None:
+            return []
+        granted = {t for r in self._roles.values() for t in r.compiled.mcp_tools
+                   if t in self._mcp_offers}
+        if not granted:
+            return []
+        self.mcp_proxy = mcp_proxy.McpProxy(self._mcp_registry)
+        return mcp_proxy.tools(self.tool_ctx, self.mcp_proxy, granted)
 
     def _upstreams(self) -> dict[str, Upstream]:
         upstreams: dict[str, Upstream] = {}
@@ -502,7 +530,9 @@ class OpencodeRun:
         effective = (replace(requested, sandbox="host_dev") if self.mode == "host"
                      else replace(requested, sandbox="standard")
                      if requested.sandbox == "host_dev" else requested)
-        compiled = compile_capabilities(effective, role_type, production=self.settings.production)
+        extra = resolve_mcp_grants(cfg.mcp_tools, role_type, self._mcp_offers)
+        compiled = compile_capabilities(effective, role_type, production=self.settings.production,
+                                        extra_mcp_tools=extra)
         return _Role(cfg=cfg, role_type=role_type, requested=requested, compiled=compiled,
                      binding=binding)
 

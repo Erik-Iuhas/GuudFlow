@@ -54,6 +54,7 @@ from api.routes import runs as runs_router
 from api.routes import dashboard as dashboard_router
 from api.routes import example_projects as example_projects_router
 from api.routes import models as models_router
+from api.routes import mcp as mcp_router
 from api.routes import model_config as model_config_router
 from api.routes import settings as settings_router
 from api.routes import tools as tools_router
@@ -292,6 +293,7 @@ def create_app() -> FastAPI:
     app.include_router(example_projects_router.router)
     app.include_router(models_router.router)
     app.include_router(model_config_router.router)
+    app.include_router(mcp_router.router)
     app.include_router(harness_router.router)
     app.include_router(settings_router.router)
     app.include_router(tools_router.router)

@@ -61,6 +61,10 @@ DETAIL_SHAPES: dict[str, dict[str, str]] = {
         "status": "number | string | null", "cache_hit": "boolean", "bytes": "number",
         "refused": "string | null",
     },
+    "MCP_CALL": {
+        "role": "string", "server": "string", "tool": "string", "duration_ms": "number",
+        "ok": "boolean",
+    },
     "ARTIFACT": {
         "path": "string", "kind": "string", "role": "string", "task_id": "string | null",
         "size": "number", "sha256": "string", "created_at": "string", "served_path": "string",

@@ -52,6 +52,7 @@ export type SignalType =
   | "TOOL_CALL"
   | "AGENT_TODO"
   | "WEB_REQUEST"
+  | "MCP_CALL"
   | "ARTIFACT"
   | "OVERSEER_INTERVENTION"
   | "TASK_MOVED"
@@ -174,6 +175,14 @@ export interface WebRequestDetail {
   refused: string | null;
 }
 
+export interface McpCallDetail {
+  role: string;
+  server: string;
+  tool: string;
+  duration_ms: number;
+  ok: boolean;
+}
+
 export interface ArtifactDetail {
   path: string;
   kind: string;
@@ -218,6 +227,7 @@ export interface DetailByType {
   REJECTED: RejectedDetail;
   BLOCKED: BlockedDetail;
   WEB_REQUEST: WebRequestDetail;
+  MCP_CALL: McpCallDetail;
   ARTIFACT: ArtifactDetail;
   RUN_SUBMITTED: RunSubmittedDetail;
   SCREENSHOT_READY: ScreenshotReadyDetail;
@@ -241,6 +251,7 @@ export const JSON_DETAIL_TYPES: ReadonlySet<SignalType> = new Set([
   "REJECTED",
   "BLOCKED",
   "WEB_REQUEST",
+  "MCP_CALL",
   "ARTIFACT",
   "RUN_SUBMITTED",
   "SCREENSHOT_READY",
