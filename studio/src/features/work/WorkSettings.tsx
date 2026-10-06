@@ -37,7 +37,7 @@ export function WorkSettings({
       <div className="mt-3 grid gap-4">
         <div>
           <Label htmlFor="check-command">Check before review</Label>
-          <Input id="check-command" placeholder="e.g. pytest -q" value={gates.check_command ?? ""}
+          <Input id="check-command" placeholder="e.g. python3 -m unittest discover -s tests -q" value={gates.check_command ?? ""}
             onChange={(e) => onChange({ check_command: e.target.value })} />
           <p className="m-0 mt-1 text-xs text-muted-foreground">
             Runs on each finished run's code in a sandbox with no network. Its result shows in the review queue.
