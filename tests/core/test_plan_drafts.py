@@ -441,3 +441,118 @@ def test_old_backlog_rows_without_serves_load(tmp_path: Path) -> None:
     conn.commit()
     conn.close()
     assert bl.get("B2").serves == []
+
+
+# ── team ops (plan §10.2) ───────────────────────────────────────────────────
+TEAM_REASON = "scope now includes a data pipeline"
+TEAM = [
+    {"role": "builder", "role_type": "builder", "model_tier": "solid", "depends_on": []},
+    {"role": "reviewer", "role_type": "reviewer", "model_tier": "solid",
+     "depends_on": ["builder"], "review_of": ["builder"]},
+]
+
+
+def add_role(**kw: Any) -> dict[str, Any]:
+    return {"op": "add_role", "role": "data_builder", "role_type": "builder",
+            "description": "Builds the data pipeline", "model_tier": "solid",
+            "depends_on": ["builder"], "review_of": [], "reason": TEAM_REASON, **kw}
+
+
+def _team_problems(pd: PlanDrafts, *changes: dict[str, Any]) -> list[str]:
+    return validate_turn(_turn(*changes), Spec(pd.db.read_spec_doc()),
+                         pd.db.read_backlog_doc(), TEAM)
+
+
+def test_valid_team_ops_pass(pd: PlanDrafts) -> None:
+    assert _team_problems(pd, add_role()) == []
+    edit = {"op": "edit_role", "role": "reviewer", "review_of": ["builder", "data_builder"],
+            "reason": TEAM_REASON}
+    assert _team_problems(pd, add_role(), edit) == []
+
+
+def test_team_op_validation(pd: PlanDrafts) -> None:
+    bad = _team_problems(pd, add_role(reason="too short"))
+    assert any("reason must be at least 20" in p for p in bad)
+    assert any("lowercase slug" in p for p in _team_problems(pd, add_role(role="Data Builder")))
+    assert any("already exists" in p for p in _team_problems(pd, add_role(role="builder")))
+    assert any("role_type" in p for p in _team_problems(pd, add_role(role_type="wizard")))
+    assert any("unknown role" in p for p in _team_problems(
+        pd, {"op": "edit_role", "role": "ghost", "description": "x y z", "reason": TEAM_REASON}))
+    assert any("unknown role" in p for p in _team_problems(
+        pd, {"op": "remove_role", "role": "ghost", "reason": TEAM_REASON}))
+    assert any("sets no field" in p for p in _team_problems(
+        pd, {"op": "edit_role", "role": "builder", "reason": TEAM_REASON}))
+    assert any("not a role" in p for p in _team_problems(pd, add_role(depends_on=["ghost"])))
+    assert any("not a role" in p for p in _team_problems(pd, add_role(review_of=["ghost"])))
+    assert any("capabilities" in p for p in _team_problems(
+        pd, add_role(capabilities={"shell": "everything"})))
+
+
+def test_team_refs_may_use_roles_added_in_the_same_turn(pd: PlanDrafts) -> None:
+    assert _team_problems(pd, add_role(role="a_role", depends_on=["b_role"]),
+                          add_role(role="b_role", depends_on=[])) == []
+    assert any("cycle" in p for p in _team_problems(
+        pd, add_role(role="a_role", depends_on=["b_role"]),
+        add_role(role="b_role", depends_on=["a_role"])))
+
+
+def test_removing_a_depended_on_role(pd: PlanDrafts) -> None:
+    team = TEAM + [{"role": "builder2", "role_type": "builder", "depends_on": []}]
+    spec, backlog = Spec(pd.db.read_spec_doc()), pd.db.read_backlog_doc()
+    turn = _turn({"op": "remove_role", "role": "builder", "reason": TEAM_REASON})
+    assert any("still depends" in p for p in validate_turn(turn, spec, backlog, team))
+    fixed = _turn({"op": "remove_role", "role": "builder", "reason": TEAM_REASON},
+                  {"op": "edit_role", "role": "reviewer", "depends_on": [], "review_of": [],
+                   "reason": TEAM_REASON})
+    assert validate_turn(fixed, spec, backlog, team) == []
+
+
+def test_team_must_keep_a_builder(pd: PlanDrafts) -> None:
+    assert any("builder" in p for p in _team_problems(
+        pd, {"op": "remove_role", "role": "builder", "reason": TEAM_REASON},
+        {"op": "edit_role", "role": "reviewer", "depends_on": [], "review_of": [],
+         "reason": TEAM_REASON}))
+    assert _team_problems(
+        pd, {"op": "edit_role", "role": "builder", "role_type": "frontend_builder",
+             "reason": TEAM_REASON}) == []
+
+
+def test_callers_without_a_team_keep_working(pd: PlanDrafts) -> None:
+    assert validate_turn(_turn(req()), Spec(pd.db.read_spec_doc()),
+                         pd.db.read_backlog_doc()) == []
+
+
+def test_team_ops_are_never_pre_accepted(pd: PlanDrafts) -> None:
+    turn = _turn(dec(), add_role(), {"op": "remove_role", "role": "reviewer",
+                                     "reason": TEAM_REASON})
+    d = pd.merge_pm_turn(pd.open_draft(), turn, lead_held=False)
+    assert [c.accepted for c in d.changes] == [True, None, None]
+    d = pd.merge_pm_turn(pd.open_draft(), turn, lead_held=True)
+    assert [c.accepted for c in d.changes] == [None, None, None]
+
+
+def test_approve_returns_ticked_team_changes_in_order(pd: PlanDrafts) -> None:
+    edit = {"op": "edit_role", "role": "reviewer", "model_tier": "heavy", "reason": TEAM_REASON}
+    res = _approve_all(pd, _turn(add_role(), edit, req()))
+    assert [c["op"] for c in res.team_changes] == ["add_role", "edit_role"]
+    assert res.team_changes[1] == {"op": "edit_role", "role": "reviewer",
+                                   "model_tier": "heavy", "reason": TEAM_REASON}
+    assert res.created == {"new:1": "R1"}
+
+
+def test_rejected_team_changes_are_not_returned(pd: PlanDrafts) -> None:
+    d = pd.merge_pm_turn(pd.open_draft(), _turn(add_role(), req()), lead_held=False)
+    pd.set_change(d.id, "c1", False)
+    pd.set_change(d.id, "c2", True)
+    assert pd.approve(d.id, "erik").team_changes == []
+
+
+def test_add_team_change_from_the_overseer(pd: PlanDrafts) -> None:
+    dc = pd.add_team_change(add_role(), by="overseer")
+    assert dc.accepted is None and dc.by == "overseer"
+    current = pd.current()
+    assert current is not None and [c.cid for c in current.changes] == ["c1"]
+    with pytest.raises(PlanDraftError):
+        pd.add_team_change({"op": "add_requirement"}, by="overseer")
+    with pytest.raises(PlanDraftError):
+        pd.add_team_change(req(), by="overseer")

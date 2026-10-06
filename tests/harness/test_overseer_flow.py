@@ -193,3 +193,14 @@ def test_overseer_failure_asks_a_human() -> None:
     flow.failed("no result was submitted")
     assert ws.pending_human is not None
     assert posted[-1][0] is SignalType.HUMAN_NEEDED
+
+
+def test_team_change_is_offered_to_the_run_for_the_project_draft() -> None:
+    flow, _, ws, _ = _setup()
+    seen: list[str] = []
+    flow.on_team_change = lambda iv: seen.append(iv.summary)
+    flow.apply(_result({"type": "propose_team_change", "summary": "Add a tester role to the team",
+                        "change": {"op": "add_role", "role": "tester"},
+                        "rationale": "nobody writes tests"}))
+    assert seen == ["Add a tester role to the team"]
+    assert ws.pending_approvals and ws.pending_approvals[-1].kind == "team_change"

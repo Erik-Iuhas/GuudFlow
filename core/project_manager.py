@@ -180,7 +180,7 @@ class ProjectManager:
             if turn is None:
                 problems = (error or "invalid payload").splitlines()
                 continue
-            problems = validate_turn(turn, spec, backlog_doc)
+            problems = validate_turn(turn, spec, backlog_doc, self._team())
             if not problems:
                 return turn, responses
         raise ProjectManagerError(problems)
@@ -223,6 +223,7 @@ class ProjectManager:
         rendered = spec.render()
         parts.append(f"Current spec (approved version {spec.version}):\n"
                      + (rendered or "(empty: nothing is approved yet)"))
+        parts.append(self._team_context())
         parts.append("Open draft (proposed, not yet part of the spec):\n"
                      + self._draft_summary())
         parts.append("Open backlog:\n" + self._backlog_summary())
@@ -248,6 +249,30 @@ class ProjectManager:
         if text is not None and text.strip():
             parts.append(f"The human says now:\n{text.strip()}")
         return "\n\n".join(parts)
+
+    def _team(self) -> list[dict[str, Any]]:  # Any: agent rows
+        """The project's current agents (empty when the doc has none)."""
+        agents = self.doc.get("agents")
+        if not isinstance(agents, list):
+            return []
+        return [a for a in agents if isinstance(a, dict) and a.get("role")]
+
+    def _team_context(self) -> str:
+        """The current team, one line per role (team ops in a draft change it, plan §10.2)."""
+        team = self._team()
+        if not team:
+            return "Current team: (none recorded)"
+        from core.harness.capabilities import infer_role_type
+        lines = []
+        for a in team:
+            role = str(a["role"])
+            role_type = infer_role_type(role, is_reviewer=bool(a.get("is_reviewer")),
+                                        declared=str(a.get("role_type") or ""))
+            after = ", ".join(a.get("depends_on") or []) or "-"
+            reviews = ", ".join(a.get("review_of") or []) or "-"
+            lines.append(f"- {role} ({role_type}, {a.get('model_tier') or 'solid'}); "
+                         f"after: {after}; reviews: {reviews}")
+        return "Current team:\n" + "\n".join(lines)
 
     def _draft_summary(self) -> str:
         draft = self.drafts.current()

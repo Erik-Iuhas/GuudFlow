@@ -182,7 +182,8 @@ async def test_direct_edit(client, auth_header, app) -> None:
     r = await client.post("/api/projects/p1/spec/edit", headers=auth_header,
                           json={"change": REQ})
     assert r.status_code == 200, r.text
-    assert r.json() == {"version": 1, "applied": ["c1"], "created": {"new:1": "R1"}}
+    assert r.json() == {"version": 1, "applied": ["c1"], "created": {"new:1": "R1"},
+                       "team_changes": []}
     r = await client.post("/api/projects/p1/spec/edit", headers=auth_header, json={
         "change": {"op": "edit_requirement", "id": "R1", "text": "Save a recipe with photos"}})
     assert r.status_code == 200 and r.json()["version"] == 2
@@ -237,3 +238,99 @@ async def test_other_modes_and_unset_mode_are_not_gated(client, auth_header) -> 
     for pid in ("p2", "p3"):
         r = await client.post(f"/api/invoke/{pid}", headers=auth_header, json={"confirm": True})
         assert r.status_code == 202, pid
+
+
+# ── team changes (plan §10.2) ───────────────────────────────────────────────
+TEAM_REASON = "scope now includes a data pipeline"
+AGENTS = [
+    {"role": "builder", "role_type": "builder", "model_tier": "solid", "depends_on": [],
+     "description": "Builds"},
+    {"role": "reviewer", "role_type": "reviewer", "model_tier": "solid", "is_reviewer": True,
+     "depends_on": ["builder"], "review_of": ["builder"], "description": "Reviews"},
+    {"role": "helper", "role_type": "tester", "model_tier": "fast", "depends_on": ["builder"],
+     "description": "Tests"},
+]
+ADD_ROLE = {"op": "add_role", "role": "data_builder", "role_type": "builder",
+            "description": "Builds the data pipeline", "model_tier": "fast",
+            "depends_on": ["builder"], "review_of": [], "reason": TEAM_REASON}
+EDIT_ROLE = {"op": "edit_role", "role": "reviewer", "model_tier": "heavy",
+             "review_of": ["builder", "data_builder"], "reason": TEAM_REASON}
+REMOVE_ROLE = {"op": "remove_role", "role": "helper", "reason": TEAM_REASON}
+
+
+async def _team_draft(client, auth_header, app, *changes: dict[str, Any]) -> None:
+    await _project(client, auth_header, agents=AGENTS)
+    _llm(app, _call("Team change.", list(changes)))
+    r = await client.post("/api/projects/p1/plan/start", headers=auth_header)
+    assert r.status_code == 200, r.text
+    assert all(c["accepted"] is None for c in r.json()["draft"]["changes"])
+    for i in range(len(changes)):
+        r = await client.patch(f"/api/projects/p1/plan/draft/c{i + 1}", headers=auth_header,
+                               json={"accepted": True})
+        assert r.status_code == 200
+
+
+async def _agents(client, auth_header) -> dict[str, dict[str, Any]]:
+    doc = (await client.get("/api/projects/p1", headers=auth_header)).json()
+    return {a["role"]: a for a in doc["agents"]}
+
+
+async def test_approve_applies_team_add_edit_and_remove(client, auth_header, app) -> None:
+    await _team_draft(client, auth_header, app, ADD_ROLE, EDIT_ROLE, REMOVE_ROLE)
+    r = await client.post("/api/projects/p1/plan/draft/approve", headers=auth_header)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [c["op"] for c in body["team_changes"]] == ["add_role", "edit_role", "remove_role"]
+    assert body["team"] == {"added": ["data_builder"], "edited": ["reviewer"],
+                            "removed": ["helper"]}
+    agents = await _agents(client, auth_header)
+    assert set(agents) == {"builder", "reviewer", "data_builder"}
+    assert agents["reviewer"]["model_tier"] == "heavy"
+    assert agents["reviewer"]["review_of"] == ["builder", "data_builder"]
+
+
+async def test_approve_adds_a_role_with_defaults(client, auth_header, app) -> None:
+    await _team_draft(client, auth_header, app, ADD_ROLE)
+    r = await client.post("/api/projects/p1/plan/draft/approve", headers=auth_header)
+    assert r.status_code == 200, r.text
+    assert r.json()["team"] == {"added": ["data_builder"], "edited": [], "removed": []}
+    new = (await _agents(client, auth_header))["data_builder"]
+    assert new["role_type"] == "builder" and new["model_tier"] == "fast"
+    assert new["depends_on"] == ["builder"] and new["is_reviewer"] is False
+    assert new["max_review_rounds"] == 2 and new["capabilities"] == {}
+
+
+async def test_approve_without_team_ops_has_an_empty_team_summary(
+        client, auth_header, app) -> None:
+    await _project(client, auth_header)
+    _llm(app, _call("Draft.", [REQ]))
+    await client.post("/api/projects/p1/plan/start", headers=auth_header)
+    await client.patch("/api/projects/p1/plan/draft/c1", headers=auth_header,
+                       json={"accepted": True})
+    body = (await client.post("/api/projects/p1/plan/draft/approve",
+                              headers=auth_header)).json()
+    assert body["team_changes"] == []
+    assert body["team"] == {"added": [], "edited": [], "removed": []}
+
+
+async def test_team_apply_failure_is_a_500_and_the_draft_stays_approved(
+        client, auth_header, app, monkeypatch) -> None:
+    await _team_draft(client, auth_header, app, ADD_ROLE)
+
+    async def boom(*_a: Any, **_k: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(app.state.project_store, "update", boom)
+    r = await client.post("/api/projects/p1/plan/draft/approve", headers=auth_header)
+    assert r.status_code == 500
+    assert "approved" in r.json()["detail"] and "disk full" in r.json()["detail"]
+    plan = (await client.get("/api/projects/p1/plan", headers=auth_header)).json()
+    assert plan["draft"] is None                      # the draft was approved and closed
+    assert set(await _agents(client, auth_header)) == {"builder", "reviewer", "helper"}
+
+
+async def test_direct_edit_refuses_team_ops(client, auth_header) -> None:
+    await _project(client, auth_header, agents=AGENTS)
+    r = await client.post("/api/projects/p1/spec/edit", headers=auth_header,
+                          json={"change": ADD_ROLE})
+    assert r.status_code == 422

@@ -103,6 +103,20 @@ A human reviewer co-signs the work items that carry binding rules or must-priori
 before a session is accepted. Keep those items small enough to review: one concern per item, a \
 few hundred changed lines at most, and acceptance lines a person can check from the diff."""
 
+TEAM_CHANGES = """\
+You may propose changes to the team with `add_role`, `edit_role` and `remove_role`. The context \
+lists the current team. A human always ticks these; they are never pre-accepted.
+- Propose one when the scope grows past the team (a new kind of work such as frontend or data, \
+or a research need), when the start mode changes (test-first adds a tester), when sessions \
+keep failing review in one area, or when the playbook or what you have learned says this kind \
+of project goes better with a role.
+- Keep the team as small as the work allows. Do not add a role for work the current team can \
+do.
+- Every team change needs a `reason` of at least 20 characters that says why. Changes apply \
+from the next session; a running session is never changed.
+- A role name is a lowercase slug. `depends_on` and `review_of` may only name roles on the \
+team or added in the same turn, and the team must keep a builder."""
+
 PHASES: dict[str, str] = {
     "plan": """\
 Phase: planning conversation. A person is talking to you about what to build. Turn what they \
@@ -130,7 +144,7 @@ work items for what is still missing. Do not invent features nobody asked for.""
 
 def pm_system_prompt(*, seats: Seats, start_mode: str, phase: Phase) -> str:
     """The project manager's system prompt for these seats, start mode and phase."""
-    parts = [BASE, LEAD_HELD if seats.lead else LEAD_EMPTY]
+    parts = [BASE, TEAM_CHANGES, LEAD_HELD if seats.lead else LEAD_EMPTY]
     if seats.reviewer == "all":
         parts.append(REVIEWER_ALL)
     elif seats.reviewer == "must":

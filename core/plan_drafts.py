@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from core.backlog import BacklogError, _check_deps, add_to_doc, update_in_doc
+from core.harness.capabilities import ROLE_TYPES, Capabilities, CapabilityError
 from core.spec import (
     REQ_ID, Check, Decision, Requirement, Rule, Spec, SpecError,
     find_row, highest_check_number, make_checks, next_id, sync_decision_rule)
@@ -30,11 +31,15 @@ _REF = re.compile(r"^new:[0-9]+$")
 _BACKLOG_ID = re.compile(r"^B[0-9]+$")
 _DECISION_ID = re.compile(r"^D[0-9]+$")
 _DECISION_OPS = ("add_decision", "supersede_decision")
+TEAM_OPS = ("add_role", "edit_role", "remove_role")
+_ROLE_SLUG = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
+_BUILDER_TYPES = ("builder", "frontend_builder")
 
 ReqKind = Literal["feature", "constraint", "quality", "non_goal"]
 ReqPriority = Literal["must", "should", "could", "wont"]
 ItemKind = Literal["code", "test", "docs", "research", "visual"]
 ItemSize = Literal["S", "M", "L"]
+ModelTier = Literal["heavy", "solid", "fast"]
 
 
 class PlanDraftError(ValueError):
@@ -151,12 +156,59 @@ class DropRule(_Model):
     reason: str = Field(min_length=3)
 
 
+class AddRole(_Model):
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+
+    """Add a role to the project's team (plan §10.2); a human always ticks it."""
+
+    op: Literal["add_role"]
+    ref: str | None = Field(default=None, pattern=_REF.pattern)
+    role: str
+    role_type: str
+    description: str = Field(min_length=3)
+    model_tier: ModelTier
+    depends_on: list[str] = Field(default_factory=list)
+    review_of: list[str] = Field(default_factory=list)
+    max_review_rounds: int | None = Field(default=None, ge=1, le=6)
+    name: str | None = None
+    capabilities: dict[str, str] | None = None
+    reason: str
+
+
+class EditRole(_Model):
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+
+    """Change fields of an existing role (the role name itself cannot change)."""
+
+    op: Literal["edit_role"]
+    role: str
+    role_type: str | None = None
+    description: str | None = None
+    model_tier: ModelTier | None = None
+    depends_on: list[str] | None = None
+    review_of: list[str] | None = None
+    max_review_rounds: int | None = Field(default=None, ge=1, le=6)
+    name: str | None = None
+    capabilities: dict[str, str] | None = None
+    reason: str
+
+
+class RemoveRole(_Model):
+    """Remove a role from the team."""
+
+    op: Literal["remove_role"]
+    role: str
+    reason: str
+
+
 Change = Annotated[
     AddRequirement | EditRequirement | DropRequirement | AddDecision | SupersedeDecision
-    | AddItem | EditItem | AddRule | DropRule, Field(discriminator="op")]
+    | AddItem | EditItem | AddRule | DropRule | AddRole | EditRole | RemoveRole,
+    Field(discriminator="op")]
 _CHANGE_ADAPTER: TypeAdapter[Any] = TypeAdapter(Change)  # Any: the union members above
 _REF_KIND = {"add_requirement": "requirement", "add_decision": "decision",
-             "supersede_decision": "decision", "add_item": "item", "add_rule": "rule"}
+             "supersede_decision": "decision", "add_item": "item", "add_rule": "rule",
+             "add_role": "role"}
 
 
 class PlanTurn(_Model):
@@ -178,13 +230,14 @@ def _set_fields(change: Any, skip: tuple[str, ...] = ("op", "id")) -> set[str]: 
 
 
 # ── validation ──────────────────────────────────────────────────────────────
-def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any]  # Any: JSON doc
-                  ) -> list[str]:
+def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # Any: JSON doc
+                  team: list[dict[str, Any]] | None = None) -> list[str]:  # Any: agent rows
     """Problems with a PM turn, one line each (empty when it is fine).
 
     Checks that ids exist, refs resolve within the turn, dependencies have no cycle, a
     decision's reason is long enough, a requirement has a check (unless a non-goal) and no
-    edit touches a field a human pinned.
+    edit touches a field a human pinned. `team` is the project's current `agents` (empty when
+    unknown); team ops are checked against it (see `_validate_team`).
     """
     problems: list[str] = []
     refs: dict[str, str] = {}
@@ -315,7 +368,106 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any]  # Any
             if _DECISION_ID.match(rule.source):
                 problems.append(f"change {n} ({ch.op}): {ch.id} belongs to decision "
                                 f"{rule.source}; supersede the decision instead")
+    problems.extend(_validate_team(turn, team or []))
     return problems
+
+
+def _validate_team(turn: PlanTurn, team: list[dict[str, Any]]) -> list[str]:  # Any: agent rows
+    """Problems with the turn's team ops, judged against the team they would produce."""
+    numbered = [(n, ch) for n, ch in enumerate(turn.changes, 1)
+                if isinstance(ch, (AddRole, EditRole, RemoveRole))]
+    if not numbered:
+        return []
+    problems: list[str] = []
+    final: dict[str, dict[str, Any]] = {  # Any: role_type str + two str lists
+        str(a["role"]): {"role_type": str(a.get("role_type") or ""),
+                         "depends_on": list(a.get("depends_on") or []),
+                         "review_of": list(a.get("review_of") or [])}
+        for a in team if a.get("role")}
+    existing = set(final)
+    added: set[str] = set()
+    removed: set[str] = set()
+    for n, ch in numbered:
+        where = f"change {n} ({ch.op})"
+        if len(ch.reason.strip()) < MIN_REASON:
+            problems.append(f"{where}: reason must be at least {MIN_REASON} characters and "
+                            f"say why")
+        if isinstance(ch, AddRole):
+            if not _ROLE_SLUG.match(ch.role):
+                problems.append(f"{where}: role {ch.role!r} must be a lowercase slug "
+                                f"(letters, digits, _ or -)")
+            elif ch.role in existing or ch.role in added:
+                problems.append(f"{where}: role {ch.role} already exists")
+            else:
+                added.add(ch.role)
+                final[ch.role] = {"role_type": ch.role_type, "depends_on": list(ch.depends_on),
+                                  "review_of": list(ch.review_of)}
+            if ch.role_type not in ROLE_TYPES:
+                problems.append(f"{where}: role_type {ch.role_type!r} is not one of "
+                                f"{', '.join(ROLE_TYPES)}")
+        elif isinstance(ch, EditRole):
+            if ch.role not in existing and ch.role not in added:
+                problems.append(f"{where}: unknown role {ch.role}")
+                continue
+            if not _set_fields(ch, ("op", "role", "reason")):
+                problems.append(f"{where}: sets no field")
+            if ch.role_type is not None and ch.role_type not in ROLE_TYPES:
+                problems.append(f"{where}: role_type {ch.role_type!r} is not one of "
+                                f"{', '.join(ROLE_TYPES)}")
+            if ch.role in final:
+                for key in ("role_type", "depends_on", "review_of"):
+                    value = getattr(ch, key)
+                    if value is not None:
+                        final[ch.role][key] = value if key == "role_type" else list(value)
+        else:
+            if ch.role not in existing and ch.role not in added:
+                problems.append(f"{where}: unknown role {ch.role}")
+                continue
+            removed.add(ch.role)
+            final.pop(ch.role, None)
+        caps = getattr(ch, "capabilities", None)
+        if caps:
+            try:
+                Capabilities.from_dict(dict(caps))
+            except (CapabilityError, TypeError) as e:
+                problems.append(f"{where}: capabilities: {e}")
+    for n, ch in numbered:
+        if isinstance(ch, RemoveRole) or ch.role not in final:
+            continue
+        for key in ("depends_on", "review_of"):
+            for ref in getattr(ch, key) or []:
+                if ref == ch.role:
+                    problems.append(f"change {n} ({ch.op}): {key} lists the role itself")
+                elif ref not in final:
+                    why = "is removed in this turn" if ref in removed else "is not a role"
+                    problems.append(f"change {n} ({ch.op}): {key} {ref} {why} (use an "
+                                    f"existing role or one added in this turn)")
+    for role, row in sorted(final.items()):
+        for other in sorted(removed):
+            if other in row["depends_on"] or other in row["review_of"]:
+                problems.append(f"remove_role {other}: {role} still depends on or reviews it; "
+                                f"edit {role} in the same turn")
+    if _has_cycle({r: [d for d in row["depends_on"] if d in final]
+                   for r, row in final.items()}):
+        problems.append("the team's depends_on would form a cycle")
+    if not any(row["role_type"] in _BUILDER_TYPES for row in final.values()):
+        problems.append("the team must keep at least one builder or frontend_builder role")
+    return problems
+
+
+def _has_cycle(graph: dict[str, list[str]]) -> bool:
+    """True when the dependency graph has a cycle."""
+    state: dict[str, int] = {}
+
+    def visit(node: str) -> bool:
+        state[node] = 1
+        for nxt in graph.get(node, []):
+            if state.get(nxt) == 1 or (nxt not in state and visit(nxt)):
+                return True
+        state[node] = 2
+        return False
+
+    return any(n not in state and visit(n) for n in graph)
 
 
 # ── draft records ───────────────────────────────────────────────────────────
@@ -376,6 +528,9 @@ class ApproveResult:
     version: int                    # the new spec version
     applied: list[str]              # cids applied
     created: dict[str, str]         # ref → new id (R4, D2, B7, rule-3)
+    # Ticked team ops (dumped add_role/edit_role/remove_role), in order. work.db does not hold
+    # the team: the caller applies them to the project doc (api/routes/plan.py).
+    team_changes: list[dict[str, Any]] = field(default_factory=list)  # Any: dumped Changes
 
 
 def _draft_row(doc: dict[str, Any], draft_id: str) -> dict[str, Any]:  # Any: JSON rows
@@ -439,7 +594,9 @@ class PlanDrafts:
 
         The PM's earlier proposals a human has not touched are replaced; changes a human
         ticked or rejected (and changes a human wrote) stay. With `lead_held` False the PM's
-        decision changes start ticked; otherwise every change starts undecided.
+        decision changes start ticked; otherwise every change starts undecided. Team ops
+        (add_role, edit_role, remove_role) always start undecided: only a human ticks them
+        (hard rule 24).
 
         # QUESTION: plan §3 lets the PM "explicitly revise" a human-decided change; there is no
         # syntax for that yet, so a touched change is always kept.
@@ -471,6 +628,30 @@ class PlanDrafts:
             row.clear()
             row.update(d.to_dict())
             return d
+
+    def add_team_change(self, change: dict[str, Any], by: str) -> DraftChange:  # Any: Change row
+        """Add one team op (e.g. from the overseer) to the open draft, undecided.
+
+        Opens a draft if none is open. PlanDraftError when `change` is not a valid
+        add_role/edit_role/remove_role.
+        """
+        try:
+            parsed = parse_change(change)
+        except ValueError as e:
+            raise PlanDraftError(f"not a team change: {e}") from e
+        if not isinstance(parsed, (AddRole, EditRole, RemoveRole)):
+            raise PlanDraftError(f"{parsed.op} is not a team change")
+        self.open_draft()
+        with self.db.drafts_doc() as doc:
+            row = next(r for r in doc["drafts"] if r.get("status") == "open")
+            d = Draft.from_dict(row)
+            dc = DraftChange(cid=f"c{d.next_cid}", change=parsed.model_dump(mode="json"),
+                             accepted=None, by=by)
+            d.next_cid += 1
+            d.changes.append(dc)
+            row.clear()
+            row.update(d.to_dict())
+            return dc
 
     def set_change(self, draft_id: str, cid: str, accepted: bool | None) -> Draft:
         """A human ticks (True), rejects (False) or resets (None) one change."""
@@ -550,7 +731,8 @@ class PlanDrafts:
         d.version, d.created = int(txn.spec["version"]), created
         row.clear()
         row.update(d.to_dict())
-        return ApproveResult(version=d.version, applied=[c.cid for c in chosen], created=created)
+        return ApproveResult(version=d.version, applied=[c.cid for c in chosen], created=created,
+                             team_changes=applier.team_changes)
 
 
 class _Applier:
@@ -561,11 +743,14 @@ class _Applier:
         self.ids: dict[str, str] = {}
         self.current: DraftChange | None = None
         self.created: dict[str, str] = {}
+        self.team_changes: list[dict[str, Any]] = []  # Any: dumped team Changes
 
     def apply(self, chosen: list[DraftChange]) -> dict[str, str]:
         """Apply in phases (requirements, decisions, rules, new items, item edits, item
         dependencies) so refs may point forward; any failure raises PlanDraftError."""
         parsed = [(dc, parse_change(dc.change)) for dc in chosen]
+        self.team_changes = [ch.model_dump(mode="json", exclude_none=True) for _, ch in parsed
+                             if isinstance(ch, (AddRole, EditRole, RemoveRole))]
         phases: list[tuple[type, ...]] = [
             (AddRequirement, EditRequirement, DropRequirement),
             (AddDecision, SupersedeDecision), (AddRule, DropRule), (AddItem,), (EditItem,)]

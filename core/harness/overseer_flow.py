@@ -64,7 +64,9 @@ MENU = """Return an `assessment` (what is wrong and why, in plain words) and at 
 - `restart_role(role, from_ref)`: reset the role's working copy to `main` (or a commit) and
   reopen its stuck cards. Once per role per run.
 - `pause(question)`: stop new work and ask the human a plain-language question.
-- `propose_team_change(change, summary)`: a team change; a human must approve it.
+- `propose_team_change(change, summary)`: a team change; a human must approve it. Make `change`
+  one op, `{"op": "add_role"|"edit_role"|"remove_role", "role": ..., ...}` (add_role also needs
+  role_type, description, model_tier), so it can also appear in the project plan draft.
 
 Prefer the smallest intervention that unsticks the work. An empty list is fine if the run
 will recover on its own."""
@@ -82,6 +84,9 @@ class OverseerFlow:
     post: Callable[[SignalType, str, str, str | None], None]
     clones: "RoleClones | None" = None
     main_dir: Path | None = None
+    # Called with each `propose_team_change` so the run can also record it in the project's
+    # draft (plan §10.2); the approval request below stays the in-run human flow.
+    on_team_change: Callable[[ProposeTeamChange], None] | None = None
     caps: OverseerCaps = field(default_factory=OverseerCaps)
     detector_cfg: DetectorConfig = field(default_factory=DetectorConfig)
     watch: StallWatch = field(default_factory=StallWatch)
@@ -218,6 +223,8 @@ class OverseerFlow:
             self.post(SignalType.APPROVAL_NEEDED, self.overseer_role, iv.summary,
                       f"approval_id={request.id}; kind=team_change; "
                       f"context={json.dumps(request.context)}")
+            if self.on_team_change is not None:
+                self.on_team_change(iv)
 
     def _stuck_cards(self, role: str, task_id: str | None) -> list[str]:
         if self.board is None:

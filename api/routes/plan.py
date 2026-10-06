@@ -17,9 +17,10 @@ from pydantic import BaseModel, ValidationError
 
 from api.auth import require_bearer
 from core.backlog import BacklogError
-from core.plan_drafts import Draft, PlanDraftError, PlanDrafts, parse_change
+from core.plan_drafts import TEAM_OPS, Draft, PlanDraftError, PlanDrafts, parse_change
 from core.project_manager import ProjectManager, ProjectManagerError, TurnOutcome
 from core.spec import Spec, SpecError
+from core.team_changes import TeamChangeError, apply_team_changes
 
 router = APIRouter(prefix="/api/projects", tags=["plan"],
                    dependencies=[Depends(require_bearer)])
@@ -133,6 +134,9 @@ async def edit_spec(request: Request, project_id: str, body: EditBody) -> dict[s
         change = parse_change(body.change)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=_pydantic_detail(exc)) from None
+    if change.op in TEAM_OPS:
+        raise HTTPException(status_code=422, detail="team changes go through a draft; "
+                            "edit the team on the Team tab")
     try:
         result = await asyncio.to_thread(PlanDrafts(data_root, project_id).apply_direct,
                                          change, APPROVER)
@@ -195,8 +199,13 @@ async def tick_change(request: Request, project_id: str, cid: str,
 
 @router.post("/{project_id}/plan/draft/approve")
 async def approve_draft(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
-    """Apply the ticked changes: `{version, applied, created}`."""
-    data_root, _ = await _project(request, project_id)
+    """Apply the ticked changes: `{version, applied, created, team_changes, team}`.
+
+    Ticked team ops (add_role, edit_role, remove_role) then change the project's `agents`;
+    `team` is `{added, edited, removed}` (role names). The new team applies from the next
+    session.
+    """
+    data_root, doc = await _project(request, project_id)
     drafts = PlanDrafts(data_root, project_id)
     current = await asyncio.to_thread(drafts.current)
     if current is None:
@@ -207,7 +216,25 @@ async def approve_draft(request: Request, project_id: str) -> dict[str, Any]:  #
         raise _draft_error(exc) from None
     except (SpecError, BacklogError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
-    return asdict(result)
+    team: dict[str, list[str]] = {"added": [], "edited": [], "removed": []}
+    if result.team_changes:
+        # QUESTION: known two-store limitation. work.db (spec, drafts) and the project store
+        # (projects.json) cannot share a transaction, so a failure here leaves the draft
+        # approved with the team unchanged. A retry is not possible (the draft is closed);
+        # the person re-proposes the team change.
+        try:
+            agents, team = apply_team_changes(list(doc.get("agents") or []),
+                                              result.team_changes)
+            updated = await request.app.state.project_store.update(
+                project_id, {**doc, "agents": agents})
+            if updated is None:
+                raise TeamChangeError(f"project {project_id!r} not found")
+        except Exception as exc:  # noqa: BLE001 — reported in full, the draft stays approved
+            raise HTTPException(
+                status_code=500,
+                detail=(f"draft {current.id} was approved (spec version {result.version}) but "
+                        f"the team change could not be applied: {exc}")) from None
+    return {**asdict(result), "team": team}
 
 
 @router.post("/{project_id}/plan/draft/discard")

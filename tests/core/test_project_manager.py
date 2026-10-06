@@ -249,3 +249,31 @@ async def test_no_usage_means_no_cost(tmp_path: Path) -> None:
     manager, _ = pm(tmp_path, call("ok"))
     out = await manager.turn("hi", mode="discuss")
     assert out.messages[-1]["cost_usd"] is None and out.messages[-1]["tokens"] is None
+
+
+TEAM_DOC = {**DOC, "agents": [
+    {"role": "builder", "role_type": "builder", "model_tier": "heavy", "depends_on": []},
+    {"role": "qa", "model_tier": "fast", "depends_on": ["builder"], "review_of": ["builder"],
+     "is_reviewer": True}]}
+
+
+async def test_context_lists_the_team(tmp_path: Path) -> None:
+    manager, llm = pm(tmp_path, call("a"), doc=TEAM_DOC)
+    await manager.turn("hi", mode="discuss")
+    ctx = user_text(llm)
+    assert "- builder (builder, heavy); after: -; reviews: -" in ctx
+    assert "- qa (reviewer, fast); after: builder; reviews: builder" in ctx
+
+
+async def test_team_ops_are_validated_against_the_team_and_not_pre_ticked(
+        tmp_path: Path) -> None:
+    reason = "scope now includes a data pipeline"
+    add = {"op": "add_role", "role": "data_builder", "role_type": "builder",
+           "description": "Builds the data pipeline", "model_tier": "solid",
+           "depends_on": ["builder"], "review_of": [], "reason": reason}
+    gone = {"op": "remove_role", "role": "builder", "reason": reason}
+    manager, llm = pm(tmp_path, call("bad", [gone]), call("ok", [add]), doc=TEAM_DOC)
+    out = await manager.turn("grow the team", mode="update")
+    assert len(llm.calls) == 2
+    assert "still depends on or reviews it" in user_text(llm, 1)
+    assert out.draft is not None and [c.accepted for c in out.draft.changes] == [None]

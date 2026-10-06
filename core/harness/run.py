@@ -71,7 +71,7 @@ from core.backlog import BacklogItem
 from core.harness.spec_brief import SpecBrief
 from core.harness.task_flow import TaskFlow, TurnPlan, backlog_text
 from core.harness.detectors import DetectorConfig, RunView
-from core.harness.overseer import OverseerCaps, OverseerResult
+from core.harness.overseer import OverseerCaps, OverseerResult, ProposeTeamChange
 from core.harness.overseer_flow import OverseerFlow
 from core.harness.retrospective import load_prior_carry_forward
 from core.harness.visual_review import ImageBudget, capped
@@ -330,7 +330,25 @@ class OpencodeRun:
             board=self.flow.board if self.flow else None, scheduler=self._scheduler,
             post=lambda kind, role, summary, detail: self._post(kind, role, summary, detail),
             clones=self.clones, main_dir=self.runner.git.working_dir,
-            caps=self.settings.overseer_caps, detector_cfg=self.settings.detectors)
+            caps=self.settings.overseer_caps, detector_cfg=self.settings.detectors,
+            on_team_change=self._draft_team_change)
+
+    def _draft_team_change(self, iv: ProposeTeamChange) -> None:
+        """Also put the overseer's team proposal in the project's open draft (plan §10.2).
+
+        Best effort: the in-run approval request is the flow that matters, so a change that
+        is not a valid team op (its shape is free-form) or an unreadable work.db is logged
+        and skipped.
+        """
+        data_root, project_id = self._data_root(), self.runner.project.project_id
+        if data_root is None or not project_id:
+            return
+        from core.plan_drafts import PlanDraftError, PlanDrafts
+        change = {"reason": iv.rationale, **iv.change}
+        try:
+            PlanDrafts(data_root, project_id).add_team_change(change, by="overseer")
+        except (PlanDraftError, OSError) as e:
+            log.warning("overseer team change not added to the draft: %s", e)
 
     def _load_carry_forward(self) -> int:
         """Read the carry-forward of the run(s) this one continues; returns cards carried.

@@ -77,3 +77,11 @@ def test_each_phase_has_its_own_paragraph() -> None:
         assert all(PHASES[o] not in text for o in PHASES if o != phase)
     assert "report" in PHASES["after_session"]
     assert "requirements from what was built" in PHASES["derive_spec"]
+
+
+def test_prompt_tells_the_manager_when_to_change_the_team() -> None:
+    from core.pm_prompts import Seats, pm_system_prompt
+    text = pm_system_prompt(seats=Seats(), start_mode="spec_first", phase="plan")
+    assert "add_role" in text and "edit_role" in text and "remove_role" in text
+    assert "as small as the work allows" in text
+    assert "at least 20 characters" in text and "next session" in text
