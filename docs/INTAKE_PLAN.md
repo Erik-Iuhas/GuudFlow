@@ -62,7 +62,12 @@ a new `core/intake.py`.
 
 ### 3.2 The project manager agent
 
-It runs host-side like the meta-agent and grooming, with `LLMClient` and one tool call. It uses
+The project manager **is the meta-agent**, renamed. The meta-agent always did a project
+manager's job (read the goal and inputs, propose the team); it now also owns intake and
+grooming. "Meta-agent" disappears from the UI and the docs, and the code keeps its module names
+until a later rename.
+
+It runs host-side like the meta-agent and grooming do today, with `LLMClient` and one tool call. It uses
 the heavy tier by default, and its model can be picked in Settings like any other. It is a named
 worker (`core/crew.py`), so the user meets "Mara, project manager" and the rest of the team can
 refer to it by name. It is **not** the overseer: the overseer works inside one run with a fixed
@@ -241,5 +246,39 @@ Settled (2026-10-06):
 
 Still open:
 
-4. **The manager is a separate role from the overseer** (project-wide versus one run). They could
-   share a persona so the same name shows up in both places.
+4. **Whether the project manager is also the overseer** (project-wide versus one run). Recommendation: one
+   persona, two jobs, so the user meets one manager. The overseer's in-run limits and fixed
+   intervention menu stay as they are.
+
+## 7. Studio modernization (design review)
+
+The same idea applies beyond intake: people say what they want, see what is happening in plain
+words, and decide. The technical detail stays one click away. There are storyboards for eight
+screens: new project, the manager's plan, project home, one request, a live session, review, the
+ticket view and project settings.
+
+| Area | Change |
+|---|---|
+| Navigation | Home, Projects, People (roster and training), Settings. "One-shot" and "Propose" become **+ New project** |
+| Naming | "Meta-agent" becomes **project manager** everywhere. Runs are shown as **sessions** |
+| Legacy harness | Hidden everywhere in Studio: the harness selector, the "Legacy view" link on the run page, the Team tab's Sub-LLM models and the legacy-only fields. Old runs still open from their saved boards (plan §14) |
+| Project tabs | Work, Plan (the roadmap, kept by the manager), Team, Files (inputs), Settings. Insights moves into Work and Team |
+| Work tab | "Needs you" strip (reviews, questions), "Ask for something", and a **request board** (§7.1). Tickets sit behind the ticket view |
+| Live session | Team cards say in plain words what each person is doing; a feed of what happened; "Tell the team something". The graph, tool calls and cards move into **Technical view** |
+| Review | What changed, how to try it, what was not done, checks, then accept or send back. The diff is a link |
+| Settings | Choices instead of numbers: how hands-off, what happens when a session finishes, detected checks, where the code lives. Everything else under Advanced |
+
+### 7.1 Board or list
+
+A board, but of **requests** rather than tickets, with five lanes a non-technical person can read:
+**Asked → Up next → Being worked on → Waiting for you → Done**.
+
+- The question users have is "where is my thing?", and a board answers it at a glance.
+- Lanes follow the request's life, not the agents' internal card states. The run's own task
+  board (to do, in progress, review, done, blocked) stays in the session's technical view.
+- "Waiting for you" is also pulled up into the "Needs you" strip, so nothing that needs the
+  human is ever only on the board.
+- A **List** toggle shows the same requests grouped by lane. It is the default on narrow screens.
+- No drag and drop between lanes. Lanes change on events (Mara refined it, a session took it, you
+  accepted it), the same rule as cards ("only the scheduler moves cards"). Order inside **Up next**
+  can be dragged, and that sets priority.
