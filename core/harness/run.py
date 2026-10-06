@@ -948,6 +948,7 @@ class OpencodeRun:
             task=plan.task_text if plan is not None else None,
             carry_forward=self._carry_text or None,
             git_notes=tuple(git_notes),
+            human_comments=self._take_human_comments(cfg.role),
             names=self.names, review_from=review_from,
             team=team_section(cfg.role, [
                 Member(c.role, self.names.get(c.role, c.role), self._roles[c.role].role_type,
@@ -958,6 +959,20 @@ class OpencodeRun:
             + (self.overseer.brief_addenda(cfg.role) if self.overseer is not None
                and not self._is_overseer(cfg.role) else ()),
         ))
+
+    def _take_human_comments(self, role: str) -> tuple[str, ...]:
+        """Comments the human posted on the run that this role has not seen yet.
+
+        Each comment reaches every role once, in its next brief; priority comments
+        come first. The role is recorded in `seen_by` (DESIGN §6).
+        """
+        fresh = [s for s in self.workspace.unseen_user_comments(role)
+                 if s.type in (SignalType.USER_COMMENT, SignalType.USER_COMMENT_PRIORITY)]
+        fresh.sort(key=lambda s: s.type is not SignalType.USER_COMMENT_PRIORITY)
+        for sig in fresh:
+            self.workspace.mark_seen(sig.id, role)
+        return tuple(("(priority) " if sig.type is SignalType.USER_COMMENT_PRIORITY else "")
+                     + sig.summary for sig in fresh)
 
     def _take_notes(self, role: str) -> tuple[tuple[str, str], ...]:
         notes: list[tuple[str, str]] = []

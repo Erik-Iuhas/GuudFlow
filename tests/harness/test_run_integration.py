@@ -140,6 +140,24 @@ async def test_notes_reach_the_next_role(tmp_path: Path, fake_llm: FakeLLM) -> N
     assert "untrusted" in builder_brief
 
 
+async def test_run_comments_reach_every_role_once(tmp_path: Path, fake_llm: FakeLLM) -> None:
+    from core.signals import Signal
+    fake_llm.route("Your turn: architect", _done("Planned the module layout for builder."))
+    fake_llm.route("Your turn: builder", _done("Implemented the module as planned."))
+    runner = _runner(tmp_path, [AgentConfig(role="architect"),
+                                AgentConfig(role="builder", depends_on=["architect"])], fake_llm)
+    runner.workspace.post_signal(Signal(type=SignalType.USER_COMMENT_PRIORITY,
+                                        summary="Walls must be hot pink.", from_user=True,
+                                        priority="high"))
+    assert (await runner.run()).status is SchedulerStatus.COMPLETE
+    for role in ("architect", "builder"):
+        brief = next(str(r["messages"]) for r in fake_llm.requests
+                     if f"Your turn: {role}" in str(r["messages"]))
+        assert "Comments from the human" in brief and "Walls must be hot pink." in brief
+    comment = runner.workspace.user_board[0]
+    assert {"architect", "builder"} <= set(comment.seen_by)
+
+
 @pytest.mark.parametrize("production", [True])
 async def test_host_dev_refused_in_production(tmp_path: Path, fake_llm: FakeLLM,
                                              production: bool) -> None:
