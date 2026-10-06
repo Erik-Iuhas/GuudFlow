@@ -50,6 +50,7 @@ async def invoke_project(
     body = body or {}
     confirm = bool(body.get("confirm", False))
     _check_project_work(request, project_id, body)
+    _check_spec_gate(request, project_id, project, body)
     if not body.get("allow_parallel"):
         # One active run per project (plan §14.5): a second run would build on the
         # same main and collide at review time.
@@ -133,6 +134,20 @@ def _check_project_work(request: Request, project_id: str, body: dict) -> None:
         if run is None or run.state != "pending":
             raise HTTPException(status_code=400,
                                 detail=f"continue_run: {parent!r} is not waiting for review")
+
+
+def _check_spec_gate(request: Request, project_id: str, project: dict, body: dict) -> None:
+    """Spec-first and test-first projects need an approved spec before the first session
+    (project-flow plan §5). `force: true` skips the check."""
+    from pathlib import Path
+
+    from core.plan_drafts import PlanDrafts
+
+    if project.get("start_mode") not in ("spec_first", "test_first") or body.get("force") is True:
+        return
+    drafts = PlanDrafts(Path(request.app.state.data_root), project_id)
+    if int(drafts.db.read_spec_doc().get("version", 0)) == 0:
+        raise HTTPException(status_code=409, detail="approve the plan first")
 
 
 @router.get("/mcp/manifest")
