@@ -21,24 +21,36 @@ import os
 import re
 import shutil
 import struct
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 
-from core.harness.mcp_server import McpIdentity, McpTool, ToolResult
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import FileResponse, PlainTextResponse, Response
+from starlette.routing import Route
+
+from core.harness.artifacts import safe_resolve
+from core.harness.mcp_server import McpIdentity, McpTool, ToolResult, serve_app
 from core.harness.tool_context import RunToolContext
 from core.signals import SignalType
 
 log = logging.getLogger(__name__)
 
-# (url, width, height, full_page, allowed_origin) -> PNG bytes
+# (url, width, height, full_page, allowed_origin) -> PNG bytes. For static-file captures the
+# tool also passes the keywords `wait_ms` (settle time after load) and `keys` (key names to
+# press before the capture); a hook that ignores them should accept **kwargs.
 CaptureFn = Callable[[str, int, int, bool, str], Awaitable[bytes]]
 
 SCREEN_DIR = ".guudflow/screens"
 TOTAL_TIMEOUT_S = 20.0
 SETTLE_MS = 500
+DEFAULT_WAIT_MS = 1500
+MAX_WAIT_MS = 5000
+MAX_KEYS = 20
+KEY_DELAY_MS = 120
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _BAD_PATH_CHARS = re.compile(r"[\s\x00-\x1f\x7f\\]")
 
@@ -46,23 +58,36 @@ SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "port": {"type": "integer", "minimum": 1024, "maximum": 65535,
-                 "description": "Port of the dev server running in your sandbox."},
+                 "description": "Port of the dev server running in your sandbox. Give either "
+                                "`port` or `file`, not both."},
         "path": {"type": "string", "default": "/",
-                 "description": "URL path (and query) to open; must start with '/'."},
+                 "description": "With `port`: URL path (and query) to open; must start with '/'."},
+        "file": {"type": "string",
+                 "description": "Static page in your working folder, e.g. 'web/index.html'. The "
+                                "host serves it read-only and captures it; no server needed."},
+        "wait_ms": {"type": "integer", "minimum": 0, "maximum": MAX_WAIT_MS,
+                    "default": DEFAULT_WAIT_MS,
+                    "description": "With `file`: wait after load so canvas content renders a frame."},
+        "keys": {"type": "array", "items": {"type": "string", "maxLength": 32},
+                 "maxItems": MAX_KEYS,
+                 "description": "With `file`: key names to press before capture, e.g. "
+                                "['ArrowLeft', 'Space']."},
         "width": {"type": "integer", "minimum": 320, "maximum": 2560, "default": 1280},
         "height": {"type": "integer", "minimum": 240, "maximum": 2000, "default": 800},
         "full_page": {"type": "boolean", "default": False,
                       "description": "Capture the whole scrollable page, not just the viewport."},
     },
-    "required": ["port"],
     "additionalProperties": False,
 }
 
 DESCRIPTION = (
     "Take a screenshot of the web app your dev server is serving. The browser runs on the "
     "host and can only reach your own sandbox's dev server on the given port; any other "
-    "origin the page references is blocked. The PNG is saved under .guudflow/screens/ in "
-    "your clone and returned inline."
+    "origin the page references is blocked. For a static page (plain HTML/JS, no build step) "
+    "you need no server: pass `file` (e.g. 'web/index.html') instead of `port`, and the host "
+    "serves your working folder read-only for the capture. Optional `wait_ms` (default 1500) "
+    "lets canvas games draw, and `keys` (e.g. ['ArrowLeft']) are pressed before capturing. "
+    "The PNG is saved under .guudflow/screens/ in your clone and returned inline."
 )
 
 
@@ -93,13 +118,43 @@ def _origin(url: str) -> str:
     return f"{parts.scheme}://{parts.hostname}:{port}"
 
 
+def _extra_seconds(wait_ms: int | None, keys: Sequence[str]) -> float:
+    """Extra time budget for a capture that waits and presses keys."""
+    return ((wait_ms or 0) + (len(keys) + 1) * KEY_DELAY_MS) / 1000
+
+
+class _StaticSite:
+    """Read-only static file server for one role's clone (GET/HEAD only)."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    async def _serve(self, request: Request) -> Response:
+        if request.method not in ("GET", "HEAD"):
+            return PlainTextResponse("method not allowed", status_code=405,
+                                     headers={"Allow": "GET, HEAD"})
+        parts = [p for p in request.path_params.get("rel", "").split("/") if p]
+        if not parts or any(p.startswith(".") or "\\" in p or "\x00" in p for p in parts):
+            return PlainTextResponse("not found", status_code=404)
+        target = safe_resolve(self.root, "/".join(parts))  # no `..`, no symlinks on the way
+        if target is None or not target.is_file():
+            return PlainTextResponse("not found", status_code=404)
+        return FileResponse(target)
+
+    def app(self) -> Starlette:
+        methods = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+        return Starlette(routes=[Route("/{rel:path}", self._serve, methods=methods)])
+
+
 async def playwright_capture(url: str, width: int, height: int, full_page: bool,
-                             allowed_origin: str) -> bytes:
+                             allowed_origin: str, *, wait_ms: int | None = None,
+                             keys: Sequence[str] = ()) -> bytes:
     """Default `CaptureFn`: headless Chromium via Playwright on the host.
 
     Aborts every request whose origin differs from `allowed_origin` (this covers
     redirects, subresources and fetch/XHR); `file:` and non-image `data:` URLs are
-    blocked too. Waits for `load` plus a 500 ms settle, within 20 s in total.
+    blocked too. Waits for `load` plus `wait_ms` (default a 500 ms settle), presses `keys`
+    in order, within 20 s plus the extra waiting in total.
     """
     from playwright.async_api import Error as PlaywrightError
     from playwright.async_api import async_playwright
@@ -146,7 +201,7 @@ async def playwright_capture(url: str, width: int, height: int, full_page: bool,
                             f"only {allowed} is reachable")
 
     try:
-        async with asyncio.timeout(TOTAL_TIMEOUT_S):
+        async with asyncio.timeout(TOTAL_TIMEOUT_S + _extra_seconds(wait_ms, keys)):
             async with async_playwright() as pw:
                 launch: dict[str, Any] = {
                     # Playwright 1.47 passes --headless=old for headless=True, which recent
@@ -179,7 +234,12 @@ async def playwright_capture(url: str, width: int, height: int, full_page: bool,
                         raise
                     if blocked_documents:
                         raise blocked_error()
-                    await page.wait_for_timeout(SETTLE_MS)
+                    await page.wait_for_timeout(SETTLE_MS if wait_ms is None else wait_ms)
+                    for key in keys:
+                        await page.keyboard.press(key)
+                        await page.wait_for_timeout(KEY_DELAY_MS)
+                    if keys:
+                        await page.wait_for_timeout(KEY_DELAY_MS)
                     return await page.screenshot(type="png", full_page=full_page)
                 finally:
                     await browser.close()
@@ -227,11 +287,34 @@ def _int_arg(args: dict[str, Any], key: str, default: int | None, lo: int, hi: i
     return value
 
 
+def _validate_file(args: dict[str, Any]) -> tuple[str, int, list[str]]:
+    """Check the static-file arguments; returns (file, wait_ms, keys)."""
+    if "port" in args or "path" in args:
+        raise ValueError("give either `file` or `port` (with `path`), not both")
+    raw = args["file"]
+    if (not isinstance(raw, str) or not raw.strip() or "://" in raw or "?" in raw or "#" in raw
+            or _BAD_PATH_CHARS.search(raw.strip())):
+        raise ValueError("file must be a plain path inside your working folder, "
+                         "e.g. 'web/index.html'")
+    file = raw.strip().removeprefix("/work/").lstrip("/")
+    parts = file.split("/")
+    if not file or ".." in parts or any(p.startswith(".") for p in parts if p):
+        raise ValueError("file must stay inside your working folder and may not name dotfiles")
+    wait_ms = _int_arg(args, "wait_ms", DEFAULT_WAIT_MS, 0, MAX_WAIT_MS)
+    keys = args.get("keys", [])
+    if (not isinstance(keys, list) or len(keys) > MAX_KEYS
+            or not all(isinstance(k, str) and 0 < len(k) <= 32 and k.isprintable() for k in keys)):
+        raise ValueError(f"keys must be a list of at most {MAX_KEYS} key names such as 'ArrowLeft'")
+    return file, wait_ms, keys
+
+
 def _validate(args: dict[str, Any]) -> tuple[int, str, int, int, bool]:
-    """Check tool arguments; returns (port, path, width, height, full_page)."""
+    """Check tool arguments for the dev-server mode; returns (port, path, width, height, full_page)."""
     unknown = set(args) - set(SCHEMA["properties"])
     if unknown:
         raise ValueError(f"unknown argument(s): {', '.join(sorted(unknown))}")
+    if "wait_ms" in args or "keys" in args:
+        raise ValueError("wait_ms and keys only work with `file`")
     port = _int_arg(args, "port", None, 1024, 65535)
     width = _int_arg(args, "width", 1280, 320, 2560)
     height = _int_arg(args, "height", 800, 240, 2000)
@@ -267,30 +350,66 @@ def tools(ctx: RunToolContext, *, capture: CaptureFn | None = None) -> list[McpT
     """The `screenshot` tool for a run. `capture` is injectable for tests."""
     take = capture or playwright_capture
 
+    async def capture_file(role: str, args: dict[str, Any]) -> tuple[bytes, str, str]:
+        """Serve the role's clone on a temporary host-only server and capture one file."""
+        file, wait_ms, keys = _validate_file(args)
+        width = _int_arg(args, "width", 1280, 320, 2560)
+        height = _int_arg(args, "height", 800, 240, 2000)
+        full_page = args.get("full_page", False)
+        if not isinstance(full_page, bool):
+            raise ValueError("full_page must be a boolean")
+        root = ctx.clone_for(role)
+        target = safe_resolve(root, file)
+        if target is None or not target.is_file():
+            raise ValueError(f"no such file in your working folder: {file}")
+        server = await serve_app(_StaticSite(root).app(), host="127.0.0.1", port=0)
+        try:
+            origin = server.url
+            url = f"{origin}/{quote(file)}"
+            png = await asyncio.wait_for(
+                take(url, width, height, full_page, origin, wait_ms=wait_ms, keys=keys),
+                timeout=TOTAL_TIMEOUT_S + 5 + _extra_seconds(wait_ms, keys))
+        finally:
+            await server.stop()
+        return png, f"{origin}/{file}", "file"
+
     async def handler(identity: McpIdentity, args: dict[str, Any]) -> ToolResult:
         role = identity.role
-        try:
-            port, path, width, height, full_page = _validate(args)
-        except ValueError as exc:
-            return ToolResult(f"invalid arguments: {exc}", is_error=True)
-        try:
-            host = ctx.sandbox_host_for(role)
-        except Exception as exc:
-            return ToolResult(f"cannot locate the sandbox for role {role!r}: {exc}", is_error=True)
-        origin = f"http://{host}:{port}"
-        url = f"{origin}{path}"
-        try:
-            png = await asyncio.wait_for(take(url, width, height, full_page, origin),
-                                         timeout=TOTAL_TIMEOUT_S + 5)
-        except Exception as exc:  # report, never raise into the agent's turn
-            if not isinstance(exc, (CaptureError, TimeoutError)):
-                log.warning("screenshot of %s failed: %s", url, exc)
-            return ToolResult(_explain(exc, url), is_error=True)
+        label = "dev"
+        if "file" in args:
+            try:
+                png, url, label = await capture_file(role, args)
+            except ValueError as exc:
+                return ToolResult(f"invalid arguments: {exc}", is_error=True)
+            except Exception as exc:  # report, never raise into the agent's turn
+                if not isinstance(exc, (CaptureError, TimeoutError)):
+                    log.warning("static screenshot of %s failed: %s", args.get("file"), exc)
+                return ToolResult(_explain(exc, str(args.get("file"))), is_error=True)
+            width, height, port = 1280, 800, 0
+        else:
+            try:
+                port, path, width, height, full_page = _validate(args)
+            except ValueError as exc:
+                return ToolResult(f"invalid arguments: {exc}", is_error=True)
+            try:
+                host = ctx.sandbox_host_for(role)
+            except Exception as exc:
+                return ToolResult(f"cannot locate the sandbox for role {role!r}: {exc}",
+                                  is_error=True)
+            origin = f"http://{host}:{port}"
+            url = f"{origin}{path}"
+            try:
+                png = await asyncio.wait_for(take(url, width, height, full_page, origin),
+                                             timeout=TOTAL_TIMEOUT_S + 5)
+            except Exception as exc:  # report, never raise into the agent's turn
+                if not isinstance(exc, (CaptureError, TimeoutError)):
+                    log.warning("screenshot of %s failed: %s", url, exc)
+                return ToolResult(_explain(exc, url), is_error=True)
         if not png:
             return ToolResult(f"screenshot of {url} came back empty", is_error=True)
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")[:-3] + "Z"
-        name = f"{stamp}-{port}.png"
+        name = f"{stamp}-{port or label}.png"
         try:
             await asyncio.to_thread(_store, ctx.tool_dir(role), ctx.run_root, role, name, png)
         except OSError as exc:

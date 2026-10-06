@@ -63,10 +63,12 @@ class FakeCapture:
         self.png = png if png is not None else make_png(1280, 800)
         self.error = error
         self.calls: list[tuple[str, int, int, bool, str]] = []
+        self.extras: list[dict[str, Any]] = []
 
     async def __call__(self, url: str, width: int, height: int, full_page: bool,
-                       allowed_origin: str) -> bytes:
+                       allowed_origin: str, **extra: Any) -> bytes:
         self.calls.append((url, width, height, full_page, allowed_origin))
+        self.extras.append(extra)
         if self.error:
             raise self.error
         return self.png
@@ -384,3 +386,82 @@ def test_find_chromium_executable_picks_newest_build(monkeypatch: pytest.MonkeyP
     monkeypatch.delenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE", raising=False)
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
     assert find_chromium_executable() == str(tmp_path / "chromium-1194" / "chrome-linux" / "chrome")
+
+
+# ── static files served by the host ─────────────────────────────────────────
+async def test_file_mode_serves_clone_over_http_and_refuses_bad_paths(ctx: RunToolContext) -> None:
+    import urllib.error
+    import urllib.request
+
+    clone = ctx.clone_for("builder")
+    (clone / "web").mkdir()
+    (clone / "web" / "index.html").write_text("<h1>hi</h1>")
+    (clone / ".env").write_text("SECRET")
+    (clone / ".guudflow").mkdir(exist_ok=True)
+    (clone / ".guudflow" / "x.txt").write_text("tool")
+    outside = clone.parent / "outside.txt"
+    outside.write_text("nope")
+    (clone / "web" / "link.txt").symlink_to(outside)
+    (clone / "web" / "dir").mkdir()
+
+    def fetch(base: str, path: str, method: str = "GET") -> tuple[int, bytes]:
+        req = urllib.request.Request(base + path, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, b""
+
+    seen: dict[str, Any] = {}
+
+    async def probing(url: str, width: int, height: int, full_page: bool, origin: str,
+                      **extra: Any) -> bytes:
+        seen["url"], seen["origin"], seen["extra"] = url, origin, extra
+        import asyncio
+        seen["results"] = await asyncio.to_thread(lambda: {
+            "ok": fetch(origin, "/web/index.html"),
+            "head": fetch(origin, "/web/index.html", "HEAD")[0],
+            "post": fetch(origin, "/web/index.html", "POST")[0],
+            "dotfile": fetch(origin, "/.env")[0],
+            "guudflow": fetch(origin, "/.guudflow/x.txt")[0],
+            "dir": fetch(origin, "/web/dir")[0],
+            "root": fetch(origin, "/")[0],
+            "symlink": fetch(origin, "/web/link.txt")[0],
+            "dotdot": fetch(origin, "/web/%2e%2e/%2e%2e/outside.txt")[0],
+        })
+        return make_png()
+
+    result = await call(screenshot_tool(ctx, probing), file="web/index.html", wait_ms=0,
+                        keys=["ArrowLeft"])
+    assert not result.is_error, result.text
+    assert seen["url"] == seen["origin"] + "/web/index.html"
+    assert seen["origin"].startswith("http://127.0.0.1:")
+    assert seen["extra"] == {"wait_ms": 0, "keys": ["ArrowLeft"]}
+    res = seen["results"]
+    assert res["ok"] == (200, b"<h1>hi</h1>")
+    assert res["head"] == 200
+    assert res["post"] == 405
+    assert all(res[k] == 404 for k in ("dotfile", "guudflow", "dir", "root", "symlink", "dotdot"))
+    # the server is gone afterwards
+    with pytest.raises(OSError):
+        fetch(seen["origin"], "/web/index.html")
+
+
+@pytest.mark.parametrize("args", [
+    {"file": "../x.html"},
+    {"file": ".git/config"},
+    {"file": "web/.hidden.html"},
+    {"file": "http://evil.com/x"},
+    {"file": "missing.html"},
+    {"file": "a.html", "port": 3000},
+    {"file": "a.html", "wait_ms": 5001},
+    {"file": "a.html", "keys": ["a"] * 21},
+    {"file": "a.html", "keys": [1]},
+    {"port": 3000, "keys": ["a"]},
+])
+async def test_file_mode_invalid_arguments(ctx: RunToolContext, args: dict[str, Any]) -> None:
+    (ctx.clone_for("builder") / "a.html").write_text("x")
+    fake = FakeCapture()
+    result = await call(screenshot_tool(ctx, fake), **args)
+    assert result.is_error
+    assert fake.calls == []
