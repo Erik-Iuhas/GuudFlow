@@ -184,6 +184,7 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
     synced = sync(repo, remote) if accept and remote is not None else None
     run = repo.accept(run_id, note) if accept else repo.reject(run_id, note)
     items = Backlog(data_root, project_id).decide(run_id, accepted=accept, note=note)
+    _remember_decision(data_root, project_id, run_id, accept, note)
     if accept:
         from core.spec_adherence import record_acceptance
         record_acceptance(data_root, project_id, run_id)
@@ -200,6 +201,16 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(carry, target)
     return RunDecision(run=run, items=items)
+
+
+def _remember_decision(data_root: Path, project_id: str, run_id: str, accept: bool,
+                       note: str) -> None:
+    """Jack learns from the decision (plan §10.3). Never raises."""
+    try:
+        from core.pm_memory import record_session_outcome
+        record_session_outcome(data_root, project_id, run_id, accept, note)
+    except Exception:  # noqa: BLE001 — a memory failure must not undo a human's decision
+        log.exception("the project manager's memory of run %s failed", run_id)
 
 
 def keeps_record_in_repo(data_root: Path, project_id: str) -> bool:

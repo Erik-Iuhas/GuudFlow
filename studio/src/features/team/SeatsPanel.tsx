@@ -5,6 +5,7 @@ import { Card } from "../../components/ui/card";
 import { Alert } from "../../components/ui/form-controls";
 import { Segmented } from "../../components/ui/segmented";
 import type { ProjectConfig, ProjectSeats } from "../../types";
+import { usePmName } from "../pm/api";
 
 const REVIEWER_OPTIONS: { value: ProjectSeats["reviewer"]; label: string }[] = [
   { value: "off", label: "Off" },
@@ -21,6 +22,7 @@ export function SeatsPanel({
   onSaved: (project: ProjectConfig) => void;
 }) {
   const seats: ProjectSeats = project.seats ?? { lead: false, reviewer: "off" };
+  const pmName = usePmName();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,7 +58,7 @@ export function SeatsPanel({
             </>
           ) : (
             <>
-              <span className="text-muted-foreground">Empty: the project manager decides and records why</span>
+              <span className="text-muted-foreground">Empty: {pmName} decides and records why</span>
               <Button size="sm" variant="outline" disabled={saving} onClick={() => void save({ ...seats, lead: true })}>
                 Take it
               </Button>

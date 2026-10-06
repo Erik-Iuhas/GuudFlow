@@ -3,6 +3,7 @@ import { Alert, Label, Textarea } from "../../components/ui/form-controls";
 import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
 import type { PlanMessageWire, PlanMode } from "./api";
+import { usePmName } from "../pm/api";
 import { timeLabel } from "./model";
 
 export interface ConversationProps {
@@ -23,7 +24,7 @@ function draftNumber(id: string | null): string | null {
   return m ? m[1] : null;
 }
 
-function Message({ m }: { m: PlanMessageWire }) {
+function Message({ m, pmName }: { m: PlanMessageWire; pmName: string }) {
   const pm = m.author === "pm";
   const draft = draftNumber(m.draft_id);
   return (
@@ -35,11 +36,12 @@ function Message({ m }: { m: PlanMessageWire }) {
           pm ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground",
         )}
       >
-        {pm ? "PM" : "You"}
+        {pm ? pmName.charAt(0).toUpperCase() : "You"}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">{pm ? "Project manager" : "You"}</span>
+          <span className="font-medium text-foreground">{pm ? pmName : "You"}</span>
+          {pm && <span>project manager</span>}
           <time>{timeLabel(m.at)}</time>
           {draft && <span>{pm ? `proposed changes in draft ${draft}` : `draft ${draft}`}</span>}
           {m.mode === "discuss" && !pm && <span>just discussing</span>}
@@ -53,6 +55,7 @@ function Message({ m }: { m: PlanMessageWire }) {
 
 /** The plan conversation: the thread, an empty state and the composer. */
 export function Conversation({ messages, pending, onSend, onStart, error }: ConversationProps) {
+  const pmName = usePmName();
   const [text, setText] = useState("");
   const [mode, setMode] = useState<PlanMode>("update");
   const [failure, setFailure] = useState<string | null>(null);
@@ -102,7 +105,7 @@ export function Conversation({ messages, pending, onSend, onStart, error }: Conv
         <div className="rounded-lg border border-dashed border-border p-6 text-sm">
           <p className="font-medium">No plan yet</p>
           <p className="mt-1 text-muted-foreground">
-            The project manager reads your project goal and files, then proposes the first draft of the spec:
+            {pmName} reads your project goal and files, then proposes the first draft of the spec:
             requirements with checks, the decisions behind them, and the first work items. You approve what you agree
             with.
           </p>
@@ -113,13 +116,13 @@ export function Conversation({ messages, pending, onSend, onStart, error }: Conv
       ) : (
         <ol className="flex flex-col gap-4" aria-live="polite">
           {messages.map((m) => (
-            <Message key={m.id} m={m} />
+            <Message key={m.id} m={m} pmName={pmName} />
           ))}
         </ol>
       )}
       {pending && (
         <p role="status" className="text-sm text-muted-foreground">
-          Project manager is drafting…
+          {pmName} is drafting…
         </p>
       )}
       <div ref={endRef} />

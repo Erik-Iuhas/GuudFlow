@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ValidationError
 
 from api.auth import require_bearer
+from api.routes.pm import remember_draft
 from core.backlog import BacklogError
 from core.plan_drafts import TEAM_OPS, Draft, PlanDraftError, PlanDrafts, parse_change
 from core.project_manager import ProjectManager, ProjectManagerError, TurnOutcome
@@ -216,6 +217,7 @@ async def approve_draft(request: Request, project_id: str) -> dict[str, Any]:  #
         raise _draft_error(exc) from None
     except (SpecError, BacklogError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
+    await remember_draft(request, project_id, current, True)
     team: dict[str, list[str]] = {"added": [], "edited": [], "removed": []}
     if result.team_changes:
         # QUESTION: known two-store limitation. work.db (spec, drafts) and the project store
@@ -249,6 +251,7 @@ async def discard_draft(request: Request, project_id: str) -> dict[str, Any]:  #
         await asyncio.to_thread(drafts.discard, current.id)
     except PlanDraftError as exc:
         raise _draft_error(exc) from None
+    await remember_draft(request, project_id, current, False)
     return {}
 
 

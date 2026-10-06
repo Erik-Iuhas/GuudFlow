@@ -147,7 +147,7 @@ export function NewProject() {
             placeholder="e.g. A small web app where my book club can vote on the next read"
           />
           <p className="m-0 text-xs text-muted-foreground">
-            Rough is fine. Planning is a conversation: the project manager drafts a spec from this, and you shape it
+            Rough is fine. Planning is a conversation: Jack, the project manager, drafts a spec from this, and you shape it
             before anything is built.
           </p>
           <div className="flex flex-wrap items-center gap-2">

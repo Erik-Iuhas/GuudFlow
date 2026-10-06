@@ -43,7 +43,7 @@ describe("SeatsPanel", () => {
   it("shows an empty Lead seat and saves taking it through the project doc", async () => {
     const onSaved = vi.fn();
     render(<SeatsPanel project={project} onSaved={onSaved} />);
-    expect(screen.getByText("Empty: the project manager decides and records why")).toBeInTheDocument();
+    expect(screen.getByText("Empty: Jack decides and records why")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Take it" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     const put = calls.find((c) => c.method === "PUT")!;

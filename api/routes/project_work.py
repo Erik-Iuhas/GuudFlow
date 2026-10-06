@@ -25,6 +25,7 @@ from core.autopilot import AutopilotConfig, AutopilotError
 from core.autopilot import status as autopilot_status
 from core.project_remote import RemoteConfig, RemoteError, sync
 from core.pm_prompts import Seats
+from api.routes.pm import schedule_distill
 from core.project_runs import decide_run
 from core.spec_adherence import cosigned, needs_cosign
 
@@ -251,6 +252,7 @@ async def _decide(request: Request, project_id: str, run_id: str, accept: bool,
             "files": exc.files})
     except ProjectRepoError as exc:
         raise _bad(exc, 404 if "never submitted" in str(exc) else 400) from None
+    schedule_distill(request)
     return {"run": asdict(decision.run), "items": [asdict(i) for i in decision.items]}
 
 

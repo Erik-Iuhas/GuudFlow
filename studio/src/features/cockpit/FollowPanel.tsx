@@ -64,7 +64,7 @@ export function FollowPanel({ runId, pollMs = 10_000 }: { runId: string; pollMs?
         </section>
       )}
       <p className="m-0 text-[11px] text-muted-foreground">
-        A flagged rule goes back to the builder as a review issue. If it repeats, the project manager steps in.
+        A flagged rule goes back to the builder as a review issue. If it repeats, the overseer steps in.
       </p>
     </aside>
   );

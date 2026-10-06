@@ -9,7 +9,7 @@ export const START_MODES: { value: StartMode; title: string; hint: string }[] = 
 ];
 
 export const LEAD_HINT =
-  "Technical decisions wait for your approval in plan drafts. Otherwise the project manager makes them and records why.";
+  "Technical decisions wait for your approval in plan drafts. Otherwise Jack, the project manager, makes them and records why.";
 export const REVIEWER_HINT = "You co-sign the code of each item before it is accepted, after the agent reviewer.";
 
 export const DEFAULT_CAP_USD = 5;

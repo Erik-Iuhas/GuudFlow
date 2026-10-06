@@ -3,6 +3,7 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
 import type { DraftWire, SpecWire } from "./api";
+import { usePmName } from "../pm/api";
 import { approveBlocker, draftCounts, groupChanges, refLabel, type ChangeView, type TeamMember } from "./model";
 
 export interface DraftPanelProps {
@@ -47,6 +48,7 @@ function TeamDetails({ v }: { v: ChangeView }) {
 }
 
 function Details({ v }: { v: ChangeView }) {
+  const pmName = usePmName();
   const c = v.change;
   if (v.section === "Team") return <TeamDetails v={v} />;
   const bits: string[] = [];
@@ -84,7 +86,7 @@ function Details({ v }: { v: ChangeView }) {
         </p>
       )}
       {v.section === "Decisions" && v.byPm && v.accepted === true && (
-        <p className="mt-1 text-xs text-muted-foreground">decided by the project manager</p>
+        <p className="mt-1 text-xs text-muted-foreground">decided by {pmName}</p>
       )}
     </>
   );

@@ -152,3 +152,15 @@ def pm_system_prompt(*, seats: Seats, start_mode: str, phase: Phase) -> str:
     parts.append(MODES[normalise_mode(start_mode)])
     parts.append(PHASES.get(phase, PHASES["plan"]))
     return "\n\n".join(parts)
+
+
+def persona_layers(persona: Any, memory_text: str = "") -> str:  # Any: agents.persona.Persona
+    """The persona layers the project manager's system prompt opens with.
+
+    Identity ("You are Jack, a project manager..."), then the character and the stake
+    framing when set. `memory_text` is optional; the project manager passes its recalled
+    memory in the context instead, below the spec and rules (which win on conflict).
+    """
+    parts = [persona.identity_layer(), persona.character_layer(), persona.stake_layer(),
+             memory_text.strip()]
+    return "\n\n".join(p for p in parts if p)

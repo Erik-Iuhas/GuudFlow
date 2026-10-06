@@ -6,6 +6,7 @@ import { Alert, Textarea } from "../../components/ui/form-controls";
 import { usePlan, useSendMessage, useSpec } from "../plan/api";
 import type { BacklogItemWire, RunBranchWire } from "./api";
 import { cardSubtext, laneItems, planQuestion, weekChanges } from "./overviewModel";
+import { usePmName } from "../pm/api";
 
 /** Sends a message to the project manager's plan (mode "update"), then opens the Plan tab. */
 export function AskBox({
@@ -86,6 +87,7 @@ export function WorkOverview({
 }) {
   const plan = usePlan(projectId);
   const spec = useSpec(projectId);
+  const pmName = usePmName();
   const [reviewing, setReviewing] = useState<string | null>(null);
   const lanes = laneItems(items);
   const question = planQuestion(plan.data);
@@ -132,7 +134,7 @@ export function WorkOverview({
               )}
               {question && (
                 <li>
-                  The project manager has a question: {question}{" "}
+                  {pmName} has a question: {question}{" "}
                   <Link to="?tab=plan">Answer in the plan</Link>
                 </li>
               )}

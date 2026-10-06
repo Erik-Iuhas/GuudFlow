@@ -26,6 +26,7 @@ import { planKeys } from "../plan/api";
 import { specApi } from "../spec/api";
 import type { ProjectSeats } from "../../types";
 import { Link } from "react-router-dom";
+import { usePmName } from "../pm/api";
 
 export interface RunRequest {
   backlog_items?: string[];
@@ -45,6 +46,7 @@ export function ProjectWork({
   onStartRun: (request: RunRequest) => void;
   starting?: boolean;
 }) {
+  const pmName = usePmName();
   const backlog = useBacklog(projectId);
   const runs = useProjectRuns(projectId);
   const add = useAddItem(projectId);
@@ -192,7 +194,7 @@ export function ProjectWork({
       )}
       {afterSession && (
         <WorkNotice>
-          The project manager is reviewing the session for spec changes. <Link to="?tab=plan">See Plan.</Link>
+          {pmName} is reviewing the session for spec changes. <Link to="?tab=plan">See Plan.</Link>
         </WorkNotice>
       )}
       {detail === "overview" ? (

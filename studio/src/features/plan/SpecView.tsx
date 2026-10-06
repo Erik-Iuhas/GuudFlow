@@ -1,5 +1,6 @@
 import { Badge } from "../../components/ui/badge";
 import type { CheckState, SpecWire } from "./api";
+import { usePmName } from "../pm/api";
 
 const stateMark: Record<CheckState, { mark: string; label: string; cls: string }> = {
   met: { mark: "✓", label: "met", cls: "text-status-complete" },
@@ -9,6 +10,7 @@ const stateMark: Record<CheckState, { mark: string; label: string; cls: string }
 
 /** The approved spec: requirements with check states, decisions and rules. */
 export function SpecView({ spec }: { spec: SpecWire }) {
+  const pmName = usePmName();
   const reqs = spec.requirements.filter((r) => r.status === "active");
   const decisions = spec.decisions.filter((d) => d.status === "accepted");
   const rules = spec.rules.filter((r) => r.status === "active");
@@ -74,7 +76,7 @@ export function SpecView({ spec }: { spec: SpecWire }) {
               <p className="mt-1 text-xs text-muted-foreground">{d.reason}</p>
               <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 {d.binding && <Badge variant="outline">binding</Badge>}
-                <span>decided by {d.decided_by === "pm" ? "the project manager" : d.decided_by}</span>
+                <span>decided by {d.decided_by === "pm" ? pmName : d.decided_by}</span>
               </p>
             </li>
           ))}

@@ -26,7 +26,7 @@ from core.harness.brief import wrap_untrusted
 from core.harness.results import result_json_schema, validate_result
 from core.llm.client import LLMClient, LLMMessage, LLMResponse
 from core.plan_drafts import Draft, PlanDrafts, PlanTurn, validate_turn
-from core.pm_prompts import Phase, Seats, normalise_mode, pm_system_prompt
+from core.pm_prompts import Phase, Seats, normalise_mode, persona_layers, pm_system_prompt
 from core.spec import Spec
 
 log = logging.getLogger(__name__)
@@ -48,7 +48,18 @@ FIRST_DRAFT_INSTRUCTION = (
     "needs, and 3 to 6 initial work items. Mark what you assumed, and ask at most one blocking "
     "question.")
 
+MEMORY_HEADING = "What you have learned on earlier projects"
+_AFTER_SPEC = "Open draft (proposed, not yet part of the spec):"
+
 Mode = Literal["update", "discuss"]
+
+
+def _insert_memory(context: str, memory: str) -> str:
+    """Put the recalled memory below the spec and rules (before the open draft)."""
+    if not memory:
+        return context
+    head, sep, tail = context.partition(_AFTER_SPEC)
+    return head + memory + "\n\n" + sep + tail if sep else context + "\n\n" + memory
 
 
 class ProjectManagerError(RuntimeError):
@@ -101,6 +112,7 @@ class ProjectManager:
         self.start_mode = normalise_mode(self.doc.get("start_mode"))
         self.drafts = PlanDrafts(self.data_root, project_id)
         self._project_dir = self.data_root / "projects" / project_id
+        self._persona: Any = None  # Any: Jack (agents.persona.Persona), loaded per turn
 
     # ── public ──────────────────────────────────────────────────────────────
     async def turn(self, text: str | None, *, mode: Mode = "update", phase: Phase = "plan",
@@ -116,6 +128,7 @@ class ProjectManager:
             new.append(await asyncio.to_thread(self.drafts.add_message, "human", text.strip(),
                                                None, mode))
         context = await asyncio.to_thread(self._context, text, instruction, extra_context)
+        context = _insert_memory(context, await self._memory_context(text))
         turn, usage = await self._ask(phase, context)
         draft: Draft | None
         if mode == "update" and turn.changes:
@@ -156,6 +169,8 @@ class ProjectManager:
     # ── the model call ──────────────────────────────────────────────────────
     async def _ask(self, phase: Phase, context: str) -> tuple[PlanTurn, list[LLMResponse]]:
         system = pm_system_prompt(seats=self.seats, start_mode=self.start_mode, phase=phase)
+        if self._persona is not None:
+            system = persona_layers(self._persona) + "\n\n" + system
         spec = Spec(self.drafts.db.read_spec_doc())
         backlog_doc = self.drafts.db.read_backlog_doc()
         responses: list[LLMResponse] = []
@@ -213,6 +228,27 @@ class ProjectManager:
         return round(cost, 6), tokens
 
     # ── context ─────────────────────────────────────────────────────────────
+    async def _memory_context(self, text: str | None) -> str:
+        """Load Jack and recall what he learned on earlier projects ("" with no memory).
+
+        Never fails a turn: with Jack unreadable the plan conversation runs without him.
+        """
+        try:
+            from core.pm_persona import load_pm
+            self._persona = await asyncio.to_thread(load_pm, self.data_root)
+            if not self._persona.has_memory():
+                return ""
+            goal = str(self.doc.get("goal") or "").strip()
+            recalled = await self._persona.recall(f"{goal}\n{text or ''}".strip())
+            body = recalled.render_for_prompt()
+        except Exception:  # noqa: BLE001 — see docstring
+            log.warning("pm: memory unavailable", exc_info=True)
+            return ""
+        if not body:
+            return ""
+        return (MEMORY_HEADING + ":\n" + body + "\n(The project's own rules and spec above win "
+                "over anything you remember when they disagree.)")
+
     def _context(self, text: str | None, instruction: str | None,
                  extra: str | None) -> str:
         spec = Spec(self.drafts.db.read_spec_doc())
