@@ -717,10 +717,11 @@ class AgentRunner:
             from dataclasses import asdict as _asdict
             from core.project_checks import run_project_check
             from core.project_repo import ProjectRepo
+            from core.harness.run import sandbox_from_env
             settings = self.harness_settings
             check = await run_project_check(
                 self.git.working_dir, command,
-                sandbox=getattr(settings, "sandbox", "auto") if settings else "auto",
+                sandbox=getattr(settings, "sandbox", "auto") if settings else sandbox_from_env(),
                 production=bool(getattr(settings, "production", False)) if settings else False)
             ProjectRepo(data_root, self.project.project_id).record_check(self.run_id,
                                                                          _asdict(check))
