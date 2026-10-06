@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import logging
 import os
 import shutil
@@ -37,8 +38,11 @@ from core.harness.brief import (
     BriefInputs,
     ReviewIssue,
     UpstreamResult,
+    NOTEBOOK_LIMIT,
     build_brief,
     conflict_brief,
+    notebook_brief,
+    wrap_untrusted,
     retry_brief,
     wrap_up_brief,
 )
@@ -114,6 +118,27 @@ DEFAULT_PROVIDER_URLS = {"anthropic": "https://api.anthropic.com/v1"}
 _TOOL_SECRETS = frozenset({"BRAVE_API_KEY", "TAVILY_API_KEY"})
 
 
+DESK_PROPOSED_DIR = "proposed"   # persona_desks/<persona>/proposed/: from the meta proposal
+_SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+_SLUG_WORD = re.compile(r"[^a-z_-]")
+
+
+def _comment_target(sig: Signal) -> str | None:
+    """The one role a human comment is for (None: everyone)."""
+    try:
+        detail = json.loads(sig.detail or "{}")
+    except ValueError:
+        return None
+    to = detail.get("to") if isinstance(detail, dict) else None
+    return str(to) if to else None
+
+
+def _config_key(cfg: "AgentConfig") -> str:
+    """What a running server was configured from; a change means a restart."""
+    return repr((cfg.model_tier, getattr(cfg, "model_id", None), cfg.description,
+                 tuple(getattr(cfg, "declared_local_tools", None) or ()), cfg.system_prompt))
+
+
 class TurnFailed(RuntimeError):
     """A role's turn ended without an acceptable outcome. The scheduler marks it failed."""
 
@@ -133,6 +158,15 @@ class HarnessSettings:
     on_permission: RolePermissionHook | None = None
     on_event: Callable[[str, dict[str, Any]], None] | None = None
     keep_servers: bool = False  # tests: keep servers between spawns of the same run
+    # A role keeps its opencode server and session from card to card, so it does not
+    # re-read the code it just worked on. Rotated after `max_turns_per_session` turns,
+    # after a failed or timed-out turn, when its work is set aside, or when its config
+    # changes. The overseer always starts fresh.
+    session_reuse: bool = True
+    max_turns_per_session: int = 8
+    # At the end of a run each role that worked writes its notebook for the next session.
+    notebooks: bool = True
+    notebook_timeout: float = 120.0
     max_parallel: int = 3       # concurrent roles (each sandbox costs ~1 GB, plan §5.6)
     max_spawns_per_role: int = 12
     # "docker": every role in a hardened container (plan §5.3); "host": host_dev for
@@ -163,6 +197,10 @@ class _Role:
     client: OpencodeClient | None = None
     token: str = ""
     prompt: PromptLayers | None = None  # layers of the prompt this role's server started with
+    session_id: str | None = None       # the opencode session reused from card to card
+    session_turns: int = 0
+    config_key: str = ""                 # the config the server started with
+    turns_done: int = 0                  # turns with an accepted result in this run
 
 
 class OpencodeRun:
@@ -177,6 +215,7 @@ class OpencodeRun:
         self.inbox = ResultInbox()
         self.mcp.register(self.inbox.tool())
         self.mcp.register(self._post_note_tool())
+        self.mcp.register(self._notebook_tool())
         for tool in self._git_tools():
             self.mcp.register(tool)
         self.clones = RoleClones(runner.git, runner.run_root / "roles")
@@ -189,6 +228,9 @@ class OpencodeRun:
         self.agents: list["AgentConfig"] = list(runner.project.agents)
         self._started = 0.0
         self._carry_text = ""
+        self._notebooks: dict[str, str] = {}
+        self._desks: dict[str, Any] = {}           # role -> DeskIndex (agents.persona_desk)
+        self._desk_seen: dict[str, set[str]] = {}  # role -> desk notes already in its session
         self.images = ImageBudget()
         self._delivered_notes: set[str] = set()
         # Per role: what the next brief must say about git (set-aside work, conflicts).
@@ -240,6 +282,9 @@ class OpencodeRun:
         self._setup_overseer()
         self._name_the_team()
         carried = self._load_carry_forward()
+        self._notebooks = project_runs.load_notebooks(
+            self._data_root(), self.runner.project.project_id, [c.role for c in self.agents])
+        self._write_desk_seeds()
         # The project backlog items this run took (plan §13).
         self.backlog = project_runs.selection(self.runner.run_root)
         flow = self.flow
@@ -423,6 +468,7 @@ class OpencodeRun:
 
     async def shutdown(self) -> None:
         """Stop every opencode server/sandbox, the MCP server and gateway; revoke tokens."""
+        await self._write_notebooks()
         # One sandbox that fails to stop must not skip revoking the run's
         # credentials below, nor fail a run whose work is already done.
         for role in self._roles.values():
@@ -580,13 +626,18 @@ class OpencodeRun:
 
     async def _ensure_server(self, role: _Role, workdir: Path,
                              task_hint: str = "") -> OpencodeClient:
-        if role.client is not None:
+        if role.client is not None and role.config_key == _config_key(role.cfg):
             return role.client
+        if role.client is not None:
+            # The team was edited mid-run: the change applies from this spawn.
+            await self._stop_server(role)
+        role.config_key = _config_key(role.cfg)
         assert self._http is not None
         assert self._gw_http is not None and self.gateway is not None
         name = role.cfg.role
         identity = McpIdentity(self.run_id, name, role.compiled.mcp_tools
-                               | {"submit_result", "changes", "history", "post_note"})
+                               | {"submit_result", "changes", "history", "post_note",
+                                  "notebook"})
         role.token = self.mcp.issue_token(identity)
         virtual_key = self.gateway.issue_key(self.run_id, name, [role.binding.model.id],
                                              budget_usd=self._role_budget(role))
@@ -628,6 +679,8 @@ class OpencodeRun:
         return float(value) if isinstance(value, (int, float)) else None
 
     async def _stop_server(self, role: _Role) -> None:
+        role.session_id = None
+        role.session_turns = 0
         if role.client is not None:
             await role.client.aclose()
             role.client = None
@@ -716,6 +769,9 @@ class OpencodeRun:
     def _note_set_aside(self, role_name: str, why: str, patch: str | None) -> None:
         if patch is None:
             return
+        if role_name in self._roles:
+            # The folder no longer matches what the session remembers: start fresh.
+            self._roles[role_name].session_id = None
         self._git_notes.setdefault(role_name, []).append(
             f"Your previous changes were set aside because {why}. Your folder now matches "
             f"main. The dropped changes are in `.guudflow/{patch}` (read-only): reuse "
@@ -733,12 +789,40 @@ class OpencodeRun:
         self._post_capabilities(role)
 
         self.images.new_turn(role_name)
-        session = await client.create_session(title=f"{self.run_id}:{role_name}")
+        reuse = self._reuses_session(role)
+        continuing = (reuse and role.session_id is not None
+                      and role.session_turns < self.settings.max_turns_per_session)
         on_event = self._event_hook(role_name)
         on_permission = self._permission_hook(role_name)
-        stats = await drive_turn(client, session["id"], self._brief(role, plan), agent=role_name,
-                                 on_event=on_event, on_permission=on_permission,
-                                 timeout=self.settings.turn_timeout)
+        kept = False
+        try:
+            if not continuing:
+                session = await client.create_session(title=f"{self.run_id}:{role_name}")
+                role.session_id, role.session_turns = str(session["id"]), 0
+                self._desk_seen.pop(role_name, None)
+            session_id = str(role.session_id)
+            role.session_turns += 1
+            stats = await drive_turn(client, session_id,
+                                     self._brief(role, plan, continuation=continuing),
+                                     agent=role_name, on_event=on_event,
+                                     on_permission=on_permission,
+                                     timeout=self.settings.turn_timeout)
+            kept = await self._turn_body(role, client, session_id, stats, plan,
+                                         on_event, on_permission)
+        finally:
+            if not (kept and reuse) and not self.settings.keep_servers:
+                await self._stop_server(role)
+
+    def _reuses_session(self, role: _Role) -> bool:
+        """Does this role keep its server and session between cards?"""
+        return self.settings.session_reuse and not self._is_overseer(role.cfg.role)
+
+    async def _turn_body(self, role: _Role, client: OpencodeClient, session_id: str,
+                         stats: TurnStats, plan: TurnPlan | None,
+                         on_event: EventHook, on_permission: PermissionHook) -> bool:
+        """Follow-ups and finishing for one turn. True when the session is worth keeping."""
+        role_name = role.cfg.role
+        session = {"id": session_id}
         result = self.inbox.take(self.run_id, role_name)
         if result is None:
             # One follow-up in the same session: after a validation miss, the
@@ -760,11 +844,11 @@ class OpencodeRun:
             _merge_stats(stats, more)
             return self.inbox.take(self.run_id, role_name)
 
-        try:
-            await self._finish(role, result, stats, plan, resolve=resolve)
-        finally:
-            if not self.settings.keep_servers:
-                await self._stop_server(role)
+        await self._finish(role, result, stats, plan, resolve=resolve)
+        if result is not None:
+            role.turns_done += 1
+        # A timed-out or result-less turn starts the next card in a fresh session.
+        return result is not None and not stats.timed_out
 
     async def _finish(self, role: _Role, result: BaseModel | None, stats: TurnStats,
                       plan: TurnPlan | None = None,
@@ -917,7 +1001,8 @@ class OpencodeRun:
         self._post(SignalType.ESCALATION, role, summary, detail)
 
     # ── briefs, notes, signals ─────────────────────────────────────────────
-    def _brief(self, role: _Role, plan: TurnPlan | None = None) -> str:
+    def _brief(self, role: _Role, plan: TurnPlan | None = None, *,
+               continuation: bool = False) -> str:
         cfg = role.cfg
         upstream = tuple(
             UpstreamResult(role=dep, summary=getattr(self.results[dep], "summary", ""),
@@ -949,16 +1034,115 @@ class OpencodeRun:
             carry_forward=self._carry_text or None,
             git_notes=tuple(git_notes),
             human_comments=self._take_human_comments(cfg.role),
+            continuation=continuation,
+            notebook=self._notebooks.get(cfg.role),
             names=self.names, review_from=review_from,
             team=team_section(cfg.role, [
                 Member(c.role, self.names.get(c.role, c.role), self._roles[c.role].role_type,
                        c.description) for c in self.agents if c.role in self._roles]),
-            extra_sections=(plan.extra_sections if plan is not None else ())
+            extra_sections=self._input_sections(cfg.role, plan, continuation)
+            + (plan.extra_sections if plan is not None else ())
             + ((("This run's backlog items", backlog_text(self.backlog)),)
                if self.backlog and self.flow is None else ())
             + (self.overseer.brief_addenda(cfg.role) if self.overseer is not None
                and not self._is_overseer(cfg.role) else ()),
         ))
+
+    def _input_sections(self, role: str, plan: TurnPlan | None,
+                        continuation: bool) -> tuple[tuple[str, str], ...]:
+        """What the human provided that this role should see: uploaded input files (first
+        brief of a session) and the persona's desk notes that this card triggers."""
+        sections: list[tuple[str, str]] = []
+        if not continuation and not self._is_overseer(role):
+            listing = self._inputs_listing()
+            if listing:
+                sections.append(("Files the human provided", listing))
+        desk = self._desk_notes(role, plan.task_text if plan is not None and plan.task_text
+                                else self._roles[role].cfg.description)
+        if desk:
+            sections.append(("Your desk notes", desk))
+        return tuple(sections)
+
+    def _inputs_listing(self) -> str:
+        """The run's input files, read-only for every role (DESIGN §33). '' if none."""
+        root = self.runner.run_root / "inputs"
+        if not root.is_dir():
+            return ""
+        files = sorted(p.relative_to(root).as_posix() for p in root.rglob("*")
+                       if p.is_file() and not p.is_symlink()
+                       and not any(part.startswith(".") for part in p.relative_to(root).parts))
+        if not files:
+            return ""
+        where = "/inputs" if self.mode == "docker" else str(root)
+        shown = "\n".join(f"- `{where}/{f}`" for f in files[:40])
+        more = f"\n- … and {len(files) - 40} more" if len(files) > 40 else ""
+        first = (f" Read `{where}/README.md` first." if "README.md" in files else "")
+        return (f"The human gave this run these files (read-only).{first}\n\n{shown}{more}")
+
+    def _desk_index(self, role: str) -> Any:
+        """The persona's desk (persona layer + this project's overlay), or None."""
+        if role in self._desks:
+            return self._desks[role]
+        cfg = self._roles[role].cfg
+        index = None
+        root = self.runner.personas_root
+        if cfg.persona_id and root is not None:
+            try:
+                from agents.persona_desk import DeskIndex
+                data_root, pid = self._data_root(), self.runner.project.project_id
+                overlay = (data_root / "projects" / pid / "persona_desks" / cfg.persona_id
+                           if data_root is not None and pid else None)
+                index = DeskIndex.build(Path(root) / cfg.persona_id / "desk", overlay)
+            except Exception as exc:  # noqa: BLE001 — desk notes are optional context
+                log.warning("%s: could not load desk notes: %s", role, exc)
+        self._desks[role] = index
+        return index
+
+    def _desk_notes(self, role: str, task: str) -> str:
+        """Desk notes this card triggers, each once per session. '' if none."""
+        index = self._desk_index(role)
+        if index is None or index.is_empty():
+            return ""
+        seen = self._desk_seen.setdefault(role, set())
+        parts: list[str] = []
+        for desk_file, snippet in index.auto_inject(task, role):
+            if desk_file.name in seen:
+                continue
+            seen.add(desk_file.name)
+            body = f"**{desk_file.name}** ({desk_file.kind})\n{snippet}"
+            # Notes the project manager proposed are agent-written: data, not orders.
+            parts.append(wrap_untrusted(f"desk note {desk_file.name}", body)
+                         if desk_file.source_path.parent.name == DESK_PROPOSED_DIR else body)
+        return "\n\n".join(parts)
+
+    def _write_desk_seeds(self) -> None:
+        """Desk notes proposed with the team (meta proposal `desk_seeds`) become files in the
+        project's persona desks, so `_desk_notes` finds them. Existing files are kept."""
+        seeds = getattr(self.runner.project, "desk_seeds", None) or {}
+        data_root, pid = self._data_root(), self.runner.project.project_id
+        if not seeds or data_root is None or not pid:
+            return
+        for persona_id, items in seeds.items():
+            if not _SLUG.fullmatch(str(persona_id)) or not isinstance(items, list):
+                continue
+            folder = (data_root / "projects" / pid / "persona_desks" / str(persona_id)
+                      / DESK_PROPOSED_DIR)
+            for seed in items:
+                name = str(seed.get("name") or "") if isinstance(seed, dict) else ""
+                if not _SLUG.fullmatch(name) or not seed.get("body"):
+                    continue
+                path = folder / f"{name}.md"
+                if path.exists():
+                    continue
+                triggers = [str(t) for t in seed.get("triggers") or [] if str(t).strip()]
+                if not triggers:
+                    continue
+                folder.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    "---\n" + f"name: {name}\n" + f"triggers: {json.dumps(triggers)}\n"
+                    + f"kind: {_SLUG_WORD.sub('', str(seed.get('kind') or 'convention'))}\n"
+                    + f"priority: {_SLUG_WORD.sub('', str(seed.get('priority') or 'normal'))}\n"
+                    + "---\n" + str(seed["body"]).strip() + "\n", encoding="utf-8")
 
     def _take_human_comments(self, role: str) -> tuple[str, ...]:
         """Comments the human posted on the run that this role has not seen yet.
@@ -967,7 +1151,8 @@ class OpencodeRun:
         come first. The role is recorded in `seen_by` (DESIGN §6).
         """
         fresh = [s for s in self.workspace.unseen_user_comments(role)
-                 if s.type in (SignalType.USER_COMMENT, SignalType.USER_COMMENT_PRIORITY)]
+                 if s.type in (SignalType.USER_COMMENT, SignalType.USER_COMMENT_PRIORITY)
+                 and _comment_target(s) in (None, role)]
         fresh.sort(key=lambda s: s.type is not SignalType.USER_COMMENT_PRIORITY)
         for sig in fresh:
             self.workspace.mark_seen(sig.id, role)
@@ -992,6 +1177,52 @@ class OpencodeRun:
         self._post(SignalType.AGENT_MESSAGE, from_role,
                    f"{self._label(from_role)} → {self._label(to_role)}: note",
                    json.dumps({"from": from_role, "to": to_role, "message": text}))
+
+    def _notebook_tool(self) -> McpTool:
+        async def handler(identity: McpIdentity, args: dict[str, Any]) -> ToolResult:
+            text = str(args.get("text", "")).strip()
+            if not text:
+                return ToolResult("text must not be empty", is_error=True)
+            if len(text) > NOTEBOOK_LIMIT:
+                return ToolResult(f"keep it under {NOTEBOOK_LIMIT} characters "
+                                  f"(got {len(text)})", is_error=True)
+            folder = self.runner.run_root / project_runs.NOTEBOOKS_DIR
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{identity.role}.md").write_text(text + "\n", encoding="utf-8")
+            self._post(SignalType.AGENT_MESSAGE, identity.role,
+                       f"{self._label(identity.role)} wrote a notebook for the next session",
+                       json.dumps({"kind": "notebook", "chars": len(text)}))
+            return ToolResult("Notebook saved. It reaches your next session once this one "
+                              "is accepted.")
+
+        return McpTool("notebook", "Save your notebook for the next session (markdown). Use "
+                       "it only when asked to write your notebook.",
+                       {"type": "object", "additionalProperties": False,
+                        "properties": {"text": {"type": "string"}}, "required": ["text"]},
+                       handler)
+
+    async def _write_notebooks(self) -> None:
+        """End of run: each role that worked writes its notebook, one after another.
+
+        Uses the role's live session (its context is still there), so it is cheap. Skipped
+        when the human stopped the run. Never raises.
+        """
+        stop = self.workspace.pending_human
+        if not self.settings.notebooks or (stop is not None and stop.from_agent == "system"):
+            return
+        for role in self._roles.values():
+            name = role.cfg.role
+            if (self._is_overseer(name) or role.turns_done == 0 or role.client is None
+                    or role.session_id is None):
+                continue
+            try:
+                await drive_turn(role.client, role.session_id,
+                                 notebook_brief(self._notebooks.get(name)), agent=name,
+                                 on_event=self._event_hook(name),
+                                 on_permission=self._permission_hook(name),
+                                 timeout=self.settings.notebook_timeout)
+            except Exception:  # noqa: BLE001 — a notebook is a convenience, never a failure
+                log.exception("%s: writing the notebook failed in %s", name, self.run_id)
 
     def _link_tool_dir(self, role: str, workdir: Path) -> None:
         """Host mode: expose the host-only tool dir at <worktree>/.guudflow (a sandbox

@@ -39,6 +39,7 @@ log = logging.getLogger(__name__)
 SELECTION_JSON = "backlog_selection.json"
 PROJECT_RUN_JSON = "project_run.json"
 LAST_ACCEPTED_JSON = "last_accepted.json"
+NOTEBOOKS_DIR = "notebooks"  # run_root/notebooks/{role}.md → projects/{id}/context/notebooks/
 DEFAULT_TAKE = 3
 
 
@@ -195,6 +196,7 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
             repo.record(run_id, sync=asdict(synced) if synced else None,
                         published=asdict(published))
         run = repo.get(run_id) or run
+        keep_notebooks(data_root, project_id, run_id)
         carry = Path(data_root) / "runs" / run_id / "carry_forward.json"
         target = Path(data_root) / "projects" / project_id / "context" / LAST_ACCEPTED_JSON
         if carry.is_file():
@@ -211,6 +213,50 @@ def _remember_decision(data_root: Path, project_id: str, run_id: str, accept: bo
         record_session_outcome(data_root, project_id, run_id, accept, note)
     except Exception:  # noqa: BLE001 — a memory failure must not undo a human's decision
         log.exception("the project manager's memory of run %s failed", run_id)
+
+
+def _notebook_dir(data_root: Path, project_id: str) -> Path:
+    return Path(data_root) / "projects" / project_id / "context" / NOTEBOOKS_DIR
+
+
+def keep_notebooks(data_root: Path, project_id: str, run_id: str) -> list[str]:
+    """An accepted run's notebooks become the project's (one per role). Never raises.
+
+    Only accepted runs: a rejected session's notes describe code that never reached main.
+    Returns the roles whose notebook was kept.
+    """
+    kept: list[str] = []
+    try:
+        source = Path(data_root) / "runs" / run_id / NOTEBOOKS_DIR
+        if not source.is_dir():
+            return kept
+        target = _notebook_dir(data_root, project_id)
+        target.mkdir(parents=True, exist_ok=True)
+        for path in sorted(source.glob("*.md")):
+            if path.is_file() and not path.is_symlink():
+                shutil.copyfile(path, target / path.name)
+                kept.append(path.stem)
+    except OSError:
+        log.exception("keeping the notebooks of run %s failed", run_id)
+    return kept
+
+
+def load_notebooks(data_root: Path | None, project_id: str | None,
+                   roles: Iterable[str]) -> dict[str, str]:
+    """Each role's notebook from the project's last accepted session ({} if none)."""
+    if data_root is None or not project_id:
+        return {}
+    folder = _notebook_dir(data_root, project_id)
+    notes: dict[str, str] = {}
+    for role in roles:
+        path = folder / f"{role}.md"
+        try:
+            text = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+        except OSError:
+            text = ""
+        if text:
+            notes[role] = text
+    return notes
 
 
 def keeps_record_in_repo(data_root: Path, project_id: str) -> bool:

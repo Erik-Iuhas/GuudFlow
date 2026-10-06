@@ -97,6 +97,15 @@ class PermissionGate:
             return False, "once"
         finally:
             unsubscribe()
+        note = (getattr(request, "decision_note", None) or "").strip()
+        if note:
+            # The human's reason reaches the asking role in its next brief.
+            verb = "allowed" if outcome[0][0] else "refused"
+            self.workspace.post_signal(Signal(
+                type=SignalType.USER_COMMENT_PRIORITY, from_user=True, priority="high",
+                summary=f"About your request to use {permission} ({verb}): {note}",
+                detail=json.dumps({"to": role, "approval_id": request.id}),
+                iteration=self.workspace.iteration))
         return outcome[0]
 
     def _post(self, kind: SignalType, role: str, summary: str, detail: dict[str, Any]) -> None:

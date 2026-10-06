@@ -13,7 +13,7 @@ def _ws() -> Workspace:
     return Workspace(run_id="r", goal="g")
 
 
-def _answer(ws: Workspace, decision: str, scope: str = "once") -> None:
+def _answer(ws: Workspace, decision: str, scope: str = "once", note: str | None = None) -> None:
     """Act like the HTTP route: answer the next APPROVAL_NEEDED (once)."""
     def on_signal(sig: Signal) -> None:
         if sig.type is not SignalType.APPROVAL_NEEDED:
@@ -21,7 +21,7 @@ def _answer(ws: Workspace, decision: str, scope: str = "once") -> None:
         unsubscribe()
         approval_id = (sig.detail or "").split(";")[0].split("=")[1]
         word = "granted" if decision == "grant" else "denied"
-        ws.record_approval(approval_id, word)
+        ws.record_approval(approval_id, word, note=note)
         kind = SignalType.APPROVAL_GRANTED if decision == "grant" else SignalType.APPROVAL_DENIED
         detail = f"approval_id={approval_id}; kind=tool_permission"
         if decision == "grant":
@@ -75,3 +75,20 @@ async def test_timeout_rejects_and_marks_denied() -> None:
     gate = PermissionGate(ws, timeout=0.05)
     assert await gate.decide("builder", ASK) == "reject"
     assert ws.pending_approvals[0].decision == "denied"
+
+
+async def test_the_humans_reason_reaches_the_asking_role() -> None:
+    ws = _ws()
+    _answer(ws, "deny", note="Use bun test instead of touching files in the repo root.")
+    assert await PermissionGate(ws).decide("builder", ASK) == "reject"
+    comments = [s for s in ws.board if s.type is SignalType.USER_COMMENT_PRIORITY]
+    assert len(comments) == 1
+    assert "Use bun test instead" in comments[0].summary and "refused" in comments[0].summary
+    assert '"to": "builder"' in (comments[0].detail or "")
+
+
+async def test_no_note_no_comment() -> None:
+    ws = _ws()
+    _answer(ws, "grant")
+    await PermissionGate(ws).decide("builder", ASK)
+    assert not [s for s in ws.board if s.type is SignalType.USER_COMMENT_PRIORITY]

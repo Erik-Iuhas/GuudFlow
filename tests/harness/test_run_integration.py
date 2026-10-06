@@ -19,7 +19,7 @@ from core.runner import AgentConfig, AgentRunner, ProjectConfig
 from core.scheduler import SchedulerStatus
 from core.signals import SignalType
 from tests.harness.conftest import requires_opencode
-from tests.harness.fake_llm import FakeLLM, ToolCall
+from tests.harness.fake_llm import FakeLLM, Text, ToolCall
 
 pytestmark = requires_opencode
 
@@ -156,6 +156,41 @@ async def test_run_comments_reach_every_role_once(tmp_path: Path, fake_llm: Fake
         assert "Comments from the human" in brief and "Walls must be hot pink." in brief
     comment = runner.workspace.user_board[0]
     assert {"architect", "builder"} <= set(comment.seen_by)
+
+
+async def test_rework_continues_the_same_session(tmp_path: Path, fake_llm: FakeLLM) -> None:
+    fake_llm.route("Your turn: builder",
+                   ToolCall("write", {"filePath": "greet.py", "content": "x = 1\n"}),
+                   _done("Wrote greet.py with the module skeleton.", ["greet.py"]), Text("Done."),
+                   _done("Renamed x to greeting as the reviewer asked.", ["greet.py"]),
+                   Text("Done."))
+    fake_llm.route("Your turn: reviewer",
+                   ToolCall("guudflow_submit_result", {"verdict": "fail", "issues": [
+                       {"file": "greet.py", "detail": "x is not a descriptive name; call it greeting"}]}),
+                   Text("Sent back."),
+                   ToolCall("guudflow_submit_result", {"verdict": "pass", "issues": []}),
+                   Text("Passed."))
+    runner = _runner(tmp_path, [AgentConfig(role="builder"),
+                                AgentConfig(role="reviewer", is_reviewer=True,
+                                            depends_on=["builder"])], fake_llm)
+    assert (await runner.run()).status is SchedulerStatus.COMPLETE
+    builder = [str(r["messages"]) for r in fake_llm.requests
+               if "Your turn: builder" in str(r["messages"])]
+    rework = [m for m in builder if "x is not a descriptive name" in m]
+    assert rework, "the builder got the review findings"
+    # Same session: the first brief is still in the conversation, the new one is short.
+    assert all("Next piece of work in the same session" in m and "Wrote greet.py" in m
+               for m in rework)
+
+
+async def test_roles_write_notebooks_at_the_end(tmp_path: Path, fake_llm: FakeLLM) -> None:
+    fake_llm.route("Write your notebook",
+                   ToolCall("guudflow_notebook", {"text": "- greet.py holds greet(); run pytest"}))
+    fake_llm.route("Your turn: builder", _done("Implemented greet in greet.py."))
+    runner = _runner(tmp_path, [AgentConfig(role="builder")], fake_llm)
+    assert (await runner.run()).status is SchedulerStatus.COMPLETE
+    note = runner.run_root / "notebooks" / "builder.md"
+    assert note.read_text().strip() == "- greet.py holds greet(); run pytest"
 
 
 @pytest.mark.parametrize("production", [True])

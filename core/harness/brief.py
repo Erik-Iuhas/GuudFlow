@@ -73,6 +73,10 @@ class BriefInputs:
     names: Mapping[str, str] = field(default_factory=dict)  # role -> worker name (core/crew.py)
     team: str | None = None                          # the "Your team" section
     review_from: str | None = None                   # the reviewer whose findings these are
+    # The role continues its session from the previous card: the goal, team, job and
+    # working rules are already in its context, so they are not repeated.
+    continuation: bool = False
+    notebook: str | None = None                      # the role's notes from the last session
 
 
 def _section(title: str, body: str) -> str:
@@ -85,6 +89,9 @@ def build_brief(inp: BriefInputs) -> str:
     # The role stays first: "Your turn: <role>" is what tooling and tests key on.
     me = inp.names.get(inp.role, "")
     parts: list[str] = [f"# Your turn: {inp.role}{f' — {me}' if me and me != inp.role else ''}\n"]
+    if inp.continuation:
+        parts.append("Next piece of work in the same session. Everything you saw earlier still "
+                     "applies; your folder has been updated with what teammates merged since.\n")
     if inp.git_notes:
         parts.append(_section("Before anything else: your folder",
                               "\n\n".join(inp.git_notes)))
@@ -93,14 +100,20 @@ def build_brief(inp: BriefInputs) -> str:
         by = f" from {who(inp.review_from)}" if inp.review_from else ""
         parts.append(_section(
             f"Fix these review findings{by} first (review round {inp.review_round})", issues))
-    parts.append(_section("Project goal", inp.goal))
-    if inp.team:
-        parts.append(_section("Your team", inp.team))
-    parts.append(_section("Your job", inp.description or f"Act as the team's {inp.role}."))
+    if not inp.continuation:
+        parts.append(_section("Project goal", inp.goal))
+        if inp.team:
+            parts.append(_section("Your team", inp.team))
+        parts.append(_section("Your job", inp.description or f"Act as the team's {inp.role}."))
     if inp.task:
         parts.append(_section("Your task", inp.task))
-    if inp.carry_forward:
+    if inp.carry_forward and not inp.continuation:
         parts.append(_section("Where the previous run left off", inp.carry_forward))
+    if inp.notebook and not inp.continuation:
+        parts.append(_section("Your notebook from the last session",
+                              "You wrote this at the end of the previous session. Code may have "
+                              "changed since; trust the code over the notes.\n\n"
+                              + wrap_untrusted("your notebook", inp.notebook)))
     if inp.upstream:
         lines = []
         for up in inp.upstream:
@@ -120,7 +133,11 @@ def build_brief(inp: BriefInputs) -> str:
                               wrap_untrusted("research/notes.md", inp.research_notes)))
     for title, body in inp.extra_sections:
         parts.append(_section(title, body))
-    parts.append(_section("How to work", _how_to_work(inp.is_reviewer)))
+    if inp.continuation:
+        parts.append(_section("How to finish", f"Same rules as before. Finish this piece by "
+                              f"calling `{SUBMIT_TOOL_NAME}` once, as your last action."))
+    else:
+        parts.append(_section("How to work", _how_to_work(inp.is_reviewer)))
     return "\n".join(parts)
 
 
@@ -144,6 +161,21 @@ def _how_to_work(is_reviewer: bool) -> str:
     return (f"{doing}\n\nYou cannot talk to other agents directly and nobody will answer "
             f"questions mid-turn: decide sensibly, note assumptions in your summary, and use "
             f"`notes_for` to leave a note for a teammate (by name or role).\n\n{finish}")
+
+
+NOTEBOOK_LIMIT = 6000
+
+
+def notebook_brief(previous: str | None) -> str:
+    """End of the session: ask the role to write its notebook for the next session."""
+    old = ("\n\nYour notebook from the previous session, to update rather than repeat:\n"
+           + wrap_untrusted("your notebook", previous)) if previous else ""
+    return ("The session is over; do not change any files. Write your notebook for the next "
+            "session, when you will start without this conversation. Call "
+            "`guudflow_notebook` once with markdown (under 500 words): where things live in "
+            "the code you own (files and what they do), conventions and decisions you follow, "
+            "commands that work (tests, checks), gotchas that cost you time, and what is "
+            "unfinished or fragile. Facts only, no narrative." + old)
 
 
 def retry_brief(error: str | None) -> str:
