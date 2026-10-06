@@ -12,6 +12,8 @@ Memory text only ever goes into the prompt; the board gets `digest()` and
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import hashlib
 import re
 from dataclasses import dataclass, fields
@@ -72,8 +74,8 @@ def strip_legacy_protocol(text: str) -> str:
 async def build_agent_prompt(*, role: str, description: str, base_prompt: str,
                              persona: Persona | None, project_id: str | None,
                              persona_id: str | None, goal: str, task_hint: str = "",
-                             teammate_brief: str = "", project_context: str = ""
-                             ) -> PromptLayers:
+                             teammate_brief: str = "", project_context: str = "",
+                             projects_root: Path | None = None) -> PromptLayers:
     """Build the layered system prompt for one role's opencode agent.
 
     Roles without a persona get identity, base prompt, CoT primer and framing only
@@ -89,10 +91,10 @@ async def build_agent_prompt(*, role: str, description: str, base_prompt: str,
     if teammate_brief.strip():
         layers.teammate_brief = "YOUR TEAMMATES:\n\n" + teammate_brief.strip()
     if project_id:
-        manifesto = BaseAgent.load_manifesto(project_id).strip()
+        manifesto = BaseAgent.load_manifesto(project_id, projects_root).strip()
         if manifesto:
             layers.manifesto = "OFFICE RULES (read before every task):\n\n" + manifesto
-        rules = BaseAgent.load_project_rules(project_id, persona_id).strip()
+        rules = BaseAgent.load_project_rules(project_id, persona_id, projects_root).strip()
         if rules:
             layers.project_rules = "PROJECT RULES (this project specifically):\n\n" + rules
     if project_context.strip():

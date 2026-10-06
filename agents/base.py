@@ -235,10 +235,15 @@ class BaseAgent:
     # ── M2: manifesto + project rules loaders ─────────────────────────────
 
     @staticmethod
-    def load_manifesto(project_id: str) -> str:
-        """Read per-project manifesto.md. Returns "" if missing (surfaces bug)."""
+    def load_manifesto(project_id: str, projects_root: "Path | None" = None) -> str:
+        """Read per-project manifesto.md. Returns "" if missing (surfaces bug).
+
+        `projects_root` is `<data root>/projects`; without it the path is relative to
+        the working directory (the legacy default `data/projects`).
+        """
         from pathlib import Path
-        path = Path(f"data/projects/{project_id}/manifesto.md")
+        base = Path(projects_root) if projects_root is not None else Path("data/projects")
+        path = base / project_id / "manifesto.md"
         if path.exists():
             try:
                 return path.read_text(encoding="utf-8")
@@ -247,10 +252,12 @@ class BaseAgent:
         return ""
 
     @staticmethod
-    def load_project_rules(project_id: str, persona_id: str | None) -> str:
-        """Read shared + persona-specific project rules."""
+    def load_project_rules(project_id: str, persona_id: str | None,
+                           projects_root: "Path | None" = None) -> str:
+        """Read shared + persona-specific project rules (`projects_root` as above)."""
         from pathlib import Path
-        rules_dir = Path(f"data/projects/{project_id}/persona_rules")
+        base = Path(projects_root) if projects_root is not None else Path("data/projects")
+        rules_dir = base / project_id / "persona_rules"
         if not rules_dir.exists():
             return ""
         parts: list[str] = []

@@ -181,3 +181,17 @@ async def test_manifesto_absent_when_empty():
     agent = _make_agent(system_prompt="Do work.", _manifesto="")
     prompt = await agent.effective_system_prompt()
     assert "OFFICE RULES" not in prompt
+
+
+def test_rules_and_manifesto_load_from_the_data_root(tmp_path, monkeypatch):
+    """An install with its own data folder (GUUDFLOW_DATA_DIR) passes `projects_root`."""
+    monkeypatch.chdir(tmp_path)  # nothing under ./data
+    root = tmp_path / "elsewhere" / "projects"
+    (root / "p" / "persona_rules").mkdir(parents=True)
+    (root / "p" / "manifesto.md").write_text("OFFICE RULE", encoding="utf-8")
+    (root / "p" / "persona_rules" / "_shared.md").write_text("SHARED RULE", encoding="utf-8")
+    (root / "p" / "persona_rules" / "sol.md").write_text("SOL RULE", encoding="utf-8")
+    assert BaseAgent.load_manifesto("p") == ""
+    assert BaseAgent.load_manifesto("p", root) == "OFFICE RULE"
+    rules = BaseAgent.load_project_rules("p", "sol", root)
+    assert "SHARED RULE" in rules and "SOL RULE" in rules

@@ -730,7 +730,8 @@ class OpencodeRun:
             role=cfg.role, description=cfg.description, base_prompt=cfg.system_prompt,
             persona=persona, project_id=getattr(runner.project, "project_id", None),
             persona_id=cfg.persona_id, goal=runner.project.goal, task_hint=task_hint,
-            teammate_brief=brief, project_context=getattr(runner, "_project_context", ""))
+            teammate_brief=brief, project_context=getattr(runner, "_project_context", ""),
+            projects_root=(self._data_root() / "projects") if self._data_root() else None)
 
     # ── one spawn ──────────────────────────────────────────────────────────
     async def execute_turn(self, role_name: str) -> None:
