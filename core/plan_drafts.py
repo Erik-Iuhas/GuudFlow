@@ -521,9 +521,10 @@ class PlanDrafts:
 
     # ── plan conversation ───────────────────────────────────────────────────
     def add_message(self, author: str, text: str, draft_id: str | None = None,
-                    mode: str = "") -> dict[str, Any]:  # Any: JSON row
+                    mode: str = "", cost_usd: float | None = None,
+                    tokens: int | None = None) -> dict[str, Any]:  # Any: JSON row
         """Append a message to the plan conversation."""
-        return self.db.add_plan_message(author, text, draft_id, mode)
+        return self.db.add_plan_message(author, text, draft_id, mode, cost_usd, tokens)
 
     def messages(self, limit: int = 100) -> list[dict[str, Any]]:  # Any: JSON rows
         """The latest messages, oldest first."""

@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS spec_items (
     kind TEXT NOT NULL, id TEXT PRIMARY KEY, num INTEGER NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS plan_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, author TEXT NOT NULL,
-    text TEXT NOT NULL, draft_id TEXT, mode TEXT NOT NULL DEFAULT '');
+    text TEXT NOT NULL, draft_id TEXT, mode TEXT NOT NULL DEFAULT '',
+    cost_usd REAL, tokens INTEGER);
 CREATE TABLE IF NOT EXISTS drafts (
     id TEXT PRIMARY KEY, base_version INTEGER NOT NULL, status TEXT NOT NULL,
     data TEXT NOT NULL);
@@ -242,24 +243,27 @@ class WorkDB:
 
     # ── plan messages ───────────────────────────────────────────────────────
     def add_plan_message(self, author: str, text: str, draft_id: str | None = None,
-                         mode: str = "") -> dict[str, Any]:  # Any: JSON row
-        """Append one message to the plan conversation."""
+                         mode: str = "", cost_usd: float | None = None,
+                         tokens: int | None = None) -> dict[str, Any]:  # Any: JSON row
+        """Append one message to the plan conversation (a PM message may carry its usage)."""
         now = time.time()
         with self._write() as conn:
-            cur = conn.execute("INSERT INTO plan_messages(at, author, text, draft_id, mode) "
-                               "VALUES (?, ?, ?, ?, ?)", (now, author, text, draft_id, mode))
+            cur = conn.execute("INSERT INTO plan_messages(at, author, text, draft_id, mode, "
+                               "cost_usd, tokens) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                               (now, author, text, draft_id, mode, cost_usd, tokens))
             return {"id": cur.lastrowid, "at": now, "author": author, "text": text,
-                    "draft_id": draft_id, "mode": mode}
+                    "draft_id": draft_id, "mode": mode, "cost_usd": cost_usd, "tokens": tokens}
 
     def list_plan_messages(self, limit: int = 100) -> list[dict[str, Any]]:  # Any: JSON rows
         """The latest `limit` plan messages, oldest first (no lock)."""
         conn = self._connect()
         try:
-            rows = conn.execute("SELECT id, at, author, text, draft_id, mode FROM plan_messages "
+            rows = conn.execute("SELECT id, at, author, text, draft_id, mode, "
+                                "cost_usd, tokens FROM plan_messages "
                                 "ORDER BY id DESC LIMIT ?", (max(0, limit),)).fetchall()
         finally:
             conn.close()
-        keys = ("id", "at", "author", "text", "draft_id", "mode")
+        keys = ("id", "at", "author", "text", "draft_id", "mode", "cost_usd", "tokens")
         return [dict(zip(keys, r)) for r in reversed(rows)]
 
     # ── run states ──────────────────────────────────────────────────────────
@@ -291,6 +295,10 @@ class WorkDB:
 
     # ── one-time import of the JSON files ───────────────────────────────────
     def _migrate(self, conn: sqlite3.Connection) -> None:
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(plan_messages)")}
+        for name, kind in (("cost_usd", "REAL"), ("tokens", "INTEGER")):
+            if name not in columns:  # databases made before the PM reported usage
+                conn.execute(f"ALTER TABLE plan_messages ADD COLUMN {name} {kind}")
         backlog = self.project_dir / "backlog.json"
         runs = self.project_dir / "runs_state.json"
         if backlog.is_file():
