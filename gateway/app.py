@@ -385,9 +385,11 @@ class Gateway:
     async def _forward(self, request: Request, call: _Call, raw: bytes) -> Response:
         upstream = call.upstream
         headers = [(k, v) for k, v in request.headers.items() if k.lower() not in _REQUEST_DROP]
-        if upstream.kind == "anthropic":
+        # A local endpoint (Ollama, LM Studio, vLLM) may have no key: send no auth header
+        # rather than an empty one (httpx rejects "Bearer " and so would many servers).
+        if upstream.api_key and upstream.kind == "anthropic":
             headers.append(("x-api-key", upstream.api_key))
-        else:
+        elif upstream.api_key:
             headers.append(("authorization", f"Bearer {upstream.api_key}"))
         url = httpx.URL(f"{upstream.base_url.rstrip('/')}/{request.path_params['path']}")
         url = url.copy_with(query=request.url.query.encode() or None)

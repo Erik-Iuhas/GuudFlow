@@ -16,8 +16,20 @@ studio/node_modules/
 studio/dist/
 node_modules/
 
-# Local data and runs (mounted at runtime, not baked in)
-data/
+# Local runtime data (mounted at runtime, not baked in). The shipped assets in
+# data/ (models.json, _seed/, example_projects/, role_templates/, manifestos/,
+# teams/, training_camp/) stay in the image: the app reads them from /app/data.
+data/runs/
+data/projects/
+data/projects.json
+data/personas/
+data/model_config.json
+data/secrets/
+data/tmp/
+data/*.log
+
+# Local tool installs (the image installs its own pinned opencode)
+.tools/
 .tmp_*
 
 # Editor / OS
