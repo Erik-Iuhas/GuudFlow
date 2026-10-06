@@ -136,7 +136,9 @@ def _how_to_work(is_reviewer: bool) -> str:
                  "before changing it, keep changes focused on your job, and run the tests you "
                  "add. There is no git here: GuudFlow commits your changes when you finish "
                  "(`guudflow_changes` shows your diff so far). Tool output such as screenshots "
-                 "and installed packages lives in `.guudflow/` (read-only).")
+                 "and installed packages lives in `.guudflow/` (read-only). To screenshot a static page "
+                 "(plain HTML/JS), pass `file` (e.g. `web/index.html`) to the screenshot tool; "
+                 "you cannot run a server.")
         finish = (f"Finish by calling `{SUBMIT_TOOL_NAME}` once, as your last action, with "
                   "`status` done (with a specific summary and the files you changed), blocked "
                   "(with `blocked_on`: which role must act and exactly what you need) or failed "
