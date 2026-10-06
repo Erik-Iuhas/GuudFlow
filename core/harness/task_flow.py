@@ -228,8 +228,8 @@ class TaskFlow:
         if self.spec is not None:
             missing = missing_check_lines(self.backlog, [t.acceptance for t in plan.tasks])
             if missing:
-                # Soft: the plan stands. There is no warning signal type, so a high-priority
-                # THINKING notice from the planner carries it.
+                # Soft: the plan stands. There is no warning signal type, so a THINKING
+                # notice from the planner carries it.
                 self.post(SignalType.THINKING, self.planner,
                           f"spec coverage warning: {', '.join(missing)} on no card",
                           json.dumps({"warning": "spec_coverage", "checks": missing}))
