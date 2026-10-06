@@ -408,3 +408,205 @@ Rules 15, 16 and 22 apply, as for any persona.
   project's own rules and spec, because rules trump memory (rule 24).
 - **Reputation:** sessions accepted and rejected, and drafts approved with no human edits. It is
   shown on Jack's profile.
+
+## 11. Addendum: lean handoffs, structured requirements, a modern Plan view (2026-10-06)
+
+This addendum comes from running pacrogue for three sessions (`docs/FIELD_NOTES.md`,
+`docs/cost-reports/pacrogue-session3.md`). It is to be done **before pacrogue session 4**.
+
+### 11.1 Card-to-card handoff (replaces `session_reuse` as the default)
+**Problem.** Without session reuse, workers re-read the code they had just written. With it
+(`core/harness/run.py:165`), each role carries its whole conversation across cards: a peak of 350 k
+tokens, 46% of session 3's cost in cache reads, and about $7.50 of $19.30 lost to carry-over
+and cold re-sends (F7, F8, F9).
+
+**Design.** A fresh opencode session per card, plus a compact handoff that carries just enough.
+- **Worker-written handoff.** `AgentResult` gains `handoff`, written in the same submit call (no
+  extra model call) and capped at about 1.5 k tokens. It has fixed sections:
+  - `changed`: files and the APIs or contracts they expose;
+  - `decisions`: choices and gotchas the next card must respect;
+  - `tests`: what is covered and what is not;
+  - `next`: what the following card should know.
+  
+  The validator rejects an empty handoff on a `done` result.
+- **Host facts, added by GuudFlow.** Files changed with line counts, test count and pass state,
+  and the exported signatures of changed files (a small host-side extractor; the legacy `repo_map`
+  is not reused).
+- **What goes into the next brief:**
+  - the role's own previous handoff;
+  - the handoffs of the card's `depends_on` cards (so the renderer gets the logic cards' contracts);
+  - handoffs of cards that touched overlapping files.
+  
+  Handoffs are wrapped as untrusted agent text. Nothing else carries over.
+- **When a session is kept.** Only when the next card directly continues the last one (same role,
+  depends on it or overlaps its files), the role has been idle for less than the cache lifetime
+  (about 4 minutes), and the carried context is under `handoff.max_carry_tokens` (default 60 k).
+  Otherwise the next card starts fresh.
+- **The reviewer always starts fresh,** with the card, the diff and the builder's handoff.
+- **Notebooks** are written in a fresh session from the role's handoffs for the run, never by
+  resuming a large session.
+- **Safety net.** If one card's own session passes about 150 k tokens, call opencode's session
+  summarize once.
+- **Measurement.** `llm_costs.jsonl` gains `card`, `carried_tokens` (context at the card's first
+  call) and `cold` (true when the call missed the cache after idling). A per-card cost table goes
+  into the retrospective and Studio's run summary. Success in session 4 means: cost per card down
+  by at least 30% against session 3 at similar card sizes, with no rise in failed reviews.
+
+### 11.2 Structured requirements and finer draft operations
+**Problem.** A requirement is one free-text paragraph that mixes behaviour, numbers and how to
+check it.
+- `edit_requirement` replaces the whole text, so the GUI strikes through whole paragraphs.
+- A check keeps its id only if its text is identical (`core/spec.py:260`), so a one-word edit
+  gives it a new id and drops its state and test link. This is why numbering drifts (R3.6, R3.9,
+  R4.11…).
+- Work items copy check text into `acceptance` when they are created, so they go stale when the
+  requirement changes.
+
+The SQLite store with id-addressed, validated ops stays the source of truth. Markdown stays a
+generated view (see below), because a model editing a markdown file rewrites and renumbers, and
+errors only show after parsing.
+
+**Requirement shape.**
+
+| Field | Rule |
+|---|---|
+| `title` | ≤ 60 chars, names the feature |
+| `statement` | 1–2 sentences of behaviour, no tunable numbers |
+| `params` | list of `{key, value, unit?, assumed: bool, note?}`; tunables live here |
+| `checks` | list of `{id, method: unit\|manual\|visual\|perf, given?, then, test?: "file::name", state}` |
+| `rationale` | optional |
+| `kind`, `priority`, `status`, `pinned_fields`, `history` | as today |
+
+**Check ids are stable.** A check is edited through its id and never re-matched by text. Numbers
+are never reused (`highest_check_number` already reserves them).
+
+**New draft ops,** each one row in the review:
+- `set_statement R#`
+- `set_param R# key value [assumed]` and `remove_param R# key`
+- `add_check R# {…}`, `edit_check R#.n {…}` and `remove_check R#.n`
+- `set_title R#`
+- `edit_requirement` stays only for kind and priority.
+
+Items: `add_item` and `edit_item` take `acceptance` as **references** (`"R4.8"`) plus the item's
+own lines (`{text}`). Studio and briefs resolve references at read time, so items never go stale.
+
+**Grouping.** Every op gets an optional `group` label (for example "Default dash", "Families"),
+so a whole theme can be ticked at once.
+
+**Traceability.** A `unit` check with `test` set takes its state from the session's check run
+(test results parsed from `bun test`, `pytest` and similar where possible). Otherwise it uses the
+reviewer's verdict.
+
+**Generated markdown.** On every approved draft, GuudFlow writes `docs/spec.md` into the project
+repo (read-only for agents, protected path). The spec gets git history, and workers read it like
+any other file. Later option: a human edits `spec.md` and GuudFlow diffs it into the same ops,
+shown as a draft.
+
+**Migration.** A one-time, rule-based split of existing requirements:
+- the title comes from the first clause;
+- numbers in the text become `params`, marked assumed for a human to confirm;
+- the `Bun test:`, `Manual:` and `Manual screenshot:` prefixes become `method`.
+
+Items' copied acceptance lines that match a check text become references. Anything that does
+not parse stays as `statement` text and is flagged.
+
+**PM prompt and validation.** The schema is the contract. The PM prompt shows the shape with one
+example. `validate_turn` refuses numbers in a statement when params exist, titles over 60
+characters, and checks without `then`.
+
+### 11.3 A modern Plan view
+- **Chat:**
+  - render markdown (today Jack's `**bold**` shows raw);
+  - fold history by session and draft, with the current draft's thread open;
+  - "Show earlier" loads more.
+- **Draft review as a structured diff:**
+  - one card per requirement: title, a word-level diff of the statement, a params table
+    (old → new per row, assumed rows highlighted for confirmation) and checks marked added, changed
+    or removed with their method icon;
+  - items show the checks they reference;
+  - groups can be collapsed and ticked as a whole;
+  - keyboard: j/k to move, y/n to tick.
+- **Spec view as a traceability tree:** requirement → checks → items → linked test and last state,
+  filterable to unmet and assumed.
+- **Assumptions checklist:** every `assumed` param in one list to confirm or edit. A human edit
+  pins the field.
+- **Deep links:** the API's Studio mount gets an SPA fallback, so `/projects/:id?tab=plan` can be
+  reloaded.
+
+### 11.4 Budget and run limits (F5, F6)
+- **Warn before the cap.** At 80% of the run cap, post an approval request: "about to stop at the
+  cap: raise it?". Studio shows it in the cockpit with the limits control.
+- **Name the caps clearly.** Studio labels the run's cap as the "GuudFlow cap", next to the budget
+  meter, as distinct from provider credit. Optionally, show the provider's remaining balance where
+  its API exposes it.
+- **Tell the team.** `RUN_LIMITS_CHANGED` goes into every role's next brief, and the overseer's
+  budget re-brief is withdrawn when the cap rises.
+
+### 11.5 GuudFlow bugs and gaps found while running pacrogue
+These are GuudFlow problems, not game ones. Details are in `docs/FIELD_NOTES.md`.
+
+| # | Problem | Status / plan |
+|---|---|---|
+| F1 | Jack could not drop backlog items | fixed (`25c1d60`, `drop_item`) |
+| F2 | Docker build cache filled the disk; nothing prunes it | worker disk check + prune offer (§11.6 W7) |
+| F3 | A session cut off by a host restart needed a manual API salvage | startup salvage offer in Studio; check H4 overlap (W7) |
+| F4 | A paused run could only be answered, or given more budget, through the API | fixed (`a49fca9`, respond + limits) |
+| F5 | Credit added at the provider never reaches the session's cap | §11.4 |
+| F6 | After a budget raise, workers still had the "money nearly gone" re-brief | §11.4 |
+| F7 | Sessions carry whole conversations across cards (≈29% of cost) | §11.1 |
+| F8 | Idle roles re-send their full context after the cache expires | §11.1 |
+| F9 | Notebooks resume the largest session | §11.1 |
+| — | Overseer `decide` text is stored HTML-escaped (`T4 &gt; T6`) | fix escaping at the source (W7) |
+| — | No board signal says which detector woke the overseer | post `OVERSEER_WAKE` with the detector and numbers (W7) |
+| — | Planner makes long serial chains, so the renderer idled about 8 min twice | planner hint: split cards on agreed interfaces so builders can start in parallel (W7) |
+| — | Studio chat shows raw markdown; the Plan page grows to about 7,500 px | §11.3 |
+| — | Studio deep links 404 when the API serves Studio | §11.3 |
+| — | Check ids are re-matched by text, so a one-word edit makes a new check | §11.2 |
+| — | Items keep stale copies of check text | §11.2 |
+
+### 11.6 Work packages (in order)
+- **W1 Handoff in results.** `AgentResult.handoff`, the validator, host facts, and brief
+  injection (own previous card, `depends_on`, overlapping files). Tests: brief contents, caps,
+  untrusted wrapping.
+- **W2 Session policy.** A fresh session per card, with the narrow keep rule, a fresh reviewer,
+  notebooks built from handoffs, and the summarize safety net. Tests: when sessions are kept or
+  rotated, the idle rule, the reviewer is always fresh.
+- **W3 Cost per card.** `card`, `carried_tokens` and `cold` in `llm_costs.jsonl`, and a per-card
+  table in the retrospective and the run summary.
+- **W4 Structured requirements.** Schema, the new ops, stable check ids, items as references,
+  migration and generated `docs/spec.md`. Tests: each op, migration of today's pacrogue spec,
+  resolving item references.
+- **W5 PM prompt and validation** for the new shape and op `group`s. Tests: refusals with clear
+  messages.
+- **W6 Plan view.** Markdown chat with folded history, the structured diff review, the
+  traceability tree, the assumptions checklist, and the SPA fallback. Tests: vitest per component
+  plus a Playwright screenshot pass.
+- **W7 Smaller fixes:**
+  - §11.4 budget warning and briefing;
+  - the escaped overseer text;
+  - the `OVERSEER_WAKE` signal;
+  - the planner hint for parallel cards;
+  - the worker disk check;
+  - the startup salvage offer.
+
+W1–W3 come first: they are what session 4 measures. W4–W6 can follow before or after session 4.
+That is the owner's call; running session 4 on the new spec shape would also test the migration.
+
+### 11.7 Where pacrogue stands (resume point)
+- **Sessions 1–3 are accepted.** The game has all 8 session-3 cards and 661 tests. Known game
+  issues: Dark hides the board, Magnet is offered but not built, and the HUD shows DOTS: DEAD.
+- **Session 4 is drafted, not approved.** Jack's **draft-4** (12 changes):
+  - a default dash with 2 charges that eats ghosts, with a power pellet refilling the charges;
+  - Dash and Wall Burst rebuilt on it, and Phase cut;
+  - Rush replaces Dark, and the boss has 5 HP;
+  - a readability rule;
+  - built-only offers and the HUD fix;
+  - cards new:3 and new:4, with B7 as the stretch card.
+  
+  The owner wants to review it in Studio before approving.
+- **Session 4 settings:** Sonnet 5.5 for all workers (the owner kept Sonnet), a $15 GuudFlow cap,
+  75 minutes, review for size M and up.
+- **State snapshot:** `snapshots/pacrogue-2026-10-06.tar.gz` holds the project (repo, `work.db`
+  with the spec, backlog, drafts and Jack's chat), the personas and the cost logs of the three
+  sessions. It contains no keys. To restore, extract it into a data root and point
+  `GUUDFLOW_DATA_DIR` there. The API key and token were never stored in it, so set them again.
