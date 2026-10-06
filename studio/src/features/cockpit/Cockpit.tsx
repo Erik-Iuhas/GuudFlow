@@ -8,6 +8,7 @@ import { CommentBox } from "../../components/CommentBox";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "../../components/ui/sheet";
+import { Segmented } from "../../components/ui/segmented";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { TooltipProvider } from "../../components/ui/tooltip";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -26,9 +27,16 @@ import { TaskBoard } from "../board";
 import { formatElapsed, mergeRoles, parseTimestamp, roleSpecs } from "./model";
 import { OverseerPanel } from "./OverseerPanel";
 import { PipelineGraph } from "./PipelineGraph";
+import { TeamView } from "./TeamView";
+import { useNodeView, type NodeView } from "./useNodeView";
 import { VirtualBoardFeed, VirtualQuipFeed, useQuipStream, type QuipStream } from "./VirtualFeeds";
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
+
+const NODE_VIEW_OPTIONS: { value: NodeView; label: string }[] = [
+  { value: "team", label: "Team" },
+  { value: "graph", label: "Graph" },
+];
 
 type PanelTab = "board" | "quips" | "overseer" | "cards" | "artifacts";
 
@@ -125,6 +133,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
 
   const [tab, setTab] = useState<PanelTab>("board");
   const [graphOpen, setGraphOpen] = useState(true);
+  const [nodeView, setNodeView] = useNodeView();
   const [panelOpen, setPanelOpen] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedRole, setSelectedRole] = useState<string | null>(null);
@@ -134,9 +143,18 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
 
   const graphRef = useRef<HTMLDivElement>(null);
   const commentRef = useRef<HTMLInputElement>(null);
+  const focusGraphAfterRender = useRef(false);
 
   const specs = useMemo(() => roleSpecs(project?.agents), [project]);
   const allSpecs = useMemo(() => mergeRoles(specs, Object.keys(agents)), [specs, agents]);
+  const models = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const a of project?.agents ?? []) {
+      const m = a.model_id || a.model_tier;
+      if (m) out[a.role] = m;
+    }
+    return out;
+  }, [project]);
   const anyStarted = useMemo(() => Object.values(agents).some((a) => a.spawns > 0), [agents]);
 
   const status = meta?.status ?? (live ? "running" : "finished");
@@ -144,6 +162,13 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
   // The earliest of the two: a finished run's meta is written when it is saved (at the end).
   const startMs = earliest(parseTimestamp(meta?.created_at), parseTimestamp(firstTs));
   const elapsed = useElapsed(startMs, parseTimestamp(lastTs), live && !terminal);
+
+  useEffect(() => {
+    if (focusGraphAfterRender.current && graphRef.current) {
+      focusGraphAfterRender.current = false;
+      graphRef.current.focus();
+    }
+  }, [nodeView, graphOpen]);
 
   // HUMAN_NEEDED: pull the cursor to the comment box so the answer is one keystroke away.
   const humanId = humanNeeded?.signalId;
@@ -157,8 +182,11 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
       if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;
       if (e.key === "g") {
         e.preventDefault();
+        setNodeView("graph");
         setGraphOpen(true);
-        graphRef.current?.focus();
+        // The graph may not be on screen yet: focus it once it is.
+        if (graphRef.current) graphRef.current.focus();
+        else focusGraphAfterRender.current = true;
       } else if (e.key === "c") {
         e.preventDefault();
         commentRef.current?.focus();
@@ -172,7 +200,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [setNodeView]);
 
   // Clicking a node or an agent card opens that role's tool calls and full result.
   const selectRole = useCallback((role: string) => {
@@ -245,6 +273,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           {elapsed === null ? "--:--" : formatElapsed(elapsed)} · {signalCount} signals
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Segmented label="Node view" value={nodeView} onChange={setNodeView} options={NODE_VIEW_OPTIONS} />
           {!desktop && (
             <Button size="sm" variant="outline" onClick={() => setDrawerOpen(true)}>
               Board and feeds
@@ -252,9 +281,11 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           )}
           {desktop && (
             <>
-              <Button size="sm" variant="ghost" onClick={() => setGraphOpen((v) => !v)} aria-expanded={graphOpen}>
-                {graphOpen ? "Hide graph" : "Show graph"}
-              </Button>
+              {nodeView === "graph" && (
+                <Button size="sm" variant="ghost" onClick={() => setGraphOpen((v) => !v)} aria-expanded={graphOpen}>
+                  {graphOpen ? "Hide graph" : "Show graph"}
+                </Button>
+              )}
               <Button size="sm" variant="ghost" onClick={() => setPanelOpen((v) => !v)} aria-expanded={panelOpen}>
                 {panelOpen ? "Hide panel" : "Show panel"}
               </Button>
@@ -265,9 +296,6 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
               <Link to={`/runs/${encodeURIComponent(runId)}/report`}>Run report</Link>
             </Button>
           )}
-          <Button size="sm" variant="ghost" asChild>
-            <Link to="?legacy=1">Legacy view</Link>
-          </Button>
           {!terminal && live && socket.status === "open" && (
             <Button size="sm" variant="destructive" onClick={() => void stop()} disabled={busy !== null}>
               {busy === "stop" ? "Stopping…" : "Stop run"}
@@ -314,7 +342,10 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           {socket.status === "error" ? "The live feed is not connected." : "Waiting for the first agent…"}
         </div>
       )}
-      {graphOpen && (
+      {nodeView === "team" && (
+        <TeamView specs={allSpecs} models={models} selectedRole={selectedRole} onSelectRole={selectRole} />
+      )}
+      {nodeView === "graph" && graphOpen && (
         <div
           ref={graphRef}
           tabIndex={0}

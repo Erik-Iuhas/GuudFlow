@@ -58,7 +58,17 @@ export interface ProjectConfig {
    *  to a registered model id from /api/models. Empty / missing
    *  entries fall back to the cheapest tool-capable model server-side. */
   sub_llm_models?: Record<string, string>;
+  /** Project flow plan §2: who holds the Lead and Reviewer seats (Owner is always on). */
+  seats?: ProjectSeats;
+  start_mode?: StartMode;
 }
+
+export interface ProjectSeats {
+  lead: boolean;
+  reviewer: "off" | "all" | "must";
+}
+
+export type StartMode = "spec_first" | "prototype_first" | "test_first" | "research_first" | "maintain";
 
 export interface PrReadyInfo {
   integration_branch: string;
