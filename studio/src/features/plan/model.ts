@@ -131,6 +131,7 @@ function summaryOf(c: ChangeWire): string {
       return c.text ?? editedFields(c);
     case "drop_requirement":
     case "drop_rule":
+    case "drop_item":
       return c.reason ? `Drop: ${c.reason}` : "Drop";
     case "add_decision":
     case "supersede_decision":

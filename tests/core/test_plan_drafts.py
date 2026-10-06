@@ -222,6 +222,33 @@ def test_drop_requirement_and_rule(pd: PlanDrafts) -> None:
     assert spec.rule("rule-1").status == "dropped"
 
 
+def test_drop_item(pd: PlanDrafts) -> None:
+    _approve_all(pd, _turn(item("new:1"), item("new:2", title="Old idea")))
+    _approve_all(pd, _turn({"op": "drop_item", "id": "B2", "reason": "merged into B1"}))
+    rows = {r["id"]: r for r in pd.db.read_backlog_doc()["items"]}
+    assert rows["B2"]["status"] == "dropped" and rows["B1"]["status"] == "open"
+    assert "merged into B1" in rows["B2"]["history"][-1]["decision"]
+    assert any("B2 is dropped" in p for p in
+               _problems(pd, _turn({"op": "drop_item", "id": "B2", "reason": "again"})))
+    assert any("unknown item B9" in p for p in
+               _problems(pd, _turn({"op": "drop_item", "id": "B9", "reason": "gone"})))
+
+
+def test_drop_item_refused_while_open_items_depend_on_it(pd: PlanDrafts) -> None:
+    _approve_all(pd, _turn(item("new:1"), item("new:2", title="Next", depends_on=["new:1"])))
+    drop_b1 = {"op": "drop_item", "id": "B1", "reason": "not needed"}
+    assert any("B2 depend on B1" in p for p in _problems(pd, _turn(drop_b1)))
+    assert _problems(pd, _turn(drop_b1, {"op": "drop_item", "id": "B2", "reason": "too"})) == []
+
+
+def test_done_item_cannot_be_dropped(pd: PlanDrafts) -> None:
+    _approve_all(pd, _turn(item("new:1")))
+    with pd.db.backlog_doc() as doc:
+        doc["items"][0]["status"] = "done"
+    assert any("only an open item" in p for p in
+               _problems(pd, _turn({"op": "drop_item", "id": "B1", "reason": "done"})))
+
+
 def test_supersede_decision_and_binding_rule_sync(pd: PlanDrafts) -> None:
     _approve_all(pd, _turn(dec("new:1", binding=True)))
     _approve_all(pd, _turn({"op": "supersede_decision", "id": "D1", "ref": "new:1",

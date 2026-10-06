@@ -138,6 +138,14 @@ class EditItem(_Model):
     serves: list[str] | None = None
 
 
+class DropItem(_Model):
+    """Drop an open backlog item that is no longer needed (it stays visible as dropped)."""
+
+    op: Literal["drop_item"]
+    id: str = Field(pattern=_BACKLOG_ID.pattern)
+    reason: str = Field(min_length=3)
+
+
 class AddRule(_Model):
     """Add a project rule (QUESTION: `ref` is optional and not in plan §3)."""
 
@@ -203,7 +211,7 @@ class RemoveRole(_Model):
 
 Change = Annotated[
     AddRequirement | EditRequirement | DropRequirement | AddDecision | SupersedeDecision
-    | AddItem | EditItem | AddRule | DropRule | AddRole | EditRole | RemoveRole,
+    | AddItem | EditItem | DropItem | AddRule | DropRule | AddRole | EditRole | RemoveRole,
     Field(discriminator="op")]
 _CHANGE_ADAPTER: TypeAdapter[Any] = TypeAdapter(Change)  # Any: the union members above
 _REF_KIND = {"add_requirement": "requirement", "add_decision": "decision",
@@ -358,6 +366,21 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
                 serves_ok(n, ch, ch.serves)
             if ch.depends_on is not None:
                 deps_ok(n, ch, ch.id, ch.depends_on)
+        elif isinstance(ch, DropItem):
+            row = items.get(ch.id)
+            if row is None:
+                problems.append(f"change {n} ({ch.op}): unknown item {ch.id}")
+            elif row.get("status") != "open":
+                problems.append(f"change {n} ({ch.op}): {ch.id} is {row.get('status')}; "
+                                f"only an open item can be dropped")
+            else:
+                needed = sorted(i for i, r in items.items() if r.get("status") == "open"
+                                and ch.id in (r.get("depends_on") or [])
+                                and not any(isinstance(o, DropItem) and o.id == i
+                                            for o in turn.changes))
+                if needed:
+                    problems.append(f"change {n} ({ch.op}): open items {', '.join(needed)} "
+                                    f"depend on {ch.id}; drop or edit them too")
         elif isinstance(ch, DropRule):
             try:
                 rule = spec.rule(ch.id)
@@ -754,7 +777,7 @@ class _Applier:
                              if isinstance(ch, (AddRole, EditRole, RemoveRole))]
         phases: list[tuple[type, ...]] = [
             (AddRequirement, EditRequirement, DropRequirement),
-            (AddDecision, SupersedeDecision), (AddRule, DropRule), (AddItem,), (EditItem,)]
+            (AddDecision, SupersedeDecision), (AddRule, DropRule), (AddItem,), (EditItem,), (DropItem,)]
         try:
             for dc, ch in parsed:                      # ids for everything but items
                 self.current = dc
@@ -861,6 +884,18 @@ class _Applier:
                 fields["serves"] = self._serves(fields["serves"])
             if fields:
                 update_in_doc(self.txn.backlog, ch.id, pin=self.pin, **fields)
+        elif isinstance(ch, DropItem):
+            row = next((r for r in self.txn.backlog.get("items", []) if r.get("id") == ch.id),
+                       None)
+            if row is None:
+                raise BacklogError(f"unknown item {ch.id}")
+            if row.get("status") != "open":
+                raise BacklogError(f"{ch.id} is {row.get('status')}; only an open item can "
+                                   f"be dropped")
+            row["status"], row["updated_at"] = "dropped", self.now
+            row.setdefault("history", []).append(
+                {"decision": f"dropped by {self.by}: {ch.reason.strip()}", "at": self.now,
+                 "draft": self.draft_id})
 
     def _push_history(self, row: dict[str, Any], **extra: Any) -> None:  # Any: JSON row
         entry = {"version": row.get("version", 1), "at": self.now, "by": self.by,
