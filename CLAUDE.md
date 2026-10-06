@@ -35,8 +35,12 @@ commits and quips use the name, and a `TEAM` signal at run start tells Studio wh
 `from_agent` on signals stays the role.
 
 **Plan, spec, seats and start modes.** See `docs/PROJECT_FLOW_PLAN.md`.
-- **Project manager.** The meta-agent is the project manager (`core/project_manager.py`,
-  prompts in `core/pm_prompts.py`). It is a host-side LLM call that proposes changes to a
+- **Project manager: Jack.** The meta-agent is the project manager, a persona named Jack
+  (`jack-project-manager-v1`, `core/pm_persona.py`) with cross-project memory (`core/pm_memory.py`:
+  episodes on session and draft outcomes, patterns via the memory writer, recall in every turn).
+  Jack can propose team changes in drafts (`add_role`/`edit_role`/`remove_role`); a human always
+  ticks them and they apply from the next session (`core/team_changes.py`).
+  The PM itself is `core/project_manager.py` (prompts in `core/pm_prompts.py`). It is a host-side LLM call that proposes changes to a
   versioned **spec** through **drafts**. Every spec change goes through a draft (`core/plan_drafts.py`).
 - **The spec.** Requirements `R#` with checks `R#.#`, decisions `D#`, and rules `rule-N`
   (`core/spec.py`), all in `work.db`. Work items are the backlog (`B#`, which `serves` requirements).

@@ -347,8 +347,8 @@ checkbox restyle.
 | P7 Studio Work/Sessions/Team | done (Work Overview/Technical, routed-to-you, spec results and co-sign in review, follow panel in the session Team view, seats and rules panels with adherence) |
 | P8 Record | done (`core/record.py` trace/export/spec files, `api/routes/record.py`, Record tab); `SPEC.md` and `docs/decisions/` committed to main on accept when `record.keep_in_repo` is on (`core/project_runs.write_record_files`) |
 | P9 MCP Studio | done (Settings → MCP servers, per-agent MCP tools field) |
-| P10 Team changes in drafts | in progress |
-| P11 Jack: persona, memory, naming | in progress |
+| P10 Team changes in drafts | done (`add_role`/`edit_role`/`remove_role` ops, always human-ticked; `core/team_changes.py` applies them to the project doc on approve; overseer team proposals land in the open draft) |
+| P11 Jack: persona, memory, naming | done (`jack-project-manager-v1` seed, `core/pm_persona.py`, `core/pm_memory.py` episodes on session and draft outcomes, recall in every PM turn, distillation via the memory writer, `GET /api/pm`, Studio shows the name) |
 
 **Known gaps after this pass:**
 - Runs with no planner (no task board) get no spec sections in briefs.
