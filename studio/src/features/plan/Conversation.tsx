@@ -1,0 +1,174 @@
+import { useEffect, useRef, useState } from "react";
+import { Alert, Label, Textarea } from "../../components/ui/form-controls";
+import { Button } from "../../components/ui/button";
+import { cn } from "../../lib/utils";
+import type { PlanMessageWire, PlanMode } from "./api";
+import { timeLabel } from "./model";
+
+export interface ConversationProps {
+  messages: readonly PlanMessageWire[];
+  /** True while the project manager is working on a turn. */
+  pending: boolean;
+  /** Sends the composer text; rejecting keeps the text in the composer. */
+  onSend: (text: string, mode: PlanMode) => Promise<unknown>;
+  /** Asks for the first draft (the empty state). */
+  onStart: () => Promise<unknown>;
+  /** Pending-state text for the draft button, e.g. an error from the last start. */
+  error?: string | null;
+}
+
+/** "draft 3" from a draft id such as "draft-3" or "d3". */
+function draftNumber(id: string | null): string | null {
+  const m = id?.match(/(\d+)$/);
+  return m ? m[1] : null;
+}
+
+function Message({ m }: { m: PlanMessageWire }) {
+  const pm = m.author === "pm";
+  const draft = draftNumber(m.draft_id);
+  return (
+    <li className="flex gap-3" data-testid={`msg-${m.id}`}>
+      <span
+        aria-hidden="true"
+        className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+          pm ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground",
+        )}
+      >
+        {pm ? "PM" : "You"}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">{pm ? "Project manager" : "You"}</span>
+          <time>{timeLabel(m.at)}</time>
+          {draft && <span>{pm ? `proposed changes in draft ${draft}` : `draft ${draft}`}</span>}
+          {m.mode === "discuss" && !pm && <span>just discussing</span>}
+        </div>
+        {/* Plain text only; line breaks are kept by CSS. */}
+        <p className="mt-1 whitespace-pre-wrap break-words text-sm">{m.text}</p>
+      </div>
+    </li>
+  );
+}
+
+/** The plan conversation: the thread, an empty state and the composer. */
+export function Conversation({ messages, pending, onSend, onStart, error }: ConversationProps) {
+  const [text, setText] = useState("");
+  const [mode, setMode] = useState<PlanMode>("update");
+  const [failure, setFailure] = useState<string | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const areaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView?.({ block: "end" });
+  }, [messages.length, pending]);
+
+  // Auto-grow with the content; the user can still drag the corner.
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.max(el.scrollHeight, 0)}px`;
+  }, [text]);
+
+  const canSend = text.trim().length > 0 && !pending;
+
+  async function send(): Promise<void> {
+    if (!canSend) return;
+    setFailure(null);
+    try {
+      await onSend(text.trim(), mode);
+      setText("");
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function start(): Promise<void> {
+    setFailure(null);
+    try {
+      await onStart();
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  const empty = messages.length === 0 && !pending;
+  const shownError = failure ?? error ?? null;
+
+  return (
+    <section aria-label="Conversation" className="flex min-w-0 flex-1 flex-col gap-4">
+      {empty ? (
+        <div className="rounded-lg border border-dashed border-border p-6 text-sm">
+          <p className="font-medium">No plan yet</p>
+          <p className="mt-1 text-muted-foreground">
+            The project manager reads your project goal and files, then proposes the first draft of the spec:
+            requirements with checks, the decisions behind them, and the first work items. You approve what you agree
+            with.
+          </p>
+          <Button className="mt-4" onClick={() => void start()}>
+            Draft the first plan
+          </Button>
+        </div>
+      ) : (
+        <ol className="flex flex-col gap-4" aria-live="polite">
+          {messages.map((m) => (
+            <Message key={m.id} m={m} />
+          ))}
+        </ol>
+      )}
+      {pending && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Project manager is drafting…
+        </p>
+      )}
+      <div ref={endRef} />
+      {shownError && <Alert variant="error">{shownError}</Alert>}
+      {!empty && (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="plan-composer">Answer, push back, or think out loud. It grows as you write.</Label>
+          <Textarea
+            id="plan-composer"
+            ref={areaRef}
+            rows={6}
+            className="min-h-[9rem] resize-y"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <div role="group" aria-label="What Send does" className="inline-flex gap-1">
+              <Button
+                type="button"
+                size="sm"
+                variant={mode === "update" ? "default" : "outline"}
+                aria-pressed={mode === "update"}
+                onClick={() => setMode("update")}
+              >
+                Update the draft
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={mode === "discuss" ? "default" : "outline"}
+                aria-pressed={mode === "discuss"}
+                onClick={() => setMode("discuss")}
+              >
+                Just discuss
+              </Button>
+            </div>
+            <span className="text-xs text-muted-foreground">Just discuss: the plan isn't touched</span>
+            <Button className="ml-auto" disabled={!canSend} onClick={() => void send()}>
+              Send
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}

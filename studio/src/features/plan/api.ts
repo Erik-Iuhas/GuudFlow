@@ -1,0 +1,238 @@
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseMutationResult,
+  type UseQueryResult,
+} from "@tanstack/react-query";
+import { getToken } from "../../api";
+import { workKeys } from "../work/api";
+
+// The project manager's plan conversation, its open draft and the approved spec
+// (docs/PROJECT_FLOW_PLAN.md §3, §6).
+
+export type CheckState = "unknown" | "met" | "unmet";
+export type PlanMode = "update" | "discuss";
+
+export interface CheckWire {
+  id: string;
+  text: string;
+  state: CheckState;
+  run_id: string | null;
+}
+
+export interface RequirementWire {
+  id: string;
+  text: string;
+  kind: string;
+  priority: string;
+  checks: CheckWire[];
+  assumed: boolean;
+  experiment: boolean;
+  status: "active" | "dropped";
+  source: string;
+  version: number;
+}
+
+export interface DecisionWire {
+  id: string;
+  title: string;
+  choice: string;
+  reason: string;
+  serves: string[];
+  binding: boolean;
+  status: "accepted" | "superseded" | "dropped";
+  decided_by: string;
+  supersedes: string | null;
+  version: number;
+}
+
+export interface RuleWire {
+  id: string;
+  text: string;
+  source: string;
+  applies_to: string[];
+  strength: "binding" | "preference";
+  status: "active" | "dropped";
+}
+
+export interface SpecWire {
+  version: number;
+  requirements: RequirementWire[];
+  decisions: DecisionWire[];
+  rules: RuleWire[];
+}
+
+/** One proposed change; the fields depend on `op` (see core/plan_drafts.py). */
+export interface ChangeWire {
+  op: string;
+  id?: string;
+  ref?: string;
+  text?: string;
+  title?: string;
+  choice?: string;
+  reason?: string;
+  kind?: string;
+  priority?: string | number;
+  size?: string;
+  checks?: string[];
+  acceptance?: string[];
+  serves?: string[];
+  depends_on?: string[];
+  assumed?: boolean;
+  experiment?: boolean;
+  binding?: boolean;
+  applies_to?: string[];
+  strength?: string;
+  notes?: string;
+}
+
+export interface DraftChangeWire {
+  cid: string;
+  change: ChangeWire;
+  accepted: boolean | null;
+  by: string;
+  touched: boolean;
+}
+
+export interface DraftWire {
+  id: string;
+  base_version: number;
+  status: "open" | "approved" | "discarded";
+  changes: DraftChangeWire[];
+}
+
+export interface PlanMessageWire {
+  id: number;
+  at: number;
+  author: "human" | "pm";
+  text: string;
+  draft_id: string | null;
+  mode: string;
+  cost_usd?: number;
+}
+
+export interface PlanWire {
+  messages: PlanMessageWire[];
+  draft: DraftWire | null;
+}
+
+export interface PlanTurnWire {
+  messages: PlanMessageWire[];
+  draft: DraftWire | null;
+}
+
+export interface ApproveResult {
+  version: number;
+  applied: string[];
+  created: Record<string, string>;
+}
+
+/** An HTTP error carrying the server's `detail`. */
+export class PlanApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+const enc = encodeURIComponent;
+
+async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!res.ok) {
+    let detail = res.statusText || `HTTP ${res.status}`;
+    try {
+      const j = (await res.json()) as { detail?: unknown };
+      if (typeof j.detail === "string") detail = j.detail;
+    } catch {
+      /* keep the status text */
+    }
+    throw new PlanApiError(res.status, detail);
+  }
+  return (await res.json()) as T;
+}
+
+export const planKeys = {
+  spec: (projectId: string) => ["spec", projectId] as const,
+  plan: (projectId: string) => ["plan", projectId] as const,
+};
+
+export const planApi = {
+  spec: (projectId: string) => send<SpecWire>("GET", `/api/projects/${enc(projectId)}/spec`),
+  plan: (projectId: string) => send<PlanWire>("GET", `/api/projects/${enc(projectId)}/plan`),
+  start: (projectId: string) => send<PlanTurnWire>("POST", `/api/projects/${enc(projectId)}/plan/start`, {}),
+  message: (projectId: string, text: string, mode: PlanMode) =>
+    send<PlanTurnWire>("POST", `/api/projects/${enc(projectId)}/plan/messages`, { text, mode }),
+  tick: (projectId: string, cid: string, accepted: boolean | null) =>
+    send<DraftWire>("PATCH", `/api/projects/${enc(projectId)}/plan/draft/${enc(cid)}`, { accepted }),
+  approve: (projectId: string) =>
+    send<ApproveResult>("POST", `/api/projects/${enc(projectId)}/plan/draft/approve`, {}),
+  discard: (projectId: string) =>
+    send<Record<string, never>>("POST", `/api/projects/${enc(projectId)}/plan/draft/discard`, {}),
+};
+
+export function useSpec(projectId: string): UseQueryResult<SpecWire> {
+  return useQuery({ queryKey: planKeys.spec(projectId), queryFn: () => planApi.spec(projectId) });
+}
+
+export function usePlan(projectId: string): UseQueryResult<PlanWire> {
+  return useQuery({ queryKey: planKeys.plan(projectId), queryFn: () => planApi.plan(projectId) });
+}
+
+/** Folds a turn's new messages and draft into the cached plan. */
+function mergeTurn(prev: PlanWire | undefined, turn: PlanTurnWire): PlanWire {
+  const have = new Set((prev?.messages ?? []).map((m) => m.id));
+  return { messages: [...(prev?.messages ?? []), ...turn.messages.filter((m) => !have.has(m.id))], draft: turn.draft };
+}
+
+export function useStartPlan(projectId: string): UseMutationResult<PlanTurnWire, Error, void> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => planApi.start(projectId),
+    onSuccess: (turn) => qc.setQueryData<PlanWire>(planKeys.plan(projectId), (p) => mergeTurn(p, turn)),
+  });
+}
+
+export function useSendMessage(
+  projectId: string,
+): UseMutationResult<PlanTurnWire, Error, { text: string; mode: PlanMode }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v) => planApi.message(projectId, v.text, v.mode),
+    onSuccess: (turn) => qc.setQueryData<PlanWire>(planKeys.plan(projectId), (p) => mergeTurn(p, turn)),
+  });
+}
+
+export function useTickChange(
+  projectId: string,
+): UseMutationResult<DraftWire, Error, { cid: string; accepted: boolean | null }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v) => planApi.tick(projectId, v.cid, v.accepted),
+    onSuccess: (draft) =>
+      qc.setQueryData<PlanWire>(planKeys.plan(projectId), (p) => ({ messages: p?.messages ?? [], draft })),
+  });
+}
+
+/** Spec, plan and backlog all change when a draft is approved or discarded. */
+function invalidateAll(qc: ReturnType<typeof useQueryClient>, projectId: string): void {
+  void qc.invalidateQueries({ queryKey: planKeys.spec(projectId) });
+  void qc.invalidateQueries({ queryKey: planKeys.plan(projectId) });
+  void qc.invalidateQueries({ queryKey: workKeys.backlog(projectId) });
+}
+
+export function useApproveDraft(projectId: string): UseMutationResult<ApproveResult, Error, void> {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: () => planApi.approve(projectId), onSuccess: () => invalidateAll(qc, projectId) });
+}
+
+export function useDiscardDraft(projectId: string): UseMutationResult<unknown, Error, void> {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: () => planApi.discard(projectId), onSuccess: () => invalidateAll(qc, projectId) });
+}
