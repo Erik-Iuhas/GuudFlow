@@ -259,6 +259,7 @@ const PAGES: Array<{
       await page.route(`**/api/projects/${cockpit.meta.project_id}`, (r) => json(r, cockpit.project));
       await page.route(`**/api/runs/${COCKPIT_RUN}/cards`, (r) => json(r, { cards: cockpit.cards }));
       await mockRunSockets(page, COCKPIT_RUN, cockpit.signals, cockpit.quips);
+      await page.addInitScript(() => window.localStorage.setItem("guudflow.cockpit.view", "graph"));
       await page.goto(`/runs/${COCKPIT_RUN}`);
       await expect(page.getByTestId("cockpit")).toBeVisible();
       await expect(page.getByTestId("graph-node-planner")).toHaveAttribute("data-state", "complete");

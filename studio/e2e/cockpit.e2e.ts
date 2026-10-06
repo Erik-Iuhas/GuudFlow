@@ -35,6 +35,11 @@ async function mockBackend(page: Page): Promise<void> {
   });
 }
 
+// The cockpit opens on the Team view; these tests drive the node graph.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("guudflow.cockpit.view", "graph"));
+});
+
 test("the cockpit renders the recorded run, windows the board and scrolls it", async ({ page }) => {
   await mockBackend(page);
   await page.goto(`/runs/${RUN}`);
