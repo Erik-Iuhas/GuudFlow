@@ -23,6 +23,7 @@ import { useDetailLevel, type DetailLevel } from "../features/project/useDetailL
 import { ProjectWork, type RunRequest } from "../features/work/ProjectWork";
 import { WorkSettings } from "../features/work/WorkSettings";
 import { Inputs } from "./Inputs";
+import { PlanTab } from "../features/plan/PlanTab";
 
 const DETAIL_OPTIONS: { value: DetailLevel; label: string }[] = [
   { value: "overview", label: "Overview" },
@@ -290,10 +291,10 @@ export function Studio() {
           <Button variant="outline" className="mt-2" onClick={addAgent}>+ Add agent</Button>
         </>
       ) : tab === "plan" ? (
-        // A later package adds the plan conversation above these two.
         id && (
           <>
-            <SectionTitle>Notes</SectionTitle>
+            <PlanTab projectId={id} />
+            <SectionTitle className="mt-8">Notes</SectionTitle>
             <RoadmapTab projectId={id} />
             <SectionTitle className="mt-6">Files</SectionTitle>
             <Inputs projectId={id} />

@@ -339,10 +339,10 @@ checkbox restyle.
 |---|---|
 | Stage 0 | done (plan, storyboard update, checkbox restyle) |
 | P1 Spec store | done (`core/spec.py`, `core/plan_drafts.py`, work.db tables, backlog `serves`) |
-| P2 MCP backend | in progress |
-| P3 Studio shell | in progress |
-| P4 Project manager + API | in progress |
-| P5 Studio Plan tab | in progress |
+| P2 MCP backend | done (registry, host proxy, grants, `/api/mcp/servers`, `MCP_CALL` signal) |
+| P3 Studio shell | done (tabs, detail switch, seat chips, New project page, Sessions tab, Team/Graph toggle) |
+| P4 Project manager + API | done (`core/pm_prompts.py`, `core/project_manager.py`, `api/routes/plan.py`, spec-first gate) |
+| P5 Studio Plan tab | done (`features/plan/*`, mounted in the Plan tab) |
 | P6 Harness integration | not started |
 | P7 Studio Work/Sessions/Team | not started |
 | P8 Record | not started |
