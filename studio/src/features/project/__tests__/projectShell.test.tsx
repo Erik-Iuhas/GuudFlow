@@ -24,6 +24,7 @@ vi.mock("../../../components/RoadmapTab", () => ({ RoadmapTab: () => <div>roadma
 vi.mock("../../../views/Inputs", () => ({ Inputs: () => <div>inputs content</div> }));
 vi.mock("../ProjectInsights", () => ({ ProjectInsights: () => <div>insights content</div> }));
 vi.mock("../../plan/PlanTab", () => ({ PlanTab: () => <div>plan conversation</div> }));
+vi.mock("../../record/RecordTab", () => ({ RecordTab: () => <div>record content</div> }));
 vi.mock("../../../components/CostStrip", () => ({ CostStrip: () => <div /> }));
 vi.mock("../../../components/PipelineGraph", () => ({ PipelineGraph: () => <div /> }));
 vi.mock("../../../components/ResumeButton", () => ({ ResumeButton: () => <button>Resume</button> }));

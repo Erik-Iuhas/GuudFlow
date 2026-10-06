@@ -61,6 +61,8 @@ export interface ProjectConfig {
   /** Project flow plan §2: who holds the Lead and Reviewer seats (Owner is always on). */
   seats?: ProjectSeats;
   start_mode?: StartMode;
+  /** Keep SPEC.md and docs/decisions/ in the project repo, updated on each accepted session. */
+  record?: { keep_in_repo?: boolean };
 }
 
 export interface ProjectSeats {

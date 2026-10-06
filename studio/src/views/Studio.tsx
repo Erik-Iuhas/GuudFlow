@@ -24,6 +24,7 @@ import { ProjectWork, type RunRequest } from "../features/work/ProjectWork";
 import { WorkSettings } from "../features/work/WorkSettings";
 import { Inputs } from "./Inputs";
 import { PlanTab } from "../features/plan/PlanTab";
+import { RecordTab } from "../features/record/RecordTab";
 
 const DETAIL_OPTIONS: { value: DetailLevel; label: string }[] = [
   { value: "overview", label: "Overview" },
@@ -303,7 +304,12 @@ export function Studio() {
       ) : tab === "sessions" ? (
         <SessionsTab runs={runs} onResumed={() => void load()} />
       ) : tab === "record" ? (
-        id && <ProjectInsights projectId={id} />
+        id && (
+          <>
+            <RecordTab projectId={id} />
+            <ProjectInsights projectId={id} />
+          </>
+        )
       ) : (
         <>
           <SettingsTab
