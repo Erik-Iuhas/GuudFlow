@@ -98,7 +98,7 @@ export function ApprovalCard({ runId, signal, onDecided }: ApprovalCardProps) {
 
       <textarea
         rows={2}
-        placeholder="Optional note (visible on the board)"
+        placeholder="Optional note: the agent reads it on its next turn"
         value={note}
         onChange={(e) => setNote(e.target.value)}
         className="mt-2"
