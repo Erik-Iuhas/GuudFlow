@@ -38,7 +38,7 @@ the API.
 
 | Your machine | Recommended setup | Agent isolation |
 |---|---|---|
-| **Linux** (workstation, server, VM) | Native install + Docker Engine. **The supported path.** | Full: every role in its own hardened container on a private network |
+| **Linux** (workstation, server, VM) | Native install + Docker Engine, or `docker compose up` (§5, option C) | Full: every role in its own hardened container on a private network |
 | **Windows** | WSL2 with a Linux distro, and Docker Engine installed *inside* that distro; then follow the Linux steps in WSL | Same as Linux (not separately verified) |
 | **macOS** | Native install in **host mode** for trusted local demos, or a Linux VM for real isolation | Host mode: none (see below) |
 | **Anywhere, just to look around** | Native install without Docker (host mode) | None |
@@ -49,14 +49,9 @@ can reach those two services and nothing else. Docker Desktop keeps its networks
 so that IP is not a local address on your Mac or Windows host. Sandboxed runs are not expected to
 work there; use WSL2 with Docker Engine, a Linux VM, or host mode.
 
-**Why not `docker compose up`?** The `Dockerfile` and `docker-compose.yml` package the API and Studio
-in one container. They predate the opencode harness and do not run agent teams yet:
-- the image does not install the opencode binary;
-- a containerized API cannot bind to the run network's gateway IP;
-- sandboxes bind-mount run folders by host path, and paths inside the container (`/app/data`) are not
-  host paths.
-
-Treat compose as a way to browse Studio and the API, not to run agents, until it is reworked.
+**Native or compose?** Both give full isolation on Linux. Compose needs only Docker on the machine
+and puts the API, Studio and opencode in one container. A native install is easier to develop on and
+to debug.
 
 **Host mode** (`--sandbox host`, or automatic when Docker is missing outside production) runs each
 opencode server as a normal process on your machine, with your user's permissions and no network
@@ -156,6 +151,37 @@ elsewhere, start Vite with `GUUDFLOW_API_URL=http://host:port npm run dev`.
 `scripts/dev.sh` starts both with `--reload`. **Do not use `--reload` while agents are running**:
 any edit under `api/`, `core/`, `agents/` or `worker/` restarts the API and kills the run. Use
 `./scripts/dev.sh --no-reload`, or plain `uvicorn` as above.
+
+### Option C: Docker Compose (Linux, only Docker needed)
+
+The API, Studio and the pinned opencode run in one container. Agent sandboxes are started next to
+it on the same Docker daemon.
+
+```bash
+git clone https://github.com/Erik-Iuhas/GuudFlow.git && cd GuudFlow
+cp .env.example .env               # set GUUDFLOW_API_TOKEN; add ANTHROPIC_API_KEY or use Studio
+docker compose up -d --build       # run from the repo root
+```
+
+Open <http://localhost:8000> and paste your token. The first run builds the sandbox image, which takes
+a minute.
+
+What the compose file sets up, and why:
+- **`network_mode: host`.** Each run binds its LLM gateway and MCP server to the run network's gateway
+  IP, which only exists on the host. In host mode `ports:` does not apply: `GUUDFLOW_BIND` (default
+  `127.0.0.1`) and `GUUDFLOW_PORT` (default `8000`) decide where the API listens. Set
+  `GUUDFLOW_BIND=0.0.0.0` only behind a firewall or proxy you control.
+- **Data at the same absolute path inside and outside.** Sandboxes bind-mount run folders by path, and
+  the host's Docker daemon resolves them on the host. The data directory defaults to `./data` in the
+  repo (`${PWD}/data`). Set `GUUDFLOW_HOST_DATA=/srv/guudflow` in `.env` to put it elsewhere (use an
+  absolute path). `TMPDIR` lives under it for the same reason.
+- **`NET_ADMIN`**, so each run can add the iptables rules that keep sandboxes off other host ports.
+- **Startup seeding:** the default personas and training scenarios are copied into a fresh data
+  directory; existing files are never overwritten.
+
+The container runs as root, so files under the data directory are owned by root. Sandboxes still run
+as an unprivileged user inside their own containers. Logs: `docker compose logs -f`. Stop:
+`docker compose down` (data stays). Update: `git pull && docker compose up -d --build`.
 
 ### Check it
 
@@ -359,6 +385,9 @@ Then restart the API.
 | Runs log `DEV MODE: opencode agent running on host` | Docker is not reachable, so the run fell back to host mode. Check `docker info` works for the API's user, then restart the API. |
 | "Docker is required for sandboxed agents but is not available" | Production refuses host mode. Start Docker, or don't set `GUUDFLOW_ENV=production` for local trials. |
 | Sandboxed runs fail to start on macOS or Windows Docker Desktop | Expected (§2). Use WSL2 with Docker Engine, a Linux VM, or host mode. |
+| Compose: runs fail with "no such file or directory" on a mount | The data directory is not at the same path inside and outside. Run `docker compose` from the repo root, or set `GUUDFLOW_HOST_DATA` to an absolute path. |
+| Compose: Studio not reachable from another machine | The API listens on `127.0.0.1` by default. Set `GUUDFLOW_BIND=0.0.0.0` (behind your own firewall or proxy). |
+| A local model (Ollama, LM Studio) fails with "Illegal header value" | Fixed: the gateway now sends no auth header to a provider without a key. Update and restart. |
 | Address already in use on 8000 | An old API is still running: `lsof -ti tcp:8000` and kill it. |
 | A run stopped when you edited code | You ran with `--reload`. Use `--no-reload` or plain `uvicorn` while agents run, then **Resume run**. |
 | Agents say a tool is missing (pytest, node, npm) | The sandbox has Python 3.11 (standard library), git and Bun only. Use `unittest` or `bun test`, or allow-list the package (pinned version) so roles can `request_package` it. |

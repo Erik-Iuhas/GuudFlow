@@ -1,65 +1,71 @@
-# docker-compose for the host stack.
+# GuudFlow in Docker: the API, Studio and the in-process worker in one container that
+# starts each agent's sandbox as a sibling container on the host's Docker daemon.
 #
-# Usage:
-#   1. ./scripts/build_sandbox.sh          # build the per-run sandbox image first
-#   2. cp .env.example .env && edit it     # add ANTHROPIC_API_KEY
-#   3. docker compose up --build           # build + start the host stack
+# Usage (Linux with Docker Engine; Docker Desktop cannot reach the per-run networks):
+#   cp .env.example .env        # add ANTHROPIC_API_KEY (or save a key in Studio) and a token
+#   docker compose up --build   # from the repo root
+#   open http://localhost:8000  # paste GUUDFLOW_API_TOKEN at the top right
 #
-# The host container mounts /var/run/docker.sock so it can ask the machine's
-# Docker daemon to spawn sandbox containers as siblings (NOT nested) per
-# DESIGN §29. This is the standard "Docker-out-of-Docker" pattern.
+# Three things make sibling sandboxes work; do not change them without reading docs/SETUP.md:
 #
-# For Kubernetes / multi-node deploys, this approach doesn't translate
-# cleanly — see ROADMAP.md Phase E (KubeJobManager + Helm chart).
+# 1. network_mode: host. Each run creates a private Docker network and binds its LLM gateway
+#    and MCP server to that network's gateway IP. That IP is an interface on the host, so
+#    this container has to share the host's network to bind it. `ports:` does not apply in
+#    host mode; GUUDFLOW_BIND decides which address the API listens on (localhost by default).
+# 2. The data directory is mounted at the same absolute path inside and outside. Sandboxes
+#    bind-mount run folders by path, and the host's Docker daemon resolves those paths on the
+#    host. TMPDIR lives under it for the same reason (pre-review checks mount a temp folder).
+# 3. NET_ADMIN, so each run can add iptables rules that let sandboxes reach only the gateway
+#    and MCP ports on the host.
+#
+# Files the container writes under ./data are owned by root (sandboxes run as an unprivileged
+# uid inside their own containers).
 
 services:
   guudflow:
     build: .
     image: guudflow:latest
     container_name: guudflow
-    ports:
-      - "8000:8000"
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
     environment:
-      # Required for real LLM calls. Read from .env.
+      # Model key; leave unset to paste it in Studio (Settings → Models & providers).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      # Optional bearer token. Required in production mode.
+      # Bearer token for the API and Studio. Set it.
       GUUDFLOW_API_TOKEN: ${GUUDFLOW_API_TOKEN:-}
-      # dev (default) keeps code-exec on the host with §29 hardening.
-      # production refuses to start without Docker; routes code-exec to
-      # the sandbox container.
       GUUDFLOW_MODE: ${GUUDFLOW_MODE:-dev}
-      # Persistent data lives in a volume.
-      GUUDFLOW_DATA_DIR: /app/data
+      # production: never fall back to running agents on the host.
+      GUUDFLOW_ENV: ${GUUDFLOW_ENV:-}
+      # Same absolute path inside and outside (see 2. above).
+      GUUDFLOW_DATA_DIR: ${GUUDFLOW_HOST_DATA:-${PWD}/data}
+      TMPDIR: ${GUUDFLOW_HOST_DATA:-${PWD}/data}/tmp
       GUUDFLOW_STUDIO_DIST: /app/studio/dist
       GUUDFLOW_CORS_ORIGINS: ${GUUDFLOW_CORS_ORIGINS:-*}
+      # 127.0.0.1 keeps the API on this machine; 0.0.0.0 exposes it on every interface.
+      GUUDFLOW_BIND: ${GUUDFLOW_BIND:-127.0.0.1}
+      GUUDFLOW_PORT: ${GUUDFLOW_PORT:-8000}
+      # Optional: web search for the researcher role, and project-remote tokens.
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      GUUDFLOW_GIT_TOKEN: ${GUUDFLOW_GIT_TOKEN:-}
     volumes:
-      # Persist runs, personas, projects across container restarts.
-      - ./data:/app/data
-      # Sibling-container pattern: the host container talks to the
-      # machine's Docker daemon to spawn sandbox containers next to it.
-      # Sandbox containers will inherit the limits in
-      # worker/docker_manager.CONTAINER_LIMITS — they are NOT nested.
+      - ${GUUDFLOW_HOST_DATA:-${PWD}/data}:${GUUDFLOW_HOST_DATA:-${PWD}/data}
+      # Sibling containers: talk to the host's Docker daemon.
       - /var/run/docker.sock:/var/run/docker.sock
+    # Seed the default personas and training scenarios (never overwriting), then serve.
+    command:
+      - sh
+      - -c
+      - >-
+        mkdir -p "$$TMPDIR" &&
+        python scripts/seed_data.py --data-root "$$GUUDFLOW_DATA_DIR" &&
+        { [ -d "$$GUUDFLOW_DATA_DIR/training_camp" ] || cp -r /app/data/training_camp "$$GUUDFLOW_DATA_DIR"/; } &&
+        exec uvicorn api.main:app --host "$$GUUDFLOW_BIND" --port "$$GUUDFLOW_PORT"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      test: ["CMD-SHELL", "python -c \"import os,urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('GUUDFLOW_PORT','8000')+'/health').status==200 else 1)\""]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
-
-# To split the worker into a separate process (production pattern):
-#
-#   worker:
-#     build: .
-#     image: guudflow:latest
-#     command: ["python", "-m", "worker.job_runner"]
-#     environment:
-#       ...same env as guudflow service...
-#       GUUDFLOW_DISABLE_INPROC_WORKER: "1"   # also set this on guudflow
-#     volumes:
-#       - ./data:/app/data
-#       - /var/run/docker.sock:/var/run/docker.sock
-#
-# (The standalone worker today has its own InMemoryJobQueue and won't share
-# with the API — Redis-backed queue lands in Phase E.)
+      start_period: 20s

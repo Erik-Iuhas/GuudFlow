@@ -2,12 +2,13 @@
 #
 # Multi-stage build:
 #   Stage 1: build the studio bundle with Node
-#   Stage 2: install Python deps, copy app, copy bundle, run uvicorn
+#   Stage 2: install the pinned opencode binary with npm
+#   Stage 3: install Python deps, copy app, bundle and opencode, run uvicorn
 #
-# The host container is a SIBLING of the per-run sandbox container, not its
-# parent. docker-compose.yml mounts /var/run/docker.sock so this container
-# can ask the machine's Docker daemon to spawn sandbox containers as
-# siblings (DESIGN §29).
+# The agent sandboxes are SIBLINGS of this container, started on the host's
+# Docker daemon through the mounted /var/run/docker.sock. Run it with
+# docker-compose.yml, which sets up what that needs (host networking, the data
+# directory at the same path inside and outside, NET_ADMIN); see docs/SETUP.md.
 
 # ── Stage 1: studio bundle ─────────────────────────────────────────────────
 
@@ -23,15 +24,30 @@ RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 COPY studio/ ./
 RUN npm run build
 
-# ── Stage 2: Python runtime ────────────────────────────────────────────────
+# ── Stage 2: the pinned opencode binary ───────────────────────────────────
+# The agent harness (one `opencode serve` per role, inside a sandbox) needs the
+# exact version in core/harness/server.py. The sandbox image is built from this
+# native binary on the first run.
+
+FROM node:22-slim AS opencode
+
+COPY core/harness/server.py /tmp/server.py
+RUN version="$(sed -n 's/^OPENCODE_VERSION = "\(.*\)"/\1/p' /tmp/server.py)" \
+ && test -n "$version" \
+ && mkdir -p /opt/opencode && cd /opt/opencode \
+ && npm init -y >/dev/null \
+ && npm install --no-audit --no-fund --save-exact "opencode-ai@${version}" \
+ && ./node_modules/.bin/opencode --version
+
+# ── Stage 3: Python runtime ────────────────────────────────────────────────
 
 FROM python:3.11-slim
 
-# git for core/git_workspace.py runtime ops; docker-cli (NOT docker.io,
-# which pulls the full daemon) so we can talk to the host's mounted
-# /var/run/docker.sock.
+# git for project repos and run branches; iptables so each run can lock its
+# sandboxes out of other host ports. The Docker SDK talks to the mounted
+# /var/run/docker.sock directly, so no docker CLI is needed.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git docker-cli \
+ && apt-get install -y --no-install-recommends git iptables \
  && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -56,8 +72,9 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # App code.
 COPY . .
 
-# Studio bundle from stage 1.
+# Studio bundle from stage 1, opencode from stage 2 (where the harness looks for it).
 COPY --from=studio-build /studio/dist /app/studio/dist
+COPY --from=opencode /opt/opencode /app/.tools/opencode
 
 # Default config — override in docker-compose.yml or `docker run -e ...`.
 ENV GUUDFLOW_DATA_DIR=/app/data \

@@ -314,32 +314,19 @@ host.
 
 ## Run it with Docker
 
-> **Not for agent runs yet.** The compose stack predates the opencode harness. It does not install
-> opencode, and a containerized API cannot reach the per-run sandbox networks it creates. Use it to
-> browse Studio and the API; run agents with the native install ([docs/SETUP.md](docs/SETUP.md)).
-
-If you'd rather not install Python/Node directly:
+On Linux with Docker Engine, one container runs the API, Studio and the pinned opencode, and starts
+each agent's sandbox next to it on the same daemon (Docker Desktop is not supported; see
+[docs/SETUP.md](docs/SETUP.md), option C):
 
 ```bash
-# 1. Build the per-run sandbox image (one-time)
-./scripts/build_sandbox.sh
-
-# 2. Start the host stack
-docker compose up --build
+cp .env.example .env          # set GUUDFLOW_API_TOKEN; add ANTHROPIC_API_KEY or paste it in Studio
+docker compose up -d --build  # from the repo root; open http://localhost:8000
 ```
 
-The compose stack:
-- Builds the host image (multi-stage: builds studio, then runs the API
-  with the bundle at `/`)
-- Mounts `./data` as the persistent run/persona directory
-- Mounts `/var/run/docker.sock` so the host container can spawn sandbox
-  containers as siblings (NOT nested — see DESIGN §29 / k8s notes in
-  [ROADMAP.md](ROADMAP.md))
-- Exposes the studio + API at `http://localhost:8000`
+The compose file uses host networking, mounts the data directory at the same absolute path inside
+and outside (`GUUDFLOW_HOST_DATA`, default `./data`), and adds `NET_ADMIN` for the per-run firewall
+rules. The guide explains why each is needed.
 
-Set environment variables in `.env` (the compose file reads it):
-- `ANTHROPIC_API_KEY` (required for real LLM calls)
-- `GUUDFLOW_API_TOKEN` (optional — required for production)
 
 ## Project layout
 

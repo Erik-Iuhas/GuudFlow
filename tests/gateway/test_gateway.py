@@ -160,6 +160,26 @@ async def test_real_key_replaces_virtual_key_anthropic(
     assert key not in repr(seen.headers.items()) and key.encode() not in seen.content
 
 
+async def test_a_keyless_local_provider_gets_no_auth_header(upstream: Upstreams,
+                                                            tmp_path: Path) -> None:
+    """Ollama / LM Studio need no key: send no auth header (an empty "Bearer " fails)."""
+    local = {"ollama": Upstream("ollama", "openai_compatible", "http://127.0.0.1:11434/v1", "")}
+    gw = Gateway(local, PRICES.get, cost_log=tmp_path / "cost.jsonl",
+                 transport=httpx.MockTransport(upstream))
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=gw.app()),
+                                     base_url="http://gateway") as c:
+            key = gw.issue_key("run1", "dev", [GPT])
+            r = await c.post("/ollama/chat/completions", headers={"authorization": f"Bearer {key}"},
+                             json={"model": GPT, "messages": []})
+        assert r.status_code == 200
+        (seen,) = upstream.requests
+        assert "authorization" not in seen.headers and "x-api-key" not in seen.headers
+        assert key not in repr(seen.headers.items())   # the virtual key never leaves the gateway
+    finally:
+        await gw.aclose()
+
+
 async def test_real_key_replaces_virtual_key_openai(
         client: httpx.AsyncClient, gateway: Gateway, upstream: Upstreams) -> None:
     key = gateway.issue_key("run1", "dev", [GPT])
