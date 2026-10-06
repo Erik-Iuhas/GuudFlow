@@ -7,10 +7,21 @@ import { CostStrip } from "../components/CostStrip";
 import { PipelineGraph } from "../components/PipelineGraph";
 import { ResumeButton } from "../components/ResumeButton";
 import { RoadmapTab } from "../components/RoadmapTab";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "../components/ui/dialog";
+import { Alert, Input, Label, Page, SectionTitle, Select, Table, Td, Textarea, Th, linkClass } from "../components/ui/form-controls";
+import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { checkCls, runStatusVariant } from "../lib/field";
+import { cn } from "../lib/utils";
 import type { AgentConfig, ProjectConfig, RunMeta } from "../types";
+import { ProjectInsights } from "../features/project/ProjectInsights";
+import { ProjectWork, type RunRequest } from "../features/work/ProjectWork";
+import { WorkSettings } from "../features/work/WorkSettings";
 import { Inputs } from "./Inputs";
 
-type Tab = "team" | "inputs" | "roadmap" | "settings";
+type Tab = "work" | "team" | "inputs" | "roadmap" | "insights" | "settings";
 
 const DEFAULT_GATES = {
   pre_run_cost_preview: true,
@@ -26,7 +37,8 @@ export function Studio() {
   const [runs, setRuns] = useState<RunMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<Tab>("team");
+  // The project is ongoing work (plan §13): its backlog and review queue come first.
+  const [tab, setTab] = useState<Tab>("work");
   const [settingsRole, setSettingsRole] = useState<string | null>(null);
   const [slideOverPersonaId, setSlideOverPersonaId] = useState<string | null>(null);
   // Track 12 — model registry for the per-use-case sub-LLM picker.
@@ -122,15 +134,22 @@ export function Studio() {
     message: string;
   }>(null);
 
-  async function runNow(confirm = false) {
+  // What the run should take on (backlog items, a pending run to continue);
+  // kept across the cost-preview round trip.
+  const [runRequest, setRunRequest] = useState<RunRequest>({});
+  const [starting, setStarting] = useState(false);
+
+  async function runNow(confirm = false, request: RunRequest = runRequest) {
     if (!id || !project) return;
     // Always persist current agent config before invoking so model_tier
     // changes and other edits made in the UI are actually used by the run.
     if (!confirm) {
+      setRunRequest(request);
       await save();
     }
+    setStarting(true);
     try {
-      const res = await invokeApi.invoke(id, confirm ? { confirm: true } : {});
+      const res = await invokeApi.invoke(id, { ...request, ...(confirm ? { confirm: true } : {}) });
       if (res.accepted) {
         setCostGate(null);
         navigate(`/runs/${res.run_id}`);
@@ -143,74 +162,61 @@ export function Studio() {
       });
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setStarting(false);
     }
   }
 
   if (!project) {
     return (
-      <div className="page">
-        {error ? <div className="error">{error}</div> : <p className="muted">loading…</p>}
-        <Link to="/projects">← projects</Link>
-      </div>
+      <Page>
+        {error ? <Alert variant="error">{error}</Alert> : <p className="text-muted-foreground">loading…</p>}
+        <Link className={linkClass} to="/projects">← projects</Link>
+      </Page>
     );
   }
 
   return (
-    <div className="page">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>{project.project_id}</h1>
-        <div className="row">
-          <button onClick={save} disabled={saving}>
+    <Page>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h1 className="m-0 text-[22px] font-semibold tracking-tight">{project.project_id}</h1>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}
-          </button>
-          <button className="primary" onClick={() => void runNow(false)}>
-            Run now
-          </button>
+          </Button>
+          {/* Backlog runs start from the Work tab; this runs on the project goal alone. */}
+          <Button variant="outline" onClick={() => void runNow(false, {})}>Run on the goal only</Button>
         </div>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <Alert variant="error" className="mb-3">{error}</Alert>}
 
-      <div className="tabs">
-        <button
-          className={`tab ${tab === "team" ? "tab-active" : ""}`}
-          onClick={() => setTab("team")}
-        >
-          Team
-        </button>
-        <button
-          className={`tab ${tab === "inputs" ? "tab-active" : ""}`}
-          onClick={() => setTab("inputs")}
-        >
-          Inputs
-        </button>
-        <button
-          className={`tab ${tab === "roadmap" ? "tab-active" : ""}`}
-          onClick={() => setTab("roadmap")}
-        >
-          Roadmap
-        </button>
-        <button
-          className={`tab ${tab === "settings" ? "tab-active" : ""}`}
-          onClick={() => setTab("settings")}
-        >
-          Settings
-        </button>
-      </div>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mb-4">
+        <TabsList>
+          <TabsTrigger value="work">Work</TabsTrigger>
+          <TabsTrigger value="team">Team</TabsTrigger>
+          <TabsTrigger value="inputs">Inputs</TabsTrigger>
+          <TabsTrigger value="roadmap">Roadmap</TabsTrigger>
+          <TabsTrigger value="insights">Insights</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
-      {tab === "team" ? (
+      {tab === "work" ? (
+        id && <ProjectWork projectId={id} starting={starting} onStartRun={(r) => void runNow(false, r)} />
+      ) : tab === "team" ? (
         <>
-          <div className="card">
-            <label>Goal</label>
-            <textarea
+          <Card className="mb-3 p-4">
+            <Label>Goal</Label>
+            <Textarea
               rows={2}
               value={project.goal}
               onChange={(e) => setProject({ ...project, goal: e.target.value })}
             />
-            <div className="grid-3" style={{ marginTop: 12 }}>
+            <div className="mt-3 grid grid-cols-3 gap-4">
               <div>
-                <label>Max iterations</label>
-                <input
+                <Label>Max iterations</Label>
+                <Input
                   type="number"
                   min={1}
                   max={20}
@@ -231,9 +237,9 @@ export function Studio() {
                 { value: "auto",   title: "Auto",   hint: "Merge straight into main. Sandbox / throwaway projects only." },
               ];
               return (
-                <div style={{ marginTop: 16 }}>
-                  <label style={{ display: "block", marginBottom: 6 }}>PR mode</label>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <div className="mt-4">
+                  <Label className="mb-1.5">PR mode</Label>
+                  <div className="grid grid-cols-2 gap-2">
                     {opts.map((o) => {
                       const selected = prMode === o.value;
                       return (
@@ -241,24 +247,15 @@ export function Studio() {
                           key={o.value}
                           type="button"
                           onClick={() => setProject({ ...project, pr_mode: o.value })}
-                          style={{
-                            textAlign: "left",
-                            padding: "10px 12px",
-                            borderRadius: 6,
-                            border: selected
-                              ? "1.5px solid #16a34a"
-                              : "1px solid #e2e8f0",
-                            background: selected ? "#f0fdf4" : "#fff",
-                            cursor: "pointer",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 2,
-                          }}
+                          className={cn(
+                            "flex cursor-pointer flex-col gap-0.5 rounded-md border bg-card px-3 py-2.5 text-left text-card-foreground",
+                            selected ? "border-status-complete bg-status-complete/10" : "border-border",
+                          )}
                         >
-                          <span style={{ fontWeight: 600, fontSize: 13 }}>
+                          <span className="text-[13px] font-semibold">
                             {selected ? "● " : "○ "}{o.title}
                           </span>
-                          <span className="muted small" style={{ lineHeight: 1.3 }}>
+                          <span className="text-xs leading-tight text-muted-foreground">
                             {o.hint}
                           </span>
                         </button>
@@ -289,27 +286,27 @@ export function Studio() {
                 (grouped[m.provider] ||= []).push(m);
               }
               return (
-                <div style={{ marginTop: 16 }}>
-                  <label style={{ display: "block", marginBottom: 6 }}>Sub-LLM models</label>
-                  <p className="muted small" style={{ marginTop: 0, marginBottom: 6 }}>
+                <div className="mt-4">
+                  <Label className="mb-1.5">Sub-LLM models</Label>
+                  <p className="mb-1.5 mt-0 text-xs text-muted-foreground">
                     Per-use-case model for tools that delegate to a cheap LLM. Empty = auto (cheapest tool-capable).
                   </p>
-                  <table className="list" style={{ width: "100%" }}>
+                  <Table>
                     <thead>
                       <tr>
-                        <th style={{ width: "32%" }}>Use case</th>
-                        <th>Model</th>
+                        <Th className="w-[32%]">Use case</Th>
+                        <Th>Model</Th>
                       </tr>
                     </thead>
                     <tbody>
                       {useCases.map((uc) => (
                         <tr key={uc.id}>
-                          <td>
-                            <div style={{ fontWeight: 500 }}>{uc.label}</div>
-                            <div className="muted small">{uc.hint}</div>
-                          </td>
-                          <td>
-                            <select
+                          <Td>
+                            <div className="font-medium">{uc.label}</div>
+                            <div className="text-xs text-muted-foreground">{uc.hint}</div>
+                          </Td>
+                          <Td>
+                            <Select
                               value={subModels[uc.id] ?? ""}
                               onChange={(e) => {
                                 const next = { ...(project.sub_llm_models ?? {}) };
@@ -320,7 +317,6 @@ export function Studio() {
                                 }
                                 setProject({ ...project, sub_llm_models: next });
                               }}
-                              style={{ width: "100%" }}
                             >
                               <option value="">(auto: cheapest tool-capable)</option>
                               {Object.entries(grouped).sort().map(([provider, ms]) => (
@@ -332,20 +328,20 @@ export function Studio() {
                                   ))}
                                 </optgroup>
                               ))}
-                            </select>
-                          </td>
+                            </Select>
+                          </Td>
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </Table>
                 </div>
               );
             })()}
-          </div>
+          </Card>
 
           <CostStrip project={project} />
 
-          <h2>Agents</h2>
+          <SectionTitle>Agents</SectionTitle>
           {/* Phase G.1 — DAG preview. Click a node to open agent settings. */}
           {(project.agents ?? []).length > 0 && (
             <PipelineGraph
@@ -354,40 +350,40 @@ export function Studio() {
               onRemoveAgent={removeAgent}
             />
           )}
-          <button onClick={addAgent} style={{ marginTop: 8 }}>+ Add agent</button>
+          <Button variant="outline" className="mt-2" onClick={addAgent}>+ Add agent</Button>
 
-          <h2 style={{ marginTop: 24 }}>Recent runs</h2>
+          <SectionTitle className="mt-6">Recent runs</SectionTitle>
           {runs.length === 0 ? (
-            <p className="muted small">No runs yet. Hit "Run now" to start one.</p>
+            <p className="text-xs text-muted-foreground">No runs yet. Hit "Run now" to start one.</p>
           ) : (
-            <table className="list">
+            <Table>
               <thead>
                 <tr>
-                  <th>Run id</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th>Completed agents</th>
-                  <th></th>
+                  <Th>Run id</Th>
+                  <Th>Status</Th>
+                  <Th>Created</Th>
+                  <Th>Completed agents</Th>
+                  <Th></Th>
                 </tr>
               </thead>
               <tbody>
                 {runs.map((r) => (
                   <tr key={r.run_id}>
-                    <td>
-                      <Link to={`/runs/${r.run_id}`} className="mono">
+                    <Td>
+                      <Link to={`/runs/${r.run_id}`} className={cn(linkClass, "font-mono")}>
                         {r.run_id}
                       </Link>
-                    </td>
-                    <td>
-                      <span className={`tag tag-status-${r.status}`}>{r.status}</span>
-                    </td>
-                    <td className="small muted">{r.created_at?.replace("T", " ").split(".")[0]}</td>
-                    <td className="small">{(r.completed_agents ?? []).join(", ")}</td>
-                    <td>
-                      <div className="row" style={{ justifyContent: "flex-end", gap: 6 }}>
-                        <Link to={`/runs/${r.run_id}`}>
-                          <button>Watch</button>
-                        </Link>
+                    </Td>
+                    <Td>
+                      <Badge variant={runStatusVariant(r.status)}>{r.status}</Badge>
+                    </Td>
+                    <Td className="text-xs text-muted-foreground">{r.created_at?.replace("T", " ").split(".")[0]}</Td>
+                    <Td className="text-xs">{(r.completed_agents ?? []).join(", ")}</Td>
+                    <Td>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Button asChild variant="outline">
+                          <Link to={`/runs/${r.run_id}`}>Watch</Link>
+                        </Button>
                         {/* Phase G.3 — quick-resume from the run history
                             list. Same backend as the Run view's button. */}
                         {r.status !== "complete" && r.status !== "running" &&
@@ -395,63 +391,65 @@ export function Studio() {
                           <ResumeButton runId={r.run_id} onResumed={() => void load()} />
                         )}
                       </div>
-                    </td>
+                    </Td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           )}
         </>
       ) : tab === "inputs" ? (
         id && <Inputs projectId={id} />
       ) : tab === "roadmap" ? (
         id && <RoadmapTab projectId={id} />
+      ) : tab === "insights" ? (
+        id && <ProjectInsights projectId={id} />
       ) : (
-        <SettingsTab
-          gates={{ ...DEFAULT_GATES, ...(project.approval_gates ?? {}) }}
-          onChange={(next) =>
-            setProject({
-              ...project,
-              approval_gates: next,
-            })
-          }
-        />
+        <>
+          <SettingsTab
+            gates={{ ...DEFAULT_GATES, ...(project.approval_gates ?? {}) }}
+            onChange={(next) =>
+              setProject({
+                ...project,
+                approval_gates: next,
+              })
+            }
+          />
+          <WorkSettings
+            gates={project.approval_gates ?? {}}
+            onChange={(patch) =>
+              setProject({ ...project, approval_gates: { ...(project.approval_gates ?? {}), ...patch } })
+            }
+          />
+        </>
       )}
 
       {/* Phase C.0.5: pre-run cost preview gate. Studio shows the
           estimate and either confirms or backs out. */}
       {costGate && (
-        <div className="modal-backdrop" onClick={() => setCostGate(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Confirm run</h3>
-            <p>{costGate.message}</p>
-            <div
-              className="card"
-              style={{ background: "#f0f9ff", borderColor: "#bae6fd" }}
-            >
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <span className="muted small">Estimated worst-case cost</span>
-                <strong style={{ fontSize: 18 }}>
+        <Dialog open onOpenChange={(o) => !o && setCostGate(null)}>
+          <DialogContent>
+            <DialogTitle>Confirm run</DialogTitle>
+            <DialogDescription>{costGate.message}</DialogDescription>
+            <Card className="border-status-running/40 bg-status-running/10 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-muted-foreground">Estimated worst-case cost</span>
+                <strong className="text-lg">
                   ${costGate.estimate.total_usd.toFixed(2)}
                 </strong>
               </div>
-            </div>
-            <p className="muted small" style={{ marginTop: 8 }}>
+            </Card>
+            <p className="m-0 text-xs text-muted-foreground">
               This is a worst-case figure (every agent runs every iteration to
               max). Real spend is usually lower. To turn this gate off, edit
               the project's approval gates settings.
             </p>
-            <div className="row" style={{ marginTop: 12, gap: 8 }}>
-              <button
-                className="primary"
-                onClick={() => void runNow(true)}
-              >
-                Confirm and run
-              </button>
-              <button onClick={() => setCostGate(null)}>Cancel</button>
-            </div>
-          </div>
-        </div>
+            <DialogFooter className="justify-start">
+              <Button onClick={() => void runNow(true)}>Confirm and run</Button>
+              <Button variant="outline" onClick={() => setCostGate(null)}>Cancel</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {slideOverPersonaId && (
@@ -495,7 +493,7 @@ export function Studio() {
           />
         );
       })()}
-    </div>
+    </Page>
   );
 }
 
@@ -509,14 +507,14 @@ interface SettingsTabProps {
 
 function SettingsTab({ gates, onChange }: SettingsTabProps) {
   return (
-    <div className="card">
-      <h2 style={{ marginTop: 0 }}>Approval gates</h2>
-      <p className="muted small">
+    <Card className="mb-3 p-4">
+      <h2 className="m-0 text-base font-semibold">Approval gates</h2>
+      <p className="my-2 text-xs text-muted-foreground">
         Pause and confirm before the team spends tokens on big actions.
         These changes save with the project on the next click of Save.
       </p>
 
-      <div className="settings-grid">
+      <div className="mt-3 flex flex-col gap-3">
         <Toggle
           label="Pre-run cost preview"
           help="Show the cost estimate before each run starts. Click Confirm to proceed."
@@ -549,9 +547,12 @@ function SettingsTab({ gates, onChange }: SettingsTabProps) {
           step={0.5}
         />
       </div>
-    </div>
+    </Card>
   );
 }
+
+const ROW_CLS = "rounded-md border border-border bg-muted px-3 py-2";
+const CHECK_LABEL = "mb-0 inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-foreground";
 
 function Toggle(props: {
   label: string;
@@ -560,16 +561,17 @@ function Toggle(props: {
   onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="settings-row">
-      <label>
+    <div className={ROW_CLS}>
+      <label className={CHECK_LABEL}>
         <input
           type="checkbox"
+          className={checkCls}
           checked={props.checked}
           onChange={(e) => props.onChange(e.target.checked)}
-        />{" "}
+        />
         {props.label}
       </label>
-      <p className="muted small">{props.help}</p>
+      <p className="mb-0 ml-6 mt-1 text-xs text-muted-foreground">{props.help}</p>
     </div>
   );
 }
@@ -583,26 +585,27 @@ function NumberOrOff(props: {
 }) {
   const enabled = props.value !== null;
   return (
-    <div className="settings-row">
-      <label>
+    <div className={ROW_CLS}>
+      <label className={CHECK_LABEL}>
         <input
           type="checkbox"
+          className={checkCls}
           checked={enabled}
           onChange={(e) => props.onChange(e.target.checked ? (props.value ?? 2) : null)}
-        />{" "}
+        />
         {props.label}
       </label>
       {enabled && (
-        <input
+        <Input
           type="number"
           step={props.step ?? 1}
           min={0}
           value={props.value ?? 0}
           onChange={(e) => props.onChange(parseFloat(e.target.value || "0"))}
-          style={{ marginTop: 4, width: 100 }}
+          className="ml-6 mt-1 w-[100px]"
         />
       )}
-      <p className="muted small">{props.help}</p>
+      <p className="mb-0 ml-6 mt-1 text-xs text-muted-foreground">{props.help}</p>
     </div>
   );
 }

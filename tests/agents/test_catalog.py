@@ -27,7 +27,7 @@ def test_register_builtins_is_idempotent():
     register_builtins()
     register_builtins()
     # All four archetypes are present.
-    for name in ("code_reviewer", "tech_lead", "requirements_writer", "architect"):
+    for name in ("code_reviewer", "requirements_writer", "architect"):
         assert registry.has(name)
 
 
@@ -35,7 +35,6 @@ def test_list_archetypes_includes_each_builtin():
     metas = list_archetypes()
     names = {m.name for m in metas}
     assert "code_reviewer" in names
-    assert "tech_lead" in names
     assert "requirements_writer" in names
     assert "architect" in names
 
@@ -56,7 +55,6 @@ def test_list_archetypes_groups_by_abstract_base():
     # Find the three known builtins.
     by_name = {m.name: m for m in metas}
     assert by_name["code_reviewer"].abstract_base == "reviewer"
-    assert by_name["tech_lead"].abstract_base == "escalation_handler"
     assert by_name["requirements_writer"].abstract_base == "specialist"
 
 
@@ -74,10 +72,9 @@ def test_meta_carries_class_level_defaults():
 
 
 def test_meta_carries_description_and_when_to_use():
-    meta = get_archetype("tech_lead")
+    meta = get_archetype("code_reviewer")
     assert meta is not None
-    # description is non-empty and references the role's purpose.
-    assert "stuck cycles" in meta.description.lower()
+    assert meta.description
     # when_to_use is non-empty prose describing project-level fit.
     assert meta.when_to_use
     assert len(meta.when_to_use) > 30
@@ -142,7 +139,6 @@ def test_list_all_includes_runtime_and_yaml():
     names = {m.name for m in metas}
     # Shipped (runtime catalog).
     assert "code_reviewer" in names
-    assert "tech_lead" in names
     # Described only (YAML — not concrete classes yet).
     assert "frontend_dev" in names
     assert "backend_dev" in names

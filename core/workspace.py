@@ -34,6 +34,9 @@ class AgentState(str, Enum):
     WAITING_FOR_PEER = "waiting_for_peer"          # blocked on ASK/ANSWER
     WAITING_FOR_SKIP_CONFIRM = "waiting_for_skip_confirm"  # REQUEST_SKIP pending
     SAT_OUT = "sat_out"                            # skip confirmed; counts as complete
+    # opencode harness (plan §4.4–§4.6)
+    BLOCKED = "blocked"                            # waiting on another role's rework
+    PARKED = "parked"                              # nothing ready for this role yet
 
 
 # ── Typed sub-records ───────────────────────────────────────────────────────
@@ -264,6 +267,24 @@ class Task:
     # M5.5: set by TaskSummarizer on close; persisted via tasks.jsonl mutation.
     completion_summary: dict | None = None
 
+    # Task board (harness plan 4.6). All optional so legacy rows still load.
+    title: str = ""
+    kind: str = "code"  # code | test | docs | research | visual
+    size: str = "M"  # S | M | L
+    files_hint: list[str] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)  # task ids
+    visual_refs: list[str] = field(default_factory=list)
+    # todo | in_progress | review | done | blocked | needs_attention. Moved only
+    # by scheduler events; independent of `status` (legacy lifecycle).
+    column: str = "todo"
+    review_round: int = 0
+    priority: int = 0  # higher runs first; humans change it from the board (S34)
+    column_since: float = 0.0  # unix time the card entered `column` (card aging, §11.2)
+    # ThreadEntry.to_dict() payloads (core.harness.tasks.ThreadEntry).
+    thread: list[dict[str, Any]] = field(default_factory=list)
+    # Project backlog item this card works on (plan §13); None for extra cards.
+    backlog_id: str | None = None
+
 
 # Map a TaskStatus transition to the SignalType the runner posts when
 # `mutate_task` fires. PENDING is the initial state and never re-enters
@@ -441,6 +462,14 @@ class Workspace:
     # with a ContextSnapshot row.
     _context_log_persister: Callable[["ContextSnapshot"], None] | None = field(
         default=None, repr=False,
+    )
+
+    # Board listeners — zero-argument callables fired by
+    # `core.harness.card_ops.notify_board_changed` after a human edits the task
+    # board (add card / priority / comment). The run registers one to re-arm
+    # roles. Not serialised.
+    board_listeners: list[Callable[[], None]] = field(
+        default_factory=list, repr=False, compare=False,
     )
 
     # In-memory log lists (always populated; persister is optional).

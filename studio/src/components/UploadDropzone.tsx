@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
 
 export interface UploadDropzoneProps {
   onUpload: (files: File[]) => Promise<void>;
@@ -24,9 +26,11 @@ export function UploadDropzone({ onUpload, disabled }: UploadDropzoneProps) {
 
   return (
     <div
-      className={`dropzone ${dragOver ? "dropzone-active" : ""} ${
-        disabled || busy ? "dropzone-disabled" : ""
-      }`}
+      className={cn(
+        "rounded-lg border-2 border-dashed border-input bg-muted p-6 text-center transition-colors",
+        dragOver && "border-primary bg-accent",
+        (disabled || busy) && "pointer-events-none opacity-60",
+      )}
       onDragOver={(e) => {
         e.preventDefault();
         if (!disabled && !busy) setDragOver(true);
@@ -43,25 +47,26 @@ export function UploadDropzone({ onUpload, disabled }: UploadDropzoneProps) {
         ref={inputRef}
         type="file"
         multiple
-        style={{ display: "none" }}
+        className="hidden"
         onChange={(e) => void handleFiles(e.target.files)}
         disabled={disabled || busy}
       />
-      <div className="dropzone-body">
-        <p className="muted">
+      <div>
+        <p className="m-0 mb-2 text-muted-foreground">
           {busy
             ? "Uploading…"
             : dragOver
               ? "Release to upload"
               : "Drag files here, or"}
         </p>
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={() => inputRef.current?.click()}
           disabled={disabled || busy}
         >
           Browse files
-        </button>
+        </Button>
       </div>
     </div>
   );

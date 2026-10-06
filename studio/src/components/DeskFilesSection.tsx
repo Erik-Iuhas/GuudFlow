@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { personasApi } from "../api";
 import type { DeskFileSummary } from "../api";
+import { errorCls, fieldCls, labelCls } from "../lib/field";
+import { cn } from "../lib/utils";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
 
 interface Props {
   personaId: string;
@@ -91,62 +96,51 @@ export function DeskFilesSection({ personaId }: Props) {
   }
 
   return (
-    <div style={{ marginTop: 16 }}>
+    <div className="mt-4">
       {/* Section header */}
       <button
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          background: "none",
-          border: "none",
-          padding: 0,
-          cursor: "pointer",
-          fontWeight: 600,
-          fontSize: 13,
-          color: "#374151",
-          width: "100%",
-        }}
+        type="button"
+        className="flex w-full cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-[13px] font-semibold text-foreground"
         onClick={() => setExpanded((v) => !v)}
       >
-        <span style={{ fontSize: 10, transition: "transform .15s", transform: expanded ? "rotate(90deg)" : "none" }}>▶</span>
+        <span className={cn("text-[10px] transition-transform", expanded && "rotate-90")}>▶</span>
         Desk Files ({loading ? "…" : files.length})
       </button>
 
       {expanded && (
-        <div style={{ marginTop: 8 }}>
+        <div className="mt-2">
           {/* Toast */}
           {toastMsg && (
-            <div className="error" style={{ marginBottom: 8, fontSize: 12 }}>{toastMsg}</div>
+            <div className={cn(errorCls, "mb-2 text-xs")}>{toastMsg}</div>
           )}
 
           {/* File list */}
           {files.length === 0 && !loading && (
-            <p className="muted small">
+            <p className="my-2 text-xs text-muted-foreground">
               No desk files yet. Add one to give this persona pre-work knowledge.
             </p>
           )}
 
           {files.map((f) => (
-            <div key={f.filename} className="card" style={{ marginBottom: 6, padding: "8px 12px" }}>
-              <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <Card key={f.filename} className="mb-1.5 px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
                 <div>
-                  <span style={{ fontWeight: 600, fontSize: 12 }}>{f.filename}</span>
-                  <div className="row" style={{ gap: 4, marginTop: 2, flexWrap: "wrap" }}>
+                  <span className="text-xs font-semibold">{f.filename}</span>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1">
                     {f.triggers.length === 0 ? (
-                      <span className="tag small" title="File won't auto-inject without triggers" style={{ background: "#fef3c7", color: "#92400e" }}>
+                      <Badge variant="blocked" title="File won't auto-inject without triggers">
                         won't auto-inject
-                      </span>
+                      </Badge>
                     ) : (
                       f.triggers.map((t) => (
-                        <span key={t} className="tag small">{t}</span>
+                        <Badge key={t} variant="secondary">{t}</Badge>
                       ))
                     )}
                   </div>
                 </div>
                 <button
-                  className="small"
-                  style={{ color: "#ef4444", background: "none", border: "none", cursor: "pointer" }}
+                  type="button"
+                  className="cursor-pointer border-0 bg-transparent p-1 text-xs text-destructive"
                   onClick={() => setConfirmDelete(f.filename)}
                   title="Delete desk file"
                 >
@@ -154,70 +148,66 @@ export function DeskFilesSection({ personaId }: Props) {
                 </button>
               </div>
               {f.body_excerpt && (
-                <div className="muted small mono" style={{ marginTop: 4, fontSize: 11, whiteSpace: "pre-wrap" }}>
+                <div className="mt-1 whitespace-pre-wrap font-mono text-[11px] text-muted-foreground">
                   {f.body_excerpt.slice(0, 120)}{f.body_excerpt.length > 120 ? "…" : ""}
                 </div>
               )}
-            </div>
+            </Card>
           ))}
 
           {/* Delete confirm */}
           {confirmDelete && (
-            <div className="card" style={{ padding: 10, marginBottom: 8, border: "1px solid #fca5a5" }}>
-              <div className="small">Delete <strong>{confirmDelete}</strong>?</div>
-              <div className="row" style={{ gap: 8, marginTop: 6 }}>
-                <button className="primary small" style={{ background: "#ef4444" }} onClick={() => void handleDelete(confirmDelete)}>Delete</button>
-                <button className="small" onClick={() => setConfirmDelete(null)}>Cancel</button>
+            <Card className="mb-2 border-destructive/40 p-2.5">
+              <div className="text-xs">Delete <strong>{confirmDelete}</strong>?</div>
+              <div className="mt-1.5 flex items-center gap-2">
+                <Button size="sm" variant="destructive" onClick={() => void handleDelete(confirmDelete)}>Delete</Button>
+                <Button size="sm" variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
               </div>
-            </div>
+            </Card>
           )}
 
           {/* Add button / form */}
           {!addOpen && (
-            <button
-              className="small"
-              style={{ marginTop: 4 }}
-              onClick={() => setAddOpen(true)}
-            >
+            <Button size="sm" variant="outline" className="mt-1" onClick={() => setAddOpen(true)}>
               + Add desk file
-            </button>
+            </Button>
           )}
 
           {addOpen && (
-            <div className="card" style={{ marginTop: 8, padding: 10 }}>
-              <label className="small">Filename (.md)</label>
+            <Card className="mt-2 p-2.5">
+              <label className={labelCls}>Filename (.md)</label>
               <input
+                className={cn(fieldCls, "mb-1.5")}
                 value={addFilename}
                 onChange={(e) => setAddFilename(e.target.value)}
                 placeholder="knowledge.md"
-                style={{ marginBottom: 6 }}
               />
-              <label className="small">Triggers (comma-separated keywords)</label>
+              <label className={labelCls}>Triggers (comma-separated keywords)</label>
               <input
+                className={cn(fieldCls, "mb-1.5")}
                 value={addTriggers}
                 onChange={(e) => setAddTriggers(e.target.value)}
                 placeholder="schema, api, design"
-                style={{ marginBottom: 6 }}
               />
-              <label className="small">Content</label>
+              <label className={labelCls}>Content</label>
               <textarea
+                className={cn(fieldCls, "mb-2")}
                 rows={4}
                 value={addContent}
                 onChange={(e) => setAddContent(e.target.value)}
                 placeholder="Knowledge content…"
-                style={{ marginBottom: 8 }}
               />
-              <div className="row" style={{ gap: 8 }}>
-                <button
-                  className="primary small"
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
                   onClick={() => void handleAdd()}
                   disabled={addBusy || !addFilename.trim() || !addContent.trim()}
                 >
                   {addBusy ? "Adding…" : "Add"}
-                </button>
-                <button className="small" onClick={() => setAddOpen(false)}>Cancel</button>
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
               </div>
-            </div>
+            </Card>
           )}
         </div>
       )}

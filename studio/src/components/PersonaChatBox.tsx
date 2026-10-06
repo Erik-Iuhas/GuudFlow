@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { ApiError, personasApi } from "../api";
 import type { PersonaChatResponse } from "../api";
+import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
+import { Alert, Input } from "./ui/form-controls";
 
 /**
  * Phase G.0 — read-only chat with a persona. Wraps F.4's
@@ -36,30 +40,38 @@ export function PersonaChatBox({ personaId }: { personaId: string }) {
   }
 
   return (
-    <div className="card chat-box">
-      <h3 style={{ marginTop: 0 }}>Chat with this persona</h3>
-      <p className="muted small">
+    <Card className="mt-4 bg-muted p-4">
+      <h3 className="m-0 mb-1 text-base font-semibold">Chat with this persona</h3>
+      <p className="mb-2 mt-0 text-sm text-muted-foreground">
         Read-only — chat does not mutate persona memory. Each reply
         shows what memory was surfaced.
       </p>
 
-      <div className="chat-history">
+      <div
+        className="my-2 max-h-80 overflow-y-auto rounded-md border border-border bg-card p-2.5"
+        role="log"
+        aria-live="polite"
+        aria-label="Chat history"
+      >
         {history.length === 0 && (
-          <p className="muted small">
+          <p className="m-0 text-xs text-muted-foreground">
             Ask about a past run, a pattern, or this persona's preferences.
           </p>
         )}
         {history.map((turn, i) => (
           <div
             key={i}
-            className={`chat-turn chat-turn-${turn.role}`}
+            className={cn(
+              "border-b border-border py-2 last:border-b-0",
+              turn.role === "user" && "my-1 rounded-sm border-b-0 bg-accent px-2 py-1.5",
+            )}
           >
-            <div className="chat-role">
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
               {turn.role === "user" ? "You" : "Persona"}
             </div>
-            <div className="chat-text">{turn.text}</div>
+            <div className="mt-0.5 whitespace-pre-wrap text-sm">{turn.text}</div>
             {turn.recall && (
-              <div className="chat-recall small muted">
+              <div className="mt-1 text-[11px] text-muted-foreground">
                 drew on {turn.recall.patterns_used} patterns ·{" "}
                 {turn.recall.anti_patterns_used} anti-patterns ·{" "}
                 {turn.recall.episodes_used} episodes
@@ -68,16 +80,14 @@ export function PersonaChatBox({ personaId }: { personaId: string }) {
           </div>
         ))}
         {loading && (
-          <div className="chat-turn chat-turn-loading muted small">
-            Thinking…
-          </div>
+          <div className="py-2 text-xs italic text-muted-foreground">Thinking…</div>
         )}
       </div>
 
-      {error && <div className="error small">{error}</div>}
+      {error && <Alert variant="error" className="mb-2 text-xs">{error}</Alert>}
 
-      <div className="chat-input-row">
-        <input
+      <div className="flex gap-2">
+        <Input
           type="text"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
@@ -88,17 +98,15 @@ export function PersonaChatBox({ personaId }: { personaId: string }) {
             }
           }}
           placeholder="Ask about a past run, a pattern, anything…"
+          aria-label="Message"
           disabled={loading}
+          className="flex-1"
         />
-        <button
-          className="primary"
-          disabled={!message.trim() || loading}
-          onClick={() => void send()}
-        >
+        <Button disabled={!message.trim() || loading} onClick={() => void send()}>
           {loading ? "…" : "Send"}
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }
 

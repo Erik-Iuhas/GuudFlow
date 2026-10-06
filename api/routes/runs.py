@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from api.auth import require_bearer
 from core.signals import Signal, SignalType
@@ -157,7 +158,24 @@ async def get_run(request: Request, run_id: str) -> dict:
     if registry is not None and meta.get("status") == "running":
         if run_id not in registry.runs:
             meta["status"] = "stale"
+    await _add_harness_meta(request, meta)
     return meta
+
+
+async def _add_harness_meta(request: Request, meta: dict) -> None:
+    """Fill `harness` and `token_budget_usd` from the project when the run meta lacks
+    them (Studio's cockpit picks its view and budget meter from these), plus the
+    board's review-column WIP cap so Studio never hardcodes it."""
+    from core.harness.task_board import BoardLimits
+    meta.setdefault("review_column_cap", BoardLimits().review_column_cap)
+    if "harness" in meta and "token_budget_usd" in meta:
+        return
+    store = getattr(request.app.state, "project_store", None)
+    project = await store.get(meta["project_id"]) if store and meta.get("project_id") else None
+    project = project or {}
+    meta.setdefault("harness", "legacy" if project.get("harness") == "legacy" else "opencode")
+    budget = (project.get("approval_gates") or {}).get("token_budget_usd")
+    meta.setdefault("token_budget_usd", budget if isinstance(budget, (int, float)) else None)
 
 
 @router.get("/{run_id}/board")
@@ -525,14 +543,17 @@ async def list_git_commits(request: Request, run_id: str) -> list[dict]:
     return out
 
 
-@router.get("/{run_id}/git/diff")
+@router.get("/{run_id}/git/diff", dependencies=[Depends(require_bearer)])
 async def get_git_diff(
     request: Request,
     run_id: str,
     ref: str = Query(..., description="commit SHA"),
+    base: str | None = Query(None, description="optional base SHA: diff base..ref"),
 ) -> dict:
-    """Return the unified diff for a single commit.
+    """Return the unified diff for a single commit, or for the range base..ref.
 
+    A card's merge is recorded as (base, head) on main, so `base` gives exactly
+    what that merge brought in, however many commits it had.
     Returns {sha, diff: str}. 404 if workspace missing or sha unknown.
     """
     from git import InvalidGitRepositoryError, NoSuchPathError, Repo
@@ -549,8 +570,17 @@ async def get_git_diff(
     except Exception:
         raise HTTPException(status_code=404, detail=f"sha {ref!r} not found")
 
+    base_commit = None
+    if base is not None:
+        try:
+            base_commit = repo.commit(base)
+        except Exception:
+            raise HTTPException(status_code=404, detail=f"sha {base!r} not found")
+
     try:
-        if commit.parents:
+        if base_commit is not None:
+            diff_text = repo.git.diff(base_commit.hexsha, commit.hexsha)
+        elif commit.parents:
             diff_text = repo.git.diff(commit.parents[0].hexsha, commit.hexsha)
         else:
             diff_text = repo.git.show(commit.hexsha, "--format=", "--patch")
@@ -586,6 +616,11 @@ async def post_approval_decision(
     note = body.get("note")
     if note is not None and not isinstance(note, str):
         raise HTTPException(status_code=400, detail="note must be a string")
+    # opencode harness tool permissions (kind "tool_permission"): a grant may be
+    # for this call only ("once") or for the rest of the run ("run").
+    scope = str(body.get("scope") or "once").lower()
+    if scope not in ("once", "run"):
+        raise HTTPException(status_code=400, detail="scope must be 'once' or 'run'")
 
     registry = request.app.state.run_registry
     workspace = await registry.get(run_id)
@@ -610,7 +645,8 @@ async def post_approval_decision(
     signal = Signal(
         type=sig_type,
         summary=f"approval {decision_word}: {req.summary}",
-        detail=f"approval_id={req.id}; kind={req.kind}",
+        detail=(f"approval_id={req.id}; kind={req.kind}"
+                + (f"; scope={scope}" if decision_word == "granted" else "")),
         from_agent="user",
         iteration=workspace.iteration,
     )
@@ -619,6 +655,7 @@ async def post_approval_decision(
         "ok": True,
         "approval_id": req.id,
         "decision": decision_word,
+        "scope": scope if decision_word == "granted" else None,
         "type": sig_type.value,
     }
 
@@ -669,6 +706,35 @@ async def post_user_comment(
         "type": sig_type.value,
         "iteration": workspace.iteration,
     }
+
+
+class VisualFeedback(BaseModel):
+    """Body of POST /{run_id}/visual_feedback."""
+
+    request_id: str = Field(min_length=1)
+    feedback: str = Field(min_length=1)
+
+
+@router.post("/{run_id}/visual_feedback", dependencies=[Depends(require_bearer)])
+async def post_visual_feedback(request: Request, run_id: str, body: VisualFeedback) -> dict:
+    """Answer an agent's `request_visual_feedback` with a USER_VISUAL_FEEDBACK signal.
+
+    The `request_id` comes from the SCREENSHOT_READY signal the agent posted. The waiting
+    agent resumes with `feedback`; the task flow also files it on the requester's card.
+    410 if the run is not active (nobody is waiting).
+    """
+    text = body.feedback.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="feedback is required")
+    workspace = await request.app.state.run_registry.get(run_id)
+    if workspace is None:
+        raise HTTPException(status_code=410, detail=f"run {run_id!r} is not active")
+    signal = Signal(
+        type=SignalType.USER_VISUAL_FEEDBACK, summary=text, from_user=True,
+        detail=json.dumps({"request_id": body.request_id, "feedback": text}),
+        iteration=workspace.iteration)
+    workspace.post_signal(signal)
+    return {"ok": True, "signal_id": str(signal.id), "type": signal.type.value}
 
 
 @router.get("/{run_id}/tags")

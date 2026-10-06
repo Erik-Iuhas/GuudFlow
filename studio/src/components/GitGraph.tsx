@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getToken } from "../api";
 import type { DesksData } from "../types";
+import { cn } from "../lib/utils";
 
 export interface GitCommit {
   sha: string;
@@ -19,9 +20,17 @@ interface Props {
   onCommitClick?: (sha: string) => void;
 }
 
-const BRANCH_COLORS = [
-  "#6366f1", "#0ea5e9", "#10b981", "#f59e0b",
-  "#ec4899", "#8b5cf6", "#14b8a6", "#f97316",
+// Branch palette from the status/column tokens. The full class names are
+// spelled out so Tailwind can see them.
+const BRANCH_TONES = [
+  { stroke: "stroke-status-running", fill: "fill-status-running" },
+  { stroke: "stroke-status-waiting", fill: "fill-status-waiting" },
+  { stroke: "stroke-status-complete", fill: "fill-status-complete" },
+  { stroke: "stroke-status-blocked", fill: "fill-status-blocked" },
+  { stroke: "stroke-status-failed", fill: "fill-status-failed" },
+  { stroke: "stroke-col-todo", fill: "fill-col-todo" },
+  { stroke: "stroke-primary", fill: "fill-primary" },
+  { stroke: "stroke-foreground", fill: "fill-foreground" },
 ];
 
 const ROW_H = 40;
@@ -50,9 +59,9 @@ export function GitGraph({ runId, desksData, onCommitClick }: Props) {
       .finally(() => setLoading(false));
   }, [runId]);
 
-  if (loading) return <div className="muted small" style={{ padding: 12 }}>Loading git history…</div>;
-  if (error) return <div className="muted small" style={{ padding: 12 }}>No git workspace yet.</div>;
-  if (commits.length === 0) return <div className="muted small" style={{ padding: 12 }}>No commits yet.</div>;
+  if (loading) return <div className="p-3 text-xs text-muted-foreground">Loading git history…</div>;
+  if (error) return <div className="p-3 text-xs text-muted-foreground">No git workspace yet.</div>;
+  if (commits.length === 0) return <div className="p-3 text-xs text-muted-foreground">No commits yet.</div>;
 
   // Derive unique branches, keeping insertion order from commits
   const branchOrder: string[] = [];
@@ -66,7 +75,7 @@ export function GitGraph({ runId, desksData, onCommitClick }: Props) {
   if (branchOrder.length === 0) branchOrder.push("main");
 
   const branchIndex = new Map(branchOrder.map((b, i) => [b, i]));
-  const branchColor = (branch: string) => BRANCH_COLORS[branchIndex.get(branch) ?? 0 % BRANCH_COLORS.length];
+  const branchTone = (branch: string) => BRANCH_TONES[(branchIndex.get(branch) ?? 0) % BRANCH_TONES.length];
 
   // Map sha → commit for merge line lookup
   const byShaSorted = new Map(commits.map((c) => [c.sha, c]));
@@ -97,7 +106,7 @@ export function GitGraph({ runId, desksData, onCommitClick }: Props) {
   const rowY = (branch: string) => PADDING + (branchIndex.get(branch) ?? 0) * ROW_H + ROW_H / 2;
 
   return (
-    <div className="git-graph" style={{ overflowX: "auto" }}>
+    <div className="overflow-x-auto">
       <svg width={svgW} height={svgH} role="img" aria-label="Git branch timeline">
         {/* Branch label lines */}
         {branchOrder.map((branch) => (
@@ -107,7 +116,7 @@ export function GitGraph({ runId, desksData, onCommitClick }: Props) {
               y={rowY(branch) + 4}
               textAnchor="end"
               fontSize={11}
-              fill={branchColor(branch)}
+              className={branchTone(branch).fill}
               fontWeight={600}
             >
               {branch.replace("agent/", "")}
@@ -117,7 +126,7 @@ export function GitGraph({ runId, desksData, onCommitClick }: Props) {
               y1={rowY(branch)}
               x2={svgW - PADDING}
               y2={rowY(branch)}
-              stroke={branchColor(branch)}
+              className={branchTone(branch).stroke}
               strokeWidth={1}
               strokeOpacity={0.25}
             />
@@ -135,7 +144,7 @@ export function GitGraph({ runId, desksData, onCommitClick }: Props) {
                 y1={rowY(branch)}
                 x2={commitX.get(next.sha) ?? 0}
                 y2={rowY(branch)}
-                stroke={branchColor(branch)}
+                className={branchTone(branch).stroke}
                 strokeWidth={2}
               />
             );
@@ -157,7 +166,7 @@ export function GitGraph({ runId, desksData, onCommitClick }: Props) {
                 key={`merge-${c.sha}-${pSha}`}
                 d={`M ${x1} ${y1} C ${x1} ${(y1 + y2) / 2}, ${x2} ${(y1 + y2) / 2}, ${x2} ${y2}`}
                 fill="none"
-                stroke={branchColor(c.branch)}
+                className={branchTone(c.branch).stroke}
                 strokeWidth={1.5}
                 strokeOpacity={0.5}
               />
@@ -169,13 +178,13 @@ export function GitGraph({ runId, desksData, onCommitClick }: Props) {
         {commits.map((c) => {
           const cx = commitX.get(c.sha) ?? 0;
           const cy = rowY(c.branch);
-          const color = branchColor(c.branch);
+          const tone = branchTone(c.branch);
           const isHovered = hovered === c.sha;
           const closedTask = closedByMap.get(c.sha);
           return (
             <g
               key={c.sha}
-              style={{ cursor: onCommitClick ? "pointer" : "default" }}
+              className={onCommitClick ? "cursor-pointer" : "cursor-default"}
               onClick={() => onCommitClick?.(c.sha)}
               onMouseEnter={() => setHovered(c.sha)}
               onMouseLeave={() => setHovered(null)}
@@ -184,12 +193,11 @@ export function GitGraph({ runId, desksData, onCommitClick }: Props) {
                 cx={cx}
                 cy={cy}
                 r={NODE_R + (isHovered ? 2 : 0)}
-                fill={color}
-                stroke="#fff"
+                className={cn(tone.fill, "stroke-card")}
                 strokeWidth={2}
               />
               {closedTask && (
-                <text x={cx} y={cy - NODE_R - 4} textAnchor="middle" fontSize={9} fill={color}>✓</text>
+                <text x={cx} y={cy - NODE_R - 4} textAnchor="middle" fontSize={9} className={tone.fill}>✓</text>
               )}
               {isHovered && (
                 <g>
@@ -199,16 +207,16 @@ export function GitGraph({ runId, desksData, onCommitClick }: Props) {
                     width={160}
                     height={46}
                     rx={4}
-                    fill="rgba(15,23,42,.9)"
+                    className="fill-popover stroke-border"
                   />
-                  <text x={cx} y={cy - 38} textAnchor="middle" fontSize={11} fill="#f1f5f9" fontWeight={600}>
+                  <text x={cx} y={cy - 38} textAnchor="middle" fontSize={11} className="fill-popover-foreground" fontWeight={600}>
                     {c.subject.length > 22 ? c.subject.slice(0, 22) + "…" : c.subject}
                   </text>
-                  <text x={cx} y={cy - 24} textAnchor="middle" fontSize={10} fill="#94a3b8">
+                  <text x={cx} y={cy - 24} textAnchor="middle" fontSize={10} className="fill-muted-foreground">
                     {c.author_role} · {c.short_sha}
                   </text>
-                  <text x={cx} y={cy - 12} textAnchor="middle" fontSize={10} fill="#4ade80">
-                    +{c.stats.insertions} <tspan fill="#f87171">-{c.stats.deletions}</tspan>
+                  <text x={cx} y={cy - 12} textAnchor="middle" fontSize={10} className="fill-status-complete">
+                    +{c.stats.insertions} <tspan className="fill-status-failed">-{c.stats.deletions}</tspan>
                   </text>
                 </g>
               )}

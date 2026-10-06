@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { ApiError, projectsApi } from "../api";
+import { errorCls, fieldCls } from "../lib/field";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
 
 /**
  * Phase K.2 — project-level roadmap document. Free-form markdown
@@ -65,19 +68,19 @@ export function RoadmapTab({ projectId }: { projectId: string }) {
   const dirty = content !== original;
 
   if (loading) {
-    return <p className="muted">Loading roadmap…</p>;
+    return <p className="text-muted-foreground">Loading roadmap…</p>;
   }
 
   return (
     <div>
-      <p className="muted small" style={{ maxWidth: 760 }}>
+      <p className="my-2 max-w-[760px] text-xs text-muted-foreground">
         Free-form markdown the team reads at run start. Use it for
         the bigger picture: what we're building, what's done, what's
         next. Optional — small projects don't need one. Empty saves
         to "no roadmap" and the team runs without project context.
       </p>
 
-      {error && <div className="error">{error}</div>}
+      {error && <div className={errorCls}>{error}</div>}
 
       {!exists && content === "" && <RoadmapEmptyHint />}
 
@@ -86,29 +89,24 @@ export function RoadmapTab({ projectId }: { projectId: string }) {
         value={content}
         onChange={(e) => setContent(e.target.value)}
         placeholder="## Goal&#10;What this project is trying to be.&#10;&#10;## Done&#10;- ...&#10;&#10;## Next&#10;- ..."
-        className="mono"
-        style={{ fontFamily: "ui-monospace, monospace", fontSize: 13 }}
+        className={`${fieldCls} font-mono text-[13px]`}
       />
 
-      <div className="row" style={{ marginTop: 12, gap: 8, alignItems: "center" }}>
-        <button
-          className="primary"
-          onClick={() => void save()}
-          disabled={saving || !dirty}
-        >
+      <div className="mt-3 flex items-center gap-2">
+        <Button onClick={() => void save()} disabled={saving || !dirty}>
           {saving ? "Saving…" : dirty ? "Save" : "Saved"}
-        </button>
+        </Button>
         {exists && (
-          <button onClick={clear} disabled={saving} className="danger">
+          <Button variant="destructive" onClick={clear} disabled={saving}>
             Clear roadmap
-          </button>
+          </Button>
         )}
         {savedAt && !dirty && (
-          <span className="small muted">
+          <span className="text-xs text-muted-foreground">
             Saved {savedAt.toLocaleTimeString()}
           </span>
         )}
-        <span style={{ marginLeft: "auto" }} className="small muted">
+        <span className="ml-auto text-xs text-muted-foreground">
           {exists
             ? `Threaded into every run as Layer 3.8`
             : `Empty roadmap — layer skipped at runtime`}
@@ -121,12 +119,12 @@ export function RoadmapTab({ projectId }: { projectId: string }) {
 
 function RoadmapEmptyHint() {
   return (
-    <div className="card roadmap-hint">
+    <Card className="mb-3 border-status-blocked/30 bg-status-blocked/10 p-4">
       <strong>No roadmap yet</strong>
-      <p className="small" style={{ margin: "4px 0 0" }}>
+      <p className="m-0 mt-1 text-xs">
         Suggested shape — copy this in if it helps:
       </p>
-      <pre className="small" style={{ marginTop: 8 }}>
+      <pre className="mb-0 mt-2 whitespace-pre-wrap rounded-md border border-border bg-card px-3 py-2 font-mono text-xs">
 {`## Goal
 What this project is trying to be in one paragraph.
 
@@ -139,6 +137,6 @@ What this project is trying to be in one paragraph.
 ## Notes / decisions
 - Architectural calls the team should remember.`}
       </pre>
-    </div>
+    </Card>
   );
 }

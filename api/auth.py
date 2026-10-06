@@ -11,9 +11,12 @@ scope (CLAUDE.md "Don't build yet": Auth / user accounts).
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
+import time
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 
@@ -64,3 +67,53 @@ async def require_bearer(
             detail="invalid bearer token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+# ── artifact cookie (S33 follow-up) ──────────────────────────────────────────
+# `<img>` and `<iframe>` cannot send a bearer header, so Studio trades its token
+# for a short-lived cookie, signed with the API token and scoped to one run's
+# `artifact-files` path. The master token never appears in a URL.
+
+ARTIFACT_COOKIE = "gf_artifacts"
+ARTIFACT_TTL_SECONDS = 3600
+
+
+def artifact_cookie_path(run_id: str) -> str:
+    """The only path the cookie is sent to."""
+    return f"/api/runs/{run_id}/artifact-files"
+
+
+def _sign(key: str, run_id: str, expires: int) -> str:
+    return hmac.new(key.encode(), f"artifacts:{run_id}:{expires}".encode(),
+                    hashlib.sha256).hexdigest()
+
+
+def issue_artifact_cookie(run_id: str, now: float | None = None) -> tuple[str, int] | None:
+    """(cookie value, expiry) for `run_id`; None when no token is configured (dev open)."""
+    key = _expected_token()
+    if key is None:
+        return None
+    expires = int(now if now is not None else time.time()) + ARTIFACT_TTL_SECONDS
+    return f"{expires}.{_sign(key, run_id, expires)}", expires
+
+
+def artifact_cookie_valid(run_id: str, value: str | None, now: float | None = None) -> bool:
+    """True if `value` was issued for this run and has not expired."""
+    key = _expected_token()
+    if key is None or not value or "." not in value:
+        return False
+    raw_exp, _, sig = value.partition(".")
+    if not raw_exp.isdigit() or int(raw_exp) < (now if now is not None else time.time()):
+        return False
+    return hmac.compare_digest(sig, _sign(key, run_id, int(raw_exp)))
+
+
+async def require_bearer_or_artifact_cookie(
+    request: Request,
+    run_id: str,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
+) -> None:
+    """Bearer token, or the run's artifact cookie (for `<img>` / `<iframe>` loads)."""
+    if artifact_cookie_valid(run_id, request.cookies.get(ARTIFACT_COOKIE)):
+        return
+    await require_bearer(credentials)

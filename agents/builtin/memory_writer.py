@@ -33,6 +33,13 @@ from typing import Any
 from uuid import uuid4
 
 from agents.base import BaseAgent
+from agents.builtin.memory_sources import (
+    HarnessTranscript,
+    RoleEvidence,
+    build_role_evidence,
+    load_harness_transcripts,
+    render_transcript_for_prompt,
+)
 from core.llm import LLMClient
 from agents.persona import (
     AntiPattern,
@@ -103,24 +110,54 @@ class MemoryWriter(BaseAgent):
 
         `personas` maps role → loaded Persona instance. The personas'
         files are at `data/personas/{persona_id}/`.
+
+        For an opencode harness run (`project.harness == "opencode"`, or a
+        board.jsonl holding AGENT_RESULT signals) the episode evidence comes
+        from `load_harness_transcripts(run_root)`; legacy runs keep the
+        workspace-derived path unchanged.
         """
+        transcripts = self._harness_transcripts(project, run_root)
         for role, persona in personas.items():
             try:
-                await self._update_persona(persona, role, workspace, run_id, project)
+                transcript = None
+                if transcripts is not None:
+                    transcript = transcripts.get(role) or HarnessTranscript(role=role)
+                await self._update_persona(
+                    persona, role, workspace, run_id, project, transcript=transcript
+                )
             except Exception:
                 # Memory write must never fail the run.
                 continue
 
+    @staticmethod
+    def _harness_transcripts(project, run_root: Path) -> dict[str, HarnessTranscript] | None:
+        """Per-role transcripts when this was an opencode run, else None (legacy)."""
+        harness = getattr(project, "harness", None)
+        if harness == "legacy":
+            return None
+        transcripts = load_harness_transcripts(Path(run_root))
+        if harness == "opencode" or any(t.results for t in transcripts.values()):
+            return transcripts
+        return None
+
     # ── Per-persona update ─────────────────────────────────────────────────
 
     async def _update_persona(
-        self, persona: Persona, role: str, workspace, run_id: str, project=None
+        self, persona: Persona, role: str, workspace, run_id: str, project=None,
+        transcript: HarnessTranscript | None = None,
     ) -> None:
         # 1. Record episode. Episodes from training-mode runs are
         #    tagged so reputation aggregates can split production vs
         #    training (DESIGN §35) — both still feed recall().
         is_training = bool(project is not None and getattr(project, "mode", "production") == "training")
-        episode = self._build_episode(persona, role, workspace, run_id, is_training, project)
+        evidence: RoleEvidence | None = None
+        if transcript is not None:
+            evidence = build_role_evidence(transcript)
+            episode = self._build_harness_episode(
+                role, workspace, run_id, is_training, project, transcript, evidence
+            )
+        else:
+            episode = self._build_episode(persona, role, workspace, run_id, is_training, project)
         persona.episodes.append(episode)
 
         # 2. Recency-weighted confidence (read-side already computes this;
@@ -137,7 +174,10 @@ class MemoryWriter(BaseAgent):
         #    `MemoryWriter()` retains its deterministic Stage-5 contract.
         if self._llm is not None:
             try:
-                await self._distill_patterns(persona, now)
+                await self._distill_patterns(
+                    persona, now,
+                    {episode.episode_id: transcript} if transcript is not None else None,
+                )
             except Exception:
                 # Synthesis must never fail the run; fall through with
                 # whatever distillation produced before the failure.
@@ -159,7 +199,10 @@ class MemoryWriter(BaseAgent):
         self._save(persona, run_id)
 
         # M2: append to history.json for this run.
-        self._append_history(persona, role, workspace, run_id, project)
+        self._append_history(
+            persona, role, workspace, run_id, project,
+            outcome=_history_outcome(evidence) if evidence is not None else None,
+        )
 
     # ── 1. Episode ──────────────────────────────────────────────────────────
 
@@ -209,9 +252,49 @@ class MemoryWriter(BaseAgent):
             rubric_score=_extract_rubric_score(workspace) if is_training else None,
         )
 
+    def _build_harness_episode(
+        self, role: str, workspace, run_id: str, is_training: bool, project,
+        transcript: HarnessTranscript, evidence: RoleEvidence,
+    ) -> Episode:
+        """Episode for an opencode run, from the role's board/card transcript.
+
+        Lessons appear in `what_failed` / `what_worked` only where the run's
+        files back them (DESIGN §26: conservative memory writes).
+        """
+        tags = sorted(set(
+            _extract_tags(workspace.goal) + [role.lower()] + evidence.extra_tags
+        ))
+        return Episode(
+            episode_id=f"ep_{uuid4().hex[:10]}",
+            run_id=run_id,
+            iteration=getattr(workspace, "iteration", 0),
+            project_type=getattr(workspace, "project_type", "") or "",
+            task_context=workspace.goal,
+            situation=f"Acted as {role} on the opencode harness ({evidence.outcome})",
+            what_i_tried=evidence.what_i_tried,
+            what_failed=evidence.what_failed,
+            what_worked=evidence.what_worked,
+            feedback_verbatim=evidence.feedback_verbatim,
+            iterations_to_resolve=evidence.iterations_to_resolve,
+            model_used=transcript.model,
+            confidence=evidence.confidence,
+            tags=tags,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            staleness="fresh",
+            training=is_training,
+            scenario_id=(
+                getattr(project, "training_scenario_id", "") or ""
+                if is_training and project is not None else ""
+            ),
+            rubric_score=_extract_rubric_score(workspace) if is_training else None,
+        )
+
     # ── 3. LLM-driven pattern distillation (§34, Phase F.3.1) ──────────────
 
-    async def _distill_patterns(self, persona: Persona, now: datetime) -> None:
+    async def _distill_patterns(
+        self, persona: Persona, now: datetime,
+        transcripts: dict[str, HarnessTranscript] | None = None,
+    ) -> None:
         """Find recent episode clusters that share themes and ask the LLM
         whether each cluster supports a new emerging pattern.
 
@@ -224,7 +307,7 @@ class MemoryWriter(BaseAgent):
             return
 
         for cluster in clusters[:MAX_DISTILL_CALLS_PER_RUN]:
-            tool_args = await self._call_distill_llm(persona, cluster)
+            tool_args = await self._call_distill_llm(persona, cluster, transcripts)
             if tool_args is None:
                 continue
             new_pattern = _build_pattern_from_tool_args(
@@ -237,7 +320,8 @@ class MemoryWriter(BaseAgent):
             persona.patterns.append(new_pattern)
 
     async def _call_distill_llm(
-        self, persona: Persona, cluster: "_EpisodeCluster"
+        self, persona: Persona, cluster: "_EpisodeCluster",
+        transcripts: dict[str, HarnessTranscript] | None = None,
     ) -> dict[str, Any] | None:
         """Render the prompt and call the LLM. Returns the structured
         `emit_pattern` arguments dict, or None if the LLM declined / the
@@ -247,7 +331,7 @@ class MemoryWriter(BaseAgent):
             from core.llm import LLMMessage  # local to keep import cheap
             response = await self._llm.complete(  # type: ignore[union-attr]
                 system=DISTILL_SYSTEM_PROMPT,
-                messages=[LLMMessage(role="user", content=_render_distill_user(persona, cluster))],
+                messages=[LLMMessage(role="user", content=_render_distill_user(persona, cluster, transcripts))],
                 tools=[EMIT_PATTERN_TOOL, EMIT_NO_PATTERN_TOOL],
                 max_tokens=1024,
             )
@@ -586,7 +670,8 @@ class MemoryWriter(BaseAgent):
         profile_path.write_text(json.dumps(profile_data, indent=2, default=str), encoding="utf-8")
 
     def _append_history(
-        self, persona: Persona, role: str, workspace: Any, run_id: str, project: Any
+        self, persona: Persona, role: str, workspace: Any, run_id: str, project: Any,
+        outcome: str | None = None,
     ) -> None:
         """Append one entry to data/personas/{id}/history.json (M2 §7).
 
@@ -610,7 +695,9 @@ class MemoryWriter(BaseAgent):
             role in (workspace.agent_states or {})
             and getattr(workspace.agent_states.get(role), "value", "") == "failed"
         )
-        if approved:
+        if outcome is not None:
+            pass  # opencode run: the caller derived it from the role's transcript
+        elif approved:
             outcome = "approved"
         elif sat_out:
             outcome = "sat_out"
@@ -880,7 +967,19 @@ def _covered_episode_ids(persona: Persona) -> set[str]:
     return out
 
 
-def _render_distill_user(persona: Persona, cluster: _EpisodeCluster) -> str:
+def _history_outcome(evidence: RoleEvidence) -> str:
+    """Map an opencode role outcome onto history.json's outcome vocabulary."""
+    if evidence.outcome in ("clean", "passed_after_rework"):
+        return "approved"
+    if evidence.outcome == "failed":
+        return "failed"
+    return "completed"
+
+
+def _render_distill_user(
+    persona: Persona, cluster: _EpisodeCluster,
+    transcripts: dict[str, HarnessTranscript] | None = None,
+) -> str:
     lines: list[str] = []
     lines.append(
         f"Persona: {persona.profile.name} ({persona.profile.specialty})."
@@ -911,6 +1010,10 @@ def _render_distill_user(persona: Persona, cluster: _EpisodeCluster) -> str:
             lines.append(f"failed: {ep.what_failed[:200]}")
         if ep.feedback_verbatim:
             lines.append(f"feedback: {ep.feedback_verbatim[:200]}")
+        t = transcripts.get(ep.episode_id) if transcripts else None
+        if t is not None:
+            lines.append("run transcript (opencode harness):")
+            lines.append(render_transcript_for_prompt(t))
     return "\n".join(lines)
 
 

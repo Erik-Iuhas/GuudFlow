@@ -386,3 +386,13 @@ async def test_fs_write_append_no_emitters_runs_silently(fw: FileWorkspace):
     await fw.write("x.md", "header\n")
     res = await FsWriteAppend(fw).run({"path": "x.md", "content": "body\n"})
     assert res["ok"] is True
+
+
+def test_closest_matches_ranks_the_nearest_lines_first():
+    from agents.tools.fs import closest_matches
+
+    content = "alpha\nbeta gamma\ndelta\nepsilon\n"
+    close = closest_matches("beta gamme", content, top_n=2)
+    assert len(close) == 2
+    assert "beta gamma" in close[0]
+    assert close[0].startswith("  Line 2-2:")

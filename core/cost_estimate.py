@@ -17,8 +17,8 @@ oracle.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from pathlib import Path
 
 from core.runner import ProjectConfig
 
@@ -33,7 +33,7 @@ _TOKENS_PER_CALL: dict[str, int] = {
 # Assumed output fraction for blended rate (output tokens cost more).
 _OUTPUT_FRACTION = 0.25
 
-_REGISTRY_PATH = Path("data/models.json")
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -55,22 +55,19 @@ def _blended_rate_from_registry(tier: str) -> float | None:
 
     Returns None if the registry is unavailable or has no model for the tier.
     """
-    if not _REGISTRY_PATH.exists():
-        return None
     try:
-        from core.llm.registry import ModelRegistry, NoModelAvailableError
-        reg = ModelRegistry(_REGISTRY_PATH)
-        # Try to find the first non-deprecated model for this tier.
+        from core import storage
+        from core.llm.registry import ModelRegistry
+        # The install's tier choice and prices (Studio "Models & providers").
         # We don't need an API key for estimation — just the price fields.
-        for m in reg.list_models():
-            if m.tier == tier and not m.deprecated:
-                input_rate = m.cost_per_1k_input
-                output_rate = m.cost_per_1k_output
-                # Blended: 75% input tokens, 25% output tokens (conservative output mix)
-                return input_rate * (1 - _OUTPUT_FRACTION) + output_rate * _OUTPUT_FRACTION
-    except Exception:
-        pass
-    return None
+        m = ModelRegistry.for_data_root(storage.data_root()).tier_model(tier)
+    except Exception:  # noqa: BLE001 — no registry means no estimate, not a failure
+        log.warning("cost estimate: model registry unavailable", exc_info=True)
+        return None
+    if m is None:
+        return None
+    # Blended: 75% input tokens, 25% output tokens (conservative output mix)
+    return m.cost_per_1k_input * (1 - _OUTPUT_FRACTION) + m.cost_per_1k_output * _OUTPUT_FRACTION
 
 
 def estimate_run_cost(project: ProjectConfig) -> CostEstimate:

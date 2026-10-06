@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# guudflow — thin wrapper for the CLI. The repo has no pyproject, so there is
+# no console-script entry point; this runs `python -m cli.<command>`.
+#
+#   scripts/guudflow oneshot "Build a typed Python client for Open-Meteo" --demo
+#
+# Run from anywhere: it changes to the repo root first.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+cmd="${1:-}"
+case "$cmd" in
+  oneshot) shift; exec "${PYTHON:-python}" -m cli.oneshot "$@" ;;
+  *) echo "usage: guudflow oneshot GOAL [--web researcher|off] [--budget USD] [--demo]" \
+          "[--example NAME] [--sandbox auto|docker|host]" >&2; exit 2 ;;
+esac

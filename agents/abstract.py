@@ -2,7 +2,7 @@
 
 DESIGN §3.4 plus Phase C.0 (post-shipped C.1, C.2). The codebase has
 three recurring patterns of agent — reviewers, escalation handlers,
-and specialists — and three concrete builtins (CodeReviewer, TechLead,
+and specialists — and three concrete builtins (CodeReviewer and Architect,
 RequirementsWriter as the proof-of-pattern) that fit those patterns.
 
 Why this layer exists

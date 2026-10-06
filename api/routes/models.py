@@ -1,26 +1,24 @@
 """GET /api/models — returns the model registry for studio dropdowns."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import APIRouter
 
 router = APIRouter()
 
-_REGISTRY_PATH = Path("data/models.json")
-
 
 @router.get("/api/models")
 async def list_models() -> dict:
-    """Return all models and providers from data/models.json.
+    """Return the install's models (Settings → Models & providers, else data/models.json).
 
     Used by the studio cost estimator and model picker dropdowns.
     The registry is read fresh on each call so live edits to models.json
     are reflected without a server restart.
     """
+    from core import storage
     from core.llm.registry import ModelRegistry
-    reg = ModelRegistry(_REGISTRY_PATH)
+    reg = ModelRegistry.for_data_root(storage.data_root())
     return {
+        "tiers": reg.tiers(),
         "models": [
             {
                 "id": m.id,
@@ -32,6 +30,8 @@ async def list_models() -> dict:
                 "cost_per_1k_input": m.cost_per_1k_input,
                 "cost_per_1k_output": m.cost_per_1k_output,
                 "cache_read_per_1k": m.cache_read_per_1k,
+                "cache_write_per_1k": m.cache_write_price,
+                "supports_images": m.supports_images,
                 "deprecated": m.deprecated,
                 "replacement": m.replacement,
             }

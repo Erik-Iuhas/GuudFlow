@@ -1,12 +1,16 @@
 import { useState } from "react";
 import { ApiError, approvalsApi } from "../api";
 import type { Signal } from "../types";
-
-interface ApprovalContext {
-  approval_id: string;
-  kind: string;
-  estimated_cost_usd?: number | null;
-}
+import { parseApprovalDetail } from "../lib/approvalDetail";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
+import {
+  decideToolPermission,
+  ToolPermissionButtons,
+  ToolPermissionSummary,
+  type ToolPermissionChoice,
+} from "./harness/toolPermission";
 
 /**
  * Inline gate prompt shown on the Run view when an APPROVAL_NEEDED
@@ -27,6 +31,7 @@ export function ApprovalCard({ runId, signal, onDecided }: ApprovalCardProps) {
   const [busy, setBusy] = useState<"grant" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [toolBusy, setToolBusy] = useState<ToolPermissionChoice | null>(null);
 
   const ctx = parseApprovalDetail(signal.detail);
   if (ctx === null) {
@@ -51,20 +56,42 @@ export function ApprovalCard({ runId, signal, onDecided }: ApprovalCardProps) {
     }
   }
 
+  async function decideTool(choice: ToolPermissionChoice) {
+    setToolBusy(choice);
+    setError(null);
+    try {
+      const decision = await decideToolPermission(
+        runId,
+        ctx!.approval_id,
+        choice,
+        note.trim() || undefined,
+      );
+      if (onDecided) onDecided(decision);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setToolBusy(null);
+    }
+  }
+
+  const isToolPermission = ctx.kind === "tool_permission";
+
   return (
-    <div className="card approval-card">
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
+    <Card className="mt-2 border-status-blocked/40 bg-status-blocked/10 p-4" data-testid="approval-card">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2">
           <strong>Approval needed</strong>
-          <span className="tag" style={{ marginLeft: 8 }}>{ctx.kind}</span>
+          <Badge variant="blocked">{ctx.kind}</Badge>
         </div>
-        <span className="muted small mono">{ctx.approval_id}</span>
+        <span className="font-mono text-xs text-muted-foreground">{ctx.approval_id}</span>
       </div>
 
-      <p style={{ marginTop: 8 }}>{signal.summary}</p>
+      <p className="mt-2">{signal.summary}</p>
+
+      {isToolPermission && <ToolPermissionSummary detail={signal.detail} />}
 
       {ctx.estimated_cost_usd != null && (
-        <p className="muted small">
+        <p className="text-xs text-muted-foreground">
           Estimated cost: <strong>${ctx.estimated_cost_usd.toFixed(2)}</strong>
         </p>
       )}
@@ -74,51 +101,31 @@ export function ApprovalCard({ runId, signal, onDecided }: ApprovalCardProps) {
         placeholder="Optional note (visible on the board)"
         value={note}
         onChange={(e) => setNote(e.target.value)}
-        style={{ marginTop: 8 }}
-        disabled={busy !== null}
+        className="mt-2"
+        disabled={busy !== null || toolBusy !== null}
       />
 
-      {error && <div className="error" style={{ marginTop: 8 }}>{error}</div>}
-
-      <div className="row" style={{ marginTop: 8, gap: 8 }}>
-        <button
-          className="primary"
-          onClick={() => void decide("grant")}
-          disabled={busy !== null}
+      {error && (
+        <div
+          role="alert"
+          className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-sm text-destructive"
         >
-          {busy === "grant" ? "Granting…" : "Grant"}
-        </button>
-        <button
-          className="danger"
-          onClick={() => void decide("deny")}
-          disabled={busy !== null}
-        >
-          {busy === "deny" ? "Denying…" : "Deny"}
-        </button>
-      </div>
-    </div>
-  );
-}
+          {error}
+        </div>
+      )}
 
-/** Parse the runner's `detail` string into structured fields.
- *  Format: `approval_id=appr_abc; kind=heavy_tier_dispatch; estimated_cost_usd=0.42`
- */
-function parseApprovalDetail(detail: string | null | undefined): ApprovalContext | null {
-  if (!detail) return null;
-  const fields = Object.fromEntries(
-    detail.split(";")
-      .map((kv) => kv.trim().split("=", 2))
-      .filter((p) => p.length === 2)
-      .map(([k, v]) => [k.trim(), v.trim()]),
+      {isToolPermission ? (
+        <ToolPermissionButtons busy={toolBusy} onChoose={(c) => void decideTool(c)} />
+      ) : (
+        <div className="mt-2 flex items-center gap-2">
+          <Button onClick={() => void decide("grant")} disabled={busy !== null}>
+            {busy === "grant" ? "Granting…" : "Grant"}
+          </Button>
+          <Button variant="destructive" onClick={() => void decide("deny")} disabled={busy !== null}>
+            {busy === "deny" ? "Denying…" : "Deny"}
+          </Button>
+        </div>
+      )}
+    </Card>
   );
-  if (!fields.approval_id) return null;
-  const cost =
-    fields.estimated_cost_usd && fields.estimated_cost_usd !== "None"
-      ? parseFloat(fields.estimated_cost_usd)
-      : null;
-  return {
-    approval_id: fields.approval_id,
-    kind: fields.kind ?? "approval",
-    estimated_cost_usd: Number.isFinite(cost as number) ? (cost as number) : null,
-  };
 }

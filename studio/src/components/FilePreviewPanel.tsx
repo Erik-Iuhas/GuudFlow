@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
 import { useFileContent, useFileHistory } from "../hooks/useFileContent";
+import { errorCls } from "../lib/field";
+import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "./ui/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 interface Props {
   runId: string;
@@ -17,15 +23,6 @@ export function FilePreviewPanel({ runId, filePath, onClose }: Props) {
     setSelectedRef(null);
   }, [filePath]);
 
-  // Close on Escape
-  useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
   const { data, loading, error } = useFileContent(runId, filePath, selectedRef);
   const { history, loading: histLoading } = useFileHistory(runId, tab === "history" ? filePath : null);
 
@@ -34,120 +31,77 @@ export function FilePreviewPanel({ runId, filePath, onClose }: Props) {
   const filename = filePath.split("/").pop() ?? filePath;
 
   return (
-    <>
-      <div className="slide-over-backdrop" onClick={onClose} />
-      <div className="slide-over" role="dialog" aria-modal style={{ width: 560 }}>
-        <div className="slide-over-header">
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent side="right" className="w-[560px] max-w-full gap-0 p-0">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4 pr-12">
           <div>
-            <span style={{ fontWeight: 600 }}>{filename}</span>
-            <span className="mono muted small" style={{ marginLeft: 8 }}>{filePath}</span>
+            <SheetTitle className="inline text-base">{filename}</SheetTitle>
+            <SheetDescription className="ml-2 inline font-mono text-xs text-muted-foreground">{filePath}</SheetDescription>
           </div>
-          <button className="close-btn" onClick={onClose}>×</button>
         </div>
 
-        <div className="tabs" style={{ padding: "0 16px", borderBottom: "1px solid #e2e8f0" }}>
-          <button
-            className={`tab ${tab === "current" ? "tab-active" : ""}`}
-            onClick={() => setTab("current")}
-          >
-            Current
-          </button>
-          <button
-            className={`tab ${tab === "history" ? "tab-active" : ""}`}
-            onClick={() => setTab("history")}
-          >
-            History
-          </button>
-        </div>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as "current" | "history")} className="flex min-h-0 flex-1 flex-col">
+          <TabsList className="mx-4 my-2 self-start">
+            <TabsTrigger value="current">Current</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
+          </TabsList>
 
-        <div className="slide-over-body" style={{ padding: 0 }}>
-          {tab === "current" && (
-            <>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <TabsContent value="current" className="mt-0">
               {selectedRef && (
-                <div
-                  className="small muted"
-                  style={{
-                    padding: "6px 16px",
-                    background: "#fef3c7",
-                    borderBottom: "1px solid #fde68a",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  Viewing at <code>{selectedRef.slice(0, 7)}</code>
-                  <button
-                    className="small"
-                    onClick={() => setSelectedRef(null)}
-                    style={{ fontSize: 11 }}
-                  >
+                <div className="flex items-center gap-2 border-b border-status-blocked/30 bg-status-blocked/10 px-4 py-1.5 text-xs text-muted-foreground">
+                  Viewing at <code className="font-mono">{selectedRef.slice(0, 7)}</code>
+                  <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={() => setSelectedRef(null)}>
                     Back to current
-                  </button>
+                  </Button>
                 </div>
               )}
-              {loading && <div className="muted small" style={{ padding: 16 }}>Loading…</div>}
-              {error && <div className="error" style={{ padding: 16 }}>{error}</div>}
+              {loading && <div className="p-4 text-xs text-muted-foreground">Loading…</div>}
+              {error && <div className={cn(errorCls, "m-4")}>{error}</div>}
               {data?.error && (
-                <div className="muted small" style={{ padding: 16 }}>
+                <div className="p-4 text-xs text-muted-foreground">
                   {data.error === "binary or too large"
                     ? "This file is binary or too large to preview."
                     : data.error}
                 </div>
               )}
               {data?.content !== undefined && (
-                <pre
-                  className="mono small"
-                  style={{
-                    margin: 0,
-                    padding: 16,
-                    overflowX: "auto",
-                    whiteSpace: "pre",
-                    fontSize: 12,
-                    lineHeight: 1.6,
-                    background: "#0f172a",
-                    color: "#e2e8f0",
-                  }}
-                >
+                <pre className="m-0 overflow-x-auto whitespace-pre bg-muted p-4 font-mono text-xs leading-relaxed text-foreground">
                   {data.content}
                 </pre>
               )}
-            </>
-          )}
+            </TabsContent>
 
-          {tab === "history" && (
-            <div style={{ padding: 12 }}>
-              {histLoading && <div className="muted small">Loading history…</div>}
+            <TabsContent value="history" className="mt-0 p-3">
+              {histLoading && <div className="text-xs text-muted-foreground">Loading history…</div>}
               {!histLoading && history.length === 0 && (
-                <div className="muted small">No commits touching this file.</div>
+                <div className="text-xs text-muted-foreground">No commits touching this file.</div>
               )}
               {history.map((entry) => (
-                <div
+                <Card
                   key={entry.sha}
-                  className="card"
-                  style={{
-                    marginBottom: 8,
-                    padding: "8px 12px",
-                    cursor: "pointer",
-                    border: selectedRef === entry.sha ? "1px solid #6366f1" : undefined,
-                  }}
+                  className={cn(
+                    "mb-2 cursor-pointer px-3 py-2",
+                    selectedRef === entry.sha && "border-primary",
+                  )}
                   onClick={() => {
                     setSelectedRef(entry.sha);
                     setTab("current");
                   }}
                 >
-                  <div className="row" style={{ justifyContent: "space-between" }}>
-                    <span className="small" style={{ fontWeight: 600 }}>{entry.subject || "(no message)"}</span>
-                    <span className="mono small muted">{entry.sha.slice(0, 7)}</span>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-semibold">{entry.subject || "(no message)"}</span>
+                    <span className="font-mono text-xs text-muted-foreground">{entry.sha.slice(0, 7)}</span>
                   </div>
-                  <div className="small muted">
+                  <div className="text-xs text-muted-foreground">
                     {entry.author_role} · {new Date(entry.committed_at * 1000).toLocaleString()}
                   </div>
-                </div>
+                </Card>
               ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </>
+            </TabsContent>
+          </div>
+        </Tabs>
+      </SheetContent>
+    </Sheet>
   );
 }

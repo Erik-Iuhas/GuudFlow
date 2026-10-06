@@ -125,6 +125,32 @@ class SignalType(str, Enum):
     # heavy retry was skipped. Detail names the recovered block kind.
     PROTOCOL_CLEANUP_AUTO = "PROTOCOL_CLEANUP_AUTO"
 
+    # opencode harness (docs/OPENCODE_HARNESS_PLAN.md).
+    # What an agent was allowed to do for this spawn: the effective capability
+    # block plus a digest of the compiled permission rules (plan §5.7).
+    CAPABILITIES = "CAPABILITIES"
+    # Who is on the team: each role's worker name (core/crew.py), posted at run start.
+    TEAM = "TEAM"
+    # The validated structured result an agent submitted for a turn (plan §4.2).
+    AGENT_RESULT = "AGENT_RESULT"
+    # One finished opencode tool call (completed or error), from the event bridge.
+    TOOL_CALL = "TOOL_CALL"
+    # The agent's own todo list changed (opencode todowrite).
+    AGENT_TODO = "AGENT_TODO"
+    # A host-side web_search / web_fetch call (plan §5.8).
+    WEB_REQUEST = "WEB_REQUEST"
+    # A visual or document artifact was produced (plan §5.10).
+    ARTIFACT = "ARTIFACT"
+    # The overseer changed course (plan §11.3).
+    OVERSEER_INTERVENTION = "OVERSEER_INTERVENTION"
+    # Task board (plan §4.6): a card changed column (only the scheduler moves
+    # cards), and a typed entry was added to a card's thread.
+    TASK_MOVED = "TASK_MOVED"
+    TASK_THREAD = "TASK_THREAD"
+    # Ongoing projects (plan §13): the run was handed back to its project and
+    # waits for a human to accept or reject it.
+    RUN_SUBMITTED = "RUN_SUBMITTED"
+
 
 Priority = Literal["normal", "high"]
 

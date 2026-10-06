@@ -202,6 +202,35 @@ async def propose(
         project_dir = request.app.state.data_root / "projects" / "_greenfield"
         meta_project_id = "_greenfield"
 
+    # Harness: the stored project decides. Greenfield proposals have no project
+    # yet, so the request body may name it (default legacy).
+    # opencode is the default harness (plan P6, O15); "legacy" only on request.
+    raw_harness = (project or {}).get("harness") or body.get("harness")
+    harness = "legacy" if raw_harness == "legacy" else "opencode"
+    playbook_text = ""
+    playbook_entries_used: list[str] = []
+    if project_id is not None:
+        try:
+            from core.playbook import Playbook
+            playbook = Playbook.load(request.app.state.data_root, project_id)
+            playbook_text = playbook.render_for_meta()
+            # render_for_meta shows active entries only; report the same ids so
+            # Studio can show which lessons shaped the team (nothing is applied).
+            playbook_entries_used = [
+                e.id for e in playbook.entries() if e.state == "active"
+            ] if playbook_text else []
+        except Exception as e:  # a corrupt playbook must not break proposals
+            _logger.warning("playbook for %s unreadable: %s", project_id, e)
+
+    # The project's open backlog (plan §13): the team should fit the ongoing work.
+    backlog_text = ""
+    if project_id is not None:
+        try:
+            from core.backlog import Backlog
+            backlog_text = Backlog(request.app.state.data_root, project_id).render_for_meta()
+        except Exception as e:  # a corrupt backlog must not break proposals
+            _logger.warning("backlog for %s unreadable: %s", project_id, e)
+
     meta = MetaAgent()
     meta._llm = _build_meta_llm(request, meta_model=meta_model)
     try:
@@ -213,6 +242,10 @@ async def propose(
             prior_run_id=prior_run_id,
             prior_team_roles=prior_team_roles,
             prior_team=prior_team,
+            harness=harness,
+            playbook_text=playbook_text,
+            backlog_text=backlog_text,
+            model_registry=getattr(request.app.state, "model_registry", None),
         )
     except Exception as e:
         _logger.exception("meta.propose crashed")
@@ -223,4 +256,8 @@ async def propose(
         skeleton["warnings"] = [f"meta-agent crashed: {e}"]
         return skeleton
 
-    return proposal.to_dict()
+    result = proposal.to_dict()
+    # Ids of the active playbook entries rendered into the prompt. The proposal
+    # carries no machine-readable playbook diff, so this is "what the model saw".
+    result["playbook_entries_used"] = playbook_entries_used
+    return result

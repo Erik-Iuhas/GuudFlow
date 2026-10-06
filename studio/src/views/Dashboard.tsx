@@ -2,9 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { dashboardApi, type DashboardData } from "../api";
 import { WorkerCard } from "../components/WorkerCard";
+import { Badge, type BadgeProps } from "../components/ui/badge";
+import { Card } from "../components/ui/card";
+import { Alert, EmptyState, linkClass, Page, SectionTitle, Skeleton, Table, Td, Th } from "../components/ui/form-controls";
+import { cn } from "../lib/utils";
 import type { AgentConfig } from "../types";
 
 const POLL_MS = 5000;
+
+const OUTCOME_VARIANT: Record<string, BadgeProps["variant"]> = {
+  complete: "complete",
+  running: "running",
+  failed: "failed",
+  queued: "waiting",
+};
 
 function formatElapsed(s: number): string {
   if (s < 60) return `${s}s`;
@@ -16,23 +27,26 @@ function formatElapsed(s: number): string {
 function TaskProgressChip({ closed, total }: { closed: number; total: number }) {
   if (total === 0) return null;
   return (
-    <span className="tag small">
+    <Badge variant="secondary">
       {closed} / {total} tasks
-    </span>
+    </Badge>
   );
 }
 
 export function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function fetchData() {
     try {
       const d = await dashboardApi.get();
       setData(d);
-    } catch {
-      // silently ignore polling errors
+      setError(null);
+    } catch (e) {
+      // Keep showing the last good data; surface the failure as a banner.
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -63,12 +77,13 @@ export function Dashboard() {
 
   if (loading) {
     return (
-      <div className="page">
-        <h1>Dashboard</h1>
-        <div className="skeleton-block" style={{ height: 80, marginBottom: 16 }} />
-        <div className="skeleton-block" style={{ height: 80, marginBottom: 16 }} />
-        <div className="skeleton-block" style={{ height: 80 }} />
-      </div>
+      <Page title="Dashboard">
+        <div className="flex flex-col gap-4" aria-busy="true" aria-label="Loading dashboard">
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
+        </div>
+      </Page>
     );
   }
 
@@ -80,43 +95,46 @@ export function Dashboard() {
   };
 
   return (
-    <div className="page">
-      <h1>Dashboard</h1>
+    <Page title="Dashboard">
+      {error && (
+        <Alert variant="error" className="mb-4">
+          Could not refresh the dashboard: {error}
+        </Alert>
+      )}
 
       {/* ── Active runs ── */}
-      <section style={{ marginBottom: 32 }}>
-        <h2>Active runs</h2>
+      <section className="mb-8">
+        <SectionTitle>Active runs</SectionTitle>
         {d.active_runs.length === 0 ? (
-          <p className="muted small">No active runs.</p>
+          <EmptyState title="No active runs.">
+            Start one from <Link to="/projects" className={linkClass}>Projects</Link> or the{" "}
+            <Link to="/oneshot" className={linkClass}>One-shot</Link> launcher.
+          </EmptyState>
         ) : (
           d.active_runs.map((run) => (
-            <div key={run.run_id} className="card" style={{ marginBottom: 12 }}>
-              <div className="row" style={{ justifyContent: "space-between" }}>
+            <Card key={run.run_id} className="mb-3 p-4">
+              <div className="flex items-center justify-between gap-3">
                 <div>
-                  <Link to={`/runs/${run.run_id}`} className="mono">
+                  <Link to={`/runs/${run.run_id}`} className={cn("font-mono", linkClass)}>
                     {run.run_id}
                   </Link>
                   {run.project_id && (
-                    <span className="muted small" style={{ marginLeft: 8 }}>
-                      {run.project_id}
-                    </span>
+                    <span className="ml-2 text-xs text-muted-foreground">{run.project_id}</span>
                   )}
                 </div>
-                <div className="row" style={{ gap: 8 }}>
+                <div className="flex items-center gap-2">
                   <TaskProgressChip
                     closed={run.task_progress.closed}
                     total={run.task_progress.total}
                   />
-                  <span className="muted small">{formatElapsed(run.elapsed_s)}</span>
+                  <span className="text-xs text-muted-foreground">{formatElapsed(run.elapsed_s)}</span>
                 </div>
               </div>
               {run.goal && (
-                <div className="muted small" style={{ marginTop: 4 }}>
-                  {run.goal}
-                </div>
+                <div className="mt-1 text-xs text-muted-foreground">{run.goal}</div>
               )}
               {run.current_agents.length > 0 && (
-                <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                <div className="mt-2 flex flex-wrap gap-2">
                   {run.current_agents.map((ag) => {
                     const agentCfg: AgentConfig = {
                       role: ag.role,
@@ -133,73 +151,75 @@ export function Dashboard() {
                   })}
                 </div>
               )}
-            </div>
+            </Card>
           ))
         )}
       </section>
 
       {/* ── Pending approvals ── */}
       {d.pending_approvals.length > 0 && (
-        <section style={{ marginBottom: 32 }}>
-          <h2>Pending approvals</h2>
+        <section className="mb-8">
+          <SectionTitle>Pending approvals</SectionTitle>
           {d.pending_approvals.map((a) => (
-            <div key={a.approval_id} className="card" style={{ marginBottom: 8 }}>
-              <div className="row" style={{ justifyContent: "space-between" }}>
+            <Card key={a.approval_id} className="mb-2 p-4">
+              <div className="mb-1 flex items-center justify-between gap-3">
                 <span>{a.title}</span>
-                <Link to={`/runs/${a.run_id}`} className="primary small">
+                <Link to={`/runs/${a.run_id}`} className={cn("text-sm font-medium", linkClass)}>
                   Review →
                 </Link>
               </div>
-              <span className="tag small muted">{a.kind}</span>
-            </div>
+              <Badge variant="waiting">{a.kind}</Badge>
+            </Card>
           ))}
         </section>
       )}
 
       {/* ── Recent completions ── */}
-      <section style={{ marginBottom: 32 }}>
-        <h2>Recent completions</h2>
+      <section className="mb-8">
+        <SectionTitle>Recent completions</SectionTitle>
         {d.recent_completions.length === 0 ? (
-          <p className="muted small">No completed runs yet.</p>
+          <EmptyState title="No completed runs yet." />
         ) : (
-          <table className="list">
+          <Table>
             <thead>
               <tr>
-                <th>Run</th>
-                <th>Project</th>
-                <th>Outcome</th>
-                <th>Duration</th>
+                <Th>Run</Th>
+                <Th>Project</Th>
+                <Th>Outcome</Th>
+                <Th>Duration</Th>
               </tr>
             </thead>
             <tbody>
               {d.recent_completions.map((r) => (
                 <tr key={r.run_id}>
-                  <td>
-                    <Link to={`/runs/${r.run_id}`} className="mono">
+                  <Td>
+                    <Link to={`/runs/${r.run_id}`} className={cn("font-mono", linkClass)}>
                       {r.run_id}
                     </Link>
-                  </td>
-                  <td>{r.project_id}</td>
-                  <td>
-                    <span className={`tag tag-status-${r.outcome}`}>{r.outcome}</span>
-                  </td>
-                  <td className="muted small">
+                  </Td>
+                  <Td>{r.project_id}</Td>
+                  <Td>
+                    <Badge variant={OUTCOME_VARIANT[r.outcome] ?? "secondary"}>{r.outcome}</Badge>
+                  </Td>
+                  <Td className="text-xs text-muted-foreground">
                     {r.duration_s != null ? formatElapsed(r.duration_s) : "—"}
-                  </td>
+                  </Td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         )}
       </section>
 
       {/* ── Top personas ── */}
       <section>
-        <h2>Top personas</h2>
+        <SectionTitle>Top personas</SectionTitle>
         {d.top_personas.length === 0 ? (
-          <p className="muted small">No personas yet.</p>
+          <EmptyState title="No personas yet.">
+            They appear on the <Link to="/roster" className={linkClass}>Roster</Link> after a first run.
+          </EmptyState>
         ) : (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div className="flex flex-wrap gap-2">
             {d.top_personas.map((p) => {
               const agentCfg: AgentConfig = {
                 role: p.role || p.name,
@@ -216,6 +236,6 @@ export function Dashboard() {
           </div>
         )}
       </section>
-    </div>
+    </Page>
   );
 }

@@ -38,16 +38,23 @@ from fastapi.staticfiles import StaticFiles
 
 from agents.builtin import register_builtins
 from api.routes import agents as agents_router
+from api.routes import cards as cards_router
 from api.routes import fs as fs_router
+from api.routes import harness as harness_router
 from api.routes import inputs as inputs_router
 from api.routes import invoke as invoke_router
+from api.routes import oneshot as oneshot_router
 from api.routes import meta as meta_router
 from api.routes import personas as personas_router
+from api.routes import project_work as project_work_router
 from api.routes import projects as projects_router
+from api.routes import run_artifacts as run_artifacts_router
+from api.routes import run_report as run_report_router
 from api.routes import runs as runs_router
 from api.routes import dashboard as dashboard_router
 from api.routes import example_projects as example_projects_router
 from api.routes import models as models_router
+from api.routes import model_config as model_config_router
 from api.routes import settings as settings_router
 from api.routes import tools as tools_router
 from api.routes import training as training_router
@@ -231,9 +238,17 @@ async def lifespan(app: FastAPI):
     if os.environ.get("GUUDFLOW_DISABLE_INPROC_WORKER") != "1":
         worker_task = _start_inproc_worker(app, data_root)
 
+    # Autopilot (plan §14.7): starts due runs for projects that enable it.
+    autopilot_task = None
+    if os.environ.get("GUUDFLOW_DISABLE_AUTOPILOT") != "1":
+        from core.autopilot import run_loop
+        autopilot_task = asyncio.create_task(run_loop(app.state))
+
     try:
         yield
     finally:
+        if autopilot_task is not None:
+            autopilot_task.cancel()
         if app.state.__dict__.get("worker_task") is not None:
             app.state.job_runner.stop()
             try:
@@ -261,16 +276,23 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(projects_router.router)
+    app.include_router(project_work_router.router)
     app.include_router(inputs_router.router)
     app.include_router(fs_router.router)
     app.include_router(agents_router.router)
     app.include_router(runs_router.router)
+    app.include_router(cards_router.router)
+    app.include_router(run_artifacts_router.router)
+    app.include_router(run_report_router.router)
     app.include_router(personas_router.router)
     app.include_router(meta_router.router)
     app.include_router(invoke_router.router)
+    app.include_router(oneshot_router.router)
     app.include_router(dashboard_router.router)
     app.include_router(example_projects_router.router)
     app.include_router(models_router.router)
+    app.include_router(model_config_router.router)
+    app.include_router(harness_router.router)
     app.include_router(settings_router.router)
     app.include_router(tools_router.router)
     app.include_router(training_router.router)

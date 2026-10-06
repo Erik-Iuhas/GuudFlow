@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agents.base import BaseAgent
 from agents.catalog import list_all_archetypes
@@ -35,6 +35,9 @@ from core.meta_proposal import (
 )
 from core.runner import AgentConfig, ProjectConfig
 from core.tool_manifest import RoleRBAC
+
+if TYPE_CHECKING:
+    from core.llm.registry import ModelRegistry
 
 
 _logger = logging.getLogger(__name__)
@@ -202,6 +205,10 @@ class MetaAgent(BaseAgent):
         prior_run_id: str | None = None,
         prior_team_roles: list[str] | None = None,
         prior_team: list[dict[str, Any]] | None = None,
+        harness: str = "legacy",
+        playbook_text: str = "",
+        backlog_text: str = "",
+        model_registry: "ModelRegistry | None" = None,
     ) -> TeamProposal:
         """Generate a team proposal for `goal` using inputs in
         `project_dir/inputs/`.
@@ -213,6 +220,10 @@ class MetaAgent(BaseAgent):
           - Passing the persona roster (from `PersonaStore.list()`).
           - Passing `prior_run_id` + `prior_team_roles` for
             continuation runs.
+          - Passing the project's `harness` ("legacy" | "opencode"; opencode
+            teams get a default planner), the rendered project playbook
+            (`playbook_text`, shown to the model as a proposal-only section)
+            and a `model_registry` for gating `vision` by model.
 
         On any LLM error or malformed tool call, returns the
         deterministic skeleton so `/api/meta/propose` never breaks.
@@ -234,7 +245,10 @@ class MetaAgent(BaseAgent):
             )
 
         # 3. Render the user message + pick the system prompt.
-        user_message = render_user_message(inputs, archetypes, roster)
+        user_message = render_user_message(
+            inputs, archetypes, roster,
+            playbook_text=playbook_text, backlog_text=backlog_text, harness=harness,
+        )
         system = (
             META_CONTINUATION_PROMPT
             if inputs.continuation is not None
@@ -267,7 +281,10 @@ class MetaAgent(BaseAgent):
                 goal, f"LLM called unexpected tool {first.name!r}",
             )
 
-        result = parse_proposal_args(first.arguments, archetypes, roster)
+        result = parse_proposal_args(
+            first.arguments, archetypes, roster,
+            harness=harness, model_registry=model_registry,
+        )
         if not result.agents:
             return self._wrap_fallback(
                 goal, "parsed proposal had no agents",

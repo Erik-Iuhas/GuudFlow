@@ -2,9 +2,35 @@ import { type ReactNode, useState } from "react";
 import type { Signal } from "../types";
 import {
   signalsForRoleIteration,
+  type AgentLiveState,
   type AgentLiveSummary,
 } from "../lib/iterations";
 import { avatarFor } from "../lib/avatar";
+import { cn } from "../lib/utils";
+import { latestCapabilityWarnings } from "./harness/parse";
+import { Badge, type BadgeProps } from "./ui/badge";
+import { Button } from "./ui/button";
+
+/** Left-border accent per live state (status tokens). */
+const STATE_BORDER: Record<AgentLiveState, string> = {
+  pending: "border-l-muted-foreground/40",
+  ready: "border-l-status-running/50",
+  running: "border-l-status-running",
+  complete: "border-l-status-complete",
+  failed: "border-l-status-failed",
+  waiting_for_human: "border-l-status-waiting",
+  blocked: "border-l-status-blocked",
+};
+
+const STATE_BADGE: Record<AgentLiveState, BadgeProps["variant"]> = {
+  pending: "secondary",
+  ready: "secondary",
+  running: "running",
+  complete: "complete",
+  failed: "failed",
+  waiting_for_human: "waiting",
+  blocked: "blocked",
+};
 
 export function AgentStateCard({
   summary,
@@ -25,9 +51,11 @@ export function AgentStateCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const capWarnings = latestCapabilityWarnings(allSignals, summary.role);
   const iterationSignals = expanded
     ? signalsForRoleIteration(allSignals, summary.role, summary.iteration)
     : [];
+  const av = avatarFor(personaId ?? summary.role);
 
   async function handleRetry(e: React.MouseEvent) {
     e.stopPropagation();
@@ -42,87 +70,91 @@ export function AgentStateCard({
 
   return (
     <div
-      className={`agent-state-card agent-state-${summary.state}`}
-      style={{ cursor: onClick ? "pointer" : undefined }}
+      className={cn(
+        "mt-1 rounded-md border border-l-[3px] border-border bg-card px-3 py-2 text-card-foreground",
+        STATE_BORDER[summary.state],
+        onClick && "cursor-pointer",
+      )}
+      data-state={summary.state}
       onClick={onClick}
     >
       <div
-        className="row"
-        style={{ alignItems: "center", gap: 8 }}
+        className="flex items-center gap-2"
         onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
       >
-        {(() => {
-          const seed = personaId ?? summary.role;
-          const av = avatarFor(seed);
-          return (
-            <div
-              style={{
-                background: av.gradient, width: 20, height: 20, borderRadius: 4,
-                fontSize: 8, fontWeight: 700, color: "#fff", flexShrink: 0,
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}
-              aria-hidden
-            >
-              {av.initials}
-            </div>
-          );
-        })()}
-        <span className={`tag tag-status-${summary.state}`}>{summary.state}</span>
-        <strong className="mono">{summary.role}</strong>
+        {/* The gradient is generated per persona at runtime, so it cannot be a utility class:
+            it is handed over as the `--avatar-bg` CSS variable and painted by a class. */}
+        <div
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-[image:var(--avatar-bg)] text-[8px] font-bold text-white"
+          style={{ "--avatar-bg": av.gradient } as React.CSSProperties}
+          aria-hidden
+        >
+          {av.initials}
+        </div>
+        <Badge variant={STATE_BADGE[summary.state]}>{summary.state}</Badge>
+        <strong className="font-mono">{summary.role}</strong>
         {personaName && personaName !== summary.role && (
-          <span className="muted small" style={{ fontStyle: "italic" }}>{personaName}</span>
+          <span className="text-xs italic text-muted-foreground">{personaName}</span>
         )}
-        <span className="muted small">iter {summary.iteration}</span>
+        <span className="text-xs text-muted-foreground">iter {summary.iteration}</span>
+        {capWarnings.length > 0 && (
+          <span
+            role="img"
+            aria-label="Capability warning"
+            title={capWarnings.join("\n")}
+            className="cursor-help text-status-blocked"
+          >
+            ⚠
+          </span>
+        )}
         {summary.lastCommit && (
-          <span className="muted small mono" title={summary.lastCommitMessage ?? ""}>
+          <span className="font-mono text-xs text-muted-foreground" title={summary.lastCommitMessage ?? ""}>
             commit {summary.lastCommit}
           </span>
         )}
         {summary.claimedFiles.length > 0 && (
-          <span className="muted small">
+          <span className="text-xs text-muted-foreground">
             claimed: {summary.claimedFiles.slice(0, 2).join(", ")}
             {summary.claimedFiles.length > 2 &&
               ` +${summary.claimedFiles.length - 2}`}
           </span>
         )}
         {summary.unreadComments > 0 && (
-          <span className="tag tag-comments">
-            {summary.unreadComments} unread comments
-          </span>
+          <Badge variant="blocked">{summary.unreadComments} unread comments</Badge>
         )}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+        <div className="ml-auto flex items-center gap-1.5">
           {summary.state === "failed" && onRetry && (
-            <button
-              className="primary small"
+            <Button
+              size="sm"
               disabled={retrying}
               onClick={handleRetry}
               title="Re-enqueue this run — completed agents will be skipped"
             >
               {retrying ? "…" : "Retry"}
-            </button>
+            </Button>
           )}
-          <span className="muted small">{expanded ? "▾" : "▸"}</span>
+          <span className="text-xs text-muted-foreground">{expanded ? "▾" : "▸"}</span>
         </div>
       </div>
 
       {expanded && (
-        <div className="agent-state-detail" onClick={(e) => e.stopPropagation()}>
+        <div className="mt-2 border-t border-border pt-2" onClick={(e) => e.stopPropagation()}>
           {children}
-          <details style={{ marginTop: 8 }}>
-            <summary className="small muted" style={{ cursor: "pointer", userSelect: "none" }}>
+          <details className="mt-2">
+            <summary className="cursor-pointer select-none text-xs text-muted-foreground">
               {iterationSignals.length > 0
                 ? `${iterationSignals.length} signal${iterationSignals.length !== 1 ? "s" : ""}`
                 : "signals"}
             </summary>
             {iterationSignals.length === 0 ? (
-              <div className="muted small" style={{ paddingLeft: 12, marginTop: 4 }}>
+              <div className="mt-1 pl-3 text-xs text-muted-foreground">
                 No signals in iteration {summary.iteration} yet.
               </div>
             ) : (
-              <ul className="agent-iteration-list" style={{ marginTop: 4 }}>
+              <ul className="m-0 mt-1 list-none p-0 text-xs text-muted-foreground">
                 {iterationSignals.map((s) => (
-                  <li key={s.id}>
-                    <span className="tag small">{s.type}</span> {s.summary}
+                  <li key={s.id} className="py-0.5">
+                    <Badge variant="secondary">{s.type}</Badge> {s.summary}
                   </li>
                 ))}
               </ul>

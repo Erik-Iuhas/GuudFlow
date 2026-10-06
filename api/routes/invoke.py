@@ -49,6 +49,17 @@ async def invoke_project(
 
     body = body or {}
     confirm = bool(body.get("confirm", False))
+    _check_project_work(request, project_id, body)
+    if not body.get("allow_parallel"):
+        # One active run per project (plan §14.5): a second run would build on the
+        # same main and collide at review time.
+        from worker.queue import JOB_QUEUED, JOB_RUNNING
+        jobs = await request.app.state.queue.list(project_id=project_id, limit=500)
+        active = [j for j in jobs if j.status in (JOB_QUEUED, JOB_RUNNING)]
+        if active:
+            raise HTTPException(status_code=409, detail=(
+                f"run {active[0].run_id} is still {active[0].status} for this project; wait for "
+                "it, or pass allow_parallel for work that does not overlap"))
 
     project_cfg = serialise_project(project)
     gates = project_cfg.approval_gates or {}
@@ -92,6 +103,36 @@ async def invoke_project(
             "enqueued_at": datetime.now(timezone.utc).isoformat(),
         },
     )
+
+
+def _check_project_work(request: Request, project_id: str, body: dict) -> None:
+    """Refuse a run whose backlog selection or continued run cannot be honoured (plan §13).
+
+    `backlog_items`: a list of open item ids, or "top" (with optional `backlog_limit`).
+    `continue_run`: a run of this project still waiting for review.
+    """
+    from pathlib import Path
+
+    from core.backlog import Backlog, BacklogError
+    from core.project_repo import ProjectRepo
+
+    data_root = Path(request.app.state.data_root)
+    wanted = body.get("backlog_items")
+    if wanted not in (None, "top") and not (
+            isinstance(wanted, list) and all(isinstance(i, str) for i in wanted)):
+        raise HTTPException(status_code=400,
+                            detail="backlog_items must be a list of item ids or \"top\"")
+    if isinstance(wanted, list):
+        try:
+            Backlog(data_root, project_id).check_selection(wanted)
+        except BacklogError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+    parent = body.get("continue_run")
+    if parent is not None:
+        run = ProjectRepo(data_root, project_id).get(str(parent))
+        if run is None or run.state != "pending":
+            raise HTTPException(status_code=400,
+                                detail=f"continue_run: {parent!r} is not waiting for review")
 
 
 @router.get("/mcp/manifest")

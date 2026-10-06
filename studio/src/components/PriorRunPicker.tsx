@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { runsApi } from "../api";
 import type { PriorRunAttachment, RunMeta } from "../types";
+import { errorCls, fieldCls, labelCls } from "../lib/field";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
 
 export interface PriorRunPickerProps {
   projectId: string;
@@ -58,41 +62,39 @@ export function PriorRunPicker({
   return (
     <div>
       {attached.length === 0 ? (
-        <p className="muted small">No prior runs attached.</p>
+        <p className="my-2 text-xs text-muted-foreground">No prior runs attached.</p>
       ) : (
-        <ul className="prior-runs-list">
+        <ul className="my-2 list-none p-0">
           {attached.map((a) => (
-            <li key={a.run_id} className="row" style={{ gap: 8 }}>
-              <span className="mono">{a.run_id}</span>
-              {a.has_feedback && <span className="tag">has feedback</span>}
-              <span className="muted small">
+            <li key={a.run_id} className="flex items-center gap-2 border-b border-border py-1.5">
+              <span className="font-mono">{a.run_id}</span>
+              {a.has_feedback && <Badge variant="secondary">has feedback</Badge>}
+              <span className="text-xs text-muted-foreground">
                 attached {a.attached_at?.replace("T", " ").split(".")[0]}
               </span>
-              <button
-                className="danger small"
-                onClick={() => void onDetach(a.run_id)}
-              >
+              <Button size="sm" variant="destructive" onClick={() => void onDetach(a.run_id)}>
                 Detach
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
       )}
 
       {picking ? (
-        <div className="card" style={{ marginTop: 8 }}>
-          {error && <div className="error">{error}</div>}
+        <Card className="mt-2 p-4">
+          {error && <div className={errorCls}>{error}</div>}
           {runs === null ? (
-            <p className="muted small">Loading runs…</p>
+            <p className="m-0 text-xs text-muted-foreground">Loading runs…</p>
           ) : eligible.length === 0 ? (
-            <p className="muted small">
+            <p className="m-0 text-xs text-muted-foreground">
               No prior runs available — every completed run is already
               attached, or this project has no prior runs.
             </p>
           ) : (
             <>
-              <label>Pick a run</label>
+              <label className={labelCls}>Pick a run</label>
               <select
+                className={fieldCls}
                 value={selectedRun ?? ""}
                 onChange={(e) => setSelectedRun(e.target.value || null)}
               >
@@ -105,8 +107,9 @@ export function PriorRunPicker({
                 ))}
               </select>
 
-              <label style={{ marginTop: 8 }}>Feedback (optional)</label>
+              <label className={`${labelCls} mt-2`}>Feedback (optional)</label>
               <textarea
+                className={fieldCls}
                 rows={3}
                 placeholder="What should the next run do differently?"
                 value={feedback}
@@ -115,29 +118,26 @@ export function PriorRunPicker({
             </>
           )}
 
-          <div className="row" style={{ marginTop: 8, gap: 8 }}>
-            <button
-              className="primary"
-              onClick={() => void attach()}
-              disabled={!selectedRun || busy}
-            >
+          <div className="mt-2 flex items-center gap-2">
+            <Button onClick={() => void attach()} disabled={!selectedRun || busy}>
               {busy ? "Attaching…" : "Attach"}
-            </button>
-            <button onClick={() => setPicking(false)} disabled={busy}>
+            </Button>
+            <Button variant="outline" onClick={() => setPicking(false)} disabled={busy}>
               Cancel
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       ) : (
-        <button
-          style={{ marginTop: 8 }}
+        <Button
+          variant="outline"
+          className="mt-2"
           onClick={() => {
             setPicking(true);
             void load();
           }}
         >
           + Attach a prior run
-        </button>
+        </Button>
       )}
     </div>
   );

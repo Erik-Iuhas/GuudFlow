@@ -6,7 +6,17 @@ The minimal image used as the per-run execution sandbox in production.
 at run start. Each run gets its own ephemeral container with the workspace
 mounted, the persona roster read-only, and §29's resource caps applied.
 
-## What's in the image
+## The opencode agent image (`agent-opencode.Dockerfile`)
+
+The image the opencode harness runs (one `opencode serve` per role). It holds git,
+python3 and the pinned opencode binary, plus a `bun` shim: opencode is Bun-compiled,
+and `BUN_BE_BUN=1 opencode` runs it as the Bun CLI. So JavaScript and TypeScript
+projects get `bun test` / `bun run` with no Node and no download. The permission
+ruleset allows `bun test*` and `bun run *` and denies `bun install/add/x`, `bunx`
+and the other package commands (`core/harness/capabilities.py`). The rest of this
+file describes the legacy image below.
+
+## What's in the legacy image
 
 - `python:3.11-slim` base
 - `bash` (for shell-mode `code-exec`)
@@ -86,3 +96,55 @@ runtime venv is the right pattern.
 - Pinning to a SHA digest (e.g. `guudflow-sandbox@sha256:...`) is
   recommended in production so a tag drift doesn't silently change
   the runtime
+
+## Optional chart-rendering variant: `agent-opencode-viz`
+
+The opencode agent sandbox (`agent-opencode.Dockerfile`, plan §5.3) has a chart-rendering
+sibling, `guudflow/agent-opencode-viz:<opencode version>` (plan §5.10). It is
+`FROM guudflow/agent-opencode:<version>` plus matplotlib (Agg backend), plotly, kaleido
+(with its own headless Chromium), numpy and pandas, so chart-heavy roles do not need the IT
+agent for packages. It adds roughly 0.15 GB compressed (about 0.65 GB on disk), so it is
+opt-in and never the default.
+
+Pinned versions live in `sandbox/viz-requirements.txt`. plotly is held below 6.1 because
+kaleido 0.2.1 is the release that bundles Chromium; kaleido 1.x needs a separate Chrome
+download, which the offline build cannot do.
+
+### Build
+
+`docker build` for these images has no network, so the wheels are downloaded on the host
+and copied in:
+
+```bash
+scripts/fetch_viz_wheels.sh        # -> .tools/viz-wheels/ (gitignored, never commit)
+python -c "import asyncio; from worker.sandbox_manager import SandboxManager; \
+asyncio.run(SandboxManager().ensure_image(variant='viz'))"
+```
+
+`ensure_image(variant="viz")` builds the default image first if it is missing, then the viz
+image from `agent-opencode-viz.Dockerfile` with a context holding only the Dockerfile,
+`viz_install.py` and the wheels. The base image has no pip, so `viz_install.py` unpacks the
+wheels in a build stage and only the unpacked packages are copied into the final image; the
+wheels never reach it. Without wheels the build raises `SandboxError` telling you to run
+`scripts/fetch_viz_wheels.sh`. Set `GUUDFLOW_VIZ_WHEELS_DIR` to keep the wheels elsewhere.
+
+### Use
+
+Hardening is identical to the default image: the manager's flags are unchanged and the image
+keeps the unprivileged `agent` user. `MPLBACKEND=Agg` and `MPLCONFIGDIR=/tmp/matplotlib` are
+preset because the root filesystem is read-only.
+
+A role gets the viz image only when asked, through the existing per-spec image override:
+
+```python
+from worker.sandbox_manager import SandboxSpec, image_for_variant
+spec = SandboxSpec(..., image=image_for_variant("viz"))   # or image=VIZ_IMAGE
+```
+
+Wiring this into run configuration (for example a role capability) is a later change.
+
+### Test
+
+`tests/worker/test_viz_image.py` builds the image and renders a matplotlib PNG and a plotly
+PNG (kaleido) inside a container started with the manager's hardened kwargs. It skips when
+Docker is unavailable, `GUUDFLOW_SKIP_DOCKER_TESTS` is set, or the wheels are missing.

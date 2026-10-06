@@ -1,13 +1,39 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ApiError, metaApi, projectsApi } from "../api";
+import { ApiError, harnessApi, metaApi, projectsApi } from "../api";
+import { PlaybookPanel } from "../features/team/PlaybookPanel";
+import { TeamGraph } from "../features/team/TeamGraph";
+import { CapabilitySwitches } from "../components/CapabilitySwitches";
 import { CostStrip } from "../components/CostStrip";
 import { WorkerCard } from "../components/WorkerCard";
+import { Badge, type BadgeProps } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import {
+  Alert,
+  Input,
+  Label,
+  Page,
+  Select,
+  Table,
+  Td,
+  Textarea,
+  Th,
+} from "../components/ui/form-controls";
 import type {
+  CapabilitiesMeta,
+  CapabilityBlock,
+  HarnessAgentConfig,
+  HarnessKind,
+  HarnessProjectConfig,
+  RoleCapState,
+} from "../lib/capabilities";
+import type {
+  AgentConfig,
   MetaProposal,
   ModelTier,
   PersonaHire,
-  ProjectConfig,
+  PlaybookEntry,
   RoleDelta,
 } from "../types";
 
@@ -27,7 +53,7 @@ function highlightPaths(text: string): React.ReactNode[] {
       parts.push(text.slice(lastIndex, idx));
     }
     parts.push(
-      <code key={`p-${idx}`} className="path-mention">
+      <code key={`p-${idx}`} className="rounded-sm bg-accent px-1.5 py-px font-mono text-xs text-accent-foreground">
         {match[1]}
       </code>,
     );
@@ -37,6 +63,10 @@ function highlightPaths(text: string): React.ReactNode[] {
     parts.push(text.slice(lastIndex));
   }
   return parts;
+}
+
+function errorText(e: unknown): string {
+  return e instanceof ApiError ? e.detail : String(e);
 }
 
 export function Propose() {
@@ -53,6 +83,75 @@ export function Propose() {
   // string — the meta-agent reads inputs/ from data/projects/{id}/
   const [projectId, setProjectId] = useState(initialProjectId);
   const navigate = useNavigate();
+  // Harness selector: "opencode" is the default (O15) and shows the
+  // per-role capability switches (plan §5.7).
+  const [harness, setHarness] = useState<HarnessKind>("opencode");
+  const [capMeta, setCapMeta] = useState<CapabilitiesMeta | null>(null);
+  const [roleCaps, setRoleCaps] = useState<Record<string, RoleCapState>>({});
+  const [view, setView] = useState<"graph" | "list">("graph");
+  const [playbookUsed, setPlaybookUsed] = useState<PlaybookEntry[]>([]);
+  const capSeq = useRef<Record<string, number>>({});
+
+  // Load the toggle levels once the opencode harness is chosen.
+  useEffect(() => {
+    if (harness !== "opencode" || capMeta) return;
+    let cancelled = false;
+    harnessApi
+      .capabilities()
+      .then((m) => !cancelled && setCapMeta(m))
+      .catch((e) => !cancelled && setError(errorText(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [harness, capMeta]);
+
+  // Resolve role type + default capabilities for each proposed agent.
+  useEffect(() => {
+    if (harness !== "opencode" || !capMeta || !proposal) return;
+    for (const agent of proposal.agents) {
+      if (capSeq.current[agent.role]) continue;
+      void resolveRole(agent);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [harness, capMeta, proposal]);
+
+  async function resolveRole(agent: AgentConfig, caps?: CapabilityBlock, roleType?: string) {
+    const seq = (capSeq.current[agent.role] = (capSeq.current[agent.role] ?? 0) + 1);
+    try {
+      const r = await harnessApi.resolve({
+        role: agent.role,
+        role_type: roleType ?? agent.agent_class_role_type ?? undefined,
+        is_reviewer: !!agent.is_reviewer,
+        model_id: agent.model_id || undefined,
+        capabilities: caps,
+      });
+      if (capSeq.current[agent.role] !== seq) return;
+      setRoleCaps((prev) => ({
+        ...prev,
+        [agent.role]: {
+          roleType: r.role_type,
+          capabilities: r.capabilities,
+          visionAvailable: r.vision_available,
+          error: null,
+        },
+      }));
+    } catch (e) {
+      if (capSeq.current[agent.role] !== seq) return;
+      // Keep the user's edit visible, but show why the server refused it.
+      setRoleCaps((prev) => {
+        const cur = prev[agent.role];
+        if (!cur) return prev;
+        return { ...prev, [agent.role]: { ...cur, error: errorText(e) } };
+      });
+    }
+  }
+
+  function handleCapChange(agent: AgentConfig, next: CapabilityBlock) {
+    const cur = roleCaps[agent.role];
+    if (!cur) return;
+    setRoleCaps((prev) => ({ ...prev, [agent.role]: { ...cur, capabilities: next, error: null } }));
+    void resolveRole(agent, next, cur.roleType);
+  }
 
   async function handlePropose() {
     setError(null);
@@ -63,7 +162,11 @@ export function Propose() {
       if (initialPriorRunId) opts.priorRunId = initialPriorRunId;
       opts.metaModel = metaModel;
       const p = await metaApi.propose(goal, opts);
+      capSeq.current = {};
+      setRoleCaps({});
       setProposal(p);
+      setPlaybookUsed([]);
+      void loadPlaybook(p);
       // Suggest a project id from the goal slug ONLY when this is a
       // greenfield proposal. Continuation flow keeps the existing id.
       if (!initialProjectId) {
@@ -76,14 +179,47 @@ export function Propose() {
     }
   }
 
+  /** Entries the meta-agent was shown; empty when there is no project or playbook yet. */
+  async function loadPlaybook(p: MetaProposal) {
+    const ids = p.playbook_entries_used ?? [];
+    if (!initialProjectId || ids.length === 0) return;
+    try {
+      const pb = await projectsApi.playbook(initialProjectId);
+      setPlaybookUsed(pb.entries.filter((e) => ids.includes(e.id)));
+    } catch {
+      // The playbook panel is informational; a failed fetch must not block approval.
+      setPlaybookUsed([]);
+    }
+  }
+
+  function handleTierChange(role: string, tier: ModelTier) {
+    setProposal((prev) =>
+      prev
+        ? {
+            ...prev,
+            agents: prev.agents.map((a) =>
+              a.role === role ? { ...a, model_tier: tier, model_id: undefined } : a,
+            ),
+          }
+        : prev,
+    );
+  }
+
   async function handleApprove() {
     if (!proposal) return;
-    const project: ProjectConfig = {
+    // Same place the screen already saves agent fields: opencode projects
+    // carry per-agent role_type + capabilities, which serialise_project reads.
+    const agents: HarnessAgentConfig[] = proposal.agents.map((a) => {
+      const rc = harness === "opencode" ? roleCaps[a.role] : undefined;
+      return rc ? { ...a, role_type: rc.roleType, capabilities: rc.capabilities } : a;
+    });
+    const project: HarnessProjectConfig = {
       project_id: projectId,
       goal,
-      agents: proposal.agents,
+      agents,
       rbac: proposal.rbac,
       max_iterations: 5,
+      harness, // always explicit: a missing field means opencode (O15)
     };
     try {
       if (initialProjectId) {
@@ -98,37 +234,43 @@ export function Propose() {
     }
   }
 
+  const capsByRole: Record<string, CapabilityBlock> = {};
+  if (harness === "opencode") {
+    for (const [role, rc] of Object.entries(roleCaps)) capsByRole[role] = rc.capabilities;
+  }
   const isContinuation = !!initialPriorRunId;
   const hires = proposal?.persona_hires ?? [];
   const deltas = proposal?.deltas ?? [];
   const warnings = proposal?.warnings ?? [];
 
   return (
-    <div className="page">
-      <h1>{isContinuation ? "Continue from a prior run" : "Propose a project"}</h1>
-      <p className="muted small">
-        {isContinuation
+    <Page
+      title={isContinuation ? "Continue from a prior run" : "Propose a project"}
+      description={
+        isContinuation
           ? "Continuation runs read the prior team + outputs and propose what to change. Approve the deltas below to update the project's stored team."
-          : "Describe the goal in plain English. The meta-agent reads any uploads + source repo you've attached and proposes a tailored team."}
-      </p>
+          : "Describe the goal in plain English. The meta-agent reads any uploads + source repo you've attached and proposes a tailored team."
+      }
+    >
+      {error && <Alert variant="error" className="mb-3">{error}</Alert>}
 
-      {error && <div className="error">{error}</div>}
-
-      <div className="card">
-        <div style={{ marginBottom: 12 }}>
-          <label className="small">Meta-agent model</label>
-          <select
+      <Card className="mb-3 p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <Label className="m-0" htmlFor="meta-model">Meta-agent model</Label>
+          <Select
+            id="meta-model"
             value={metaModel}
             onChange={(e) => setMetaModel(e.target.value as ModelTier)}
-            style={{ width: "auto", marginLeft: 8 }}
+            className="w-auto"
           >
             <option value="heavy">Heavy (default)</option>
             <option value="solid">Solid</option>
             <option value="fast">Fast</option>
-          </select>
+          </Select>
         </div>
-        <label>{isContinuation ? "What's the new ask?" : "Project goal"}</label>
-        <textarea
+        <Label htmlFor="goal">{isContinuation ? "What's the new ask?" : "Project goal"}</Label>
+        <Textarea
+          id="goal"
           rows={3}
           placeholder={
             isContinuation
@@ -138,108 +280,176 @@ export function Propose() {
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
         />
-        <div className="row-end" style={{ marginTop: 12 }}>
-          <button
-            className="primary"
-            disabled={!goal || loading}
-            onClick={handlePropose}
-          >
+        <div className="mt-3 flex justify-end">
+          <Button disabled={!goal || loading} onClick={handlePropose}>
             {loading ? "Proposing…" : "Propose team"}
-          </button>
+          </Button>
         </div>
-      </div>
+      </Card>
 
       {proposal && (
-        <div className="card">
-          <h2>Proposed team</h2>
-          <p className="rationale">{highlightPaths(proposal.rationale)}</p>
+        <Card className="mb-3 p-4">
+          <h2 className="m-0 mb-2 text-base font-semibold">Proposed team</h2>
+          <p className="my-3 text-sm leading-relaxed">{highlightPaths(proposal.rationale)}</p>
 
           {warnings.length > 0 && (
-            <div className="warn">
+            <Alert variant="warn">
               <strong>Notes from the meta-agent:</strong>
-              <ul>
+              <ul className="my-1.5 ml-5 p-0">
                 {warnings.map((w, i) => (
                   <li key={i}>{w}</li>
                 ))}
               </ul>
-            </div>
+            </Alert>
           )}
-
-          <CostStrip
-            project={{
-              project_id: projectId,
-              goal,
-              agents: proposal.agents,
-              rbac: proposal.rbac,
-              max_iterations: 5,
-            }}
-          />
 
           {deltas.length > 0 && <DeltaTable deltas={deltas} />}
 
-          <hr />
-          <div className="grid-2">
-            {proposal.agents.map((a) => (
-              <WorkerCard
-                key={a.role}
-                agent={a}
-                mode="preview"
-              />
-            ))}
+          <div className="my-3 flex flex-wrap items-center gap-2">
+            <Label className="m-0" htmlFor="harness-select">Agent harness</Label>
+            <Select
+              id="harness-select"
+              value={harness}
+              onChange={(e) => setHarness(e.target.value as HarnessKind)}
+              className="w-auto"
+            >
+              <option value="legacy">Legacy</option>
+              <option value="opencode">opencode</option>
+            </Select>
+            {harness === "opencode" && (
+              <span className="text-xs text-muted-foreground">
+                Review what each agent may do before approving.
+              </span>
+            )}
           </div>
 
-          <hr />
-          <div className="row">
-            <div style={{ flex: 1 }}>
-              <label>Project id</label>
-              <input
+          <div className="my-3 flex gap-1" role="group" aria-label="Team view">
+            <Button
+              size="sm"
+              variant={view === "graph" ? "default" : "outline"}
+              aria-pressed={view === "graph"}
+              onClick={() => setView("graph")}
+            >
+              Graph
+            </Button>
+            <Button
+              size="sm"
+              variant={view === "list" ? "default" : "outline"}
+              aria-pressed={view === "list"}
+              onClick={() => setView("list")}
+            >
+              List
+            </Button>
+          </div>
+
+          {view === "graph" ? (
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <TeamGraph
+                projectId={projectId}
+                goal={goal}
+                agents={proposal.agents}
+                roleCaps={harness === "opencode" ? roleCaps : {}}
+                capMeta={harness === "opencode" ? capMeta : null}
+                onCapabilityChange={handleCapChange}
+                onTierChange={handleTierChange}
+              />
+              <PlaybookPanel entries={playbookUsed} />
+            </div>
+          ) : (
+            <>
+              <CostStrip
+                project={{
+                  project_id: projectId,
+                  goal,
+                  agents: proposal.agents,
+                  rbac: proposal.rbac,
+                  max_iterations: 5,
+                }}
+                capsByRole={capsByRole}
+              />
+              <div className="grid gap-4 md:grid-cols-2">
+                {proposal.agents.map((a) => {
+                  const rc = roleCaps[a.role];
+                  return (
+                    <div key={a.role}>
+                      <WorkerCard agent={a} mode="preview" />
+                      {harness === "opencode" && capMeta && rc && (
+                        <CapabilitySwitches
+                          role={a.role}
+                          roleType={rc.roleType}
+                          value={rc.capabilities}
+                          onChange={(next) => handleCapChange(a, next)}
+                          levels={capMeta.levels}
+                          defaults={capMeta.defaults[rc.roleType]}
+                          visionAvailable={rc.visionAvailable}
+                          production={capMeta.production}
+                          hostDevWarning={capMeta.host_dev_warning}
+                          error={rc.error}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          <hr className="my-4 border-0 border-t border-border" />
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <Label htmlFor="project-id">Project id</Label>
+              <Input
+                id="project-id"
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
                 disabled={isContinuation}
               />
             </div>
-            <button
-              className="primary"
-              disabled={!projectId}
-              onClick={handleApprove}
-              style={{ alignSelf: "flex-end" }}
-            >
+            <Button disabled={!projectId} onClick={handleApprove}>
               {isContinuation ? "Approve deltas" : "Approve & create"}
-            </button>
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
-    </div>
+    </Page>
   );
 }
 
+const DELTA_VARIANT: Record<string, BadgeProps["variant"]> = {
+  keep: "secondary",
+  drop: "failed",
+  add: "complete",
+  swap_tier: "blocked",
+  replace_persona: "waiting",
+};
+
 function DeltaTable({ deltas }: { deltas: RoleDelta[] }) {
   return (
-    <div className="card delta-card">
-      <h3 style={{ marginTop: 0 }}>What's changing</h3>
-      <table className="list">
+    <Card className="mt-4 border-status-blocked/40 bg-status-blocked/10 p-4">
+      <h3 className="m-0 mb-2 text-base font-semibold">What's changing</h3>
+      <Table>
         <thead>
           <tr>
-            <th>Role</th>
-            <th>Action</th>
-            <th>Detail</th>
+            <Th>Role</Th>
+            <Th>Action</Th>
+            <Th>Detail</Th>
           </tr>
         </thead>
         <tbody>
           {deltas.map((d) => (
             <tr key={`${d.role}-${d.action}`}>
-              <td className="mono">{d.role}</td>
-              <td>
-                <span className={`tag tag-delta-${d.action}`}>
+              <Td className="font-mono">{d.role}</Td>
+              <Td>
+                <Badge variant={DELTA_VARIANT[d.action] ?? "secondary"}>
                   {d.action.replace("_", " ")}
-                </span>
-              </td>
-              <td className="small muted">{deltaDetail(d)}</td>
+                </Badge>
+              </Td>
+              <Td className="text-xs text-muted-foreground">{deltaDetail(d)}</Td>
             </tr>
           ))}
         </tbody>
-      </table>
-    </div>
+      </Table>
+    </Card>
   );
 }
 

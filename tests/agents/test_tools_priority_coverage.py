@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from agents.tools.base import BaseTool
-from core.runner import LOCAL_TOOL_CLASSES
+from agents.tools.catalog import LOCAL_TOOL_CLASSES
 
 
 _BASE_PRIORITY = BaseTool.priority         # 100

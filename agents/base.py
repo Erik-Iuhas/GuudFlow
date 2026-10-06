@@ -96,6 +96,19 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Layer 6 — chain-of-thought primer. Shared with core/harness/persona_prompt.py
+# so the legacy and opencode prompts use one sentence.
+COT_PRIMER = (
+    "Before producing output, briefly consider edge cases and what "
+    "a reviewer would flag. Then respond in the concise professional "
+    "voice of your role. Do not explain what you did — the work "
+    "is the evidence. One short statement of outcome is enough."
+)
+
+# Layer 7 — always the final line of every effective system prompt.
+POSITIVE_FRAMING = "Make this something you are proud of."
+
+
 @dataclass
 class ClaimAdvice:
     """Returned by `_pre_write_check`. Tells the agent how to proceed
@@ -1260,12 +1273,7 @@ class BaseAgent:
             "before any [ACTION] or [COMMIT]. Do not invent requirements."
         )
 
-        parts.append(
-            "Before producing output, briefly consider edge cases and what "
-            "a reviewer would flag. Then respond in the concise professional "
-            "voice of your role. Do not explain what you did — the work "
-            "is the evidence. One short statement of outcome is enough."
-        )
+        parts.append(COT_PRIMER)
         parts.append(
             "## AUTONOMY RULES — non-negotiable\n\n"
             "You are an **autonomous agent**, not a chatbot or assistant.\n\n"
@@ -1334,6 +1342,6 @@ class BaseAgent:
             )
 
         parts.append(self._protocol_output_primer())
-        parts.append("Make this something you are proud of.")
+        parts.append(POSITIVE_FRAMING)
 
         return "\n\n".join(parts)

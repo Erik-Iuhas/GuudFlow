@@ -2,6 +2,7 @@
 // on every model change". Estimate-only; not real billing.
 
 import type { AgentConfig, ModelTier, ProjectConfig } from "../types";
+import { capabilityCostFactor, type CapabilityBlock } from "./capabilities";
 
 // Per-tier pricing (USD per 1M tokens). Indicative; treat as ballpark.
 const TIER_PRICING: Record<ModelTier, { inputPerM: number; outputPerM: number }> = {
@@ -23,14 +24,18 @@ export interface CostBreakdown {
   perAgent: { role: string; tier: ModelTier; iterations: number; cost: number }[];
 }
 
-export function estimateProjectCost(project: ProjectConfig): CostBreakdown {
+/** `capsByRole` (opencode harness) scales each role's cost by its capabilities. */
+export function estimateProjectCost(
+  project: ProjectConfig,
+  capsByRole?: Record<string, CapabilityBlock | undefined>,
+): CostBreakdown {
   const maxIter = project.max_iterations ?? 5;
   const breakdown: CostBreakdown["perAgent"] = [];
 
   for (const agent of project.agents ?? []) {
     const tier: ModelTier = (agent.model_tier ?? "solid") as ModelTier;
     const iters = agent.max_tool_iterations ?? maxIter;
-    const cost = estimateAgentCost(tier, iters);
+    const cost = estimateAgentCost(tier, iters) * capabilityCostFactor(capsByRole?.[agent.role]);
     breakdown.push({
       role: agent.role,
       tier,
@@ -51,12 +56,21 @@ export function estimateAgentCost(tier: ModelTier, iterations: number): number {
   return inputCost + outputCost;
 }
 
+/**
+ * Measured spend, one rule everywhere (cockpit, report, result cards): two decimals,
+ * or four below ten cents so small per-agent costs do not read as $0.00.
+ */
+export function formatUsd(n: number): string {
+  return `$${n.toFixed(n > 0 && n < 0.1 ? 4 : 2)}`;
+}
+
 export function formatCost(usd: number): string {
   if (usd < 0.01) return "<$0.01";
   if (usd < 1) return `$${usd.toFixed(2)}`;
   return `$${usd.toFixed(2)}`;
 }
 
-export function tierColor(tier: ModelTier): string {
-  return { heavy: "#a855f7", solid: "#3b82f6", fast: "#10b981" }[tier];
+/** Token text-colour class for a model tier (replaces the old hex `tierColor`). */
+export function tierClass(tier: ModelTier): string {
+  return { heavy: "text-status-waiting", solid: "text-status-running", fast: "text-status-complete" }[tier];
 }

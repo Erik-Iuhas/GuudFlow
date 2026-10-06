@@ -58,16 +58,21 @@ describe("WorkerSettingsPanel", () => {
     expect(screen.getByText(/Agent settings — developer/)).toBeInTheDocument();
   });
 
-  it("closes on backdrop click", () => {
+  it("closes on backdrop click", async () => {
     const { onClose } = renderPanel();
-    const backdrop = document.querySelector(".slide-over-backdrop")!;
-    fireEvent.click(backdrop);
-    expect(onClose).toHaveBeenCalled();
+    // Radix registers its outside-pointer listener on the next tick.
+    await new Promise((r) => setTimeout(r, 10));
+    const overlay = document.querySelector("[data-state=open].fixed.inset-0") as HTMLElement;
+    expect(overlay).not.toBeNull();
+    fireEvent.pointerDown(overlay);
+    fireEvent.mouseDown(overlay);
+    fireEvent.click(overlay);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
   it("closes on Escape key", () => {
     const { onClose } = renderPanel();
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
   });
 

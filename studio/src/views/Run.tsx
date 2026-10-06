@@ -17,7 +17,11 @@ import { WorkerCognitionView } from "../components/WorkerCognitionView";
 import { FilePreviewPanel } from "../components/FilePreviewPanel";
 import { GitGraph } from "../components/GitGraph";
 import { GitDiffSideOver } from "../components/GitDiffSideOver";
-import { KanbanBoard } from "../components/KanbanBoard";
+import { TaskBoard } from "../features/board";
+import { useRunCards } from "../api/queries";
+import { createRunStore } from "../stores/runEvents";
+import { RunStoreProvider } from "../stores/runStoreContext";
+import type { RawSignal } from "../lib/runEvents.gen";
 import { PipelineGraph } from "../components/PipelineGraph";
 import { useRunGraph } from "../hooks/useRunGraph";
 import { useDesks } from "../hooks/useDesks";
@@ -27,9 +31,18 @@ import { TagsPanel } from "../components/TagsPanel";
 import { PersonaSlideOver } from "../components/PersonaSlideOver";
 import { WorkerCard } from "../components/WorkerCard";
 import { WorkerSettingsPanel } from "../components/WorkerSettingsPanel";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "../components/ui/dialog";
+import { Alert, Label, Page, Textarea, linkClass } from "../components/ui/form-controls";
+import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { runStatusVariant } from "../lib/field";
+import { cn } from "../lib/utils";
 import { RunWsProvider } from "../contexts/RunWsContext";
 import type { RunWsSubscriber } from "../contexts/RunWsContext";
 import { summariseAgents, signalsForRoleIteration } from "../lib/iterations";
+import { isTerminalStatus } from "../lib/runStatus";
 import type { ProjectConfig, RunMeta, Signal } from "../types";
 
 /** Unresolved approval gates: APPROVAL_NEEDED signals whose matching
@@ -49,19 +62,7 @@ function unresolvedApprovals(signals: Signal[]): Signal[] {
   });
 }
 
-const TERMINAL_STATUSES = new Set([
-  "complete",
-  "max_iterations",
-  "stuck",
-  "deadline_exceeded",
-  "errored",
-  "failed",
-  "stopped",
-]);
-
-function isTerminal(status: string | undefined): boolean {
-  return !!status && TERMINAL_STATUSES.has(status);
-}
+const isTerminal = isTerminalStatus;
 
 export function Run() {
   const { runId } = useParams<{ runId: string }>();
@@ -248,65 +249,67 @@ export function Run() {
 
   return (
     <RunWsProvider value={wsSubscriber}>
-    <div className="page" style={{ maxWidth: "100%" }}>
-      <div className="run-layout">
-        <div className="run-header">
-          <div className="row" style={{ justifyContent: "space-between" }}>
+    <Page className="max-w-full">
+      <div className="grid h-[calc(100vh-90px)] grid-cols-[minmax(0,2fr)_minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)] gap-4">
+        <div className="col-span-2">
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <h1 style={{ marginBottom: 0 }}>
-                Run <span className="mono">{runId}</span>
+              <h1 className="m-0 text-[22px] font-semibold tracking-tight">
+                Run <span className="font-mono">{runId}</span>
               </h1>
               {meta && (
-                <span className="muted small">
-                  project <Link to={`/projects/${meta.project_id}`}>{meta.project_id}</Link>
+                <span className="text-xs text-muted-foreground">
+                  project <Link className={linkClass} to={`/projects/${meta.project_id}`}>{meta.project_id}</Link>
                   {" — "}
-                  <span className={`tag tag-status-${meta.status}`}>{meta.status}</span>
+                  <Badge variant={runStatusVariant(meta.status)}>{meta.status}</Badge>
                 </span>
               )}
-              {!meta && <span className="muted small">live (no on-disk meta yet)</span>}
+              {!meta && <span className="text-xs text-muted-foreground">live (no on-disk meta yet)</span>}
+              {" "}
+              <Link to={`/runs/${runId}`} className={cn(linkClass, "text-xs")}>Cockpit view</Link>
             </div>
-            <div className="row small muted">
-              <span className={connected ? "tag tag-status-running" : "tag"}>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <Badge variant={connected ? "running" : "secondary"}>
                 {connected ? "● live" : "○ disconnected"}
-              </span>
+              </Badge>
               <span>{signals.length} signals</span>
               {/* Stop button — visible while the run is active (no
                   on-disk meta yet, or meta exists but isn't terminal). */}
               {(!meta || !isTerminal(meta.status)) && connected && (
-                <button
-                  className="small"
-                  style={{ background: "#dc2626", color: "#fff", borderColor: "#dc2626" }}
+                <Button
+                  size="sm"
+                  variant="destructive"
                   onClick={() => void handleStop()}
                   disabled={stopping}
                   title="Soft-cancel: in-flight agents finish; no new dispatches"
                 >
                   {stopping ? "Stopping…" : "Stop run"}
-                </button>
+                </Button>
               )}
               {/* Phase G.3 — resume button on failed/non-complete runs.
                   Calls runsApi.resume() (G-prime.2 backend). */}
               {meta && meta.status !== "complete" && isTerminal(meta.status) && (
-                <button
-                  className="primary small"
+                <Button
+                  size="sm"
                   onClick={() => void handleResume()}
                   disabled={resuming}
                   title="Re-enqueue from the persisted state"
                 >
                   {resuming ? "Resuming…" : "Resume run"}
-                </button>
+                </Button>
               )}
               {meta && isTerminal(meta.status) && meta.project_id && (
-                <button
-                  className="primary small"
+                <Button
+                  size="sm"
                   onClick={() => setContinueOpen(true)}
                   title="Start a new run that builds on this one"
                 >
                   Continue from this run
-                </button>
+                </Button>
               )}
             </div>
           </div>
-          {error && <div className="error">{error}</div>}
+          {error && <Alert variant="error" className="mt-3">{error}</Alert>}
 
           {/* Phase G.3 — banner showing this run was resumed from a
               prior point. Reads the synthetic STARTED signal posted
@@ -320,12 +323,12 @@ export function Run() {
             );
             if (!resumedSig) return null;
             return (
-              <div className="card resumed-banner">
+              <Card className="mt-2 border-status-running/40 bg-status-running/10 px-3 py-2">
                 <strong>Resumed run</strong>
-                <span className="small muted" style={{ marginLeft: 8 }}>
+                <span className="ml-2 text-xs text-muted-foreground">
                   {resumedSig.summary}
                 </span>
-              </div>
+              </Card>
             );
           })()}
 
@@ -343,34 +346,29 @@ export function Run() {
             }
             if (!prReady) return null;
             return (
-              <div className="card" style={{ borderLeft: "4px solid #16a34a" }}>
-                <div style={{ fontWeight: 600 }}>
-                  🌿 Branch ready: <span className="mono">{prReady.integration_branch}</span>
+              <Card className="mt-3 border-l-4 border-l-status-complete p-4">
+                <div className="font-semibold">
+                  🌿 Branch ready: <span className="font-mono">{prReady.integration_branch}</span>
                 </div>
-                <div className="small muted" style={{ marginTop: 4 }}>
+                <div className="mt-1 text-xs text-muted-foreground">
                   Open the PR yourself with:
                 </div>
-                <div className="row" style={{ gap: 6, marginTop: 4, alignItems: "center" }}>
-                  <code
-                    className="mono"
-                    style={{
-                      flex: 1, padding: "6px 8px", background: "#f1f5f9",
-                      borderRadius: 4, fontSize: 12, overflowX: "auto",
-                    }}
-                  >
+                <div className="mt-1 flex items-center gap-1.5">
+                  <code className="flex-1 overflow-x-auto rounded bg-muted px-2 py-1.5 font-mono text-xs">
                     {prReady.gh_command}
                   </code>
-                  <button
-                    className="small"
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={() => {
                       if (prReady) void navigator.clipboard.writeText(prReady.gh_command);
                     }}
                     title="Copy to clipboard"
                   >
                     Copy
-                  </button>
+                  </Button>
                 </div>
-              </div>
+              </Card>
             );
           })()}
 
@@ -385,7 +383,7 @@ export function Run() {
         {/* Pipeline graph — compact, graph only. Agent state cards live
             in the side rail so they don't eat the board's vertical space. */}
         {project && (project.agents ?? []).length > 0 && (
-          <div className="run-pipeline">
+          <div className="col-span-2 max-h-[220px] overflow-y-auto border-b border-border bg-muted/40 px-4 py-3">
             <PipelineGraph
               agents={project.agents ?? []}
               liveStates={summariseAgents(
@@ -397,23 +395,21 @@ export function Run() {
           </div>
         )}
 
-        <div className="run-board">
-          <div className="tabs" style={{ marginBottom: 0, borderBottom: "1px solid #e2e8f0" }}>
-            {(["signals", "kanban", "workers", "git", "files", "analytics"] as const).map((tab) => (
-              <button
-                key={tab}
-                className={`tab ${boardTab === tab ? "tab-active" : ""}`}
-                onClick={() => setBoardTab(tab)}
-              >
-                {tab === "signals" ? "Board"
-                  : tab === "kanban" ? "Kanban"
-                  : tab === "workers" ? "Workers"
-                  : tab === "git" ? "Git"
-                  : tab === "files" ? "Files"
-                  : "Analytics"}
-              </button>
-            ))}
-          </div>
+        <div className="col-start-1 row-start-3 flex min-h-0 flex-col overflow-y-auto">
+          <Tabs value={boardTab} onValueChange={(v) => setBoardTab(v as typeof boardTab)}>
+            <TabsList className="mb-2">
+              {(["signals", "kanban", "workers", "git", "files", "analytics"] as const).map((tab) => (
+                <TabsTrigger key={tab} value={tab}>
+                  {tab === "signals" ? "Board"
+                    : tab === "kanban" ? "Kanban"
+                    : tab === "workers" ? "Workers"
+                    : tab === "git" ? "Git"
+                    : tab === "files" ? "Files"
+                    : "Analytics"}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
           {boardTab === "signals" && <BoardFeed signals={signals} />}
           {boardTab === "analytics" && runId && (
             <RunAnalytics runId={runId} isActive={!isTerminal(meta?.status)} />
@@ -423,23 +419,14 @@ export function Run() {
           )}
           {boardTab === "kanban" && runId && (
             <>
-              <KanbanBoard
-                runId={runId}
-                agents={(project?.agents ?? []).map((a) => ({ role: a.role, persona_id: a.persona_id }))}
-                onCardClick={(role) => {
-                  setBoardTab("signals");
-                  // Smooth scroll to role in board feed is handled by BoardFeed itself
-                  const el = document.querySelector(`[data-role="${role}"]`);
-                  el?.scrollIntoView({ behavior: "smooth" });
-                }}
-              />
-              <div style={{ borderTop: "1px solid #e2e8f0", padding: "8px 0 0", marginTop: "auto" }}>
+              <LegacyTaskBoard runId={runId} signals={signals} />
+              <div className="mt-auto border-t border-border pt-2">
                 <CommentBox runId={runId} />
               </div>
             </>
           )}
           {boardTab === "git" && runId && (
-            <div style={{ padding: 12 }}>
+            <div className="p-3">
               <GitGraph
                 runId={runId}
                 desksData={desksData}
@@ -456,10 +443,10 @@ export function Run() {
           )}
         </div>
 
-        <div className="run-side">
+        <div className="col-start-2 row-start-3 flex min-h-0 flex-col gap-3 overflow-y-auto">
           {project && (project.agents ?? []).length > 0 && (
-            <div className="run-side-workers">
-              <div className="small" style={{ fontWeight: 600, textTransform: "uppercase", color: "var(--muted)", marginBottom: 6 }}>Workers</div>
+            <div>
+              <div className="mb-1.5 text-xs font-semibold uppercase text-muted-foreground">Workers</div>
               {Array.from(
                 summariseAgents(
                   (project.agents ?? []).map((a) => a.role),
@@ -499,44 +486,37 @@ export function Run() {
       </div>
 
       {continueOpen && meta?.project_id && (
-        <div
-          className="modal-backdrop"
-          onClick={() => !continueBusy && setContinueOpen(false)}
-        >
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Continue from run {runId}</h3>
-            <p className="muted small">
+        <Dialog open onOpenChange={(o) => !o && !continueBusy && setContinueOpen(false)}>
+          <DialogContent>
+            <DialogTitle>Continue from run {runId}</DialogTitle>
+            <DialogDescription>
               The next run on project{" "}
-              <span className="mono">{meta.project_id}</span> will start with
+              <span className="font-mono">{meta.project_id}</span> will start with
               this run's deliverables attached. Add feedback below — it lands
-              as <span className="mono">feedback.md</span> in the next run's
+              as <span className="font-mono">feedback.md</span> in the next run's
               inputs.
-            </p>
-            <label>What should change?</label>
-            <textarea
-              rows={5}
-              autoFocus
-              placeholder="e.g. Token expiry was not enforced. Add an exp claim and a refresh-token endpoint."
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-            />
-            <div className="row" style={{ marginTop: 12, gap: 8 }}>
-              <button
-                className="primary"
-                onClick={() => void continueFromRun()}
-                disabled={continueBusy}
-              >
-                {continueBusy ? "Setting up…" : "Continue"}
-              </button>
-              <button
-                onClick={() => setContinueOpen(false)}
-                disabled={continueBusy}
-              >
-                Cancel
-              </button>
+            </DialogDescription>
+            <div>
+              <Label htmlFor="continue-feedback">What should change?</Label>
+              <Textarea
+                id="continue-feedback"
+                rows={5}
+                autoFocus
+                placeholder="e.g. Token expiry was not enforced. Add an exp claim and a refresh-token endpoint."
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+              />
             </div>
-          </div>
-        </div>
+            <DialogFooter className="justify-start">
+              <Button onClick={() => void continueFromRun()} disabled={continueBusy}>
+                {continueBusy ? "Setting up…" : "Continue"}
+              </Button>
+              <Button variant="outline" onClick={() => setContinueOpen(false)} disabled={continueBusy}>
+                Cancel
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {slideOverPersonaId && (
@@ -615,7 +595,24 @@ export function Run() {
           onClose={() => setDiffSha(null)}
         />
       )}
-    </div>
+    </Page>
     </RunWsProvider>
+  );
+}
+
+/** The task board inside the legacy view: it needs a run store, fed here from the view's own signal list. */
+function LegacyTaskBoard({ runId, signals }: { runId: string; signals: Signal[] }) {
+  const store = useMemo(() => createRunStore(runId), [runId]);
+  const cards = useRunCards(runId);
+  useEffect(() => {
+    store.getState().ingest(signals as unknown as RawSignal[]);
+  }, [store, signals]);
+  useEffect(() => {
+    if (cards.data) store.getState().seedCards(cards.data);
+  }, [store, cards.data]);
+  return (
+    <RunStoreProvider store={store}>
+      <TaskBoard runId={runId} />
+    </RunStoreProvider>
   );
 }

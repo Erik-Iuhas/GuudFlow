@@ -29,6 +29,53 @@ async def get_project(request: Request, project_id: str) -> dict:
     return project
 
 
+@router.get("/{project_id}/playbook", dependencies=[Depends(require_bearer)])
+async def get_playbook(request: Request, project_id: str) -> dict[str, Any]:
+    """The project's playbook (plan 11.4), read-only.
+
+    Returns `{entries: [{id, section, key, value, confidence, state,
+    evidence_runs, needs_review}], metrics: [{run_id, recorded_at, metrics}]}`.
+    Archived and superseded entries are omitted. A project with no playbook
+    yet returns empty lists. Nothing here changes a team (hard constraint 24).
+    """
+    if await _store(request).get(project_id) is None:
+        raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+    from core.playbook import Playbook
+
+    try:
+        playbook = Playbook.load(request.app.state.data_root, project_id)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=500, detail=f"playbook unreadable: {exc}")
+    return {
+        "entries": [
+            {
+                "id": e.id, "section": e.section, "key": e.key, "value": e.value,
+                "confidence": e.confidence, "state": e.state,
+                "evidence_runs": list(e.evidence_runs), "needs_review": e.needs_review,
+            }
+            for e in playbook.entries()
+        ],
+        "metrics": playbook.metrics_history(),
+    }
+
+
+async def _with_names(request: Request, project: dict, project_id: str) -> dict:
+    """Every worker has a name (core/crew.py): fill in the missing ones before saving."""
+    agents = project.get("agents")
+    if not isinstance(agents, list) or not all(isinstance(a, dict) for a in agents):
+        return project
+    personas: dict[str, str | None] = {}
+    store = getattr(request.app.state, "persona_store", None)
+    for a in agents:
+        pid = a.get("persona_id")
+        if pid and not a.get("name") and store is not None:
+            profile = await store.get(str(pid))
+            name = profile.get("name") if profile else None
+            personas[str(a.get("role"))] = str(name) if name else None
+    from core.crew import name_agents
+    return {**project, "agents": name_agents(project_id, agents, personas)}
+
+
 @router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_bearer)])
 async def create_project(request: Request, project: dict = Body(...)) -> dict:
     if "project_id" not in project or not project["project_id"]:
@@ -36,14 +83,16 @@ async def create_project(request: Request, project: dict = Body(...)) -> dict:
     if "goal" not in project:
         raise HTTPException(status_code=400, detail="goal is required")
     try:
-        return await _store(request).create(project)
+        return await _store(request).create(
+            await _with_names(request, project, str(project["project_id"])))
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.put("/{project_id}", dependencies=[Depends(require_bearer)])
 async def update_project(request: Request, project_id: str, project: dict = Body(...)) -> dict:
-    result = await _store(request).update(project_id, project)
+    result = await _store(request).update(project_id,
+                                          await _with_names(request, project, project_id))
     if result is None:
         raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
     return result

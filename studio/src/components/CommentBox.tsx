@@ -1,13 +1,18 @@
-import { useState } from "react";
+import { useState, type Ref } from "react";
 import { ApiError, runsApi } from "../api";
+import { errorCls, fieldCls } from "../lib/field";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
 
 interface Props {
   runId: string;
   /** Optional override — defaults to runsApi.postComment. Tests inject. */
   onSubmit?: (text: string, priority: "normal" | "high") => Promise<void>;
+  /** Lets a parent focus the input (cockpit `c` shortcut, HUMAN_NEEDED). */
+  inputRef?: Ref<HTMLInputElement>;
 }
 
-export function CommentBox({ runId, onSubmit }: Props) {
+export function CommentBox({ runId, onSubmit, inputRef }: Props) {
   const [text, setText] = useState("");
   const [priority, setPriority] = useState<"normal" | "high">("normal");
   const [error, setError] = useState<string | null>(null);
@@ -44,13 +49,15 @@ export function CommentBox({ runId, onSubmit }: Props) {
   }
 
   return (
-    <div className="card">
-      <div className="row" style={{ alignItems: "flex-start" }}>
-        <div className="col" style={{ flex: 1 }}>
-          <label className="small">
-            Post a comment to run <span className="mono">{runId}</span>
+    <Card className="mb-3 p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex flex-1 flex-col gap-2">
+          <label className="mb-0 block text-xs font-medium text-muted-foreground">
+            Post a comment to run <span className="font-mono">{runId}</span>
           </label>
           <input
+            ref={inputRef}
+            aria-label="Comment for the agents"
             placeholder="Add some context for the agents — 'use Tailwind, not raw CSS'"
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -58,29 +65,26 @@ export function CommentBox({ runId, onSubmit }: Props) {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void send();
             }}
             disabled={busy}
+            className={fieldCls}
           />
-          {error && <div className="error" style={{ marginTop: 4 }}>{error}</div>}
+          {error && <div className={`${errorCls} mb-0 mt-1`}>{error}</div>}
         </div>
-        <div className="col" style={{ minWidth: 100 }}>
-          <label className="small">Priority</label>
+        <div className="flex min-w-[100px] flex-col gap-2">
+          <label className="mb-0 block text-xs font-medium text-muted-foreground">Priority</label>
           <select
             value={priority}
             onChange={(e) => setPriority(e.target.value as "normal" | "high")}
             disabled={busy}
+            className={fieldCls}
           >
             <option value="normal">normal</option>
             <option value="high">high</option>
           </select>
         </div>
-        <button
-          className="primary"
-          onClick={send}
-          disabled={!text.trim() || busy}
-          style={{ alignSelf: "flex-end" }}
-        >
+        <Button className="self-end" onClick={send} disabled={!text.trim() || busy}>
           {busy ? "Posting…" : "Post"}
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }

@@ -1,3 +1,4 @@
+import type { TaskColumn, TaskThreadDetail } from "./lib/runEvents.gen";
 // Shared types — mirror the backend's API shapes.
 
 export type ModelTier = "heavy" | "solid" | "fast";
@@ -10,6 +11,8 @@ export interface AgentConfig {
   declared_local_tools?: string[];
   declared_mcp_servers?: string[];
   persona_id?: string | null;
+  /** The worker's name (core/crew.py); filled in when the project is saved. */
+  name?: string | null;
   model_tier?: ModelTier;
   /** Optional explicit model id (e.g. "mistral-large-latest"). When set
    *  AND the model's tier matches `model_tier`, the runner uses this exact
@@ -29,6 +32,10 @@ export interface AgentConfig {
    *  from the manifest even though they're in BASELINE_LOCAL_SCOPES.
    *  Studio's tool picker writes here when the user un-checks a baseline. */
   excluded_baseline_tools?: string[];
+  /** opencode harness: for a reviewer, the roles whose work it reviews (a review edge). */
+  review_of?: string[];
+  /** opencode harness: rework rounds a review edge allows before escalating. */
+  max_review_rounds?: number;
 }
 
 export interface RoleRBAC {
@@ -43,6 +50,8 @@ export interface ProjectConfig {
   mcp_servers?: unknown[];
   max_iterations?: number;
   approval_gates?: Partial<ApprovalGates>;
+  /** "legacy" only on request; a missing value means the opencode harness (plan O15). */
+  harness?: "legacy" | "opencode";
   pr_mode?: "manual" | "auto";
   /** Track 12 — per-use-case sub-LLM model picks. Maps use_case name
    *  (e.g. "summarise-subtask", "protocol-cleanup", "llm-dispatch")
@@ -70,6 +79,39 @@ export interface RunMeta {
   created_at?: string;
   pr_mode?: "manual" | "auto";
   pr_ready?: PrReadyInfo;
+  /** Spend cap in USD, when the run meta carries it (else the project's `approval_gates`). */
+  token_budget_usd?: number | null;
+  /** Review column WIP cap of the task board (server default). */
+  review_column_cap?: number;
+  /** Harness the run used, when the run meta carries it. */
+  harness?: "legacy" | "opencode";
+}
+
+/** Signal types posted by the opencode harness. Their `detail` is a JSON
+ *  string (THINKING's is free text). */
+export const HARNESS_SIGNAL_TYPES = [
+  "CAPABILITIES",
+  "AGENT_RESULT",
+  "TOOL_CALL",
+  "AGENT_TODO",
+  "THINKING",
+  "BLOCKED",
+] as const;
+
+/** One card as returned by `GET /api/runs/{id}/cards` (`card_view` in the backend). */
+export interface CardWire {
+  id: string;
+  title: string;
+  owner: string;
+  column: TaskColumn;
+  kind?: string;
+  size?: string;
+  priority?: number;
+  review_round?: number;
+  acceptance?: string[];
+  depends_on?: string[];
+  column_since?: string | null;
+  thread?: TaskThreadDetail[];
 }
 
 export interface Signal {
@@ -132,6 +174,8 @@ export interface MetaProposal {
   persona_hires?: PersonaHire[];
   warnings?: string[];
   deltas?: RoleDelta[];
+  /** Ids of the active playbook entries that were shown to the meta-agent. */
+  playbook_entries_used?: string[];
 }
 
 // ── Approval gates (Phase C.0.5) ───────────────────────────────────────────
@@ -142,6 +186,27 @@ export interface ApprovalGates {
   iteration_breach_at: number | null;
   per_iteration: boolean;
   token_budget_usd: number | null;
+  /** Ongoing projects (plan §14): run on the run's code before review, e.g. "pytest -q". */
+  check_command?: string;
+  project_remote?: ProjectRemote | null;
+  autopilot?: AutopilotSettings | null;
+}
+
+export interface ProjectRemote {
+  url: string;
+  branch?: string;
+  publish?: "none" | "branch" | "pr" | "main";
+  /** Name of a host environment variable (GUUDFLOW_GIT_*) holding the token; never the token. */
+  token_env?: string | null;
+}
+
+export interface AutopilotSettings {
+  enabled: boolean;
+  every_hours: number;
+  take: number;
+  max_usd_per_run: number;
+  max_usd_per_week: number;
+  auto_accept: boolean;
 }
 
 export interface CostEstimate {
@@ -271,4 +336,52 @@ export interface Task {
 export interface DesksData {
   desks: Record<string, Task[]>;
   tasksById: Record<string, Task>;
+}
+
+// ── One-shot launcher (POST /api/oneshot) ──────────────────────────────────
+
+export interface OneShotRequestBody {
+  goal: string;
+  web: "researcher" | "off";
+  /** USD; the backend accepts > 0 and <= 1000. */
+  budget: number;
+  demo: boolean;
+}
+
+export interface OneShotResponse {
+  accepted: boolean;
+  needs_approval: boolean;
+  project_id: string;
+  run_id?: string;
+  job_id?: string;
+  status_url?: string;
+  confirm_url?: string;
+  estimated_cost?: CostEstimate;
+  message?: string;
+}
+
+// ── Project playbook (GET /api/projects/{id}/playbook) ─────────────────────
+
+export type PlaybookSection =
+  | "team_adjustments"
+  | "brief_addenda"
+  | "known_pitfalls"
+  | "review_rounds"
+  | "capability_hints"
+  | "task_templates";
+
+export interface PlaybookEntry {
+  id: string;
+  section: PlaybookSection;
+  key: string;
+  value: unknown;
+  confidence: number;
+  state: "emerging" | "active" | "declining" | "archived" | "superseded";
+  evidence_runs: string[];
+  needs_review?: boolean;
+}
+
+export interface PlaybookResponse {
+  entries: PlaybookEntry[];
+  metrics: { run_id: string; recorded_at: string; metrics: Record<string, number> }[];
 }

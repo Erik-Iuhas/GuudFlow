@@ -34,7 +34,6 @@ from core.llm import AnthropicClient, LLMClient
 from core.llm.registry import ModelRegistry
 from core.quip_engine import QuipEngine
 from core.runner import AgentConfig, AgentRunner, ProjectConfig
-from core.task_summarizer import TaskSummarizer
 from core.tool_manifest import RoleRBAC
 from worker.docker_manager import DockerManager, DockerManagerError
 from worker.queue import (
@@ -96,6 +95,7 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             declared_local_tools=list(a.get("declared_local_tools") or []),
             declared_mcp_servers=list(a.get("declared_mcp_servers") or []),
             persona_id=a.get("persona_id"),
+            name=(str(a.get("name") or "").strip() or None),
             model_tier=a.get("model_tier", "solid"),
             model_id=str(a.get("model_id") or ""),
             agent_class_role_type=a.get("agent_class_role_type"),
@@ -109,6 +109,10 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             # had `manages` populated.
             manages=list(a.get("manages") or []),
             escalates_to=list(a.get("escalates_to") or []),
+            role_type=str(a.get("role_type") or ""),
+            capabilities={str(k): str(v) for k, v in (a.get("capabilities") or {}).items()},
+            review_of=[str(r) for r in (a.get("review_of") or [])],
+            max_review_rounds=int(a.get("max_review_rounds", 2)),
         ))
 
     rbac: dict[str, RoleRBAC] = {}
@@ -167,10 +171,10 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
     raw_sub_llm = data.get("sub_llm_models") or {}
     sub_llm_models: dict[str, str] = {}
     if isinstance(raw_sub_llm, dict) and raw_sub_llm:
-        from pathlib import Path as _P
+        from core import storage as _storage
         from core.llm.registry import ModelRegistry as _MR
         try:
-            _reg = _MR(_P("data/models.json"))
+            _reg = _MR.for_data_root(_storage.data_root())
             _known = {m.id for m in _reg.list_models()}
         except Exception:
             _known = set()
@@ -181,7 +185,7 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             if _known and mid not in _known:
                 raise ValueError(
                     f"sub_llm_models[{use_case!r}] = {mid!r} is not in the "
-                    "model registry (data/models.json). Pick a known model "
+                    "model registry (Settings → Models & providers). Pick a known model "
                     "or remove the entry to fall back to cheapest_tool_capable()."
                 )
             sub_llm_models[str(use_case)] = mid
@@ -201,6 +205,8 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         stories=stories,
         pr_mode=pr_mode,  # type: ignore[arg-type]
         sub_llm_models=sub_llm_models,
+        # opencode is the default harness (plan P6, O15); "legacy" only on request.
+        harness="legacy" if data.get("harness") == "legacy" else "opencode",
     )
 
 
@@ -364,6 +370,18 @@ def serialise_task(task) -> dict[str, Any]:
         "closed_by_commit": task.closed_by_commit,
         "blocked_on": list(task.blocked_on),
         "cancelled_reason": task.cancelled_reason,
+        "title": task.title,
+        "kind": task.kind,
+        "size": task.size,
+        "files_hint": list(task.files_hint),
+        "depends_on": list(task.depends_on),
+        "visual_refs": list(task.visual_refs),
+        "column": task.column,
+        "review_round": task.review_round,
+        "priority": task.priority,
+        "column_since": task.column_since,
+        "thread": [dict(e) for e in task.thread],
+        "backlog_id": task.backlog_id,
     }
 
 
@@ -419,11 +437,11 @@ def _persist_run(run_root: Path, runner: AgentRunner, run_id: str,
 
 
 RunnerFactory = Callable[..., AgentRunner]
-"""Factory signature: (project, run_id, run_root, llm, *, docker_manager=None,
-data_root=None) -> AgentRunner.
+"""Factory signature: (project, run_id, run_root, llm, *, data_root=None,
+restored_workspace=None) -> AgentRunner.
 
-The trailing keyword args are positional-via-kwarg so existing factories
-that ignore them still work — JobRunner always passes them as keywords."""
+The trailing keyword args are passed as keywords so factories that ignore
+them still work."""
 
 
 def default_runner_factory(
@@ -432,7 +450,6 @@ def default_runner_factory(
     run_root: Path,
     llm: LLMClient,
     *,
-    docker_manager: DockerManager | None = None,
     data_root: Path | None = None,
     restored_workspace=None,
 ) -> AgentRunner:
@@ -456,21 +473,17 @@ def default_runner_factory(
         if data_root is not None else None
     )
     # M3: load ModelRegistry when no explicit LLM is injected (production path).
-    # Tests inject llm=MockLLMClient, which takes priority in _resolve_llm_for_tier;
-    # registry is only loaded for production runs where llm=None.
+    # Tests inject llm=MockLLMClient; the registry is only loaded for production
+    # runs where llm=None.
     model_registry: ModelRegistry | None = None
     if llm is None:
-        registry_path = (
-            Path(data_root) / "models.json" if data_root is not None
-            else Path("data/models.json")
-        )
-        if not registry_path.exists():
-            registry_path = Path("data/models.json")
-        if registry_path.exists():
-            try:
-                model_registry = ModelRegistry(registry_path)
-            except Exception:
-                pass  # malformed registry — runner raises on first agent spawn
+        # The install's saved configuration (Studio "Models & providers") or the
+        # shipped defaults, with keys stored from Studio (core/model_config.py).
+        try:
+            model_registry = ModelRegistry.for_data_root(
+                Path(data_root) if data_root is not None else None)
+        except Exception:  # noqa: BLE001 — a malformed registry fails the first spawn
+            _logger.exception("could not load the model registry")
 
     # MemoryWriter needs a concrete LLM client (it calls complete() directly
     # for pattern synthesis). Give it the injected client, or resolve a
@@ -486,27 +499,12 @@ def default_runner_factory(
     else:
         mw_llm = _build_default_llm()
 
-    # TaskSummarizer uses FAST tier. Fall back to the same client as
-    # MemoryWriter if FAST resolution fails (mirrors quip_engine pattern).
-    if llm is not None:
-        ts_llm: LLMClient = llm
-    elif model_registry is not None:
-        try:
-            ts_model = model_registry.resolve("fast")
-            ts_llm = model_registry.get_client(ts_model)
-        except Exception:
-            ts_llm = _build_default_llm()
-    else:
-        ts_llm = _build_default_llm()
-
     return AgentRunner(
         project=project,
         run_id=run_id,
         run_root=run_root,
         llm=llm,
         memory_writer=MemoryWriter(llm=mw_llm),
-        task_summarizer=TaskSummarizer(llm=ts_llm),
-        docker_manager=docker_manager,
         rubric_scorer=RubricScorer(),
         training_scenarios_root=scenarios_root,
         restored_workspace=restored_workspace,
@@ -605,7 +603,8 @@ class JobRunner:
                 pass
             raise
 
-    def _initialize_run(self, job: Job, run_root: Path) -> None:
+    def _initialize_run(self, job: Job, run_root: Path,
+                        project_data: dict[str, Any] | None = None) -> None:
         """Seed the run's workspace from the project's persistent inputs.
 
         Order matters:
@@ -615,16 +614,24 @@ class JobRunner:
           3. bundle_prior_history: per attached prior run with a working/ on
              disk, bundle its history under inputs/from_run_{id}/.history.bundle
           4. generate_inputs_readme: last so it sees the bundles too
+          5. project_runs.prepare_run (plan §13): working/ becomes a clone of
+             the project repo's main (seeded from step 2 the first time) and
+             the backlog items the run takes are snapshotted
         """
+        from core import project_runs
+        from core.project_repo import ProjectRepo
+
         project_dir = self.data_root / "projects" / job.project_id
         run_initializer.seed_run(project_dir, run_root)
 
         run_inputs = run_root / "workspace" / "inputs"
         working_dir = run_root / "workspace" / "working"
+        in_place = _is_in_place_source(project_dir)
 
         # Track 4.3 — when this project's source repo is `local_path_in_place`,
         # agents work directly in the user's directory; do not seed/clobber it.
-        if not _is_in_place_source(project_dir):
+        # Once the project repo exists, it (not the original source) is the seed.
+        if not in_place and not ProjectRepo(self.data_root, job.project_id).exists():
             run_initializer.seed_working_from_source(
                 working_dir, run_inputs / "source_repo"
             )
@@ -645,6 +652,16 @@ class JobRunner:
                 run_initializer.bundle_prior_history(prior_working, bundle_path)
 
         run_initializer.generate_inputs_readme(run_inputs)
+        from core.autopilot import RUN_MARKER
+        from core.json_store import write_json
+        from core.project_remote import RemoteConfig
+        if isinstance((job.payload or {}).get("autopilot"), dict):
+            write_json(run_root / RUN_MARKER, job.payload["autopilot"])
+        gates = ((project_data.get("approval_gates") if isinstance(project_data, dict)
+                  else getattr(project_data, "approval_gates", None)) or {})
+        project_runs.prepare_run(self.data_root, job.project_id, job.run_id, run_root,
+                                 working_dir, dict(job.payload or {}), in_place=in_place,
+                                 remote=RemoteConfig.from_settings(gates.get("project_remote")))
 
     async def run_one(self, job: Job) -> None:
         """Execute a single job end-to-end. Idempotent on status updates."""
@@ -666,6 +683,16 @@ class JobRunner:
             )
             return
         project = serialise_project(project_data)
+        # Autopilot runs carry a per-run spend cap (plan §14.7): it can only tighten
+        # the project's own token_budget_usd.
+        cap = (job.payload or {}).get("budget_usd")
+        if isinstance(cap, (int, float)) and cap > 0:
+            gates = dict(project.approval_gates or {})
+            own = gates.get("token_budget_usd")
+            gates["token_budget_usd"] = (min(float(own), float(cap))
+                                         if isinstance(own, (int, float)) and own > 0
+                                         else float(cap))
+            project.approval_gates = gates
 
         # 1.5. Bootstrap persona directories for any create_new persona_ids
         # that have no on-disk directory yet. Without this, Persona.load()
@@ -691,7 +718,7 @@ class JobRunner:
             # source_repo, bundle attached prior runs' git history, and write
             # the inputs/README.md index.
             try:
-                self._initialize_run(job, run_root)
+                self._initialize_run(job, run_root, project_data)
             except Exception as e:
                 await self.queue.update_status(
                     job.job_id, JOB_FAILED,
@@ -730,12 +757,9 @@ class JobRunner:
         # loads ModelRegistry and resolves per-agent clients by tier.
         llm = self.llm  # may be None; factory handles it
 
-        # 4. Construct runner. Thread docker_manager through so the
-        # production code:exec routing in core/runner.py can reach it.
-        # On resume, also thread the restored workspace so the runner
-        # uses it instead of constructing a fresh one.
+        # 4. Construct runner. On resume, also thread the restored workspace
+        # so the runner uses it instead of constructing a fresh one.
         factory_kwargs: dict[str, Any] = {
-            "docker_manager": self.docker,
             "data_root": self.data_root,
         }
         if restored_workspace is not None:
@@ -806,6 +830,8 @@ class JobRunner:
             error = f"{type(e).__name__}: {e}"
             run_status = "errored"
             _logger.exception("runner crashed for job %s", job.job_id)
+            from core.project_runs import release_crashed_run
+            release_crashed_run(self.data_root, job.project_id, job.run_id, run_root, error)
         finally:
             await self.docker.stop(job.run_id)
             if self.run_registry is not None:

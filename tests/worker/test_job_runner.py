@@ -7,12 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from agents.builtin.code_reviewer import CodeReviewer
-from agents.builtin.memory_writer import MemoryWriter
-from agents.persona import Persona
-from agents.registry import registry as _registry
-from core.llm import LLMMessage, MockLLMClient, MockTurn, ToolCall
-from core.runner import AgentConfig, AgentRunner, ProjectConfig
+from collections.abc import Iterator
+
+from core.harness.config_gen import ProviderBinding
+from core.harness.run import HarnessSettings
+from core.llm import MockLLMClient
+from core.llm.registry import ModelInfo
+from tests.harness.conftest import requires_opencode
+from tests.harness.fake_llm import FakeLLM, Text, ToolCall
 from worker.docker_manager import DockerManager
 from worker.job_runner import (
     JobRunner,
@@ -145,43 +147,55 @@ def test_serialise_project_carries_is_final_reviewer():
 # ── JobRunner end-to-end ───────────────────────────────────────────────────
 
 
-@pytest.fixture(autouse=True)
-def _register_code_reviewer():
-    """E2E run uses CodeReviewer; ensure it's registered."""
-    if not _registry.has("code_reviewer"):
-        _registry.register("code_reviewer", CodeReviewer)
+FAKE_MODEL = ModelInfo(id="fake-model", provider="fake", tier="solid", supports_images=True)
 
 
-async def test_job_runner_runs_one_job_to_completion(tmp_path: Path, monkeypatch):
+@pytest.fixture
+def fake_llm() -> Iterator[FakeLLM]:
+    """A started scripted LLM that opencode talks to through the harness gateway."""
+    with FakeLLM() as fake:
+        yield fake
+
+
+def _factory(fake: FakeLLM):
+    """A runner factory that builds the default runner and points it at the fake LLM."""
+    def make(project, run_id, run_root, llm, **kwargs):
+        runner = default_runner_factory(project, run_id, run_root, llm, **kwargs)
+        runner.harness_settings = HarnessSettings(
+            production=False, turn_timeout=60, sandbox="host",
+            binding_factory=lambda cfg: ProviderBinding(
+                "fake", FAKE_MODEL, "openai_compatible", base_url=fake.base_url, api_key="fake"))
+        return runner
+    return make
+
+
+def _noop_dev(fake: FakeLLM) -> None:
+    """The lone `developer` role finishes at once."""
+    fake.route("Your turn: developer",
+               ToolCall("guudflow_submit_result",
+                        {"status": "done", "summary": "Nothing to change; the task is already met.",
+                         "files_changed": []}),
+               Text("Done."))
+
+
+@requires_opencode
+async def test_job_runner_runs_one_job_to_completion(tmp_path: Path, monkeypatch,
+                                                     fake_llm: FakeLLM):
     """The smoking exit criterion: enqueue a job, run_one() drives it
-    through queued → running → complete; meta.json + board.json land
+    through queued -> running -> complete; meta.json + board.json land
     on disk."""
     monkeypatch.setenv("GUUDFLOW_MODE", "dev")
 
-    # Project: developer writes a file, reviewer approves.
+    # Project: developer writes a file, reviewer passes it.
     project = {
         "project_id": "p1",
         "goal": "write hello.py",
         "agents": [
-            {
-                "role": "developer",
-                "description": "write a file",
-                "declared_local_tools": ["fs-read", "fs-write"],
-                "model_tier": "solid",
-            },
-            {
-                "role": "reviewer",
-                "depends_on": ["developer"],
-                "declared_local_tools": ["fs-read", "git-diff"],
-                "agent_class_role_type": "code_reviewer",
-                "is_reviewer": True,
-                "max_tool_iterations": 4,
-            },
+            {"role": "developer", "description": "write a file", "model_tier": "solid"},
+            {"role": "reviewer", "depends_on": ["developer"],
+             "agent_class_role_type": "code_reviewer", "is_reviewer": True},
         ],
-        "rbac": {
-            "developer": {"allowed_scopes": ["fs-write"]},
-            "reviewer": {"allowed_scopes": []},
-        },
+        "rbac": {},
         "max_iterations": 2,
     }
 
@@ -192,27 +206,24 @@ async def test_job_runner_runs_one_job_to_completion(tmp_path: Path, monkeypatch
     async def loader(project_id: str):
         return project if project_id == "p1" else None
 
-    # Scripted LLM. Developer writes a file then ends. Reviewer diffs
-    # then approves.
-    llm = MockLLMClient([
-        MockTurn(tool_calls=[ToolCall(
-            id="dev_t1", name="fs-write",
-            arguments={"path": "hello.py", "content": "print('hi')"},
-        )]),
-        MockTurn(text="[COMMIT]\n  summary: wrote hello.py\n  files: hello.py"),
-        MockTurn(tool_calls=[ToolCall(
-            id="rev_t1", name="git-diff",
-            arguments={"branch_a": "agent/developer", "branch_b": "main"},
-        )]),
-        MockTurn(text="[VERIFY] PASS"),
-    ])
+    fake_llm.route("Your turn: developer",
+                   ToolCall("write", {"filePath": "hello.py", "content": "print('hi')\n"}),
+                   ToolCall("guudflow_submit_result",
+                            {"status": "done", "summary": "Wrote hello.py printing a greeting.",
+                             "files_changed": ["hello.py"]}),
+                   Text("Done."))
+    fake_llm.route("Your turn: reviewer",
+                   ToolCall("read", {"filePath": "hello.py"}),
+                   ToolCall("guudflow_submit_result", {"verdict": "pass", "issues": []}),
+                   Text("Reviewed."))
 
     worker = JobRunner(
         queue=queue,
         project_loader=loader,
         data_root=tmp_path,
-        llm=llm,
+        llm=MockLLMClient([]),
         docker_manager=DockerManager(mode="dev"),
+        runner_factory=_factory(fake_llm),
     )
 
     await worker.run_one(job)
@@ -220,7 +231,7 @@ async def test_job_runner_runs_one_job_to_completion(tmp_path: Path, monkeypatch
     # Job status moved to complete.
     out = await queue.get("j1")
     assert out is not None
-    assert out.status == JOB_COMPLETE
+    assert out.status == JOB_COMPLETE, out.error
     assert out.started_at is not None
     assert out.finished_at is not None
     assert out.error is None
@@ -237,8 +248,29 @@ async def test_job_runner_runs_one_job_to_completion(tmp_path: Path, monkeypatch
     assert "reviewer" in meta["completed_agents"]
 
     board = json.loads((run_dir / "board.json").read_text(encoding="utf-8"))
-    assert any(s["type"] == "APPROVED" for s in board)
-    assert any(s["type"] == "GIT_COMMIT" for s in board)
+    assert any(s["type"] == "AGENT_RESULT" for s in board)
+    assert any(s["type"] == "GIT_MERGE" for s in board)
+    assert (run_dir / "workspace" / "working" / "hello.py").exists()
+
+
+async def test_job_runner_fails_a_legacy_harness_project(tmp_path: Path):
+    """A stored project that still asks for the retired legacy harness fails fast."""
+    project = {"project_id": "p1", "goal": "x", "harness": "legacy",
+               "agents": [{"role": "developer", "description": "dev"}], "rbac": {}}
+    queue = InMemoryJobQueue()
+    job = Job(job_id="jl", project_id="p1", run_id="run_legacy")
+    await queue.enqueue(job)
+
+    async def loader(_: str):
+        return project
+
+    worker = JobRunner(queue=queue, project_loader=loader, data_root=tmp_path,
+                       llm=MockLLMClient([]))
+    await worker.run_one(job)
+
+    out = await queue.get("jl")
+    assert out.status == JOB_FAILED
+    assert "legacy harness was retired" in (out.error or "")
 
 
 async def test_job_runner_unknown_project_fails_job(tmp_path: Path):
@@ -279,7 +311,9 @@ async def test_job_runner_loader_exception_fails_job(tmp_path: Path):
     assert "storage down" in (out.error or "")
 
 
-async def test_job_runner_registers_with_run_registry(tmp_path: Path, monkeypatch):
+@requires_opencode
+async def test_job_runner_registers_with_run_registry(tmp_path: Path, monkeypatch,
+                                                      fake_llm: FakeLLM):
     """When a RunRegistry is provided, the worker registers the workspace
     while the run is active and unregisters at the end."""
     monkeypatch.setenv("GUUDFLOW_MODE", "dev")
@@ -287,13 +321,11 @@ async def test_job_runner_registers_with_run_registry(tmp_path: Path, monkeypatc
 
     project = {
         "project_id": "p1", "goal": "x",
-        "agents": [{
-            "role": "developer", "description": "no-op",
-            "declared_local_tools": ["fs-read"],
-        }],
+        "agents": [{"role": "developer", "description": "no-op"}],
         "rbac": {},
         "max_iterations": 1,
     }
+    _noop_dev(fake_llm)
     queue = InMemoryJobQueue()
     job = Job(job_id="j4", project_id="p1", run_id="run_reg")
     await queue.enqueue(job)
@@ -301,13 +333,11 @@ async def test_job_runner_registers_with_run_registry(tmp_path: Path, monkeypatc
     async def loader(_: str):
         return project
 
-    llm = MockLLMClient([MockTurn(text="ok done")])
-
     registry = RunRegistry()
     worker = JobRunner(
         queue=queue, project_loader=loader,
-        data_root=tmp_path, llm=llm,
-        run_registry=registry,
+        data_root=tmp_path, llm=MockLLMClient([]),
+        run_registry=registry, runner_factory=_factory(fake_llm),
     )
 
     await worker.run_one(job)
@@ -316,37 +346,35 @@ async def test_job_runner_registers_with_run_registry(tmp_path: Path, monkeypatc
     assert "run_reg" not in registry.runs
 
 
-async def test_run_forever_drains_then_stops(tmp_path: Path, monkeypatch):
+@requires_opencode
+async def test_run_forever_drains_then_stops(tmp_path: Path, monkeypatch, fake_llm: FakeLLM):
     """The long loop processes a job and respects stop()."""
     import asyncio
     monkeypatch.setenv("GUUDFLOW_MODE", "dev")
 
     project = {
         "project_id": "p1", "goal": "x",
-        "agents": [{
-            "role": "developer", "description": "dev",
-            "declared_local_tools": ["fs-read"],
-        }],
+        "agents": [{"role": "developer", "description": "dev"}],
         "rbac": {},
         "max_iterations": 1,
     }
+    _noop_dev(fake_llm)
     queue = InMemoryJobQueue()
     await queue.enqueue(Job(job_id="j5", project_id="p1", run_id="run_loop"))
 
     async def loader(_: str):
         return project
 
-    llm = MockLLMClient([MockTurn(text="done")])
     worker = JobRunner(
         queue=queue, project_loader=loader,
-        data_root=tmp_path, llm=llm,
-        poll_timeout_s=0.05,
+        data_root=tmp_path, llm=MockLLMClient([]),
+        poll_timeout_s=0.05, runner_factory=_factory(fake_llm),
     )
 
     task = asyncio.create_task(worker.run_forever())
     # Give it time to drain.
-    for _ in range(50):
-        await asyncio.sleep(0.05)
+    for _ in range(600):
+        await asyncio.sleep(0.1)
         out = await queue.get("j5")
         if out and out.status == JOB_COMPLETE:
             break
@@ -476,178 +504,16 @@ def test_initialize_run_greenfield_project(tmp_path: Path):
     assert inputs.is_dir()
     readme = (inputs / "README.md").read_text(encoding="utf-8")
     assert "greenfield" in readme.lower()
-    # No source_repo → no working/ either.
-    assert not (run_root / "workspace" / "working").exists()
+    # No source_repo: the project repo starts empty and the run clones it (plan §13).
+    working = run_root / "workspace" / "working"
+    assert (working / ".git").is_dir()
+    assert (tmp_path / "projects" / "p_blank" / "repo.git" / "HEAD").is_file()
+    assert (run_root / "project_run.json").is_file()
 
 
-async def test_default_runner_factory_threads_docker_manager(tmp_path: Path):
-    """Phase B wiring: default_runner_factory propagates the
-    docker_manager kwarg into AgentRunner.docker_manager so the runner's
-    tool instantiation can reach it."""
-    project = serialise_project({"project_id": "p", "goal": "x"})
-    docker_mgr = DockerManager(mode="dev")
-    runner = default_runner_factory(
-        project, "run_x", tmp_path / "runs" / "run_x",
-        MockLLMClient([]),
-        docker_manager=docker_mgr,
-    )
-    assert runner.docker_manager is docker_mgr
-
-
-async def test_production_mode_wires_container_runner_for_code_exec(
-    tmp_path: Path, monkeypatch
-):
-    """Phase B integration: with GUUDFLOW_MODE=production and a
-    docker_manager threaded into AgentRunner, the runner's instantiated
-    code:exec tool routes through DockerManager.exec_in. Tests the seam
-    that connects JobRunner → AgentRunner._instantiate_local_tools →
-    make_container_runner → DockerManager.
-
-    Goes via the runner's tool-instantiation path directly rather than
-    the full agent-loop e2e, to keep the assertion focused on the
-    routing seam itself."""
-    monkeypatch.setenv("GUUDFLOW_MODE", "production")
-
-    project = serialise_project({
-        "project_id": "p_prod",
-        "goal": "exec something",
-        "agents": [{
-            "role": "developer",
-            "description": "runs code",
-            "declared_local_tools": ["code-exec"],
-            "model_tier": "solid",
-        }],
-        "rbac": {"developer": {"allowed_scopes": ["code-exec"]}},
-    })
-
-    class _FakeClient:
-        def ping(self): return True
-
-    docker_mgr = DockerManager(mode="production", client=_FakeClient())
-    captured: list[dict] = []
-
-    async def spy_exec_in(run_id, language, code, timeout_s=30.0):
-        captured.append({
-            "run_id": run_id, "language": language,
-            "code": code, "timeout_s": timeout_s,
-        })
-        from worker.docker_manager import ExecResult
-        return ExecResult(exit_code=0, stdout="ok\n", stderr="")
-    docker_mgr.exec_in = spy_exec_in  # type: ignore[method-assign]
-
-    runner = AgentRunner(
-        project=project,
-        run_id="run_prod",
-        run_root=tmp_path / "runs" / "run_prod",
-        llm=MockLLMClient([]),
-        docker_manager=docker_mgr,
-    )
-
-    tools = runner._instantiate_local_tools("developer")
-    code_exec = tools["code-exec"]
-
-    result = await code_exec.run({
-        "language": "python",
-        "code": "print('hello container')",
-    })
-
-    assert result["ok"] is True
-    assert result["container_mode"] is True
-    assert captured == [{
-        "run_id": "run_prod",
-        "language": "python",
-        "code": "print('hello container')",
-        "timeout_s": 30.0,
-    }]
-
-
-async def test_dev_mode_keeps_host_runner_even_with_docker_manager(
-    tmp_path: Path, monkeypatch
-):
-    """Inverse seam: GUUDFLOW_MODE=dev keeps the hardened host runner
-    even when a docker_manager is available. exec_in is never reached."""
-    monkeypatch.setenv("GUUDFLOW_MODE", "dev")
-
-    project = serialise_project({
-        "project_id": "p_dev",
-        "goal": "x",
-        "agents": [{
-            "role": "developer",
-            "description": "runs code",
-            "declared_local_tools": ["code-exec"],
-            "model_tier": "solid",
-        }],
-        "rbac": {"developer": {"allowed_scopes": ["code-exec"]}},
-    })
-    docker_mgr = DockerManager(mode="dev")
-    captured: list = []
-
-    async def spy(*a, **kw):
-        captured.append((a, kw))
-        from worker.docker_manager import ExecResult
-        return ExecResult(exit_code=0, stdout="", stderr="", is_stub=True)
-    docker_mgr.exec_in = spy  # type: ignore[method-assign]
-
-    runner = AgentRunner(
-        project=project,
-        run_id="run_dev",
-        run_root=tmp_path / "runs" / "run_dev",
-        llm=MockLLMClient([]),
-        docker_manager=docker_mgr,
-    )
-
-    tools = runner._instantiate_local_tools("developer")
-    result = await tools["code-exec"].run({
-        "language": "python",
-        "code": "print('hi')",
-    })
-
-    assert result["ok"] is True
-    assert result.get("dev_mode") is True
-    assert captured == []
-
-
-async def test_production_without_docker_manager_falls_back_to_host(
-    tmp_path: Path, monkeypatch
-):
-    """If somehow a runner ends up in production mode without a
-    docker_manager (misconfiguration), it falls back to the host runner —
-    which itself refuses to run via CodeExec.run()'s mode check
-    (DESIGN §29 rule 61). Defence in depth: wrong wiring fails closed."""
-    monkeypatch.setenv("GUUDFLOW_MODE", "production")
-
-    project = serialise_project({
-        "project_id": "p_misconfig",
-        "goal": "x",
-        "agents": [{
-            "role": "developer",
-            "description": "runs code",
-            "declared_local_tools": ["code-exec"],
-            "model_tier": "solid",
-        }],
-        "rbac": {"developer": {"allowed_scopes": ["code-exec"]}},
-    })
-
-    runner = AgentRunner(
-        project=project,
-        run_id="run_misconfig",
-        run_root=tmp_path / "runs" / "run_misconfig",
-        llm=MockLLMClient([]),
-        docker_manager=None,  # the misconfiguration
-    )
-
-    tools = runner._instantiate_local_tools("developer")
-    result = await tools["code-exec"].run({
-        "language": "python",
-        "code": "print('this should be refused')",
-    })
-
-    # Host runner refuses production-mode execution.
-    assert "error" in result
-    assert "production" in result["error"].lower()
-
-
-async def test_run_one_initializes_inputs_for_real_run(tmp_path: Path, monkeypatch):
+@requires_opencode
+async def test_run_one_initializes_inputs_for_real_run(tmp_path: Path, monkeypatch,
+                                                    fake_llm: FakeLLM):
     """End-to-end: a project with uploads + source_repo runs through the
     worker; the run's workspace shows the seeded inputs and a working/
     with the source_repo content + a fresh git history."""
@@ -657,25 +523,23 @@ async def test_run_one_initializes_inputs_for_real_run(tmp_path: Path, monkeypat
     project = {
         "project_id": "p_seeded",
         "goal": "extend the existing app",
-        "agents": [{
-            "role": "developer", "description": "no-op",
-            "declared_local_tools": ["fs-read"],
-        }],
+        "agents": [{"role": "developer", "description": "no-op"}],
         "rbac": {},
         "max_iterations": 1,
     }
+    _noop_dev(fake_llm)
     queue = InMemoryJobQueue()
     job = Job(job_id="j_init", project_id="p_seeded", run_id="run_init_e2e")
     await queue.enqueue(job)
 
     async def loader(_: str):
         return project
-    llm = MockLLMClient([MockTurn(text="ok done")])
 
     worker = JobRunner(
         queue=queue, project_loader=loader,
-        data_root=tmp_path, llm=llm,
+        data_root=tmp_path, llm=MockLLMClient([]),
         docker_manager=DockerManager(mode="dev"),
+        runner_factory=_factory(fake_llm),
     )
     await worker.run_one(job)
 

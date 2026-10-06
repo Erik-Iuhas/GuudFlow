@@ -47,8 +47,9 @@ describe("ToolsMultiSelect", () => {
     const item = screen.getByText("assign-task").closest("div")!;
     expect(item).toHaveAttribute("title");
     expect(item.getAttribute("title")).toContain("Requires scope assign-task");
-    // Should be visually disabled (cursor: not-allowed via style)
-    expect(item.style.cursor).toBe("not-allowed");
+    // Should be visually disabled
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item.className).toContain("cursor-not-allowed");
   });
 
   it("shows assign-task enabled for architect archetype", async () => {
@@ -64,7 +65,8 @@ describe("ToolsMultiSelect", () => {
     await waitFor(() => screen.getByText("assign-task"));
 
     const item = screen.getByText("assign-task").closest("div")!;
-    expect(item.style.cursor).toBe("pointer");
+    expect(item).toHaveAttribute("aria-disabled", "false");
+    expect(item.className).toContain("cursor-pointer");
   });
 
   it("selecting a tool calls onChange with new tool appended", async () => {

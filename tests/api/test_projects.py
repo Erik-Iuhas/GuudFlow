@@ -224,3 +224,51 @@ async def test_put_roadmap_rejects_non_string_content(client, auth_header):
         headers=auth_header,
     )
     assert r.status_code == 400
+
+
+async def test_get_playbook_entries_and_metrics(client, auth_header, data_root):
+    from core.playbook import Playbook
+
+    await client.post("/api/projects", json={"project_id": "p_book", "goal": "g"},
+                      headers=auth_header)
+    pb = Playbook.load(data_root, "p_book")
+    entry = pb.add("review_rounds", "builder>reviewer", 3, "run_1", confidence=0.7)
+    pb.record_run_metrics("run_1", {"cost_usd": 1.5})
+    pb.save()
+
+    r = await client.get("/api/projects/p_book/playbook", headers=auth_header)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [e["id"] for e in body["entries"]] == [entry.id]
+    first = body["entries"][0]
+    assert first["section"] == "review_rounds" and first["value"] == 3
+    assert first["evidence_runs"] == ["run_1"] and first["state"] in {"emerging", "active"}
+    assert body["metrics"][0]["run_id"] == "run_1"
+
+
+async def test_get_playbook_empty_404_and_auth(client, auth_header):
+    await client.post("/api/projects", json={"project_id": "p_none", "goal": "g"},
+                      headers=auth_header)
+    r = await client.get("/api/projects/p_none/playbook", headers=auth_header)
+    assert r.status_code == 200 and r.json() == {"entries": [], "metrics": []}
+    assert (await client.get("/api/projects/missing/playbook", headers=auth_header)).status_code == 404
+    assert (await client.get("/api/projects/p_none/playbook")).status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_saving_a_project_names_every_worker(client, auth_header, write_persona):
+    """Every worker has a name: set on the team, the persona's, or a stable pick (core/crew.py)."""
+    write_persona("grace-1", name="Grace")
+    body = {"project_id": "crew", "goal": "g", "agents": [
+        {"role": "planner"}, {"role": "builder", "name": "Sarah"},
+        {"role": "reviewer", "persona_id": "grace-1"}]}
+    r = await client.post("/api/projects", json=body, headers=auth_header)
+    assert r.status_code == 201
+    names = {a["role"]: a.get("name") for a in r.json()["agents"]}
+    assert names["builder"] == "Sarah" and names["reviewer"] == "Grace"
+    assert names["planner"] and names["planner"] not in ("Sarah", "Grace")
+
+    # The same seat keeps its name when the team is saved again.
+    again = await client.put("/api/projects/crew", json={**body, "agents": [
+        {"role": "planner"}, {"role": "builder", "name": "Sarah"}]}, headers=auth_header)
+    assert {a["role"]: a["name"] for a in again.json()["agents"]}["planner"] == names["planner"]

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { AgentConfig } from "../types";
 import type { AgentLiveSummary, AgentLiveState } from "../lib/iterations";
 import type { GraphData } from "../hooks/useRunGraph";
+import { cn } from "../lib/utils";
 
 /**
  * DAG view of project agents.
@@ -19,14 +20,18 @@ const COL_GAP = 80;
 const ROW_GAP = 28;
 const PADDING = 24;
 
-const STATE_COLORS: Record<AgentLiveState, { fill: string; stroke: string; text: string }> = {
-  pending: { fill: "#f1f5f9", stroke: "#cbd5e1", text: "#475569" },
-  ready: { fill: "#e0e7ff", stroke: "#6366f1", text: "#3730a3" },
-  running: { fill: "#fef3c7", stroke: "#f59e0b", text: "#92400e" },
-  complete: { fill: "#d1fae5", stroke: "#10b981", text: "#065f46" },
-  failed: { fill: "#fee2e2", stroke: "#ef4444", text: "#991b1b" },
-  waiting_for_human: { fill: "#dbeafe", stroke: "#3b82f6", text: "#1e3a8a" },
-  blocked: { fill: "#fef9c3", stroke: "#ca8a04", text: "#713f12" },
+// Node tones come from the status tokens. Full class names are spelled out so
+// Tailwind can see them.
+interface Tone { rect: string; text: string; swatch: string }
+
+const STATE_COLORS: Record<AgentLiveState, Tone> = {
+  pending: { rect: "fill-muted stroke-border", text: "fill-muted-foreground", swatch: "bg-muted border-border" },
+  ready: { rect: "fill-primary/15 stroke-primary", text: "fill-primary", swatch: "bg-primary/15 border-primary" },
+  running: { rect: "fill-status-running/15 stroke-status-running", text: "fill-status-running", swatch: "bg-status-running/15 border-status-running" },
+  complete: { rect: "fill-status-complete/15 stroke-status-complete", text: "fill-status-complete", swatch: "bg-status-complete/15 border-status-complete" },
+  failed: { rect: "fill-status-failed/15 stroke-status-failed", text: "fill-status-failed", swatch: "bg-status-failed/15 border-status-failed" },
+  waiting_for_human: { rect: "fill-status-waiting/15 stroke-status-waiting", text: "fill-status-waiting", swatch: "bg-status-waiting/15 border-status-waiting" },
+  blocked: { rect: "fill-status-blocked/15 stroke-status-blocked", text: "fill-status-blocked", swatch: "bg-status-blocked/15 border-status-blocked" },
 };
 
 // Archetype band order (top → bottom)
@@ -43,7 +48,7 @@ interface Props {
 export function PipelineGraph({ agents, liveStates, onClickAgent, onRemoveAgent, graphData }: Props) {
   if (agents.length === 0) {
     return (
-      <div className="muted small" style={{ padding: 12 }}>
+      <div className="p-3 text-xs text-muted-foreground">
         No agents to show. Add one to see the pipeline graph.
       </div>
     );
@@ -67,12 +72,12 @@ export function PipelineGraph({ agents, liveStates, onClickAgent, onRemoveAgent,
   const isConfigMode = !liveStates;
 
   return (
-    <div className="pipeline-graph">
-      <svg width={width} height={height} role="img" aria-label="Pipeline graph">
+    <div className="my-2 overflow-x-auto rounded-md border border-border bg-muted/40 p-2">
+      <svg className="block min-w-max" width={width} height={height} role="img" aria-label="Pipeline graph">
         <defs>
           {Object.entries(LEGACY_EDGE_STYLES).map(([kind, s]) => (
             <marker key={kind} id={`arrow-${kind}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill={s.stroke} />
+              <path d="M 0 0 L 10 5 L 0 10 z" className={s.fill} />
             </marker>
           ))}
         </defs>
@@ -82,7 +87,7 @@ export function PipelineGraph({ agents, liveStates, onClickAgent, onRemoveAgent,
             <line
               key={i}
               x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
-              stroke={s.stroke}
+              className={s.stroke}
               strokeWidth={1.5}
               strokeDasharray={s.dash || undefined}
               markerEnd={`url(#arrow-${e.kind})`}
@@ -91,31 +96,34 @@ export function PipelineGraph({ agents, liveStates, onClickAgent, onRemoveAgent,
         })}
         {layout.nodes.map((n) => {
           const agent = agents.find((a) => a.role === n.role);
-          let c: { fill: string; stroke: string; text: string };
+          let c: Tone;
           if (isConfigMode) {
             c = TIER_NODE[agent?.model_tier ?? "solid"] ?? TIER_NODE.solid;
           } else {
             const state = (liveStates?.get(n.role)?.state as AgentLiveState) ?? "pending";
             c = STATE_COLORS[state];
           }
-          const sublabel = isConfigMode
+          const detail = isConfigMode
             ? (agent?.model_tier ?? "solid")
             : ((liveStates?.get(n.role)?.state as AgentLiveState) ?? "pending");
+          // A named worker reads "Arlo" over "planner · heavy".
+          const title = agent?.name || n.role;
+          const sublabel = agent?.name ? `${n.role} · ${detail}` : detail;
           return (
-            <g key={n.role} transform={`translate(${n.x}, ${n.y})`} style={{ cursor: onClickAgent ? "pointer" : "default" }} onClick={onClickAgent ? () => onClickAgent(n.role) : undefined}>
-              <rect width={NODE_W} height={NODE_H} rx={8} ry={8} fill={c.fill} stroke={c.stroke} strokeWidth={2} />
-              <text x={NODE_W / 2} y={24} textAnchor="middle" fontSize={13} fontWeight={600} fill={c.text}>{n.role}</text>
-              <text x={NODE_W / 2} y={42} textAnchor="middle" fontSize={11} fill={c.text}>{sublabel}</text>
+            <g key={n.role} transform={`translate(${n.x}, ${n.y})`} className={onClickAgent ? "cursor-pointer" : "cursor-default"} onClick={onClickAgent ? () => onClickAgent(n.role) : undefined}>
+              <rect width={NODE_W} height={NODE_H} rx={8} ry={8} className={c.rect} strokeWidth={2} />
+              <text x={NODE_W / 2} y={24} textAnchor="middle" fontSize={13} fontWeight={600} className={c.text}>{title}</text>
+              <text x={NODE_W / 2} y={42} textAnchor="middle" fontSize={11} className={c.text}>{sublabel}</text>
               {isConfigMode && onRemoveAgent && (
                 <g
-                  style={{ cursor: "pointer" }}
+                  className="cursor-pointer"
                   onClick={(e) => {
                     e.stopPropagation();
                     if (confirm(`Remove agent ${n.role}?`)) onRemoveAgent(n.role);
                   }}
                 >
-                  <circle cx={NODE_W - 10} cy={10} r={9} fill="#ef4444" stroke="#fff" strokeWidth={1.5} />
-                  <text x={NODE_W - 10} y={14} textAnchor="middle" fontSize={12} fontWeight={700} fill="#fff">×</text>
+                  <circle cx={NODE_W - 10} cy={10} r={9} className="fill-destructive stroke-card" strokeWidth={1.5} />
+                  <text x={NODE_W - 10} y={14} textAnchor="middle" fontSize={12} fontWeight={700} className="fill-destructive-foreground">×</text>
                 </g>
               )}
             </g>
@@ -123,18 +131,18 @@ export function PipelineGraph({ agents, liveStates, onClickAgent, onRemoveAgent,
         })}
       </svg>
       {isConfigMode && (
-        <div className="row" style={{ gap: 12, padding: "4px 8px", flexWrap: "wrap" }}>
+        <div className="flex flex-wrap items-center gap-3 px-2 py-1">
           {Object.entries(LEGACY_EDGE_STYLES).map(([kind, s]) => (
-            <span key={kind} className="row" style={{ gap: 4, alignItems: "center", fontSize: 11, color: "#64748b" }}>
+            <span key={kind} className="flex items-center gap-1 text-[11px] text-muted-foreground">
               <svg width={28} height={10}>
-                <line x1={0} y1={5} x2={28} y2={5} stroke={s.stroke} strokeWidth={1.5} strokeDasharray={s.dash || undefined} />
+                <line x1={0} y1={5} x2={28} y2={5} className={s.stroke} strokeWidth={1.5} strokeDasharray={s.dash || undefined} />
               </svg>
               {s.label}
             </span>
           ))}
           {Object.entries(TIER_NODE).map(([tier, c]) => (
-            <span key={tier} className="row" style={{ gap: 4, alignItems: "center", fontSize: 11, color: "#64748b" }}>
-              <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: 3, background: c.fill, border: `1.5px solid ${c.stroke}` }} />
+            <span key={tier} className="flex items-center gap-1 text-[11px] text-muted-foreground">
+              <span className={cn("inline-block h-3 w-3 rounded-sm border-[1.5px]", c.swatch)} />
               {tier}
             </span>
           ))}
@@ -147,9 +155,18 @@ export function PipelineGraph({ agents, liveStates, onClickAgent, onRemoveAgent,
 // ── Hierarchy render (graphData present) ─────────────────────────────────────
 
 const EDGE_STYLES = {
-  depends_on:     { stroke: "#6366f1", strokeDasharray: "none", label: "depends on" },
-  can_assign_to:  { stroke: "#0ea5e9", strokeDasharray: "6 3",  label: "can assign to" },
-  escalates_to:   { stroke: "#ef4444", strokeDasharray: "3 3",  label: "escalates to" },
+  depends_on: {
+    stroke: "stroke-primary", fill: "fill-primary", strokeDasharray: "none", label: "depends on",
+    tab: "border-primary text-primary data-[active=true]:bg-primary data-[active=true]:text-primary-foreground",
+  },
+  can_assign_to: {
+    stroke: "stroke-status-waiting", fill: "fill-status-waiting", strokeDasharray: "6 3", label: "can assign to",
+    tab: "border-status-waiting text-status-waiting data-[active=true]:bg-status-waiting data-[active=true]:text-background",
+  },
+  escalates_to: {
+    stroke: "stroke-status-failed", fill: "fill-status-failed", strokeDasharray: "3 3", label: "escalates to",
+    tab: "border-status-failed text-status-failed data-[active=true]:bg-status-failed data-[active=true]:text-background",
+  },
 } as const;
 
 type EdgeKind = "depends_on" | "can_assign_to" | "escalates_to";
@@ -214,9 +231,9 @@ function HierarchyGraph({
   }, [nodes, edges, activeKind]);
 
   return (
-    <div className="pipeline-graph" style={{ position: "relative" }}>
+    <div className="relative my-2 overflow-x-auto rounded-md border border-border bg-muted/40 p-2">
       {/* Tab strip */}
-      <div className="row" style={{ gap: 4, padding: "6px 8px", borderBottom: "1px solid #e2e8f0" }}>
+      <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
         {TABS.map((tab) => {
           const hasEdges = edges.some((e) => e.kind === tab.kind);
           const isActive = activeKind === tab.kind;
@@ -224,18 +241,14 @@ function HierarchyGraph({
           return (
             <button
               key={tab.kind}
+              type="button"
               onClick={() => setActiveKind(tab.kind)}
-              style={{
-                padding: "3px 10px",
-                borderRadius: 12,
-                border: `1px solid ${style.stroke}`,
-                background: isActive ? style.stroke : "transparent",
-                color: isActive ? "#fff" : style.stroke,
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: "pointer",
-                opacity: hasEdges ? 1 : 0.4,
-              }}
+              data-active={isActive}
+              className={cn(
+                "cursor-pointer rounded-xl border bg-transparent px-2.5 py-0.5 text-[11px] font-semibold",
+                style.tab,
+                !hasEdges && "opacity-40",
+              )}
             >
               {tab.label}
             </button>
@@ -243,10 +256,10 @@ function HierarchyGraph({
         })}
       </div>
 
-      <svg width={svgW} height={svgH} role="img" aria-label="Hierarchy graph">
+      <svg className="block min-w-max" width={svgW} height={svgH} role="img" aria-label="Hierarchy graph">
         <defs>
           <marker id={`arrow-active`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill={activeStyle.stroke} />
+            <path d="M 0 0 L 10 5 L 0 10 z" className={activeStyle.fill} />
           </marker>
         </defs>
 
@@ -262,14 +275,12 @@ function HierarchyGraph({
           return (
             <path
               key={i}
-              className={`edge-${e.kind}`}
+              className={cn(`edge-${e.kind}`, activeStyle.stroke, "cursor-default")}
               d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
               fill="none"
-              stroke={activeStyle.stroke}
               strokeWidth={1.5}
               strokeDasharray={activeStyle.strokeDasharray === "none" ? undefined : activeStyle.strokeDasharray}
               markerEnd="url(#arrow-active)"
-              style={{ cursor: "default" }}
               onMouseEnter={(ev) => {
                 const svg = (ev.target as SVGElement).closest("svg");
                 const rect = svg?.getBoundingClientRect();
@@ -290,20 +301,20 @@ function HierarchyGraph({
             <g
               key={n.role}
               transform={`translate(${pos.x}, ${pos.y})`}
-              style={{ cursor: onClickAgent ? "pointer" : "default" }}
+              className={onClickAgent ? "cursor-pointer" : "cursor-default"}
               onClick={onClickAgent ? () => onClickAgent(n.role) : undefined}
             >
-              <rect width={NODE_W} height={NODE_H_PERSONA} rx={8} ry={8} fill={c.fill} stroke={c.stroke} strokeWidth={roots.has(n.role) ? 3 : 2} />
+              <rect width={NODE_W} height={NODE_H_PERSONA} rx={8} ry={8} className={c.rect} strokeWidth={roots.has(n.role) ? 3 : 2} />
               {roots.has(n.role) && (
                 <g>
-                  <rect x={4} y={4} width={40} height={14} rx={4} fill="#10b981" />
-                  <text x={24} y={14} textAnchor="middle" fontSize={8} fontWeight={700} fill="#fff">▶ START</text>
+                  <rect x={4} y={4} width={40} height={14} rx={4} className="fill-status-complete" />
+                  <text x={24} y={14} textAnchor="middle" fontSize={8} fontWeight={700} className="fill-background">▶ START</text>
                 </g>
               )}
-              <text x={NODE_W / 2} y={24} textAnchor="middle" fontSize={13} fontWeight={600} fill={c.text}>{n.role}</text>
-              <text x={NODE_W / 2} y={40} textAnchor="middle" fontSize={10} fill={c.text} opacity={0.75}>{state}</text>
+              <text x={NODE_W / 2} y={24} textAnchor="middle" fontSize={13} fontWeight={600} className={c.text}>{n.role}</text>
+              <text x={NODE_W / 2} y={40} textAnchor="middle" fontSize={10} className={c.text} opacity={0.75}>{state}</text>
               {showPersona && (
-                <text x={NODE_W / 2} y={56} textAnchor="middle" fontSize={10} fill={c.text} opacity={0.6} fontStyle="italic">{n.persona_name}</text>
+                <text x={NODE_W / 2} y={56} textAnchor="middle" fontSize={10} className={c.text} opacity={0.6} fontStyle="italic">{n.persona_name}</text>
               )}
             </g>
           );
@@ -311,8 +322,8 @@ function HierarchyGraph({
 
         {tooltip && (
           <g>
-            <rect x={tooltip.x - 4} y={tooltip.y - 14} width={tooltip.text.length * 7 + 8} height={20} rx={4} fill="rgba(0,0,0,.7)" />
-            <text x={tooltip.x} y={tooltip.y} fill="#fff" fontSize={11}>{tooltip.text}</text>
+            <rect x={tooltip.x - 4} y={tooltip.y - 14} width={tooltip.text.length * 7 + 8} height={20} rx={4} className="fill-popover stroke-border" />
+            <text x={tooltip.x} y={tooltip.y} className="fill-popover-foreground" fontSize={11}>{tooltip.text}</text>
           </g>
         )}
       </svg>
@@ -327,15 +338,15 @@ interface LayoutEdge { x1: number; y1: number; x2: number; y2: number; kind: "de
 interface Layout { nodes: LayoutNode[]; edges: LayoutEdge[]; cols: number; maxRowsInCol: number; }
 
 const LEGACY_EDGE_STYLES = {
-  depends_on:   { stroke: "#6366f1", dash: "",        label: "depends on" },
-  manages:      { stroke: "#0ea5e9", dash: "6 3",     label: "manages" },
-  escalates_to: { stroke: "#ef4444", dash: "3 3",     label: "escalates to" },
+  depends_on:   { stroke: "stroke-primary", fill: "fill-primary", dash: "", label: "depends on" },
+  manages:      { stroke: "stroke-status-waiting", fill: "fill-status-waiting", dash: "6 3", label: "manages" },
+  escalates_to: { stroke: "stroke-status-failed", fill: "fill-status-failed", dash: "3 3", label: "escalates to" },
 };
 
-const TIER_NODE: Record<string, { fill: string; stroke: string; text: string }> = {
-  heavy: { fill: "#fce7f3", stroke: "#ec4899", text: "#831843" },
-  solid: { fill: "#e0e7ff", stroke: "#6366f1", text: "#3730a3" },
-  fast:  { fill: "#d1fae5", stroke: "#10b981", text: "#065f46" },
+const TIER_NODE: Record<string, Tone> = {
+  heavy: STATE_COLORS.waiting_for_human,
+  solid: STATE_COLORS.ready,
+  fast: STATE_COLORS.complete,
 };
 
 function computeLayout(agents: AgentConfig[]): Layout {

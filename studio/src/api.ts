@@ -1,13 +1,17 @@
 // Thin API client. Handles auth + JSON shape so views can stay focused.
 
 import type {
+  CardWire,
   ExampleProjectSummary,
   InputsState,
   InstantiateExampleProjectResponse,
   InvokeOutcome,
   InvokeResponse,
   MetaProposal,
+  OneShotRequestBody,
+  OneShotResponse,
   PersonaSummary,
+  PlaybookResponse,
   PriorRunAttachment,
   ProjectConfig,
   RunMeta,
@@ -15,6 +19,12 @@ import type {
   Signal,
   SourceRepoMeta,
 } from "./types";
+import type {
+  CapabilitiesMeta,
+  ResolveCapabilitiesRequest,
+  ResolveCapabilitiesResponse,
+} from "./lib/capabilities";
+import type { TaskThreadDetail } from "./lib/runEvents.gen";
 
 const TOKEN_KEY = "guudflow.token";
 
@@ -102,6 +112,14 @@ export const projectsApi = {
   /** Phase K.0 — read the project's roadmap.md. Returns content="" +
    *  exists=false when the file doesn't exist (default state for new
    *  projects). */
+  /** Playbook entries (plan 11.4) and run-metrics history; read-only. */
+  playbook: (id: string) =>
+    request<PlaybookResponse>(
+      "GET",
+      `/api/projects/${encodeURIComponent(id)}/playbook`,
+      undefined,
+      true,
+    ),
   getRoadmap: (id: string) =>
     request<RoadmapResponse>("GET", `/api/projects/${encodeURIComponent(id)}/roadmap`),
   /** Phase K.0 — write the project's roadmap.md. Empty content
@@ -646,6 +664,12 @@ export const metaApi = {
     ),
 };
 
+export const oneshotApi = {
+  /** POST /api/oneshot. 202 either enqueues the run or asks for approval. */
+  start: (body: OneShotRequestBody) =>
+    request<OneShotResponse>("POST", "/api/oneshot", body, true),
+};
+
 export const invokeApi = {
   /** First call returns cost-preview when the gate is on; second call
    *  with `confirm: true` actually enqueues. Studio handles both shapes. */
@@ -691,6 +715,54 @@ export const approvalsApi = {
       "POST",
       `/api/runs/${encodeURIComponent(runId)}/approval/${encodeURIComponent(approvalId)}`,
       { decision, note },
+      true,
+    ),
+};
+
+/** The run's board cards (works for active and finished runs). */
+export async function getCards(runId: string): Promise<CardWire[]> {
+  const res = await request<{ cards: CardWire[] }>(
+    "GET",
+    `/api/runs/${encodeURIComponent(runId)}/cards`,
+  );
+  return res?.cards ?? [];
+}
+
+/** Body of `POST /api/runs/{id}/cards` (human adds a card). */
+export interface NewCardBody {
+  owner: string;
+  title: string;
+  acceptance: string[];
+  kind: string;
+  size: string;
+  priority?: number;
+}
+
+/** Human operations on the live task board (bearer auth). Columns never change from here. */
+export const cardsApi = {
+  add: (runId: string, body: NewCardBody) =>
+    request<CardWire>("POST", `/api/runs/${encodeURIComponent(runId)}/cards`, body, true),
+  setPriority: (runId: string, taskId: string, priority: number) =>
+    request<CardWire>(
+      "PATCH",
+      `/api/runs/${encodeURIComponent(runId)}/cards/${encodeURIComponent(taskId)}`,
+      { priority },
+      true,
+    ),
+  comment: (runId: string, taskId: string, text: string) =>
+    request<TaskThreadDetail>(
+      "POST",
+      `/api/runs/${encodeURIComponent(runId)}/cards/${encodeURIComponent(taskId)}/comments`,
+      { text },
+      true,
+    ),
+  /** Unified diff of one commit (`GET /git/diff?ref=`). */
+  commitDiff: (runId: string, sha: string, base?: string) =>
+    request<{ sha: string; diff: string }>(
+      "GET",
+      `/api/runs/${encodeURIComponent(runId)}/git/diff?ref=${encodeURIComponent(sha)}` +
+        (base ? `&base=${encodeURIComponent(base)}` : ""),
+      undefined,
       true,
     ),
 };
@@ -809,15 +881,21 @@ function _connectWithReconnect(
 
 export function connectRunStream(
   runId: string,
-  onMessage: (msg: { type: string; signals?: Signal[]; signal?: Signal }) => void,
+  onMessage: (msg: { type: string; signals?: Signal[]; signal?: Signal; live?: boolean }) => void,
   onClose?: () => void,
+  /** Optional: called with true on open and false on every drop (including the final give-up). */
+  onStateChange?: (connected: boolean) => void,
 ): WsHandle {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   const url = `${proto}://${window.location.host}/ws/runs/${encodeURIComponent(runId)}`;
   return _connectWithReconnect(
     url,
-    (data) => onMessage(data as { type: string; signals?: Signal[]; signal?: Signal }),
-    (connected) => { if (!connected) onClose?.(); },
+    (data) =>
+      onMessage(data as { type: string; signals?: Signal[]; signal?: Signal; live?: boolean }),
+    (connected) => {
+      if (!connected) onClose?.();
+      onStateChange?.(connected);
+    },
   );
 }
 
@@ -892,6 +970,20 @@ export const toolsApi = {
   list: () =>
     request<{ tools: ToolEntry[] }>("GET", "/api/tools", undefined, true).then(
       (r) => r.tools,
+    ),
+};
+
+export const harnessApi = {
+  /** Toggle levels, role types and per-role-type defaults (opencode harness). */
+  capabilities: () =>
+    request<CapabilitiesMeta>("GET", "/api/harness/capabilities", undefined, true),
+  /** Merge overrides onto role defaults; gates vision by the model. 422 on invalid values. */
+  resolve: (body: ResolveCapabilitiesRequest) =>
+    request<ResolveCapabilitiesResponse>(
+      "POST",
+      "/api/harness/capabilities/resolve",
+      body,
+      true,
     ),
 };
 

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { ApiError, personasApi } from "../api";
 import type { PersonaRankingRow } from "../api";
+import { Button } from "./ui/button";
+import { Alert, EmptyState, Input, Table, Td, Th } from "./ui/form-controls";
 
 /**
  * Phase G.0 — leaderboard of personas ranked by training rubric
@@ -36,66 +38,65 @@ export function RankingsPanel() {
 
   return (
     <div>
-      <p className="muted small">
+      <p className="mb-3 mt-0 text-sm text-muted-foreground">
         Ranked by average training rubric score. Personas without
         any training-mode runs don't appear here.
       </p>
 
-      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-        <input
+      <div className="mb-3 flex flex-wrap gap-2">
+        <Input
           type="text"
           value={roleType}
           onChange={(e) => setRoleType(e.target.value)}
           placeholder="role_type (e.g. frontend)"
-          style={{ flex: 1 }}
+          aria-label="Filter by role type"
+          className="min-w-[200px] flex-1"
         />
-        <input
+        <Input
           type="text"
           value={scenario}
           onChange={(e) => setScenario(e.target.value)}
           placeholder="scenario id (e.g. hello_python_v1)"
-          style={{ flex: 1 }}
+          aria-label="Filter by scenario"
+          className="min-w-[200px] flex-1"
         />
-        <button onClick={() => void load()} disabled={loading}>
+        <Button variant="outline" onClick={() => void load()} disabled={loading}>
           {loading ? "…" : "Filter"}
-        </button>
+        </Button>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && <Alert variant="error" className="mb-3">{error}</Alert>}
 
       {rows.length === 0 ? (
-        <p className="muted small">
-          No ranked personas yet. Train some via the Training tab to
-          populate this leaderboard.
-        </p>
+        <EmptyState title="No ranked personas yet.">
+          Train some via the Training tab to populate this leaderboard.
+        </EmptyState>
       ) : (
-        <table className="list">
+        <Table>
           <thead>
             <tr>
-              <th style={{ textAlign: "left" }}>#</th>
-              <th style={{ textAlign: "left" }}>Persona</th>
-              <th style={{ textAlign: "left" }}>Specialty</th>
-              <th style={{ textAlign: "right" }}>Avg score</th>
-              <th style={{ textAlign: "right" }}>Runs</th>
+              <Th>#</Th>
+              <Th>Persona</Th>
+              <Th>Specialty</Th>
+              <Th className="text-right">Avg score</Th>
+              <Th className="text-right">Runs</Th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row, i) => (
               <tr key={row.persona_id}>
-                <td>{i + 1}</td>
-                <td>
+                <Td>{i + 1}</Td>
+                <Td>
                   <strong>{row.name}</strong>
-                  <div className="small muted mono">{row.persona_id}</div>
-                </td>
-                <td className="small">{row.specialty || "—"}</td>
-                <td style={{ textAlign: "right" }}>
-                  {row.average_score.toFixed(2)}
-                </td>
-                <td style={{ textAlign: "right" }}>{row.n_runs}</td>
+                  <div className="font-mono text-xs text-muted-foreground">{row.persona_id}</div>
+                </Td>
+                <Td className="text-xs">{row.specialty || "—"}</Td>
+                <Td className="text-right">{row.average_score.toFixed(2)}</Td>
+                <Td className="text-right">{row.n_runs}</Td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       )}
     </div>
   );

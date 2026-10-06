@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import { personasApi, ApiError } from "../api";
 import type { PersonaSummary } from "../types";
 import { avatarFor } from "../lib/avatar";
+import { cn } from "../lib/utils";
 import { DeskFilesSection } from "./DeskFilesSection";
+import { Badge } from "./ui/badge";
+import { Card } from "./ui/card";
+import { Alert } from "./ui/form-controls";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "./ui/sheet";
 
 interface Props {
   personaId: string;
@@ -36,95 +41,85 @@ export function PersonaSlideOver({ personaId, onClose }: Props) {
     }
   }
 
-  // Close on Escape
-  useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
   const av = avatarFor(personaId);
   const rep = persona?.reputation;
   const totalRuns = (rep?.production?.total_runs ?? 0) + (rep?.training?.total_runs ?? 0);
   const winRate = rep?.production?.reviewer_first_pass_rate;
 
+  const statLabel = "text-xs text-muted-foreground";
+
   return (
-    <>
-      <div className="slide-over-backdrop" onClick={onClose} />
-      <div className="slide-over" role="dialog" aria-modal>
-        <div className="slide-over-header">
-          <div className="row" style={{ gap: 12, alignItems: "center" }}>
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent side="right" className="w-[480px] max-w-full gap-0 overflow-y-auto p-0" aria-describedby={undefined}>
+        <SheetHeader className="shrink-0 border-b border-border px-5 py-4">
+          <div className="flex items-center gap-3 pr-8">
+            {/* The gradient is generated per persona at runtime, so it is handed over
+                as the `--avatar-bg` CSS variable and painted by a class. */}
             <div
-              className="worker-avatar"
-              style={{ background: av.gradient, width: 48, height: 48, fontSize: 18 }}
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[image:var(--avatar-bg)] text-lg font-bold text-white"
+              style={{ "--avatar-bg": av.gradient } as React.CSSProperties}
+              aria-hidden
             >
               {av.initials}
             </div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 16 }}>
-                {persona?.name ?? personaId}
-              </div>
-              <div className="small muted">{persona?.specialty}</div>
+              <SheetTitle className="text-base">{persona?.name ?? personaId}</SheetTitle>
+              <div className={statLabel}>{persona?.specialty}</div>
             </div>
           </div>
-          <button className="close-btn" onClick={onClose} title="Close">×</button>
-        </div>
+        </SheetHeader>
 
-        <div className="slide-over-body">
-          {loading && <div className="muted small">Loading…</div>}
-          {error && <div className="error">{error}</div>}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {loading && <div className="text-xs text-muted-foreground">Loading…</div>}
+          {error && <Alert variant="error" className="mb-3">{error}</Alert>}
 
           {persona && (
             <>
               {/* Goal */}
               {persona.goal ? (
-                <div className="card" style={{ marginBottom: 12 }}>
-                  <div className="small muted" style={{ marginBottom: 2 }}>Goal</div>
-                  <div className="small">{persona.goal}</div>
-                </div>
+                <Card className="mb-3 p-4">
+                  <div className={cn(statLabel, "mb-0.5")}>Goal</div>
+                  <div className="text-sm">{persona.goal}</div>
+                </Card>
               ) : (
-                <div className="muted small" style={{ marginBottom: 12 }}>No goal set.</div>
+                <div className="mb-3 text-xs text-muted-foreground">No goal set.</div>
               )}
 
               {/* Reputation snapshot */}
-              <div className="card" style={{ marginBottom: 12 }}>
-                <div className="small muted" style={{ marginBottom: 6 }}>Reputation</div>
-                <div className="row" style={{ gap: 16, flexWrap: "wrap" }}>
+              <Card className="mb-3 p-4">
+                <div className={cn(statLabel, "mb-1.5")}>Reputation</div>
+                <div className="flex flex-wrap items-center gap-4">
                   <div>
-                    <div style={{ fontWeight: 600 }}>{totalRuns}</div>
-                    <div className="small muted">total runs</div>
+                    <div className="font-semibold">{totalRuns}</div>
+                    <div className={statLabel}>total runs</div>
                   </div>
                   <div>
-                    <div style={{ fontWeight: 600 }}>{persona.n_episodes}</div>
-                    <div className="small muted">episodes</div>
+                    <div className="font-semibold">{persona.n_episodes}</div>
+                    <div className={statLabel}>episodes</div>
                   </div>
                   {winRate !== undefined && (
                     <div>
-                      <div style={{ fontWeight: 600 }}>{(winRate * 100).toFixed(0)}%</div>
-                      <div className="small muted">first-pass rate</div>
+                      <div className="font-semibold">{(winRate * 100).toFixed(0)}%</div>
+                      <div className={statLabel}>first-pass rate</div>
                     </div>
                   )}
                   {rep?.training?.graduation_status === "graduated" && (
-                    <span className="tag tag-graduated" style={{ alignSelf: "center" }}>
-                      graduated
-                    </span>
+                    <Badge variant="complete">graduated</Badge>
                   )}
                 </div>
-              </div>
+              </Card>
 
               {/* Style tendencies */}
               {persona.style_tendencies && Object.keys(persona.style_tendencies).length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <div className="small muted" style={{ marginBottom: 4 }}>Style tendencies</div>
+                <div className="mb-3">
+                  <div className={cn(statLabel, "mb-1")}>Style tendencies</div>
                   {Object.entries(persona.style_tendencies)
                     .sort(([, a], [, b]) => b - a)
                     .slice(0, 5)
                     .map(([key, val]) => (
-                      <div key={key} className="small row" style={{ justifyContent: "space-between", marginBottom: 2 }}>
+                      <div key={key} className="mb-0.5 flex items-center justify-between text-xs">
                         <span>{key.replace(/_/g, " ")}</span>
-                        <span className="muted">{(val * 100).toFixed(0)}%</span>
+                        <span className="text-muted-foreground">{(val * 100).toFixed(0)}%</span>
                       </div>
                     ))}
                 </div>
@@ -135,7 +130,7 @@ export function PersonaSlideOver({ personaId, onClose }: Props) {
           {/* Last 5 episodes */}
           {episodes && episodes.length > 0 && (
             <div>
-              <div className="small muted" style={{ marginBottom: 6 }}>Recent episodes</div>
+              <div className={cn(statLabel, "mb-1.5")}>Recent episodes</div>
               {episodes.slice(-5).reverse().map((e, i) => {
                 const ep = e as {
                   episode_id?: string;
@@ -146,26 +141,26 @@ export function PersonaSlideOver({ personaId, onClose }: Props) {
                   rubric_score?: number | null;
                 };
                 return (
-                  <div className="card" key={i} style={{ marginBottom: 6, padding: "8px 12px" }}>
-                    <div className="small muted">
+                  <Card key={i} className="mb-1.5 px-3 py-2">
+                    <div className={statLabel}>
                       {ep.timestamp?.replace("T", " ").split(".")[0]}
                       {ep.training && (
-                        <span className="tag tag-training" style={{ marginLeft: 6 }}>training</span>
+                        <Badge variant="waiting" className="ml-1.5">training</Badge>
                       )}
                     </div>
-                    <div className="small">{ep.task_context}</div>
-                  </div>
+                    <div className="text-xs">{ep.task_context}</div>
+                  </Card>
                 );
               })}
             </div>
           )}
           {episodes && episodes.length === 0 && (
-            <div className="muted small">No episodes yet.</div>
+            <div className="text-xs text-muted-foreground">No episodes yet.</div>
           )}
 
           <DeskFilesSection personaId={personaId} />
         </div>
-      </div>
-    </>
+      </SheetContent>
+    </Sheet>
   );
 }

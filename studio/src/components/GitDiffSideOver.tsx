@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { getToken } from "../api";
+import { errorCls } from "../lib/field";
+import { cn } from "../lib/utils";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "./ui/sheet";
 
 interface Props {
   runId: string;
@@ -36,64 +39,40 @@ export function GitDiffSideOver({ runId, sha, onClose }: Props) {
       .finally(() => setLoading(false));
   }, [runId, sha]);
 
-  useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
   if (!sha) return null;
 
   return (
-    <>
-      <div className="slide-over-backdrop" onClick={onClose} />
-      <div className="slide-over" role="dialog" aria-modal style={{ width: 600 }}>
-        <div className="slide-over-header">
-          <div>
-            <span style={{ fontWeight: 600 }}>Commit diff</span>
-            <span className="mono small muted" style={{ marginLeft: 8 }}>{sha.slice(0, 7)}</span>
-          </div>
-          <button className="close-btn" onClick={onClose}>×</button>
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent side="right" className="w-[600px] max-w-full gap-0 p-0">
+        <div className="flex shrink-0 items-center border-b border-border px-5 py-4 pr-12">
+          <SheetTitle className="text-base">Commit diff</SheetTitle>
+          <SheetDescription className="ml-2 font-mono text-xs text-muted-foreground">{sha.slice(0, 7)}</SheetDescription>
         </div>
-        <div className="slide-over-body" style={{ padding: 0 }}>
-          {loading && <div className="muted small" style={{ padding: 16 }}>Loading diff…</div>}
-          {error && <div className="error" style={{ padding: 16 }}>{error}</div>}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {loading && <div className="p-4 text-xs text-muted-foreground">Loading diff…</div>}
+          {error && <div className={cn(errorCls, "m-4")}>{error}</div>}
           {data && (
-            <pre
-              className="mono small"
-              style={{
-                margin: 0,
-                padding: 16,
-                overflowX: "auto",
-                whiteSpace: "pre",
-                fontSize: 12,
-                lineHeight: 1.5,
-                background: "#0f172a",
-                color: "#e2e8f0",
-              }}
-            >
+            <pre className="m-0 overflow-x-auto whitespace-pre bg-muted p-4 font-mono text-xs leading-normal text-foreground">
               {renderDiff(data.diff)}
             </pre>
           )}
         </div>
-      </div>
-    </>
+      </SheetContent>
+    </Sheet>
   );
 }
 
 function renderDiff(raw: string): React.ReactNode {
-  if (!raw.trim()) return <span className="muted">Empty diff.</span>;
+  if (!raw.trim()) return <span className="text-muted-foreground">Empty diff.</span>;
   return raw.split("\n").map((line, i) => {
-    let color = "#e2e8f0";
-    if (line.startsWith("+") && !line.startsWith("+++")) color = "#4ade80";
-    else if (line.startsWith("-") && !line.startsWith("---")) color = "#f87171";
-    else if (line.startsWith("@@")) color = "#7dd3fc";
-    else if (line.startsWith("diff ") || line.startsWith("index ")) color = "#94a3b8";
+    let tone = "text-foreground";
+    if (line.startsWith("+") && !line.startsWith("+++")) tone = "text-status-complete";
+    else if (line.startsWith("-") && !line.startsWith("---")) tone = "text-status-failed";
+    else if (line.startsWith("@@")) tone = "text-status-running";
+    else if (line.startsWith("diff ") || line.startsWith("index ")) tone = "text-muted-foreground";
     return (
-      <span key={i} style={{ color, display: "block" }}>
-        {line || " "}
+      <span key={i} className={cn("block", tone)}>
+        {line || " "}
       </span>
     );
   });

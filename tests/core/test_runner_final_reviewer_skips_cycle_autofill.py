@@ -63,7 +63,7 @@ def test_autofill_final_reviewer_no_inbound_deps(tmp_path: Path):
         AgentConfig(role="reviewer", depends_on=[], is_final_reviewer=True),
     ]
     runner = _make_runner(agents, tmp_path)
-    runner._build_agents()
+    runner._prepare_team()
     rev_cfg = next(c for c in runner.project.agents if c.role == "reviewer")
     assert sorted(rev_cfg.depends_on) == ["dev_a", "dev_b"]
 
@@ -78,7 +78,7 @@ def test_autofill_skips_inbound_dep_to_prevent_cycle(tmp_path: Path):
         AgentConfig(role="dev_b", depends_on=["game_architect"], is_final_reviewer=False),
     ]
     runner = _make_runner(agents, tmp_path)
-    runner._build_agents()
+    runner._prepare_team()
 
     arch_cfg = next(c for c in runner.project.agents if c.role == "game_architect")
     # dev_a and dev_b depend on game_architect → auto-fill must not add them back
@@ -96,7 +96,7 @@ def test_autofill_partial_inbound(tmp_path: Path):
         AgentConfig(role="dev_b", depends_on=[], is_final_reviewer=False),
     ]
     runner = _make_runner(agents, tmp_path)
-    runner._build_agents()
+    runner._prepare_team()
 
     rev_cfg = next(c for c in runner.project.agents if c.role == "reviewer")
     assert "dev_a" not in rev_cfg.depends_on   # would cause cycle
@@ -123,7 +123,7 @@ def test_autofill_skips_transitive_inbound_dep(tmp_path: Path):
         AgentConfig(role="qa_and_docs_reviewer", depends_on=["integration_dev"], is_final_reviewer=False),
     ]
     runner = _make_runner(agents, tmp_path)
-    runner._build_agents()
+    runner._prepare_team()
 
     arch_cfg = next(c for c in runner.project.agents if c.role == "game_architect")
     # Every other role transitively depends on game_architect → all blocked
@@ -140,7 +140,7 @@ def test_explicit_depends_on_never_overwritten(tmp_path: Path):
         AgentConfig(role="dev_b", depends_on=[], is_final_reviewer=False),
     ]
     runner = _make_runner(agents, tmp_path)
-    runner._build_agents()
+    runner._prepare_team()
 
     rev_cfg = next(c for c in runner.project.agents if c.role == "reviewer")
     assert rev_cfg.depends_on == ["dev_b"]

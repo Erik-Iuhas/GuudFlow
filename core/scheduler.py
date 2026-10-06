@@ -88,6 +88,21 @@ class AgentSpec:
     role: str
     runner: AgentRunner
     depends_on: list[str] = field(default_factory=list)
+    # Review edge (plan §4.5): how many times this role may send work back to
+    # its authors via `Scheduler.request_rework` before escalation.
+    max_review_rounds: int = 2
+    # Task board (plan §4.6): when set, the role is only spawned while this
+    # returns True ("there is a card for you now"). Keeps the decision of WHEN
+    # to spawn here, while the board decides WHAT the role works on.
+    has_work: Callable[[], bool] | None = None
+
+
+@dataclass(frozen=True)
+class BlockOutcome:
+    """What `Scheduler.block()` did."""
+
+    action: Literal["rearmed", "waiting", "cycle", "unknown_role"]
+    cycle: tuple[str, ...] = ()
 
 
 class SchedulerStatus(str, Enum):
@@ -127,6 +142,11 @@ class Scheduler:
         workspace: Workspace,
         scope: str = "pipeline",
         max_iterations: int | None = None,
+        *,
+        transition_rules: bool = True,
+        max_parallel: int | None = None,
+        watchdog: Callable[[], None] | None = None,
+        watchdog_interval: float = 30.0,
     ):
         if len({a.role for a in agents}) != len(agents):
             raise ValueError("duplicate agent roles in scheduler scope")
@@ -150,9 +170,22 @@ class Scheduler:
         # queued values injected by resume() — runner drains at agent re-entry
         self._pending_input: dict[str, list[Any]] = defaultdict(list)
 
-        # allowed-speaker-transition rules (AutoGen-style, M1 §10)
+        # allowed-speaker-transition rules (AutoGen-style, M1 §10). The opencode
+        # harness turns them off: it drives rework through request_rework().
         self._transition_rules: dict[tuple[str, str], frozenset[str]] = {}
-        self._build_transition_rules()
+        if transition_rules:
+            self._build_transition_rules()
+
+        # opencode harness primitives (plan §4.4–§4.6)
+        self.max_parallel = max_parallel
+        # Stall watchdog (plan §11.2): called every loop pass and at least every
+        # `watchdog_interval` seconds while work is in flight. It may re-arm
+        # roles (the overseer); it must not block.
+        self.watchdog = watchdog
+        self.watchdog_interval = watchdog_interval
+        self._review_rounds: dict[tuple[str, str], int] = defaultdict(int)
+        self._blocked_on: dict[str, str] = {}      # role → role it waits on
+        self._parked: set[str] = set()
 
     # ── Public API ──────────────────────────────────────────────────────────
 
@@ -223,6 +256,118 @@ class Scheduler:
         self.workspace.agent_states[role] = AgentState.SAT_OUT
         self._wake.set()
 
+    # ── opencode harness primitives (plan §4.4–§4.6) ───────────────────────
+
+    def rearm(self, role: str, payload: Any = None) -> None:
+        """Make a role runnable again, even if it already completed.
+
+        `payload` is queued for the role's next spawn (read via
+        `drain_pending_input`). Downstream roles that already completed are not
+        touched; callers that need them to re-run re-arm them too.
+        """
+        if role not in self.agents:
+            raise KeyError(role)
+        if role in self.workspace.completed_agents:
+            self.workspace.completed_agents.remove(role)
+        self._failed.discard(role)
+        self._parked.discard(role)
+        self.workspace.agent_states[role] = AgentState.READY
+        if payload is not None:
+            self._pending_input[role].append(payload)
+        self._wake.set()
+
+    def review_rounds(self, reviewer: str, author: str) -> int:
+        """How many times `reviewer` has sent work back to `author`."""
+        return self._review_rounds[(reviewer, author)]
+
+    def request_rework(self, reviewer: str, authors: list[str], payload: Any = None) -> bool:
+        """Review edge: send work back to `authors`; the reviewer re-runs after them.
+
+        Returns False (and changes nothing) once any author has used up the
+        reviewer's `max_review_rounds` — the caller escalates instead. The
+        reviewer's runner must return WITHOUT marking itself complete; because
+        it depends on the authors it is spawned again once they finish.
+        """
+        limit = self.agents[reviewer].max_review_rounds
+        if any(self._review_rounds[(reviewer, a)] >= limit for a in authors):
+            return False
+        for author in authors:
+            self._review_rounds[(reviewer, author)] += 1
+            self.rearm(author, payload)
+        if reviewer in self.workspace.completed_agents:
+            self.workspace.completed_agents.remove(reviewer)
+        self.workspace.agent_states[reviewer] = AgentState.READY
+        return True
+
+    def block(self, role: str, on_role: str, need: Any = None) -> BlockOutcome:
+        """`role` cannot continue until `on_role` acts (plan §4.4).
+
+        - `on_role` unknown → nothing changes (caller fails the turn).
+        - waiting on each other (directly or through a chain) → `pending_human`
+          is set with the cycle: a human has to break it.
+        - `on_role` running or not yet complete → `role` waits for it.
+        - `on_role` already complete → it is re-armed with `need` as input.
+        `role` becomes spawnable again once `on_role` completes.
+        """
+        if on_role not in self.agents or on_role == role:
+            return BlockOutcome("unknown_role")
+        chain = [role, on_role]
+        nxt = self._blocked_on.get(on_role)
+        while nxt is not None and nxt not in chain:
+            chain.append(nxt)
+            nxt = self._blocked_on.get(nxt)
+        if nxt == role:
+            from core.workspace import HumanRequest
+            cycle = tuple(chain)
+            self.workspace.pending_human = HumanRequest(
+                from_agent=role,
+                question=("These roles are blocked on each other: "
+                          + " → ".join(cycle + (role,))
+                          + ". Decide what should happen and answer, or stop the run."),
+                iteration=self.workspace.iteration,
+            )
+            self.workspace.agent_states[role] = AgentState.BLOCKED
+            self._blocked_on[role] = on_role
+            return BlockOutcome("cycle", cycle)
+        self._blocked_on[role] = on_role
+        if role in self.workspace.completed_agents:
+            self.workspace.completed_agents.remove(role)
+        self.workspace.agent_states[role] = AgentState.BLOCKED
+        if on_role in self.workspace.completed_agents and on_role not in self._tasks:
+            self.rearm(on_role, need)
+            return BlockOutcome("rearmed")
+        if need is not None:
+            self._pending_input[on_role].append(need)
+        self._wake.set()
+        return BlockOutcome("waiting")
+
+    def blocked_on(self, role: str) -> str | None:
+        """The role `role` is currently blocked on, if any."""
+        return self._blocked_on.get(role)
+
+    def is_running(self, role: str) -> bool:
+        """True while a spawn of `role` is in flight."""
+        return role in self._tasks
+
+    def park(self, role: str) -> None:
+        """Nothing is ready for `role` right now; don't respawn it until `wake_parked()`."""
+        self._parked.add(role)
+        self.workspace.agent_states[role] = AgentState.PARKED
+
+    def wake_parked(self) -> None:
+        """Something changed (e.g. a task finished): parked roles may look again."""
+        for role in self._parked:
+            self.workspace.agent_states[role] = AgentState.READY
+        self._parked.clear()
+        self._wake.set()
+
+    def _release_blocked(self) -> None:
+        for role, on_role in list(self._blocked_on.items()):
+            if self._effective_complete(on_role):
+                del self._blocked_on[role]
+                if self.workspace.agent_states.get(role) is AgentState.BLOCKED:
+                    self.workspace.agent_states[role] = AgentState.READY
+
     def _build_transition_rules(self) -> None:
         """Populate the default allowed-speaker-transition table (M1 §10).
 
@@ -259,6 +404,11 @@ class Scheduler:
                 # 0b. M1 deadline watcher — expire WAITING_FOR_PEER /
                 #     WAITING_FOR_SKIP_CONFIRM interrupts past their deadline_ts.
                 self._reap_expired_interrupts()
+
+                # 0c. Stall watchdog (opencode harness): may re-arm the overseer,
+                #     including right before the run would otherwise be STUCK.
+                if self.watchdog is not None:
+                    self.watchdog()
 
                 # 1. Try to spawn anything ready. The `pending_human` flag is
                 #    the global block for new spawns; per-agent WAITING_FOR_PEER
@@ -300,11 +450,15 @@ class Scheduler:
         whichever comes first. Caller re-enters the loop body to act.
         """
         next_deadline = self._next_interrupt_deadline()
-        if next_deadline is None:
+        if next_deadline is None and self.watchdog is None:
             await self._wake.wait()
             self._wake.clear()
             return
-        timeout = max(0.0, next_deadline - time.monotonic())
+        # With a watchdog, wake at least every interval so it (and the wall-clock
+        # deadline check) keep running while the run waits for a human.
+        timeout = min(max(0.0, next_deadline - time.monotonic())
+                      if next_deadline is not None else float("inf"),
+                      self.watchdog_interval if self.watchdog is not None else float("inf"))
         try:
             await asyncio.wait_for(self._wake.wait(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -403,17 +557,26 @@ class Scheduler:
     def _ready_to_spawn(self) -> list[AgentSpec]:
         allowed_speaker = self._allowed_speaker_for_recent_signal()
         ready: list[AgentSpec] = []
+        self._release_blocked()
+        slots = (None if self.max_parallel is None
+                 else max(0, self.max_parallel - len(self._tasks)))
         for role, spec in self.agents.items():
+            if slots is not None and len(ready) >= slots:
+                break
             if role in self._tasks:
                 continue
             if self._effective_complete(role):
                 continue
             if role in self._failed:
                 continue
+            if role in self._parked or role in self._blocked_on:
+                continue
             state = self.workspace.agent_states.get(role)
             if state in self._WAITING_STATES:
                 continue
             if not all(self._effective_complete(dep) for dep in spec.depends_on):
+                continue
+            if spec.has_work is not None and not spec.has_work():
                 continue
             if self._spawn_count[role] >= self.max_iterations:
                 continue
@@ -538,8 +701,9 @@ class Scheduler:
         """Block until any in-flight task finishes OR `notify()` fires."""
         wake_task = asyncio.create_task(self._wake.wait(), name="scheduler:wake")
         waiters: list[asyncio.Task] = [wake_task, *self._tasks.values()]
+        timeout = self.watchdog_interval if self.watchdog is not None else None
         try:
-            await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED, timeout=timeout)
         finally:
             self._wake.clear()
             if not wake_task.done():

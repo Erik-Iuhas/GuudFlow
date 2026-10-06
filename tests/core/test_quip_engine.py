@@ -210,3 +210,37 @@ async def test_system_prompt_contains_persona_name_not_role(tmp_path: Path, work
     assert "Sarah" in system
     assert "Mike" in system
     assert "Your coworkers on this run" in system
+
+
+async def test_quip_pump_turns_live_signals_into_quips() -> None:
+    import asyncio
+    from core.quip_engine import QuipPump
+    from core.signals import Signal, SignalType
+    from core.workspace import Workspace
+
+    calls: list[tuple[str, str]] = []
+
+    class Engine:
+        async def on_agent_started(self, role, ws): calls.append((role, "started"))
+        async def on_agent_complete(self, role, ws): calls.append((role, "complete"))
+        async def on_review_verdict(self, role, verdict, ws):
+            if verdict == "REJECTED":
+                raise RuntimeError("model down")   # one failure does not stop the rest
+            calls.append((role, verdict))
+
+    ws = Workspace(run_id="r", goal="g")
+    pump = QuipPump(Engine(), ws, limit=4)
+    task = asyncio.create_task(pump.run())
+    for kind, role, summary in [
+        (SignalType.STARTED, "builder", "builder started"),
+        (SignalType.STARTED, "builder", "builder started on T2"),     # repeat: skipped
+        (SignalType.COMPLETE, "runner", "run done"),                   # runner: skipped
+        (SignalType.REJECTED, "reviewer", "sent back"),
+        (SignalType.AGENT_RESULT, "reviewer", "reviewer: review pass (0 issue(s))"),
+        (SignalType.COMPLETE, "builder", "builder complete"),
+        (SignalType.COMPLETE, "reviewer", "reviewer complete"),        # over the limit
+    ]:
+        pump.on_signal(Signal(type=kind, from_agent=role, summary=summary))
+    pump.close()
+    await asyncio.wait_for(task, 5)
+    assert calls == [("builder", "started"), ("reviewer", "APPROVED"), ("builder", "complete")]
