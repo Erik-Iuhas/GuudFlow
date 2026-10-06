@@ -449,3 +449,62 @@ last 3 reviews. Should reviews open on the diff?". It never switches on its own.
   and the export, all on top of the existing backlog. Then a real-model trial on pacrogue: are
   the requirements still consistent after 4 rounds of changes? Build the rest of the UI only if
   that holds.
+
+## 11. Fourth storyboard take: simpler, on the current architecture (2026-10-06)
+
+The goal of this take is fewer layers, built on what exists, while keeping the plan conversation,
+seats, code review and the record.
+
+**What users see:** Work, Plan, Sessions, Team, Record and Settings, with one detail switch
+(Overview or Technical).
+
+| Concept | Ids | Built on |
+|---|---|---|
+| Spec: requirements with checks, plus decisions | `R`, `D` | new store, versioned by plan drafts |
+| Work items | `B` | today's backlog (each names the requirements it serves) |
+| Sessions | session number | today's runs; cards stay internal |
+| Record | none | signals, backlog history, run reports, retrospective, plus spec history |
+
+**How the pieces work:**
+- **Requests are messages.** "Ask for something" on Work goes into the plan conversation and comes
+  back as a draft.
+- **Spec changes come from three places:** the plan conversation, a session ("the session suggests a
+  spec change"), and the record, which shows each requirement's versions.
+- **Seats:**
+  - **Owner** is always held and accepts sessions.
+  - **Lead** is optional. While it is held, decision changes in drafts wait for approval;
+    otherwise the project manager decides and records why.
+  - **Reviewer** is optional and co-signs an item's code after the agent reviewer.
+  - There is no Builder seat. People work through the project's remote between sessions.
+- **Export:** `SPEC.md` and `docs/decisions/` can be kept in the project repo, updated when a
+  session is accepted.
+
+### 11.1 Team adherence (needs design)
+
+The storyboards show one simple mechanism.
+
+- **Rules the team follows** are listed on the Team tab. Each rule has a source: a requirement, a
+  decision, the project default or a person. Each is either **binding** or a **preference**.
+- **Binding rules:**
+  - are injected into every brief;
+  - the reviewer checks against them;
+  - a broken one is a review issue (blocking) rather than a note;
+  - repeat breaks wake the overseer.
+- **The session view lists what the session must follow:** the requirements in play, the decisions
+  and the rules, each with its status.
+- **The Team tab shows an adherence summary:** rule issues raised and fixed, and none merged broken.
+
+This builds on what exists: project rules (`persona_rules/_shared.md`, rule 24), the reviewer's
+structured `ReviewResult`, the overseer's detectors and the brief builder.
+
+**Open questions:**
+- How a decision becomes a rule. Automatically for decisions marked binding, or proposed in a draft?
+- Which checks can be mechanical (a lint, grep or test from the rule) rather than the reviewer's
+  judgement.
+- How to stop rule lists growing until briefs are mostly rules.
+- What happens when a requirement changes and an old rule now contradicts it.
+
+### 11.2 MCP
+
+See `docs/MCP_PLAN.md`. The Team tab gets a per-role MCP tools column, and Settings gets an MCP
+servers page.
