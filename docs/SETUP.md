@@ -8,7 +8,7 @@ GuudFlow is and how it works, see the [README](../README.md); for the design, se
 - [1. What you are installing](#1-what-you-are-installing)
 - [2. Pick a setup](#2-pick-a-setup)
 - [3. Prerequisites](#3-prerequisites)
-- [4. Install](#4-install)
+- [4. Install](#4-install) (and [on Windows](#on-windows-wsl2))
 - [5. Start it](#5-start-it)
 - [6. First project, end to end](#6-first-project-end-to-end)
 - [7. Models, keys and costs](#7-models-keys-and-costs)
@@ -39,7 +39,7 @@ the API.
 | Your machine | Recommended setup | Agent isolation |
 |---|---|---|
 | **Linux** (workstation, server, VM) | Native install + Docker Engine, or `docker compose up` (§5, option C) | Full: every role in its own hardened container on a private network |
-| **Windows** | WSL2 with a Linux distro; follow the Linux steps inside WSL. For sandboxes, install Docker Engine *inside* that distro. Without Docker, run in host mode. | With Docker Engine in WSL: same as Linux. Without: none |
+| **Windows** | WSL2 with a Linux distro; follow the Linux steps inside WSL ([§4, Windows](#on-windows-wsl2)). For sandboxes, install Docker Engine *inside* that distro. Without Docker, run in host mode. | With Docker Engine in WSL: same as Linux. Without: none |
 | **No Docker at all** (any OS, including macOS) | Native install with `GUUDFLOW_SANDBOX=host` | None: agents run as your user (see host mode below) |
 
 **Docker Desktop is not supported for sandboxes.** For each run, GuudFlow creates a private Docker
@@ -126,6 +126,56 @@ GUUDFLOW_DATA_DIR=./data
 
 Setting `GUUDFLOW_API_TOKEN` is strongly recommended even locally: with it unset, dev mode leaves the
 API open to anything that can reach port 8000.
+
+### On Windows (WSL2)
+
+Run GuudFlow *inside* WSL, as on a Linux machine: install, start and run it from your WSL
+distro's terminal, then open it from your Windows browser. These steps follow the standard Linux
+setup but have not been verified on WSL yet; please report anything that differs.
+
+1. **Install WSL2 with a distro** (in PowerShell, once): `wsl --install -d Ubuntu`, then open the
+   Ubuntu terminal. Everything below runs there.
+2. **Docker: use Docker Engine inside the distro, not Docker Desktop.**
+   - With Docker Desktop's "WSL integration" on, `docker` inside WSL talks to Docker Desktop's
+     daemon, which keeps its networks in its own VM. That is the setup sandboxes cannot use (§2).
+   - Turn that integration off for your distro (Docker Desktop → Settings → Resources → WSL
+     integration), or quit Docker Desktop.
+   - Install Docker Engine in the distro by following
+     [docs.docker.com/engine/install/ubuntu](https://docs.docker.com/engine/install/ubuntu/), then:
+
+   ```bash
+   sudo usermod -aG docker "$USER"     # close and reopen the terminal
+   sudo service docker start           # or enable systemd so it starts on its own (below)
+   docker info                         # must work without sudo
+   ```
+
+   To start Docker automatically, put this in `/etc/wsl.conf`, then run `wsl --shutdown` in
+   PowerShell and reopen the terminal:
+
+   ```ini
+   [boot]
+   systemd=true
+   ```
+
+   No Docker at all? Skip this step and set `GUUDFLOW_SANDBOX=host` in `.env` (agents then run
+   without containers; trusted work only).
+3. **Clone into the Linux filesystem**, e.g. your home directory, **not** under `/mnt/c/...`. The
+   Windows drive is slow from WSL and ignores Linux file permissions, which GuudFlow relies on to keep
+   saved provider keys owner-only.
+
+   ```bash
+   cd ~ && git clone https://github.com/Erik-Iuhas/GuudFlow.git && cd GuudFlow
+   ```
+
+4. **Install and start it** the Linux way: the native steps above (`./scripts/setup.sh`,
+   `scripts/install_opencode.sh`, `.env`, then [§5](#5-start-it)), or Docker Compose
+   ([§5, option C](#option-c-docker-compose-linux-only-docker-needed)). The native route needs Python
+   3.11+, Node 18+ and git *inside* WSL; Ubuntu 24.04 ships Python 3.12.
+5. **Open it from Windows:** <http://localhost:8000> (or `:3001` for the dev server). WSL2 forwards
+   localhost to Windows by default.
+
+Do not use `scripts/setup.ps1` or `scripts/dev.ps1` for agent runs: they set GuudFlow up on Windows
+itself, where sandboxes cannot run.
 
 ## 5. Start it
 
@@ -390,6 +440,9 @@ Then restart the API.
 | Runs log `DEV MODE: opencode agent running on host` | Docker is not reachable, so the run fell back to host mode. Check `docker info` works for the API's user, then restart the API. |
 | "Docker is required for sandboxed agents but is not available" | Production refuses host mode. Start Docker, or don't set `GUUDFLOW_ENV=production` for local trials. |
 | Sandboxed runs fail to start on Docker Desktop | Not supported (§2). On Windows, install Docker Engine inside WSL2; otherwise set `GUUDFLOW_SANDBOX=host`. |
+| WSL: `docker info` fails or needs sudo | Start the daemon (`sudo service docker start`, or enable systemd in `/etc/wsl.conf`) and make sure your user is in the `docker` group (reopen the terminal after `usermod`). |
+| WSL: `docker` works but sandboxes fail like on Docker Desktop | Your `docker` is Docker Desktop's WSL integration. Turn it off for this distro and install Docker Engine inside it (§4, Windows). |
+| WSL: slow, or "permission" warnings about the keys file | The repo is under `/mnt/c`. Clone it into your WSL home directory instead. |
 | Compose: runs fail with "no such file or directory" on a mount | The data directory is not at the same path inside and outside. Run `docker compose` from the repo root, or set `GUUDFLOW_HOST_DATA` to an absolute path. |
 | Compose: Studio not reachable from another machine | The API listens on `127.0.0.1` by default. Set `GUUDFLOW_BIND=0.0.0.0` (behind your own firewall or proxy). |
 | A local model (Ollama, LM Studio) fails with "Illegal header value" | Fixed: the gateway now sends no auth header to a provider without a key. Update and restart. |
