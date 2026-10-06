@@ -34,4 +34,20 @@ Status is `open`, `fixed (<commit>)` or `wontfix (<why>)`.
 
 ## Session 3 (final pacrogue session)
 
-_Entries are added while the session runs._
+Run `run_e12b4626f7`: 8 cards, all passed review on the first try, 44 minutes, $17.95, 661 tests.
+No card was stuck on a GuudFlow bug. The overseer woke twice on `burn_without_output` and handled
+it on its own (budget re-briefs and a priority order). What still needed the operator:
+
+### F5. Raising the budget at the provider does not reach the session
+- **Seen:** the owner added credit to the Anthropic key twice ($5, then $20), expecting the session to use it. The session's own cap (`token_budget_usd`) stayed at $10 and would have stopped it with credit to spare. The owner had to tell the operator, and the operator called `PATCH /runs/{id}/limits`.
+- **Cause:** GuudFlow knows only its own cap. It cannot see the key's balance, and Studio does not say clearly that the two are separate.
+- **Proposed fix:** when spend reaches about 80% of the cap, Studio shows a clear "about to stop: raise the cap?" prompt (the limits control is already there) and posts it as an approval request. Studio states the run's cap next to the budget meter as "GuudFlow cap", distinct from provider credit. Optionally, show the provider's remaining balance where its API offers one. `open`
+
+### F6. After a budget raise, the team still worked as if money was nearly gone
+- **Seen:** the overseer had told both workers "budget nearly spent, finish fast". Raising the cap did not reach them; the operator had to post a priority comment.
+- **Proposed fix:** a `RUN_LIMITS_CHANGED` signal goes into every role's next brief (as notes do), and the overseer's budget re-brief is withdrawn when the cap rises. `open`
+
+### Noticed in passing (no intervention)
+- **Escaped text on the board:** the overseer's `decide` summary is stored with HTML entities (`T4 &gt; T6`). Something escapes it before it is saved, and Studio would show the entities. `open`
+- **Overseer wake reason not on the board:** the overseer started with no signal saying which detector woke it (here `burn_without_output`). Post the detector and its numbers as a signal so Studio can show why. `open`
+- **Serial plans leave workers idle:** the planner chained most cards (T3 → T4 → T5 → T7 → T8), so the renderer waited about 8 minutes twice. Worth a planner hint: prefer cards that can start on agreed interfaces. `open`
