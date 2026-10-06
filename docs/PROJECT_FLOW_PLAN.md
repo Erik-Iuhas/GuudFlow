@@ -590,14 +590,17 @@ by the session budget, and stalls are guarded by the stuck detectors.
   - `none`: no time limit; the budget and stuck detectors are the guards.
   - `soft` (the new default): at the time limit, stop starting new cards, let running cards and
     their reviews finish, then submit for review. A `TIME_LIMIT_REACHED` signal is shown in Studio.
-  - `hard`: today's behaviour. Kept only for CI and scripted runs that must end on time; Studio
-    does not offer it by default.
+  - `hard`: today's behaviour, for sessions that must end on time (CI, scripted runs, demos).
+    Offered in Studio, just not the default.
 - **The soft limit wakes the overseer.** A new stuck detector, `time_limit`, fires when the soft
   limit is reached (and once early, at 80% of it). The overseer looks for loops and cards that are
   going nowhere and redirects with its usual menu (`rebrief`, `split`, `restart_role`, `decide`,
   `pause`). For example: "T7 has run 25 min with 3 failed reviews on the same issue; split it."
-  If nothing is stuck, it lets the running cards finish. Overseer wake caps still apply, and if its
-  wakes are used up the session goes to `HUMAN_NEEDED` instead of running on.
+  If nothing is stuck, it lets the running cards finish. The two `time_limit` wakes do not count
+  against the overseer's 5 wakes per session (`OverseerCaps.max_wakes_per_run`), so a session that
+  already had stalls can still be checked when time runs out. The per-wake cap (3 interventions)
+  still applies. If the overseer is out of wakes for anything else, the session goes to
+  `HUMAN_NEEDED` instead of running on.
 - **Turn timeout becomes a stall timeout:** a card attempt is aborted only after N minutes with
   no model or tool activity (default 10). A long but busy turn keeps going. An optional absolute
   cap per turn stays available, off by default.
