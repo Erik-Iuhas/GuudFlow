@@ -36,9 +36,10 @@ Outcome = Literal["done", "partial", "not_started"]
 KINDS = frozenset({"code", "test", "docs", "research", "visual"})
 SIZES = frozenset({"S", "M", "L"})
 _ID = re.compile(r"^B[0-9]+$")
+_REQ_ID = re.compile(r"^R[0-9]+$")
 _STATUS_ORDER = {"in_run": 0, "open": 1, "done": 2, "dropped": 3}
 _EDITABLE = frozenset({"title", "acceptance", "kind", "size", "priority", "notes", "files_hint",
-                       "depends_on"})
+                       "depends_on", "serves"})
 
 
 class BacklogError(ValueError):
@@ -59,6 +60,8 @@ class BacklogItem:
     notes: str = ""
     files_hint: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)   # items that must be done first
+    serves: list[str] = field(default_factory=list)       # requirement ids (R4) it serves
+    pinned_fields: list[str] = field(default_factory=list)  # fields a human set directly
     source: str = "human"              # human | run:<run_id>
     created_at: float = 0.0
     updated_at: float = 0.0
@@ -159,36 +162,17 @@ class Backlog:
     def add(self, title: str, acceptance: Sequence[str] = (), *, kind: str = "code",
             size: str = "M", priority: int = 0, notes: str = "",
             files_hint: Sequence[str] = (), depends_on: Sequence[str] = (),
-            source: str = "human") -> BacklogItem:
+            source: str = "human", serves: Sequence[str] = ()) -> BacklogItem:
         """Add an open item."""
-        fields = self._validated({"title": title, "acceptance": list(acceptance), "kind": kind,
-                                  "size": size, "priority": priority, "notes": notes,
-                                  "files_hint": list(files_hint),
-                                  "depends_on": list(depends_on)})
-        now = time.time()
         with self.db.backlog_doc() as doc:
-            _check_deps(doc, f"B{int(doc.get('next', 1))}", fields["depends_on"])
-            item = BacklogItem(id=f"B{int(doc.get('next', 1))}", source=source,
-                               created_at=now, updated_at=now, **fields)
-            doc["next"] = int(doc.get("next", 1)) + 1
-            doc.setdefault("items", []).append(asdict(item))
-        return item
+            return add_to_doc(doc, title, acceptance, kind=kind, size=size, priority=priority,
+                              notes=notes, files_hint=files_hint, depends_on=depends_on,
+                              source=source, serves=serves)
 
     def update(self, item_id: str, **changes: Any) -> BacklogItem:  # Any: validated below
         """Edit fields of an item (any status but `done`)."""
-        unknown = set(changes) - _EDITABLE
-        if unknown:
-            raise BacklogError(f"cannot edit {', '.join(sorted(unknown))}")
-        clean = self._validated(changes)
         with self.db.backlog_doc() as doc:
-            row = self._row(doc, item_id)
-            if row["status"] == "done":
-                raise BacklogError(f"{item_id} is done; add a new item instead")
-            if "depends_on" in clean:
-                _check_deps(doc, item_id, clean["depends_on"])
-            row.update(clean)
-            row["updated_at"] = time.time()
-            return BacklogItem(**row)
+            return update_in_doc(doc, item_id, **changes)
 
     def drop(self, item_id: str, reason: str = "") -> BacklogItem:
         """Drop an open item (it stays visible as dropped)."""
@@ -376,7 +360,52 @@ class Backlog:
                         isinstance(v, str) and _ID.match(v) for v in value):
                     raise BacklogError("depends_on must be a list of item ids like B3")
                 out[key] = list(dict.fromkeys(value))
+            elif key == "serves":
+                if not isinstance(value, (list, tuple)) or not all(
+                        isinstance(v, str) and _REQ_ID.match(v) for v in value):
+                    raise BacklogError("serves must be a list of requirement ids like R4")
+                out[key] = list(dict.fromkeys(value))
         return out
+
+
+def add_to_doc(doc: dict[str, Any], title: str, acceptance: Sequence[str] = (), *,
+               kind: str = "code", size: str = "M", priority: int = 0, notes: str = "",
+               files_hint: Sequence[str] = (), depends_on: Sequence[str] = (),
+               source: str = "human", serves: Sequence[str] = ()) -> BacklogItem:
+    """Add an open item to an already-open backlog document (inside the caller's transaction)."""
+    fields = Backlog._validated({"title": title, "acceptance": list(acceptance), "kind": kind,
+                                 "size": size, "priority": priority, "notes": notes,
+                                 "files_hint": list(files_hint),
+                                 "depends_on": list(depends_on), "serves": list(serves)})
+    now = time.time()
+    item_id = f"B{int(doc.get('next', 1))}"
+    _check_deps(doc, item_id, fields["depends_on"])
+    item = BacklogItem(id=item_id, source=source, created_at=now, updated_at=now, **fields)
+    doc["next"] = int(doc.get("next", 1)) + 1
+    doc.setdefault("items", []).append(asdict(item))
+    return item
+
+
+def update_in_doc(doc: dict[str, Any], item_id: str, *, pin: bool = False,
+                  **changes: Any) -> BacklogItem:  # Any: validated below
+    """Edit an item in an already-open backlog document (any status but `done`).
+
+    `pin=True` records the edited fields in the item's `pinned_fields` (a human edit).
+    """
+    unknown = set(changes) - _EDITABLE
+    if unknown:
+        raise BacklogError(f"cannot edit {', '.join(sorted(unknown))}")
+    clean = Backlog._validated(changes)
+    row = Backlog._row(doc, item_id)
+    if row["status"] == "done":
+        raise BacklogError(f"{item_id} is done; add a new item instead")
+    if "depends_on" in clean:
+        _check_deps(doc, item_id, clean["depends_on"])
+    row.update(clean)
+    if pin:
+        row["pinned_fields"] = sorted(set(row.get("pinned_fields") or []) | set(clean))
+    row["updated_at"] = time.time()
+    return BacklogItem(**row)
 
 
 def _check_selection(doc: dict[str, Any], ids: Sequence[str]
