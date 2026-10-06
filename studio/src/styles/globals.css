@@ -18,6 +18,38 @@
     @apply rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
   }
   :focus-visible { @apply outline-none ring-2 ring-ring; }
+
+  /* Checkboxes and radios: drawn from tokens instead of the browser's native control. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    @apply m-0 inline-grid h-4 w-4 shrink-0 cursor-pointer appearance-none place-content-center border border-muted-foreground/45 bg-background p-0 align-middle transition-colors;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+  input[type="checkbox"] { @apply rounded-[4px]; background-size: 12px 12px; }
+  input[type="radio"] { @apply rounded-full; }
+  input[type="checkbox"]:hover:not(:disabled),
+  input[type="radio"]:hover:not(:disabled) { @apply border-primary/70; }
+  input[type="checkbox"]:checked,
+  input[type="checkbox"]:indeterminate,
+  input[type="radio"]:checked { @apply border-primary bg-primary; }
+  input[type="checkbox"]:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23ffffff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
+  }
+  html.dark input[type="checkbox"]:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230b1222' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
+  }
+  input[type="checkbox"]:indeterminate {
+    background-image: linear-gradient(hsl(var(--primary-foreground)), hsl(var(--primary-foreground)));
+    background-size: 8px 2px;
+  }
+  input[type="radio"]:checked {
+    background-image: radial-gradient(circle, hsl(var(--primary-foreground)) 0 3px, transparent 3.5px);
+  }
+  input[type="checkbox"]:focus-visible,
+  input[type="radio"]:focus-visible { @apply ring-2 ring-ring ring-offset-2 ring-offset-background; }
+  input[type="checkbox"]:disabled,
+  input[type="radio"]:disabled { @apply cursor-not-allowed opacity-50; }
 }
 
 /* Cockpit pipeline graph (U1): React Flow edges and chrome, coloured from tokens. */
