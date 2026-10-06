@@ -189,8 +189,9 @@ curl -X POST http://localhost:8000/api/projects/my-app/runs-review/RUN_ID/accept
 
 In **Settings → Project work** you can also set:
 
-- a check command (for example `pytest -q`), run on each finished run's code in a sandbox
-  with no network; its result shows in the review queue;
+- a check command (for example `python3 -m unittest discover -s tests -q`, or `bun test` for
+  JavaScript), run on each finished run's code in a sandbox with no network; its result shows in
+  the review queue;
 - the project's real remote: it is synced into the project before every run, and an
   accepted run is pushed as a branch, opened as a GitHub pull request, or pushed to the
   branch. The token stays in a `GUUDFLOW_GIT_*` environment variable on the server;
@@ -225,8 +226,12 @@ suite (`tests/harness/test_escape_suite.py`) needs Docker and runs in CI's Docke
 
 ## Run it locally
 
-You need Python 3.11+, Node 18+, and (for production sandbox)
-Docker. Three commands:
+> **Full guide: [docs/SETUP.md](docs/SETUP.md)**: which setup to pick for your OS, prerequisites,
+> install, starting it, a first project end to end, models and keys, configuration, security and
+> troubleshooting. The summary below is the short version.
+
+You need Python 3.11+, Node 18+ with npm, git, and Docker Engine for sandboxed agents (Linux, or
+WSL2 with Docker Engine inside it; Docker Desktop is not supported for sandboxes, see the guide).
 
 ### 1. Backend
 
@@ -247,11 +252,18 @@ exist. Open `.env` and add your `ANTHROPIC_API_KEY`.
 > `GUUDFLOW_WITH_EMBEDDINGS=1` before running setup, or
 > `pip install -r requirements-optional.txt` separately later.
 
-Then start the API + in-process worker:
+Install the pinned opencode binary (needs npm):
+
+```bash
+scripts/install_opencode.sh
+```
+
+Then start the API + in-process worker (avoid `--reload` while agents run: a code edit restarts
+the API and stops the run):
 
 ```bash
 source venv/bin/activate     # or: venv\Scripts\Activate.ps1 on Windows
-uvicorn api.main:app --reload --port 8000
+uvicorn api.main:app --port 8000
 ```
 
 The API serves at `http://localhost:8000`. Health check:
@@ -265,11 +277,18 @@ npm install
 npm run dev
 ```
 
-Studio runs at `http://localhost:3000` and proxies `/api` and `/ws` to
-the backend on `:8000`. Paste your API token (whatever you set in
+Studio runs at `http://localhost:3001` and proxies `/api` and `/ws` to
+the backend on `:8000` (or set `GUUDFLOW_API_URL`). To serve Studio from the API on one port instead,
+run `npm run build` and start the API with `GUUDFLOW_STUDIO_DIST=studio/dist`. Paste your API token (whatever you set in
 `GUUDFLOW_API_TOKEN`) in the top-right field.
 
-### 3. (Optional) Sandbox image
+### 3. Sandboxes
+
+With Docker available, every agent role runs in its own hardened container; the image
+(`guudflow/agent-opencode:<version>`) is built automatically on the first run. Without Docker, runs
+fall back to host mode (no isolation, trusted demos only). See [docs/SETUP.md](docs/SETUP.md).
+
+The rest of this section describes the **legacy** harness's sandbox, kept for reference.
 
 In dev mode this is optional — `code-exec` runs on the host with §29
 hardening (env scrub, cwd pin, audit log, POSIX rlimits, mode
@@ -294,6 +313,10 @@ without a `DockerManager`, `code-exec` itself refuses to run on the
 host.
 
 ## Run it with Docker
+
+> **Not for agent runs yet.** The compose stack predates the opencode harness. It does not install
+> opencode, and a containerized API cannot reach the per-run sandbox networks it creates. Use it to
+> browse Studio and the API; run agents with the native install ([docs/SETUP.md](docs/SETUP.md)).
 
 If you'd rather not install Python/Node directly:
 

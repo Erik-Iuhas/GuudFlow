@@ -41,7 +41,7 @@ function Kill-LeftoverUvicorn {
 
 Write-Host "Stopping existing servers..." -ForegroundColor Yellow
 Kill-Port 8000
-Kill-Port 3000
+Kill-Port 3001
 Kill-LeftoverUvicorn
 Start-Sleep -Milliseconds 500
 
@@ -81,7 +81,7 @@ if (-not (Test-Path (Join-Path $studioPath "node_modules"))) {
     Pop-Location
 }
 
-Write-Host "Starting frontend -> http://localhost:3000" -ForegroundColor Cyan
+Write-Host "Starting frontend -> http://localhost:3001" -ForegroundColor Cyan
 Start-Process pwsh -ArgumentList @(
     "-NoExit", "-Command",
     "Set-Location '$studioPath'; npm run dev"
@@ -90,4 +90,4 @@ Start-Process pwsh -ArgumentList @(
 Write-Host ""
 Write-Host "Both servers launching in separate windows." -ForegroundColor Green
 Write-Host "  Backend:  http://localhost:8000"
-Write-Host "  Frontend: http://localhost:3000"
+Write-Host "  Frontend: http://localhost:3001"

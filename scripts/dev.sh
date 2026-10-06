@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch (or relaunch) the GuudFlow dev stack.
-# Kills anything on 8000/3000, rebuilds venv if it was made by Windows, then
+# Kills anything on 8000/3001, rebuilds venv if it was made by Windows, then
 # starts backend + frontend in the background with live-tailed logs.
 #
 # Usage:
@@ -52,7 +52,7 @@ kill_leftover_uvicorn() {
 # ── stop existing servers ───────────────────────────────────────────────────
 info "→ Stopping existing servers..."
 kill_port 8000
-kill_port 3000
+kill_port 3001
 kill_leftover_uvicorn
 sleep 0.3
 
@@ -111,13 +111,13 @@ else
 fi
 BACK_PID=$!
 
-info "→ Starting frontend → http://localhost:3000"
+info "→ Starting frontend → http://localhost:3001"
 (cd studio && npm run dev) > "${LOG_FRONT}" 2>&1 &
 FRONT_PID=$!
 
 ok "
   Backend  pid ${BACK_PID}  →  http://localhost:8000
-  Frontend pid ${FRONT_PID}  →  http://localhost:3000
+  Frontend pid ${FRONT_PID}  →  http://localhost:3001
   Logs: tail -f .dev-backend.log .dev-frontend.log
 
   Ctrl-C to stop both.
