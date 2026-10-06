@@ -26,6 +26,7 @@ import { Inputs } from "./Inputs";
 import { PlanTab } from "../features/plan/PlanTab";
 import { SeatsPanel } from "../features/team/SeatsPanel";
 import { RulesPanel } from "../features/team/RulesPanel";
+import { RecordTab } from "../features/record/RecordTab";
 
 const DETAIL_OPTIONS: { value: DetailLevel; label: string }[] = [
   { value: "overview", label: "Overview" },
@@ -307,7 +308,12 @@ export function Studio() {
       ) : tab === "sessions" ? (
         <SessionsTab runs={runs} onResumed={() => void load()} />
       ) : tab === "record" ? (
-        id && <ProjectInsights projectId={id} />
+        id && (
+          <>
+            <RecordTab projectId={id} />
+            <ProjectInsights projectId={id} />
+          </>
+        )
       ) : (
         <>
           <SettingsTab
