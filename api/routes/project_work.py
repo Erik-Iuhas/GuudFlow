@@ -24,7 +24,9 @@ from core.project_repo import ProjectRepo, ProjectRepoConflict, ProjectRepoError
 from core.autopilot import AutopilotConfig, AutopilotError
 from core.autopilot import status as autopilot_status
 from core.project_remote import RemoteConfig, RemoteError, sync
+from core.pm_prompts import Seats
 from core.project_runs import decide_run
+from core.spec_adherence import cosigned, needs_cosign
 
 router = APIRouter(prefix="/api/projects", tags=["project-work"],
                    dependencies=[Depends(require_bearer)])
@@ -67,6 +69,22 @@ class Decision(BaseModel):
     """Body of POST /runs-review/{run_id}/accept|reject."""
 
     note: str = ""
+
+
+class CosignComment(BaseModel):
+    """One comment of a co-sign."""
+
+    file: str | None = None
+    line: int | None = None
+    text: str
+    severity: Literal["note", "should_fix", "blocking"] = "note"
+
+
+class Cosign(BaseModel):
+    """Body of POST /runs-review/{run_id}/cosign (the reviewer seat, plan §1 call 7)."""
+
+    verdict: Literal["cosign", "changes"]
+    comments: list[CosignComment] = Field(default_factory=list)
 
 
 async def _project(request: Request, project_id: str) -> Path:
@@ -170,7 +188,11 @@ async def list_project_runs(request: Request, project_id: str) -> dict[str, Any]
         pilot_status = autopilot_status(data_root, project_id, pilot, time.time())
     except AutopilotError as exc:
         pilot_status = {"enabled": False, "error": str(exc)}
-    return {"main": main, "runs": [asdict(r) for r in repo.runs()],
+    seat = Seats.from_project(project).reviewer
+    return {"main": main,
+            "runs": [{**asdict(r), "needs_cosign": r.state == "pending"
+                      and needs_cosign(data_root, project_id, r.run_id, seat)}
+                     for r in repo.runs()],
             "autopilot": pilot_status,
             "remote": None if remote is None else {
                 "url": remote.url, "branch": remote.branch, "publish": remote.publish,
@@ -211,6 +233,13 @@ async def _decide(request: Request, project_id: str, run_id: str, accept: bool,
     remote = _remote(await request.app.state.project_store.get(project_id) or {})
     if await _run_is_live(request, run_id):
         raise HTTPException(status_code=409, detail=f"run {run_id} is still running")
+    if accept:
+        project = await request.app.state.project_store.get(project_id) or {}
+        run = ProjectRepo(data_root, project_id).get(run_id)
+        if (run is not None and run.state == "pending" and not cosigned(run.cosign)
+                and needs_cosign(data_root, project_id, run_id,
+                                 Seats.from_project(project).reviewer)):
+            raise HTTPException(status_code=409, detail="co-sign the code first")
     try:
         decision = decide_run(data_root, project_id, run_id, accept=accept, note=note,
                               remote=remote,
@@ -237,3 +266,42 @@ async def reject_run(request: Request, project_id: str, run_id: str,
                      body: Decision | None = None) -> Any:  # Any: dict or JSONResponse
     """Leave main as it is; the run's backlog items reopen."""
     return await _decide(request, project_id, run_id, False, (body or Decision()).note)
+
+
+def _changes_note(comments: list[CosignComment]) -> str:
+    """The reject note a "changes" co-sign becomes: it reaches the next brief as `review_note`."""
+    lines = ["Changes requested by the reviewer:"]
+    for c in comments:
+        where = (f"{c.file}:{c.line}" if c.file and c.line else c.file or "")
+        lines.append(f"- [{c.severity}] {where + ': ' if where else ''}{c.text.strip()}")
+    return "\n".join(lines)
+
+
+@router.post("/{project_id}/runs-review/{run_id}/cosign")
+async def cosign_run(request: Request, project_id: str, run_id: str,
+                     body: Cosign) -> Any:  # Any: dict or JSONResponse
+    """The reviewer seat's decision on a waiting run.
+
+    `cosign` stores the verdict (accepting is then allowed); `changes` stores it and rejects
+    the run with a note built from the comments, so they reach the next brief.
+    """
+    data_root = await _project(request, project_id)
+    repo = ProjectRepo(data_root, project_id)
+    run = repo.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id} was never submitted")
+    if await _run_is_live(request, run_id):
+        raise HTTPException(status_code=409, detail=f"run {run_id} is still running")
+    if run.state != "pending":
+        raise HTTPException(status_code=409, detail=f"run {run_id} is {run.state}, not waiting")
+    cosign = {"verdict": body.verdict, "by": "human", "at": time.time(),
+              "comments": [c.model_dump() for c in body.comments]}
+    repo.record(run_id, cosign=cosign)
+    if body.verdict == "cosign":
+        return {"cosign": cosign, "run": asdict(repo.get(run_id) or run)}
+    result = await _decide(request, project_id, run_id, False,
+                           _changes_note(body.comments) if body.comments
+                           else "Changes requested by the reviewer.")
+    if isinstance(result, dict):
+        result["cosign"] = cosign
+    return result

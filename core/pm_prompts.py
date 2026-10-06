@@ -11,9 +11,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from core.start_modes import DEFAULT_START_MODE, MODES, START_MODES, normalise_mode
+
 Phase = Literal["plan", "after_session", "derive_spec"]
-START_MODES = ("spec_first", "prototype_first", "test_first", "research_first", "maintain")
-DEFAULT_START_MODE = "spec_first"
 _REVIEWER = ("off", "all", "must")
 
 
@@ -33,11 +33,6 @@ class Seats:
         reviewer = raw.get("reviewer")
         return cls(lead=raw.get("lead") is True,
                    reviewer=reviewer if reviewer in _REVIEWER else "off")
-
-
-def normalise_mode(mode: object) -> str:
-    """A known start mode, else `spec_first`."""
-    return mode if isinstance(mode, str) and mode in START_MODES else DEFAULT_START_MODE
 
 
 BASE = """\
@@ -107,39 +102,6 @@ REVIEWER_MUST = """\
 A human reviewer co-signs the work items that carry binding rules or must-priority requirements \
 before a session is accepted. Keep those items small enough to review: one concern per item, a \
 few hundred changed lines at most, and acceptance lines a person can check from the diff."""
-
-MODES: dict[str, str] = {
-    "spec_first": """\
-Start mode: spec first. No session runs until the spec is approved, so the first job is a spec \
-that is good enough to build from: requirements with checks, the decisions that shape the \
-build, and work items that each implement named checks. Every item you add should serve at \
-least one requirement. Keep the first set of items to the smallest slice that proves the \
-design.""",
-    "prototype_first": """\
-Start mode: prototype first. The first session builds the thinnest end-to-end slice and skips \
-polish; no approved spec is needed to start. Plan session one as that slice: few items, wide \
-rather than deep. Keep requirements light and mark them `assumed` until the prototype shows \
-what is real. After the first accepted session you will be asked to write the spec from what \
-was built.""",
-    "test_first": """\
-Start mode: test first. No session runs until the spec is approved. For each work item the \
-team writes failing tests for its requirement checks first and builds second, so every check \
-must be concrete enough to become a test. Write checks as observable behaviour with example \
-inputs and outputs where you can. Say in the item's acceptance when a tester item must come \
-before a builder item, and use `depends_on` for it.""",
-    "research_first": """\
-Start mode: research first. The first session produces knowledge, not product code. Plan it \
-as `research` work items, each ending in a decision note with the options, the evidence and a \
-recommendation. Requirements stay light and assumed until the research is in. No approved spec \
-is needed to start. After the session you will be asked to write requirements and decisions \
-from what was found.""",
-    "maintain": """\
-Start mode: maintain. This is existing software and the goal is small, safe change. Plan the \
-smallest change that meets each item, with a regression test for every fix, and no refactoring \
-outside the files the item names (`files_hint`). Prefer a rule such as "minimal diff" or \
-"regression test per fix" over new requirements. Do not rewrite the spec; add to it only when \
-behaviour that must not break is worth recording.""",
-}
 
 PHASES: dict[str, str] = {
     "plan": """\

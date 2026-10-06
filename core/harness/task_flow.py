@@ -27,6 +27,7 @@ from pydantic import BaseModel
 
 from core.harness.result_inbox import ResultCheck
 from core.harness.results import AgentResult, ReviewResult
+from core.harness.spec_brief import SpecBrief, missing_check_lines
 from core.harness.task_board import BoardLimits, TaskBoard
 from core.harness.tasks import PlanResult, check_plan, check_task_result
 from core.harness import visual_review
@@ -36,6 +37,7 @@ from core.workspace import AgentState, HumanRequest, Workspace
 
 if TYPE_CHECKING:
     from core.backlog import BacklogItem
+    from core.workspace import Task
     from core.runner import AgentConfig
     from core.scheduler import Scheduler
 
@@ -93,6 +95,8 @@ class TaskFlow:
     _feedback_roles: dict[str, str] = field(default_factory=dict)   # request id → role
     # The project backlog items this run took (plan §13); the plan must cover each.
     backlog: list["BacklogItem"] = field(default_factory=list)
+    # The project's spec and start mode (project-flow plan §4); None for projects without.
+    spec: SpecBrief | None = None
 
     @classmethod
     def build(cls, agents: Sequence["AgentConfig"], role_types: dict[str, str],
@@ -157,6 +161,10 @@ class TaskFlow:
             items = [i.id for i in self.backlog]
             sections: tuple[tuple[str, str], ...] = (
                 ("Your output: the task list", _planner_instructions(owners)),)
+            if self.spec is not None:
+                text = self.spec.planner_section(self.backlog)
+                if text:
+                    sections = (("The spec", text),) + sections
             if self.backlog:
                 sections = (("This run's backlog items", backlog_text(self.backlog)),) + sections
             return TurnPlan(
@@ -172,9 +180,11 @@ class TaskFlow:
                 return TurnPlan(model=ReviewResult, skip=True)
             self.board.start(role, card.task_id)
             criteria = list(card.acceptance_criteria)
+            spec_section, extra = self._card_spec(role, card, reviewer=True)
+            criteria += [line for line in extra if line not in criteria]
             visual = self._visual_review_text(role, card.task_id)
             return TurnPlan(
-                model=ReviewResult, card_id=card.task_id,
+                model=ReviewResult, card_id=card.task_id, extra_sections=spec_section,
                 task_text=self.board.brief_for(card.task_id, reviewer=True) + visual
                 + f"\n\nThe card's work was done by **{card.assigned_to}** and is merged into "
                   f"your working copy. Call `guudflow_changes` with `task_id` "
@@ -190,9 +200,23 @@ class TaskFlow:
                       if card.kind == "visual" and self.tool_dir_for is not None else "")
         return TurnPlan(
             model=AgentResult, card_id=card.task_id,
+            extra_sections=self._card_spec(role, card)[0],
             task_text=self.board.brief_for(card.task_id) + self_check,
             check=lambda r, tid=card.task_id: (_check_done(r, tid, criteria)
                                                if isinstance(r, AgentResult) else []))
+
+    def _card_spec(self, role: str, card: "Task", *, reviewer: bool = False
+                   ) -> tuple[tuple[tuple[str, str], ...], list[str]]:
+        """The spec section for a card turn, and (reviewers) the rule lines to answer."""
+        if self.spec is None:
+            return (), []
+        item = next((i for i in self.backlog if i.id == card.backlog_id), None)
+        owner_type = self.role_types.get(card.assigned_to, "")
+        extra = self.spec.reviewer_lines(owner_type) if reviewer else []
+        text = self.spec.card_section(self.role_types.get(role, ""), item,
+                                      owner_type=owner_type if reviewer else None,
+                                      extra_lines=extra)
+        return ((("The spec", text),) if text else ()), extra
 
     def end_turn(self, role: str) -> None:
         """Always called when a spawn ends."""
@@ -201,6 +225,14 @@ class TaskFlow:
     def plan_accepted(self, plan: PlanResult) -> None:
         """Create the cards and give card roles enough spawns for them."""
         self.board.create_from_plan(plan, self.planner)
+        if self.spec is not None:
+            missing = missing_check_lines(self.backlog, [t.acceptance for t in plan.tasks])
+            if missing:
+                # Soft: the plan stands. There is no warning signal type, so a high-priority
+                # THINKING notice from the planner carries it.
+                self.post(SignalType.THINKING, self.planner,
+                          f"spec coverage warning: {', '.join(missing)} on no card",
+                          json.dumps({"warning": "spec_coverage", "checks": missing}))
         per_role: dict[str, int] = {}
         for t in plan.tasks:
             per_role[t.owner_role] = per_role.get(t.owner_role, 0) + 1

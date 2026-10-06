@@ -31,6 +31,7 @@ from agents.builtin.meta import MetaAgent, TeamProposal
 from api.auth import require_bearer
 from core.llm import AnthropicClient, LLMClient
 from core.runner import AgentConfig
+from core.start_modes import TEAM_HINTS
 
 
 _logger = logging.getLogger(__name__)
@@ -89,30 +90,8 @@ def _skeleton_response(goal: str) -> dict[str, Any]:
     }
 
 
-# Team-template hints per start mode (project flow plan §5).
-START_MODE_HINTS: dict[str, str] = {
-    "spec_first": (
-        "start mode spec_first: project manager, one or two builders and a reviewer. "
-        "Every card should implement named requirement checks."
-    ),
-    "prototype_first": (
-        "start mode prototype_first: project manager, one builder and a reviewer. "
-        "The first session builds the thinnest end-to-end slice; skip polish."
-    ),
-    "test_first": (
-        "start mode test_first: include a tester role ahead of builders. The tester "
-        "writes failing tests for each item's checks first; builders depend on the tester."
-    ),
-    "research_first": (
-        "start mode research_first: project manager, a researcher with web access and a "
-        "reviewer. Research produces a decision note with options, evidence and a "
-        "recommendation; no product code yet."
-    ),
-    "maintain": (
-        "start mode maintain: project manager, one builder and a reviewer. Existing code: "
-        "the smallest safe change, and a regression test per fix."
-    ),
-}
+# Team-template hints per start mode (project flow plan §5): see core/start_modes.py.
+START_MODE_HINTS = TEAM_HINTS
 
 
 _VALID_META_MODEL_TIERS = frozenset({"heavy", "solid", "fast"})

@@ -68,6 +68,7 @@ from core.harness.results import AgentResult, ReviewResult
 from core.harness.server import OpencodeServer
 from core import project_runs
 from core.backlog import BacklogItem
+from core.harness.spec_brief import SpecBrief
 from core.harness.task_flow import TaskFlow, TurnPlan, backlog_text
 from core.harness.detectors import DetectorConfig, RunView
 from core.harness.overseer import OverseerCaps, OverseerResult
@@ -244,6 +245,9 @@ class OpencodeRun:
         flow = self.flow
         if flow is not None:
             flow.backlog = list(self.backlog)
+            # The spec and the start mode (plan §4); None keeps briefs as they were.
+            flow.spec = SpecBrief.load(self._data_root(), self.runner.project.project_id,
+                                       getattr(self.runner.project, "start_mode", None))
             flow.tool_dir_for = self.clones.tool_dir
             flow.ref_roots = [self.runner.run_root / "inputs", self.runner.git.working_dir]
             flow.run_root = self.runner.run_root

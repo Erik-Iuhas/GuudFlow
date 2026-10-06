@@ -68,6 +68,10 @@ class RunBranch:
     # Remote results (plan §14.1): the sync before accepting, and where it was published.
     sync: dict[str, object] | None = None
     published: dict[str, object] | None = None
+    # The human reviewer's co-sign (plan §1 call 7): {verdict, by, at, comments}.
+    cosign: dict[str, object] | None = None
+    # Per rule id, review verdicts that said met and unmet ({"rule-2": {"met": 3, "unmet": 1}}).
+    rule_verdicts: dict[str, dict[str, int]] | None = None
 
     @property
     def branch(self) -> str:
