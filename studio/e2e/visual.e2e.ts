@@ -190,6 +190,8 @@ const PAGES: Array<{
           ],
         }),
       );
+      // The Work tab opens on Overview; this scenario pictures the Technical view.
+      await page.addInitScript(() => window.localStorage.setItem("guudflow.detail.billing-api", "technical"));
       await page.goto("/projects/billing-api");
       await expect(page.getByTestId("review-run_7c2e1")).toBeVisible();
       await expect(page.getByTestId("backlog-B4")).toBeVisible();

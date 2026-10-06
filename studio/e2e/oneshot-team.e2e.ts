@@ -93,7 +93,6 @@ test("approve a team after a capability change, with a playbook entry visible", 
   await expect(entry).toContainText("+ brief addendum for builder: Read research/notes.md first");
   await expect(entry).toContainText("confidence 80%");
 
-  await page.getByLabel("Agent harness").selectOption("opencode");
   const cost = page.getByTestId("cost-strip").getByText(/per run/);
   await page.getByTestId("team-node-builder").click();
   const before = await cost.textContent();
