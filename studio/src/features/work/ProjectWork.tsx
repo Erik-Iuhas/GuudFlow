@@ -131,10 +131,10 @@ export function ProjectWork({
       </div>
       <div>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <SectionTitle className="m-0">Backlog</SectionTitle>
+          <SectionTitle className="m-0">Choose items for the next session</SectionTitle>
           <Button size="sm" variant="outline" disabled={groom.isPending}
             onClick={() => groom.mutate(undefined, { onSuccess: (p) => setProposals(p) })}>
-            {groom.isPending ? "Thinking…" : "Suggest items from the roadmap"}
+            {groom.isPending ? "Thinking…" : "Suggest items"}
           </Button>
         </div>
         {proposals && (

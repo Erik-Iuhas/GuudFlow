@@ -61,7 +61,7 @@ describe("BacklogList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Move B2 up" }));
     expect(props.onMove).toHaveBeenCalledWith("B2", 3);
     expect(screen.getByRole("button", { name: "Move B1 up" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Start a run with 1 item" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start session with 1 item" }));
     expect(props.onStart).toHaveBeenCalled();
   });
 
@@ -72,7 +72,7 @@ describe("BacklogList", () => {
     ]} />);
     expect(within(screen.getByTestId("backlog-B1")).getByText("finished, waiting for your review")).toBeInTheDocument();
     expect(screen.getByText("Last run (run_w): half the endpoints")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start a run with 0 items" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Start session with 0 items" })).toBeDisabled();
   });
 
   it("adds an item with one acceptance check per line", () => {

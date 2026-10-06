@@ -51,7 +51,7 @@ export function BacklogList({
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h3 className="m-0 text-sm font-semibold">Open ({groups.open.length})</h3>
           <Button size="sm" onClick={onStart} disabled={selected.length === 0 || starting}>
-            {starting ? "Starting…" : `Start a run with ${selected.length} item${selected.length === 1 ? "" : "s"}`}
+            {starting ? "Starting…" : `Start session with ${selected.length} item${selected.length === 1 ? "" : "s"}`}
           </Button>
         </div>
         {groups.open.length === 0 ? (
