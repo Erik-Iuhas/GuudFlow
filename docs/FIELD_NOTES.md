@@ -27,6 +27,11 @@ Status is `open`, `fixed (<commit>)` or `wontfix (<why>)`.
 - **Operator:** restarted the API, then accepted the run through the API with a note listing what was left undone.
 - **Proposed fix:** on startup, the worker finds runs whose process is gone and offers "salvage" in Studio: finalize what merged, stop the rest, and send the run to review. `open` (check whether H4 reconcile runs covers this)
 
+### F4. A paused run could only be answered, or given more budget or time, through the API
+- **Seen:** in earlier sessions, when a run stopped for a human (`HUMAN_NEEDED`) or ran into its budget, Studio only said "answer in the comment box". A comment does not clear the pause, so the run stayed stuck.
+- **Operator:** posted `HUMAN_RESPONDED` or raised limits by hand.
+- **Fix:** `POST /runs/{id}/respond` and `PATCH /runs/{id}/limits`, an answer box in the HUMAN_NEEDED banner and a limits control next to the budget meter. The wall-clock deadline now also ends a run that is paused for a human. `fixed` (this commit)
+
 ## Session 3 (final pacrogue session)
 
 _Entries are added while the session runs._

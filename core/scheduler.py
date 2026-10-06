@@ -450,8 +450,13 @@ class Scheduler:
         whichever comes first. Caller re-enters the loop body to act.
         """
         next_deadline = self._next_interrupt_deadline()
+        run_left = self._run_deadline_timeout()
         if next_deadline is None and self.watchdog is None:
-            await self._wake.wait()
+            # Even while paused for a human the wall-clock deadline must still end the run.
+            try:
+                await asyncio.wait_for(self._wake.wait(), timeout=run_left)
+            except asyncio.TimeoutError:
+                pass
             self._wake.clear()
             return
         # With a watchdog, wake at least every interval so it (and the wall-clock
@@ -459,6 +464,8 @@ class Scheduler:
         timeout = min(max(0.0, next_deadline - time.monotonic())
                       if next_deadline is not None else float("inf"),
                       self.watchdog_interval if self.watchdog is not None else float("inf"))
+        if run_left is not None:
+            timeout = min(timeout, run_left)
         try:
             await asyncio.wait_for(self._wake.wait(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -702,6 +709,9 @@ class Scheduler:
         wake_task = asyncio.create_task(self._wake.wait(), name="scheduler:wake")
         waiters: list[asyncio.Task] = [wake_task, *self._tasks.values()]
         timeout = self.watchdog_interval if self.watchdog is not None else None
+        run_left = self._run_deadline_timeout()
+        if run_left is not None:
+            timeout = run_left if timeout is None else min(timeout, run_left)
         try:
             await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED, timeout=timeout)
         finally:
@@ -770,6 +780,13 @@ class Scheduler:
             if state in self._PARKED_STATES:
                 return True
         return False
+
+    def _run_deadline_timeout(self) -> float | None:
+        """Seconds until the run's wall-clock deadline (just past it), or None without one."""
+        deadline = self.workspace.deadline_at
+        if deadline is None:
+            return None
+        return max(0.0, deadline - time.time()) + 0.01
 
     def _deadline_exceeded(self) -> bool:
         deadline = self.workspace.deadline_at

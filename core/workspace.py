@@ -472,6 +472,12 @@ class Workspace:
         default_factory=list, repr=False, compare=False,
     )
 
+    # Live controls the running harness registers so the API can reach it without
+    # importing it (e.g. "set_budget", "wake"). Callables; never serialised.
+    controls: dict[str, Callable[..., Any]] = field(
+        default_factory=dict, repr=False, compare=False,
+    )
+
     # In-memory log lists (always populated; persister is optional).
     iteration_metrics: list["IterationMetrics"] = field(default_factory=list)
     context_log: list["ContextSnapshot"] = field(default_factory=list)

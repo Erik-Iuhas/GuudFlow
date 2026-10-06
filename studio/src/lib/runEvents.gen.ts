@@ -57,7 +57,8 @@ export type SignalType =
   | "OVERSEER_INTERVENTION"
   | "TASK_MOVED"
   | "TASK_THREAD"
-  | "RUN_SUBMITTED";
+  | "RUN_SUBMITTED"
+  | "RUN_LIMITS_CHANGED";
 
 export type TaskColumn = "todo" | "in_progress" | "review" | "done" | "blocked" | "needs_attention";
 

@@ -708,6 +708,127 @@ async def post_user_comment(
     }
 
 
+class RespondBody(BaseModel):
+    """Body of POST /{run_id}/respond."""
+
+    answer: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/{run_id}/respond", dependencies=[Depends(require_bearer)])
+async def respond_to_pause(request: Request, run_id: str, body: RespondBody) -> dict:
+    """Answer whatever paused the run (an agent's ask_human, the overseer's wake cap,
+    a blocked cycle) and let it carry on.
+
+    Posts HUMAN_RESPONDED (carrying the pending `question_id` when the pause came from
+    ask_human, so the waiting tool call returns), clears `pending_human`, posts the answer
+    as a priority comment so every role sees it in its next brief, and wakes the scheduler.
+    410 if the run is not active, 409 if nothing is pending.
+    """
+    answer = body.answer.strip()
+    if not answer:
+        raise HTTPException(status_code=400, detail="answer is required")
+    workspace = await request.app.state.run_registry.get(run_id)
+    if workspace is None:
+        raise HTTPException(status_code=410, detail=f"run {run_id!r} is not active")
+    pending = workspace.pending_human
+    if pending is None:
+        raise HTTPException(status_code=409, detail="nothing is waiting for an answer")
+    if pending.from_agent == "system":
+        raise HTTPException(status_code=409, detail="the run was stopped; it cannot be resumed")
+
+    question_id: str | None = None
+    for sig in reversed(workspace.board):
+        if sig.type is SignalType.HUMAN_NEEDED:
+            try:
+                raw = json.loads(sig.detail or "{}")
+            except ValueError:
+                raw = {}
+            if isinstance(raw, dict) and raw.get("question_id"):
+                question_id = str(raw["question_id"])
+            break
+    detail: dict[str, Any] = {"answer": answer}
+    if question_id:
+        detail["question_id"] = question_id
+    responded = Signal(
+        type=SignalType.HUMAN_RESPONDED, summary=answer, detail=json.dumps(detail),
+        from_user=True, iteration=workspace.iteration,
+    )
+    workspace.post_signal(responded)
+    workspace.pending_human = None
+    workspace.post_signal(Signal(
+        type=SignalType.USER_COMMENT_PRIORITY, summary=answer, from_user=True,
+        priority="high", iteration=workspace.iteration,
+    ))
+    wake = workspace.controls.get("wake")
+    if wake is not None:
+        wake()
+    return {"ok": True, "signal_id": str(responded.id), "question_id": question_id}
+
+
+class LimitsBody(BaseModel):
+    """Body of PATCH /{run_id}/limits."""
+
+    budget_usd: float | None = None
+    extend_minutes: int | None = None
+
+
+MAX_BUDGET_USD = 1000.0
+
+
+@router.patch("/{run_id}/limits", dependencies=[Depends(require_bearer)])
+async def change_limits(request: Request, run_id: str, body: LimitsBody) -> dict:
+    """Raise a live run's spend cap and/or push its deadline out.
+
+    `budget_usd` must exceed what the run has spent and be at most 1000;
+    `extend_minutes` (1..240) is added to the run's deadline.
+    """
+    import time
+
+    registry = request.app.state.run_registry
+    workspace = await registry.get(run_id)
+    if workspace is None:
+        raise HTTPException(status_code=410, detail=f"run {run_id!r} is not active")
+    if body.budget_usd is None and body.extend_minutes is None:
+        raise HTTPException(status_code=400, detail="give budget_usd and/or extend_minutes")
+    if body.extend_minutes is not None and not 1 <= body.extend_minutes <= 240:
+        raise HTTPException(status_code=400, detail="extend_minutes must be 1..240")
+    spend_fn = workspace.controls.get("spend")
+    spend = float(spend_fn()) if spend_fn is not None else 0.0
+    if body.budget_usd is not None:
+        if body.budget_usd > MAX_BUDGET_USD:
+            raise HTTPException(status_code=400, detail=f"budget_usd must be <= {MAX_BUDGET_USD:g}")
+        if body.budget_usd <= spend:
+            raise HTTPException(
+                status_code=400,
+                detail=f"budget_usd must be above the ${spend:.4f} already spent")
+        if workspace.controls.get("set_budget") is None:
+            raise HTTPException(status_code=409, detail="this run has no live budget to change")
+
+    changes: dict[str, Any] = {}
+    if body.budget_usd is not None:
+        workspace.controls["set_budget"](body.budget_usd)
+        changes["budget_usd"] = body.budget_usd
+    if body.extend_minutes is not None:
+        base = max(workspace.deadline_at or time.time(), time.time())
+        workspace.deadline_at = base + body.extend_minutes * 60
+        changes["extend_minutes"] = body.extend_minutes
+    workspace.post_signal(Signal(
+        type=SignalType.RUN_LIMITS_CHANGED, iteration=workspace.iteration,
+        summary="run limits changed: " + ", ".join(f"{k}={v}" for k, v in changes.items()),
+        detail=json.dumps({**changes, "deadline_at": workspace.deadline_at, "spend_usd": spend}),
+    ))
+    wake = workspace.controls.get("wake")
+    if wake is not None:
+        wake()
+    runner = await registry.get_runner(run_id)
+    budget = body.budget_usd
+    if budget is None and runner is not None:
+        gate = runner.project.approval_gates.get("token_budget_usd")
+        budget = float(gate) if isinstance(gate, (int, float)) else None
+    return {"ok": True, "budget_usd": budget, "spend_usd": spend,
+            "deadline_at": workspace.deadline_at}
+
+
 class VisualFeedback(BaseModel):
     """Body of POST /{run_id}/visual_feedback."""
 

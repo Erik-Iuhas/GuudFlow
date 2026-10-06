@@ -153,6 +153,8 @@ class SignalType(str, Enum):
     # Ongoing projects (plan §13): the run was handed back to its project and
     # waits for a human to accept or reject it.
     RUN_SUBMITTED = "RUN_SUBMITTED"
+    # A human raised the budget or extended the deadline of a live run.
+    RUN_LIMITS_CHANGED = "RUN_LIMITS_CHANGED"
 
 
 Priority = Literal["normal", "high"]

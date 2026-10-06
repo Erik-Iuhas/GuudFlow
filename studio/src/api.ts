@@ -190,6 +190,22 @@ export const runsApi = {
       { text, priority },
       true,
     ),
+  /** Answer whatever paused the live run (ask_human, overseer cap, blocked cycle). */
+  respond: (id: string, answer: string) =>
+    request<{ ok: boolean; signal_id: string; question_id: string | null }>(
+      "POST",
+      `/api/runs/${encodeURIComponent(id)}/respond`,
+      { answer },
+      true,
+    ),
+  /** Raise a live run's budget and/or push its deadline out. */
+  setLimits: (id: string, limits: { budget_usd?: number | null; extend_minutes?: number | null }) =>
+    request<{ ok: boolean; budget_usd: number | null; spend_usd: number; deadline_at: number | null }>(
+      "PATCH",
+      `/api/runs/${encodeURIComponent(id)}/limits`,
+      limits,
+      true,
+    ),
   /** Phase G-prime.2 — re-enqueue a Job for a failed/paused run. The
    *  worker resumes from persisted board.jsonl + artifacts.json
    *  rather than seeding fresh. Studio's "Resume" button (G.3) calls

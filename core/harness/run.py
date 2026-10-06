@@ -541,12 +541,20 @@ class OpencodeRun:
         budget = self.runner.project.approval_gates.get("token_budget_usd")
         if isinstance(budget, (int, float)):
             self.gateway.set_run_budget(self.run_id, float(budget))
+        self.workspace.controls["set_budget"] = self._set_budget
+        self.workspace.controls["spend"] = lambda: self.gateway.spend(self.run_id)
+        self.workspace.controls["wake"] = lambda: self._scheduler().notify()
         self._gw_http = await serve_app(self.gateway.app(), host=bind)
         if self.mode == "docker":
             assert self.sandboxes is not None and self.network is not None
             # Containers may reach the host ONLY on these two ports.
             await asyncio.to_thread(self.sandboxes.restrict_host_ports, self.network,
                                     [self._http.port, self._gw_http.port])
+
+    def _set_budget(self, usd: float) -> None:
+        """Raise (or set) the run's spend cap while it runs (API: PATCH /limits)."""
+        self.gateway.set_run_budget(self.run_id, float(usd))
+        self.runner.project.approval_gates["token_budget_usd"] = float(usd)
 
     def _host_tools(self) -> list[McpTool]:
         overrides = self.settings.tool_overrides

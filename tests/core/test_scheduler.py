@@ -245,6 +245,30 @@ async def test_human_pause_halts_new_spawns_and_resumes_after_response():
     assert b_state["runs"] == 2  # paused once, resumed once
 
 
+async def test_deadline_ends_a_run_paused_for_a_human():
+    """A pending_human pause must not outlive the wall-clock deadline."""
+    ws = Workspace(run_id="r1", goal="x", max_iterations=5)
+    b, _ = _pausing_agent("B")
+    ws.deadline_at = time.time() + 0.3
+    sched = Scheduler([b], ws)
+    result = await asyncio.wait_for(sched.run(), timeout=3.0)
+    assert result.status is SchedulerStatus.DEADLINE_EXCEEDED
+    assert ws.pending_human is not None
+
+
+async def test_deadline_ends_a_paused_run_with_a_task_in_flight():
+    ws = Workspace(run_id="r1", goal="x", max_iterations=5)
+    b, _ = _pausing_agent("B")
+    busy = _never_completing_agent("D")
+
+    async def slow(workspace: Workspace) -> None:
+        await asyncio.sleep(30)
+    busy = AgentSpec(role="D", runner=slow)
+    ws.deadline_at = time.time() + 0.3
+    result = await asyncio.wait_for(Scheduler([b, busy], ws).run(), timeout=3.0)
+    assert result.status is SchedulerStatus.DEADLINE_EXCEEDED
+
+
 # ── 5. Group completion ─────────────────────────────────────────────────────
 
 

@@ -22,6 +22,8 @@ import type { ProjectConfig, RunMeta } from "../../types";
 import { AgentDetail } from "./AgentDetail";
 import { ApprovalsBar } from "./ApprovalsBar";
 import { BudgetMeter } from "./BudgetMeter";
+import { HumanAnswerBox } from "./HumanAnswerBox";
+import { LimitsControl } from "./LimitsControl";
 import { ArtifactGallery } from "../artifacts/ArtifactGallery";
 import { TaskBoard } from "../board";
 import { formatElapsed, mergeRoles, parseTimestamp, roleSpecs } from "./model";
@@ -331,7 +333,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
       {humanNeeded && (
         <div role="alert" className="rounded-md border border-status-waiting/40 bg-status-waiting/10 px-3 py-2 text-sm" data-testid="human-needed">
           <strong>{humanNeeded.role ?? "An agent"} needs you:</strong> {humanNeeded.summary}{" "}
-          <span className="text-muted-foreground">Answer in the comment box below.</span>
+          <HumanAnswerBox runId={runId} />
         </div>
       )}
 
@@ -406,7 +408,10 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           <div className="min-w-0 flex-1">
             <ApprovalsBar runId={runId} />
           </div>
-          <BudgetMeter budgetUsd={budgetUsd} />
+          <div className="flex flex-col items-end gap-1">
+            <BudgetMeter budgetUsd={budgetUsd} />
+            {live && !terminal && <LimitsControl runId={runId} budgetUsd={budgetUsd} />}
+          </div>
         </div>
         <div data-testid="comment-bar">
           <CommentBox runId={runId} inputRef={commentRef} />
