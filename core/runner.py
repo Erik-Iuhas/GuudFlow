@@ -137,6 +137,8 @@ class ProjectConfig:
     rbac: dict[str, RoleRBAC] = field(default_factory=dict)
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
     max_iterations: int = 5
+    # Wall-clock budget for one run (session), in minutes (`max_run_minutes`).
+    max_run_minutes: int = 30
     escalation_thresholds: dict[str, int] = field(
         default_factory=lambda: {"tech_lead": 2},
     )

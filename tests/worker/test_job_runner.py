@@ -553,3 +553,13 @@ async def test_run_one_initializes_inputs_for_real_run(tmp_path: Path, monkeypat
     assert (inputs / "README.md").exists()
     # working/ was seeded from source_repo
     assert (run_root / "workspace" / "working" / "main.py").exists()
+
+
+@pytest.mark.parametrize("raw,minutes", [(None, 30), (90, 90), ("45", 45), (1, 5), (10_000, 240),
+                                         ("soon", 30), (True, 30)])
+def test_max_run_minutes_is_read_and_clamped(raw, minutes) -> None:
+    from worker.job_runner import serialise_project
+    data = {"project_id": "p", "goal": "g", "agents": []}
+    if raw is not None:
+        data["max_run_minutes"] = raw
+    assert serialise_project(data).max_run_minutes == minutes

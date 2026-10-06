@@ -65,6 +65,18 @@ def _is_in_place_source(project_dir: Path) -> bool:
     return meta.get("kind") == "local_path_in_place"
 
 
+MIN_RUN_MINUTES, MAX_RUN_MINUTES = 5, 240
+
+
+def _run_minutes(raw: object) -> int:
+    """The project's per-run wall clock in minutes: default 30, clamped to 5..240."""
+    try:
+        minutes = int(raw) if raw is not None and not isinstance(raw, bool) else 30
+    except (TypeError, ValueError):
+        minutes = 30
+    return max(MIN_RUN_MINUTES, min(MAX_RUN_MINUTES, minutes))
+
+
 def serialise_project(data: dict[str, Any]) -> ProjectConfig:
     """Turn a stored project dict into a ProjectConfig dataclass.
 
@@ -199,6 +211,7 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         rbac=rbac,
         mcp_servers=list(data.get("mcp_servers") or []),
         max_iterations=int(data.get("max_iterations", 5)),
+        max_run_minutes=_run_minutes(data.get("max_run_minutes")),
         escalation_thresholds=escalation_thresholds,
         approval_gates=approval_gates,
         mode=str(data.get("mode") or "production"),
@@ -515,6 +528,7 @@ def default_runner_factory(
         personas_root=personas_root,
         project_dir=project_dir,
         model_registry=model_registry,
+        max_wall_seconds=project.max_run_minutes * 60.0,
     )
 
 
