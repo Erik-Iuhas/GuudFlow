@@ -54,16 +54,6 @@ LABEL_RUN = "guudflow.run"
 LABEL_ROLE = "guudflow.role"
 OPENCODE_PORT = 4096
 
-# How sandboxes and GuudFlow reach each other (docs/SETUP.md):
-# - direct: GuudFlow binds its gateway and MCP server on the run network's gateway IP and
-#   talks to sandboxes at their container IPs (Linux, Docker Engine).
-# - relay: one relay container per role forwards fixed ports both ways (Docker Desktop on
-#   macOS/Windows, where the host can reach neither network gateways nor container IPs).
-NETWORK_MODE_ENV = "GUUDFLOW_SANDBOX_NETWORK"   # auto | direct | relay
-RELAY_ALIAS = "guudflow-host"                   # the relay's name on a role's network
-_RELAY_LISTEN = 4096                            # relay port GuudFlow uses to reach opencode
-_RELAY_SCRIPT = Path(__file__).resolve().parents[1] / "sandbox" / "relay.py"
-
 _DOCKERFILE = Path(__file__).resolve().parents[1] / "sandbox" / "agent-opencode.Dockerfile"
 _VIZ_DOCKERFILE = (Path(__file__).resolve().parents[1] / "sandbox"
                    / "agent-opencode-viz.Dockerfile")
@@ -127,8 +117,6 @@ class SandboxSpec:
     # Host-only tool output (screenshots, installed packages), mounted READ-ONLY at
     # /work/.guudflow so the agent can read it but never redirect host writes (O8).
     tool_dir: Path | None = None
-    # Relay mode only: the host ports (gateway, MCP) the sandbox may reach through its relay.
-    relay_ports: tuple[int, ...] = ()
 
 
 @dataclass
@@ -139,15 +127,10 @@ class Sandbox:
     name: str
     ip: str
     password: str
-    # Relay mode: the relay's port published on the host's 127.0.0.1.
-    relay_port: int | None = None
-    relay_id: str | None = None
 
     @property
     def base_url(self) -> str:
         """HTTP base URL of the sandbox's opencode server (reachable from the host)."""
-        if self.relay_port is not None:
-            return f"http://127.0.0.1:{self.relay_port}"
         return f"http://{self.ip}:{OPENCODE_PORT}"
 
 
