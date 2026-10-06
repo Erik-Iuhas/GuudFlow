@@ -47,7 +47,21 @@ it on its own (budget re-briefs and a priority order). What still needed the ope
 - **Seen:** the overseer had told both workers "budget nearly spent, finish fast". Raising the cap did not reach them; the operator had to post a priority comment.
 - **Proposed fix:** a `RUN_LIMITS_CHANGED` signal goes into every role's next brief (as notes do), and the overseer's budget re-brief is withdrawn when the cap rises. `open`
 
+### F7. Sessions carry context from card to card, about 29% of the cost
+- **Seen:** after the session, the owner asked where the money went. Each role keeps one opencode session for the whole run, so its later cards re-read all earlier ones (peak 350 k tokens). Cache reads were 46% of session 3's $19.30. Full analysis: `docs/cost-reports/pacrogue-session3.md`.
+- **Proposed fix:** a fresh session per card by default (always for the reviewer), or rotation once carried context passes about 60 k tokens. Knowledge carries forward through the brief, the thread and notes. `open`
+
+### F8. Idle roles re-send their whole context after the cache expires
+- **Seen:** after more than 5 idle minutes the prompt cache is gone, and the next call re-sends 100–220 k tokens at full price (about $1.40 in session 3).
+- **Proposed fix:** rotate the session when the idle time exceeds the cache lifetime. `open`
+
+### F9. Notebooks resume the largest session
+- **Seen:** end-of-run notebooks resume each role's session, so one cold 328 k-token re-send (about $0.65) went to a short note.
+- **Proposed fix:** write the notebook in a fresh session from a summary of the role's results. `open`
+
 ### Noticed in passing (no intervention)
+- **Studio chat shows raw markdown:** Jack's replies show `**bold**` markers in the Plan tab, and the chat column holds the full history since project start, which makes for a very long page. `open`
+- **Deep links 404 when the API serves Studio:** `GUUDFLOW_STUDIO_DIST` is mounted with no SPA fallback, so reloading `/projects/pacrogue?tab=plan` returns `{"detail":"Not Found"}`. `open`
 - **Escaped text on the board:** the overseer's `decide` summary is stored with HTML entities (`T4 &gt; T6`). Something escapes it before it is saved, and Studio would show the entities. `open`
 - **Overseer wake reason not on the board:** the overseer started with no signal saying which detector woke it (here `burn_without_output`). Post the detector and its numbers as a signal so Studio can show why. `open`
 - **Serial plans leave workers idle:** the planner chained most cards (T3 → T4 → T5 → T7 → T8), so the renderer waited about 8 minutes twice. Worth a planner hint: prefer cards that can start on agreed interfaces. `open`
