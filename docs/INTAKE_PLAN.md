@@ -32,16 +32,17 @@ work. It never tidies what the user typed, and its proposals have to be added on
 ```
 User writes:   "the ghosts are too fast on level 1 and I want a pause button"
       │
-      ▼  Request R7 (verbatim, human text), saved instantly, never lost
+      ▼  Request #13 (verbatim, human text), saved instantly, never lost
 Project manager (host-side, heavy tier, one structured call)
-      │   reads: goal, roadmap, open backlog, last run summaries, repo outline
+      │   reads: requirements, decisions, milestones, open tickets, last run summaries, repo outline
       ▼
-IntakeResult:  split into 2 items
-  B12 "Slow ghosts on early levels"   size S  checks: [...]  related: B5
-  B13 "Pause with P / Esc"            size S  checks: [...]
-  roadmap note: "difficulty curve" under Milestone 2
+IntakeResult:
+  requirements:  ~ R5  ghosts ramp from 60% speed on level 1 to full speed by level 4
+                 + R12 pause and resume with P or Esc        (must, 2 checks)
+  tickets:       T14 ghost speed ramp (R5) · T16 pause (R12, after T6)
+  milestone:     both go into M3
       │
-      ▼  applied to the backlog, shown as "refined from your request"; edit or undo
+      ▼  shown on the request as "changes to the requirements"; accept, edit or undo
 ```
 
 ## 3. Architecture
@@ -51,7 +52,7 @@ IntakeResult:  split into 2 items
 A **request** is anything a human writes to the project: a sentence, a paragraph, a pasted bug
 report, or a screenshot with a comment. It is stored verbatim and is never overwritten. Fields:
 
-- `id` (`R1`, `R2`…), `text`, `attachments`, `author`, `created_at`;
+- `id` (`#1`, `#2`…), `text`, `attachments`, `author`, `created_at`;
 - `status`: `new` → `refining` → `done` or `needs_answer`;
 - `items`: the backlog items it produced or touched;
 - `questions` and `answers`;
@@ -68,9 +69,9 @@ grooming. "Meta-agent" disappears from the UI and the docs, and the code keeps i
 until a later rename.
 
 It runs host-side like the meta-agent and grooming do today, with `LLMClient` and one tool call. It uses
-the heavy tier by default, and its model can be picked in Settings like any other. It is a named
-worker (`core/crew.py`), so the user meets "Mara, project manager" and the rest of the team can
-refer to it by name. It is **not** the overseer: the overseer works inside one run with a fixed
+the heavy tier by default, and its model can be picked in Settings like any other. It is shown as
+**Project manager** until the user names it; a name, once set, is used in briefs and notes like
+any worker's (`core/crew.py`). There is no default persona name for this role. It is **not** the overseer: the overseer works inside one run with a fixed
 intervention menu, and the manager works across the whole project, between runs.
 
 **What it reads:**
@@ -128,20 +129,21 @@ An invalid result gets one retry with the error, the same rule as agent turns.
 
 ### 3.3 What the user sees
 
-The Work tab shows **requests, not tickets**:
+The Work tab shows **requests**, each with the requirement changes it caused, not tickets:
 
 ```
 Ask for something  [ the ghosts are too fast on level 1 and I want a pause button      ] [Send]
 
-  "the ghosts are too fast on level 1…"    Mara split this into 2 pieces of work · ready
-  "add a high-score table"                 Mara needs your answer: saved on this computer only,
-                                           or shared online?   [ answer… ]
-  "make walls breakable"                   done in run 3 · accepted
+  #13 Ghosts too fast on level 1      ~ R5 · 1 of 2 tickets · being worked on
+  #14 Save high scores, show top 10   + R10, R11 · Q2 needs a decision (browser or online?)
+  #9  Arrow keys feel laggy           ~ R2 · done in session 2
 ```
 
-- Each request shows one line from the manager ("split into 2 pieces of work", "already covered
-  by your earlier request about walls") and a plain status: refining, ready, needs your answer,
-  in a run, waiting for your review, or done.
+- Each request shows the requirement ids it adds (`+`) or changes (`~`), its open question if
+  any, and a status: drafting, up next, needs a decision, being worked on, waiting for review,
+  done.
+- A question comes with the options and what each one costs or changes ("needs a server, so it
+  changes R1; size L").
 - Starting a run means "work on the ready requests" (or picking some), not ticking ticket ids.
 - Ticket ids, checks, sizes and dependency links are not on this screen. A **Ticket view** toggle
   on the Work tab shows the full backlog as it is today, for people who want it.
@@ -279,6 +281,67 @@ A board, but of **requests** rather than tickets, with five lanes a non-technica
 - "Waiting for you" is also pulled up into the "Needs you" strip, so nothing that needs the
   human is ever only on the board.
 - A **List** toggle shows the same requests grouped by lane. It is the default on narrow screens.
-- No drag and drop between lanes. Lanes change on events (Mara refined it, a session took it, you
+- No drag and drop between lanes. Lanes change on events (the manager refined it, a session took it, you
   accepted it), the same rule as cards ("only the scheduler moves cards"). Order inside **Up next**
   can be dragged, and that sets priority.
+
+## 8. Requirements and build modes (revision after storyboard review, 2026-10-06)
+
+Feedback on the first storyboards: they were too simplified. The plan was a short list in casual
+language, and there was no way to be explicit about how a project gets made. The revised
+storyboards aim for the middle: plain enough to read at a glance, but precise.
+
+### 8.1 Requirements are the project's spec
+
+There are three layers, each with its own id, and only the middle one is the project's contract:
+
+| Layer | Ids | Who writes it | Who sees it |
+|---|---|---|---|
+| Requests | `#14` | the human, in any words | the Work tab |
+| **Requirements** | `R10` | the manager drafts; the human agrees, edits or adds | the **Plan** tab, requests, reviews |
+| Tickets | `T17` | the manager, from requirements | ticket view, sessions' technical view |
+
+A requirement has:
+- `id`, `text`, and a `kind`: feature, constraint, quality or non-goal;
+- a priority: must, should, could or won't;
+- a status: proposed, agreed, met, partly met or dropped;
+- acceptance checks, and how each is verified (tests, reviewer, the human);
+- a `source`: the human's description, a request `#n`, or a manager **assumption**. Assumptions
+  are flagged until the human confirms them.
+
+**Decisions** (`D1`: "Canvas 2D rather than a DOM grid, needed for R8") record the manager's
+technical choices with their reason, and the human can change any of them. **Open questions**
+(`Q2`) block the requirements they name, until answered. **Milestones** (`M1`…) group
+requirements into sessions, with a cost range each.
+
+This replaces the free-form roadmap. The Plan tab is these four sections, and the roadmap text
+becomes the manager's notes. Traceability runs both ways:
+- tickets carry the requirement ids they serve;
+- the reviewer checks a session against those requirements' acceptance checks (the existing
+  `ItemVerdict` per acceptance item);
+- the review screen reports each requirement as met, partly met or still met (regression);
+- the board shows how many requirements are met.
+
+### 8.2 Build modes
+
+The human picks how the project is made. Each mode is a preset over levers that already exist, so
+it is not just a label:
+
+| Mode | What changes |
+|---|---|
+| **Spec first** (default) | The plan (requirements + decisions) needs approval before session 1. The reviewer checks against requirement checks. 2 review rounds |
+| **Prototype first** | Session 1 builds a thin working slice with light review. Requirements are drafted from what was built, then approved |
+| **Test first** | Adds a tester role that writes the requirement checks as tests before builders start. Merges are gated on them. Strict review |
+| **Research first** | Adds a researcher with web access. The session's output is a decision document comparing options (feeds `D*`); no code is merged |
+| **Maintain** | For existing code: smallest diff, a regression test required per fix, protected areas from project rules |
+
+The mode is shown on the plan and in project settings, and it can be changed between sessions.
+The team approval screen stays, folded into the plan's Team panel, which shows each member's
+model and role.
+
+### 8.3 Tone
+
+- Copy is neutral and specific: ids, counts, checks, costs. No coaching phrases.
+- Technical detail (model per role, check commands, files touched) is shown inline in small
+  type rather than hidden. What gets hidden is mechanics: tool calls, raw signals and card
+  columns stay in the technical view.
