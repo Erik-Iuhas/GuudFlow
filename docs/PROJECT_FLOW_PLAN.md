@@ -337,12 +337,12 @@ checkbox restyle.
 
 | Package | Status |
 |---|---|
-| Stage 0 | in progress |
-| P1 Spec store | not started |
-| P2 MCP backend | not started |
-| P3 Studio shell | not started |
-| P4 Project manager + API | not started |
-| P5 Studio Plan tab | not started |
+| Stage 0 | done (plan, storyboard update, checkbox restyle) |
+| P1 Spec store | done (`core/spec.py`, `core/plan_drafts.py`, work.db tables, backlog `serves`) |
+| P2 MCP backend | in progress |
+| P3 Studio shell | in progress |
+| P4 Project manager + API | in progress |
+| P5 Studio Plan tab | in progress |
 | P6 Harness integration | not started |
 | P7 Studio Work/Sessions/Team | not started |
 | P8 Record | not started |
