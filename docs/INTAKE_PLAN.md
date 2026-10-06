@@ -396,3 +396,56 @@ last 3 reviews. Should reviews open on the diff?". It never switches on its own.
 - **A git endpoint for the Builder seat:** authenticated clone and push of the project repo,
   limited to `human/*` branches; or the project's GitHub remote. This is new and needs its own
   security review: tokens, branch restrictions, the same protected-path rules.
+
+## 10. Reality check (2026-10-06)
+
+### 10.1 Where we are
+
+**Built and on `main`:**
+- backlog items with acceptance checks, dependencies and grooming;
+- runs that take backlog items;
+- the review queue with accept and reject;
+- checks before review, remote sync and publish, autopilot;
+- named workers, the run cockpit, the overseer;
+- the retrospective and playbook;
+- per-item history and the board signal log.
+
+**Not built:** everything in this document. It is all proposal, shown in storyboards.
+
+### 10.2 What is wrong with the storyboards as drawn
+
+1. **Too many layers.** They use seven id spaces: requests `#`, requirements `R`, decisions `D`,
+   questions `Q`, milestones `M`, tickets `T`, plus the in-run cards that already exist. Today
+   there are two (backlog items and cards). Every layer is something the project manager has to
+   keep consistent for months, which is exactly where a model drifts. The storyboards look
+   coherent because every id in them was written by hand.
+2. **Everything rests on one unproven thing.** That one thing is the manager writing a good
+   spec and keeping it consistent as people change their minds. The rest is presentation over it,
+   and it has not been tested with a real model across several rounds of changes.
+3. **Seats move team process into scheduler gates.** Pending decisions with timeouts, human
+   co-signs and human-held tickets are real scheduler and security work, not a UI change.
+
+### 10.3 Sorting it
+
+| Keep (core) | Keep, but smaller | Defer or drop |
+|---|---|---|
+| **Plan conversation with versioned drafts.** The manager proposes changes, the human accepts or rejects each one, and nothing applies until a draft is approved (storyboard F) | **Build modes:** Spec first and Prototype first only, as presets of existing settings | **Builder seat and git endpoint.** Pushing to the project's remote between sessions already works (plan §14 H1) |
+| **Requirements with acceptance checks** as the persistent spec. Reviewer verdicts per acceptance item already exist, so met or partly met comes cheaply | **Detail:** two levels (Overview and Technical), not four | **Lead seat with pending decisions and timeouts.** Approving a plan draft already covers it |
+| **Decisions with reasons**, plus the **project record**: trace by id, Markdown/JSON export, decision records in `docs/decisions/` (storyboard G). Mostly assembled from data we already keep | **Reviewer co-sign:** one optional "I review code too" switch, in a later phase | Per-seat scopes, quick picks, behaviour nudges |
+| **Owner accept or reject** (already built) | **Milestones** as optional labels on work items | Time-left and cost-range estimates: show real spend and budget only |
+| | | "Play this version", except for static web projects |
+| | | Tickets as their own visible layer: tickets are today's backlog items, and cards stay internal |
+
+### 10.4 The simplification
+
+- **Requests are messages, not a system.** "Ask for something" sends a short message into the
+  same plan conversation, and it comes back as a draft diff. One mechanism, not two.
+- **Users see four things:**
+  - **Plan:** requirements, decisions and open questions, versioned by drafts;
+  - **Work:** the backlog items, each naming the requirements it serves;
+  - **Sessions:** runs;
+  - **Record:** trace and export.
+- **First slice to build:** the plan conversation and drafts, the requirement and decision store,
+  and the export, all on top of the existing backlog. Then a real-model trial on pacrogue: are
+  the requirements still consistent after 4 rounds of changes? Build the rest of the UI only if
+  that holds.
