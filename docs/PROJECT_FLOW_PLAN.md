@@ -542,13 +542,69 @@ The provider account (API key credit) is the owner's concern and GuudFlow never 
 - **Tell the team.** When the budget is raised, `RUN_LIMITS_CHANGED` goes into every role's next
   brief, and the overseer's "budget nearly spent" re-brief is withdrawn.
 
-### 11.5 GuudFlow bugs and gaps found while running pacrogue
+### 11.5 Quips as a work simulator
+**Problem.** Quips are flat and repetitive. Across 60 quips in three sessions, "rolling up my sleeves"
+or "cracking my knuckles" came up about 15 times. The generator only gets the speaker's character, a
+list of coworker names and the event, so nobody knows anything about anyone. Two bugs:
+- review quips name the wrong subject ("I gave overseer the green light", "Arlo's card");
+- the quip log does not record the speaker.
+
+**Design.** Each quip call gets a small, factual "office state", so workers know about each other
+and where they stand. Just enough for some spice, built from data GuudFlow already has (no extra
+LLM call):
+- **Standing this session**, one line per teammate: cards done, first-try passes, review
+  rejections, cost so far, time spent idle or waiting. For example: "Sol: 4 cards, all passed first
+  try, most expensive so far; Lena: waited 8 min on Sol twice".
+- **Recent interactions** involving the speaker, at most 3: who reviewed or rejected whose card,
+  who waited on whom, overseer re-briefs, budget raises.
+- **History across projects,** at most 1 line per teammate, from persona reputation and episodes,
+  so working relationships carry over. For example: "Bram has rejected Sol's work 3 times across
+  projects".
+- **Anti-repetition:** the speaker's last 5 quips are passed with "say something new", and a
+  short list of banned openers ("rolling up my sleeves", "cracking my knuckles", "grabbing
+  coffee").
+- **More events worth a line:** a review rejection, waiting on a teammate, an overseer wake, a
+  budget raise, the most expensive card, a session going to review, and a teammate's first-try
+  pass streak.
+
+**Limits** (unchanged hard rules):
+- the quip log never enters agent context;
+- the office state contains facts and numbers only, never invented drama;
+- tone is light banter, never mean about a named person's competence;
+- quips stay on the fast tier.
+
+**Fixes:**
+- review events pass the card id and builder name as the subject ("T4, Sol's abilities");
+- the speaker's name and role are written in every quip entry.
+
+### 11.6 Time limits that do not cut work off
+**Problem.** Two wall clocks:
+- the session deadline (`max_run_minutes`) stops the session even mid-card;
+- the turn timeout (`turn_timeout`, 20 min) aborts a card attempt.
+
+Neither makes models faster, because workers are never told the time. Money is already guarded
+by the session budget, and stalls are guarded by the stuck detectors.
+
+**Design.**
+- **Session time limit modes,** set per project (Settings) and per session at start:
+  - `none`: no time limit; the budget and stuck detectors are the guards.
+  - `soft` (the new default): at the time limit, stop starting new cards, let running cards and
+    their reviews finish, then submit for review. A `TIME_LIMIT_REACHED` signal is shown in Studio.
+  - `hard`: today's behaviour, for CI or demos that must end on time.
+- **Turn timeout becomes a stall timeout:** a card attempt is aborted only after N minutes with
+  no model or tool activity (default 10). A long but busy turn keeps going. An optional absolute
+  cap per turn stays available, off by default.
+- **Pausing for a human does not count** towards a soft time limit.
+- **The Studio limits control** can switch the mode or change the limit on a live session (it
+  already extends deadlines).
+
+### 11.7 GuudFlow bugs and gaps found while running pacrogue
 These are GuudFlow problems, not game ones. Details are in `docs/FIELD_NOTES.md`.
 
 | # | Problem | Status / plan |
 |---|---|---|
 | F1 | Jack could not drop backlog items | fixed (`25c1d60`, `drop_item`) |
-| F2 | Docker build cache filled the disk; nothing prunes it | worker disk check + prune offer (§11.6 W7) |
+| F2 | Docker build cache filled the disk; nothing prunes it | worker disk check + prune offer (§11.8 W7) |
 | F3 | A session cut off by a host restart needed a manual API salvage | startup salvage offer in Studio; check H4 overlap (W7) |
 | F4 | A paused run could only be answered, or given more budget, through the API | fixed (`a49fca9`, respond + limits) |
 | F5 | A session can stop at its budget with nobody warned in time | §11.4 |
@@ -563,8 +619,12 @@ These are GuudFlow problems, not game ones. Details are in `docs/FIELD_NOTES.md`
 | — | Studio deep links 404 when the API serves Studio | §11.3 |
 | — | Check ids are re-matched by text, so a one-word edit makes a new check | §11.2 |
 | — | Items keep stale copies of check text | §11.2 |
+| — | Review quips name the wrong subject ("gave overseer the green light") | §11.5 |
+| — | The quip log does not record the speaker | §11.5 |
+| — | Quips repeat the same openers and know nothing about teammates | §11.5 |
+| — | Session deadline and turn timeout cut work off; there is no "no limit" option | §11.6 |
 
-### 11.6 Work packages (in order)
+### 11.8 Work packages (in order)
 - **W1 Handoff in results.** `AgentResult.handoff`, the validator, host facts, and brief
   injection (own previous card, `depends_on`, overlapping files). Tests: brief contents, caps,
   untrusted wrapping.
@@ -589,10 +649,16 @@ These are GuudFlow problems, not game ones. Details are in `docs/FIELD_NOTES.md`
   - the worker disk check;
   - the startup salvage offer.
 
+- **W8 Time limits.** The `none` / `soft` / `hard` session modes, the stall timeout instead of the
+  per-turn wall clock, and the Studio controls. Tests: a soft limit finishes running cards and
+  starts none; `none` never ends on time; a stall aborts and a busy turn does not.
+- **W9 Quips.** The office state, anti-repetition, the new events, and the subject and speaker
+  fixes. Tests: office-state contents from a scripted board; review subject; no quip text in briefs.
+
 W1–W3 come first: they are what session 4 measures. W4–W6 can follow before or after session 4.
 That is the owner's call; running session 4 on the new spec shape would also test the migration.
 
-### 11.7 Where pacrogue stands (resume point)
+### 11.9 Where pacrogue stands (resume point)
 - **Sessions 1–3 are accepted.** The game has all 8 session-3 cards and 661 tests. Known game
   issues: Dark hides the board, Magnet is offered but not built, and the HUD shows DOTS: DEAD.
 - **Session 4 is drafted, not approved.** Jack's **draft-4** (12 changes):
