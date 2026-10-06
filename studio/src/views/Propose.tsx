@@ -85,7 +85,8 @@ export function Propose() {
   const navigate = useNavigate();
   // Harness selector: "opencode" is the default (O15) and shows the
   // per-role capability switches (plan §5.7).
-  const [harness, setHarness] = useState<HarnessKind>("opencode");
+  // Only opencode runs; the selector is gone (the field stays explicit in the saved project).
+  const harness: HarnessKind = "opencode";
   const [capMeta, setCapMeta] = useState<CapabilitiesMeta | null>(null);
   const [roleCaps, setRoleCaps] = useState<Record<string, RoleCapState>>({});
   const [view, setView] = useState<"graph" | "list">("graph");
@@ -305,23 +306,9 @@ export function Propose() {
 
           {deltas.length > 0 && <DeltaTable deltas={deltas} />}
 
-          <div className="my-3 flex flex-wrap items-center gap-2">
-            <Label className="m-0" htmlFor="harness-select">Agent harness</Label>
-            <Select
-              id="harness-select"
-              value={harness}
-              onChange={(e) => setHarness(e.target.value as HarnessKind)}
-              className="w-auto"
-            >
-              <option value="legacy">Legacy</option>
-              <option value="opencode">opencode</option>
-            </Select>
-            {harness === "opencode" && (
-              <span className="text-xs text-muted-foreground">
-                Review what each agent may do before approving.
-              </span>
-            )}
-          </div>
+          <p className="my-3 text-xs text-muted-foreground">
+            Review what each agent may do before approving.
+          </p>
 
           <div className="my-3 flex gap-1" role="group" aria-label="Team view">
             <Button

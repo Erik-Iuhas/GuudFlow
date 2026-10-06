@@ -17,7 +17,7 @@ export const PALETTE_ROUTES: PaletteItem[] = [
   { id: "route-dashboard", label: "Dashboard", hint: "Go to", to: "/" },
   { id: "route-projects", label: "Projects", hint: "Go to", to: "/projects" },
   { id: "route-oneshot", label: "One-shot", hint: "Go to", to: "/oneshot" },
-  { id: "route-propose", label: "Propose", hint: "Go to", to: "/propose" },
+  { id: "route-new-project", label: "New project", hint: "Go to", to: "/projects/new" },
   { id: "route-roster", label: "Roster", hint: "Go to", to: "/roster" },
   { id: "route-training", label: "Training", hint: "Go to", to: "/training" },
   { id: "route-tournament", label: "Tournament", hint: "Go to", to: "/training" },

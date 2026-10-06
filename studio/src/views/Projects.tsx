@@ -174,7 +174,7 @@ export function Projects() {
       title="Projects"
       actions={
         <div className="flex">
-          <Button className="rounded-r-none" onClick={() => navigate("/propose")}>
+          <Button className="rounded-r-none" onClick={() => navigate("/projects/new")}>
             + New project
           </Button>
           <DropdownMenu>
@@ -187,8 +187,8 @@ export function Projects() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => navigate("/propose")}>
-                Propose with goal
+              <DropdownMenuItem onSelect={() => navigate("/projects/new")}>
+                Describe a new project
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setBlankOpen(true)}>
                 Create blank project
@@ -384,7 +384,7 @@ function OnboardingPanel({
             team. You approve before anything runs.
           </p>
           <Button asChild>
-            <Link to="/propose">Propose a team</Link>
+            <Link to="/projects/new">Start a project</Link>
           </Button>
         </div>
       </div>

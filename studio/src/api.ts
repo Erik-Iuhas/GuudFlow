@@ -8,6 +8,7 @@ import type {
   InvokeOutcome,
   InvokeResponse,
   MetaProposal,
+  StartMode,
   OneShotRequestBody,
   OneShotResponse,
   PersonaSummary,
@@ -649,7 +650,7 @@ export const metaApi = {
    *  response will populate `deltas` rather than just a fresh team. */
   propose: (
     goal: string,
-    options?: { projectId?: string; priorRunId?: string; metaModel?: string },
+    options?: { projectId?: string; priorRunId?: string; metaModel?: string; startMode?: StartMode },
   ) =>
     request<MetaProposal>(
       "POST",
@@ -659,6 +660,7 @@ export const metaApi = {
         ...(options?.projectId ? { project_id: options.projectId } : {}),
         ...(options?.priorRunId ? { prior_run_id: options.priorRunId } : {}),
         ...(options?.metaModel ? { meta_model: options.metaModel } : {}),
+        ...(options?.startMode ? { start_mode: options.startMode } : {}),
       },
       true,
     ),

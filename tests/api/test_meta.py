@@ -350,3 +350,48 @@ async def test_propose_without_playbook_reports_empty_list(client, auth_header, 
     )])])
     r = await client.post("/api/meta/propose", json={"goal": "g"}, headers=auth_header)
     assert r.json()["playbook_entries_used"] == []
+
+
+# ── Start mode hint (project flow plan §5) ────────────────────────────────
+
+
+def _team_llm():
+    return MockLLMClient([MockTurn(tool_calls=[ToolCall(
+        id="m1", name="propose_team",
+        arguments={
+            "rationale": "team",
+            "agents": [{"role": "api", "archetype": "backend_dev", "depends_on": []}],
+        },
+    )])])
+
+
+async def test_propose_start_mode_adds_team_hint(client, auth_header, app):
+    llm = _team_llm()
+    app.state.meta_llm = llm
+    r = await client.post(
+        "/api/meta/propose",
+        json={"goal": "Build it", "start_mode": "test_first"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200, r.text
+    user_msg = llm.calls[0]["messages"][0].content
+    assert "start mode test_first: include a tester role ahead of builders" in user_msg
+
+
+async def test_propose_without_start_mode_has_no_hint(client, auth_header, app):
+    llm = _team_llm()
+    app.state.meta_llm = llm
+    r = await client.post(
+        "/api/meta/propose", json={"goal": "Build it"}, headers=auth_header,
+    )
+    assert r.status_code == 200, r.text
+    assert "start mode" not in llm.calls[0]["messages"][0].content
+
+
+async def test_propose_rejects_unknown_start_mode(client, auth_header):
+    r = await client.post(
+        "/api/meta/propose",
+        json={"goal": "Build it", "start_mode": "nonsense"},
+        headers=auth_header,
+    )
+    assert r.status_code == 400

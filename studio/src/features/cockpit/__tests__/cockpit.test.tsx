@@ -23,6 +23,7 @@ import { AgentDetail } from "../AgentDetail";
 import { ApprovalsBar } from "../ApprovalsBar";
 import { BudgetMeter } from "../BudgetMeter";
 import { CockpitView } from "../Cockpit";
+import { NODE_VIEW_KEY } from "../useNodeView";
 import { OverseerPanel } from "../OverseerPanel";
 import { PipelineGraph } from "../PipelineGraph";
 import { roleSpecs } from "../model";
@@ -65,6 +66,7 @@ beforeEach(() => {
   mockViewport(true);
 });
 afterEach(() => {
+  window.localStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -338,6 +340,7 @@ describe("CockpitView", () => {
   });
 
   it("shows the waiting state before any agent starts, then the lanes", () => {
+    window.localStorage.setItem(NODE_VIEW_KEY, "graph");
     const store = createRunStore("r1");
     render(view(store));
     expect(screen.getByTestId("waiting")).toHaveTextContent("Waiting for the first agent…");
@@ -348,6 +351,7 @@ describe("CockpitView", () => {
   });
 
   it("clicking a graph node opens its tool calls in a sheet", async () => {
+    window.localStorage.setItem(NODE_VIEW_KEY, "graph");
     const store = createRunStore("r1");
     store.getState().ingest([
       sig("STARTED", "dev"),
@@ -424,6 +428,7 @@ describe("recorded run (2,000 signals)", () => {
   });
 
   it("ingests and renders the cockpit within the time budget", async () => {
+    window.localStorage.setItem(NODE_VIEW_KEY, "graph");
     const store = createRunStore("r1");
     const t0 = performance.now();
     store.getState().ingest(fixture.signals as unknown as RawSignal[]);
@@ -447,5 +452,59 @@ describe("recorded run (2,000 signals)", () => {
     expect(screen.getByTestId("budget-meter")).toHaveTextContent("/ $5.00");
     expect(screen.getByLabelText("Comment for the agents")).toBeInTheDocument();
     expect(store.getState().reviews["reviewer>backend"].round).toBeGreaterThan(0);
+  });
+});
+
+describe("CockpitView node view toggle", () => {
+  it("defaults to Team: a card per role with model, state and the last summary", () => {
+    const store = createRunStore("r1");
+    store.getState().ingest(sig("STARTED", "dev"));
+    render(
+      view(store, {
+        project: { ...project, agents: project.agents.map((a) => (a.role === "dev" ? { ...a, model_id: "m-large" } : a)) },
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Team" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Graph" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("graph-node-dev")).toBeNull();
+    const card = screen.getByTestId("team-card-dev");
+    expect(card).toHaveAttribute("data-state", "running");
+    expect(card).toHaveTextContent("m-large");
+    expect(screen.getByTestId("team-card-planner")).toBeInTheDocument();
+    expect(screen.queryByText("Legacy view")).toBeNull();
+  });
+
+  it("switching to Graph shows the node graph and remembers the choice", () => {
+    const store = createRunStore("r1");
+    store.getState().ingest(sig("STARTED", "dev"));
+    const { unmount } = render(view(store));
+    fireEvent.click(screen.getByRole("button", { name: "Graph" }));
+    expect(screen.getByTestId("graph-node-dev")).toBeInTheDocument();
+    expect(screen.queryByTestId("team-view")).toBeNull();
+    expect(window.localStorage.getItem(NODE_VIEW_KEY)).toBe("graph");
+    unmount();
+    render(view(store));
+    expect(screen.getByRole("button", { name: "Graph" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("graph-node-dev")).toBeInTheDocument();
+  });
+
+  it("clicking a team card opens the agent detail", async () => {
+    const store = createRunStore("r1");
+    store.getState().ingest(sig("STARTED", "dev"));
+    render(view(store));
+    fireEvent.click(screen.getByTestId("team-card-dev"));
+    expect(await screen.findByTestId("agent-detail-dev")).toBeInTheDocument();
+  });
+
+  it("still works when localStorage throws", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    render(view(createRunStore("r1")));
+    fireEvent.click(screen.getByRole("button", { name: "Graph" }));
+    expect(screen.getByRole("button", { name: "Graph" })).toHaveAttribute("aria-pressed", "true");
   });
 });
