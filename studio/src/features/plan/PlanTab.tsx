@@ -10,6 +10,7 @@ import {
   useStartPlan,
   useTickChange,
 } from "./api";
+import { useProject } from "../../api/queries";
 import { Conversation } from "./Conversation";
 import { DraftPanel } from "./DraftPanel";
 import { SpecView } from "./SpecView";
@@ -21,7 +22,7 @@ function message(e: unknown): string {
 }
 
 /** The Plan tab: the conversation with the project manager beside the draft or the approved spec. */
-export function PlanTab({ projectId }: { projectId: string }) {
+export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTeamChanged?: () => void }) {
   const plan = usePlan(projectId);
   const spec = useSpec(projectId);
   const start = useStartPlan(projectId);
@@ -29,6 +30,7 @@ export function PlanTab({ projectId }: { projectId: string }) {
   const tick = useTickChange(projectId);
   const approve = useApproveDraft(projectId);
   const discard = useDiscardDraft(projectId);
+  const project = useProject(projectId);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [approvedVersion, setApprovedVersion] = useState<number | null>(null);
 
@@ -77,6 +79,7 @@ export function PlanTab({ projectId }: { projectId: string }) {
           <DraftPanel
             draft={draft}
             spec={spec.data}
+            team={project.data?.agents}
             busy={tick.isPending || approve.isPending || discard.isPending}
             error={panelError ? message(panelError) : null}
             onTick={(cid, accepted) => tick.mutate({ cid, accepted })}
@@ -84,6 +87,7 @@ export function PlanTab({ projectId }: { projectId: string }) {
               approve.mutate(undefined, {
                 onSuccess: (r) => {
                   setApprovedVersion(r.version);
+                  if ((r.team_changes?.length ?? 0) > 0) onTeamChanged?.();
                   setPanel(null);
                 },
               })

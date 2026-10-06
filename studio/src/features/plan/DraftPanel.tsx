@@ -3,12 +3,14 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
 import type { DraftWire, SpecWire } from "./api";
-import { approveBlocker, draftCounts, groupChanges, refLabel, type ChangeView } from "./model";
+import { approveBlocker, draftCounts, groupChanges, refLabel, type ChangeView, type TeamMember } from "./model";
 
 export interface DraftPanelProps {
   draft: DraftWire;
   /** The approved spec, used to show the old text of edits. */
   spec: SpecWire | undefined;
+  /** The project's current team, used to show the old values of role edits. */
+  team?: TeamMember[];
   busy?: boolean;
   error?: string | null;
   onTick: (cid: string, accepted: boolean | null) => void;
@@ -18,8 +20,35 @@ export interface DraftPanelProps {
 
 const markerClass = { "+": "text-status-complete", "~": "text-status-waiting", "−": "text-status-failed" } as const;
 
+function TeamDetails({ v }: { v: ChangeView }) {
+  const c = v.change;
+  const lines: string[] = [];
+  if (c.op === "add_role") {
+    if (c.depends_on?.length) lines.push(`after ${c.depends_on.join(", ")}`);
+    if (c.review_of?.length) lines.push(`reviews ${c.review_of.join(", ")}`);
+  }
+  return (
+    <>
+      {c.op === "add_role" && c.description && <p className="mt-1 text-xs text-muted-foreground">{c.description}</p>}
+      {lines.length > 0 && <p className="mt-1 text-xs text-muted-foreground">{lines.join(" · ")}</p>}
+      {v.teamFields.length > 0 && (
+        <ul className="mt-1 flex flex-col gap-0.5 text-xs text-muted-foreground">
+          {v.teamFields.map((f) => (
+            <li key={f.field}>
+              {f.field}: {f.old !== null && <del className="mr-1">{f.old}</del>}
+              <span className="text-foreground">{f.next}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {c.reason && <p className="mt-1 text-xs text-muted-foreground">{c.reason}</p>}
+    </>
+  );
+}
+
 function Details({ v }: { v: ChangeView }) {
   const c = v.change;
+  if (v.section === "Team") return <TeamDetails v={v} />;
   const bits: string[] = [];
   if (c.kind) bits.push(c.kind);
   if (c.priority !== undefined && c.priority !== null) bits.push(String(c.priority));
@@ -102,10 +131,10 @@ function ChangeRow({ v, onTick }: { v: ChangeView; onTick: DraftPanelProps["onTi
 }
 
 /** The open draft: its changes by section with ✓/✕ ticks, then Approve or Discard. */
-export function DraftPanel({ draft, spec, busy, error, onTick, onApprove, onDiscard }: DraftPanelProps) {
+export function DraftPanel({ draft, spec, team, busy, error, onTick, onApprove, onDiscard }: DraftPanelProps) {
   const counts = draftCounts(draft);
   const blocker = approveBlocker(counts);
-  const groups = groupChanges(draft, spec);
+  const groups = groupChanges(draft, spec, team);
   return (
     <div className="flex flex-col gap-4">
       <header className="flex flex-wrap items-start justify-between gap-2">

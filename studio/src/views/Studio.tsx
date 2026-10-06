@@ -298,7 +298,7 @@ export function Studio() {
       ) : tab === "plan" ? (
         id && (
           <>
-            <PlanTab projectId={id} />
+            <PlanTab projectId={id} onTeamChanged={() => void load()} />
             <SectionTitle className="mt-8">Notes</SectionTitle>
             <RoadmapTab projectId={id} />
             <SectionTitle className="mt-6">Files</SectionTitle>

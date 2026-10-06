@@ -60,7 +60,7 @@ beforeEach(() => {
       else if (method === "GET" && path.endsWith("/plan")) out = { json: server.plan };
       else out = { status: 404, json: { detail: `no handler for ${method} ${path}` } };
       const status = out.status ?? 200;
-      return { ok: status < 400, status, statusText: "x", json: async () => out.json } as Response;
+      return { ok: status < 400, status, statusText: "x", headers: new Headers({ "content-type": "application/json" }), json: async () => out.json } as Response;
     }),
   );
 });
@@ -265,5 +265,85 @@ describe("SpecView", () => {
     expect(await screen.findByText("Version 3")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Draft" }));
     expect(await screen.findByText("Spec · draft")).toBeInTheDocument();
+  });
+});
+
+describe("PlanTab team changes", () => {
+  const TEAM = [
+    { role: "builder", role_type: "builder", model_tier: "solid", depends_on: [] as string[] },
+    { role: "reviewer", role_type: "reviewer", model_tier: "solid", depends_on: ["builder"], review_of: ["builder"] },
+  ];
+  const reason = "scope now includes a data pipeline";
+  const teamChanges = (): DraftChangeWire[] => [
+    dc("c1", { op: "add_role", role: "data_builder", role_type: "builder", model_tier: "fast", description: "Builds the data pipeline",
+      depends_on: ["builder"], review_of: [], reason }),
+    dc("c2", { op: "edit_role", role: "reviewer", model_tier: "heavy", review_of: ["builder", "data_builder"], reason }),
+    dc("c3", { op: "remove_role", role: "helper", reason }),
+  ];
+
+  it("shows a Team section with +, ~ (old values struck) and − and never 'decided by'", () => {
+    const groups = groupChanges(draftOf(teamChanges()), undefined, TEAM);
+    expect(groups.map((g) => g.section)).toEqual(["Team"]);
+    expect(groups[0].changes.map((c) => c.marker)).toEqual(["+", "~", "−"]);
+    expect(groups[0].changes[1].teamFields).toEqual([
+      { field: "tier", old: "solid", next: "heavy" },
+      { field: "reviews", old: "builder", next: "builder, data_builder" },
+    ]);
+  });
+
+  it("renders the team ops with the reason and no 'decided by the project manager'", async () => {
+    server.plan = { messages: [msg(1, "pm", "Draft")], draft: draftOf(teamChanges().map((c) => ({ ...c, accepted: true }))) };
+    server.handlers["GET /api/projects/p1"] = () => ({ json: { project_id: "p1", goal: "g", agents: TEAM } });
+    renderTab();
+    const team = await screen.findByRole("region", { name: "Team" });
+    const add = within(team).getByTestId("change-c1");
+    expect(within(add).getByText("data_builder")).toBeInTheDocument();
+    expect(within(add).getByText("builder · fast")).toBeInTheDocument();
+    expect(within(add).getByText("after builder")).toBeInTheDocument();
+    expect(within(add).getByText(reason)).toBeInTheDocument();
+    const edit = within(team).getByTestId("change-c2");
+    await waitFor(() => expect(within(edit).getByText("solid").tagName).toBe("DEL"));
+    expect(within(edit).getByText("heavy")).toBeInTheDocument();
+    expect(within(team).getByTestId("change-c3")).toHaveTextContent("Remove from the team");
+    expect(screen.queryByText(/decided by the project manager/)).toBeNull();
+  });
+
+  it("approves with team changes, invalidates the project and tells the Studio", async () => {
+    server.plan = { messages: [msg(1, "pm", "Draft")], draft: draftOf(teamChanges().map((c) => ({ ...c, accepted: true }))) };
+    server.handlers["POST /api/projects/p1/plan/draft/approve"] = () => {
+      server.plan = { ...server.plan, draft: null };
+      return { json: { version: 4, applied: ["c1", "c2", "c3"], created: {}, team_changes: teamChanges().map((c) => c.change),
+        team: { added: ["data_builder"], edited: ["reviewer"], removed: ["helper"] } } };
+    };
+    const onTeamChanged = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    render(
+      <QueryClientProvider client={qc}>
+        <PlanTab projectId="p1" onTeamChanged={onTeamChanged} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Approve draft" }));
+    expect(await screen.findByText("Approved: spec v4")).toBeInTheDocument();
+    const keys = spy.mock.calls.map((c) => JSON.stringify((c[0] as { queryKey: unknown }).queryKey));
+    expect(keys).toEqual(expect.arrayContaining([JSON.stringify(["projects", "p1"]), JSON.stringify(["project", "p1"])]));
+    expect(onTeamChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not tell the Studio when no team change was applied", async () => {
+    server.plan = { messages: [msg(1, "pm", "Draft")], draft: draftOf([dc("c1", { op: "add_rule", text: "Be kind" }, true)]) };
+    server.handlers["POST /api/projects/p1/plan/draft/approve"] = () => {
+      server.plan = { ...server.plan, draft: null };
+      return { json: { version: 4, applied: ["c1"], created: {}, team_changes: [], team: { added: [], edited: [], removed: [] } } };
+    };
+    const onTeamChanged = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <PlanTab projectId="p1" onTeamChanged={onTeamChanged} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Approve draft" }));
+    await screen.findByText("Approved: spec v4");
+    expect(onTeamChanged).not.toHaveBeenCalled();
   });
 });

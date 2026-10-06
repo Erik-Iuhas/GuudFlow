@@ -85,6 +85,15 @@ export interface ChangeWire {
   applies_to?: string[];
   strength?: string;
   notes?: string;
+  // Team ops (add_role, edit_role, remove_role).
+  role?: string;
+  role_type?: string;
+  description?: string;
+  model_tier?: string;
+  review_of?: string[];
+  max_review_rounds?: number;
+  name?: string;
+  capabilities?: Record<string, string>;
 }
 
 export interface DraftChangeWire {
@@ -126,6 +135,9 @@ export interface ApproveResult {
   version: number;
   applied: string[];
   created: Record<string, string>;
+  /** Ticked team ops, already applied to the project (`team` says which roles). */
+  team_changes?: ChangeWire[];
+  team?: { added: string[]; edited: string[]; removed: string[] };
 }
 
 /** An HTTP error carrying the server's `detail`. */
@@ -225,6 +237,9 @@ function invalidateAll(qc: ReturnType<typeof useQueryClient>, projectId: string)
   void qc.invalidateQueries({ queryKey: planKeys.spec(projectId) });
   void qc.invalidateQueries({ queryKey: planKeys.plan(projectId) });
   void qc.invalidateQueries({ queryKey: workKeys.backlog(projectId) });
+  // An approved team change edits the project doc, so the project config is stale too.
+  void qc.invalidateQueries({ queryKey: ["projects", projectId], exact: true });
+  void qc.invalidateQueries({ queryKey: ["project", projectId] });
 }
 
 export function useApproveDraft(projectId: string): UseMutationResult<ApproveResult, Error, void> {
