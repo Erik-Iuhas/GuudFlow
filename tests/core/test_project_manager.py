@@ -100,6 +100,22 @@ async def test_one_retry_on_invalid_output(tmp_path: Path) -> None:
     assert "rejected" in retry and "reason" in retry and retry.startswith(user_text(llm, 0))
 
 
+async def test_a_cut_off_answer_is_never_accepted(tmp_path: Path) -> None:
+    # A real model hit the output limit: the truncated tool call kept only `reply`,
+    # which validated as a turn with no changes. It must be retried instead.
+    cut = MockTurn(tool_calls=[ToolCall("1", TOOL_NAME, {"reply": "Long plan…"})],
+                   stop_reason="max_tokens")
+    manager, llm = pm(tmp_path, cut, call("Short.", [req()]))
+    out = await manager.turn("plan it", mode="update")
+    assert out.reply == "Short." and out.draft is not None and len(out.draft.changes) == 1
+    assert "cut off" in user_text(llm, 1)
+
+
+def test_changes_come_before_the_reply_in_the_schema() -> None:
+    props = list(turn_tool()["input_schema"]["properties"])
+    assert props.index("changes") < props.index("reply")
+
+
 async def test_retry_when_no_tool_call(tmp_path: Path) -> None:
     manager, llm = pm(tmp_path, MockTurn(text="I will just talk"), call("ok"))
     out = await manager.turn("hi", mode="discuss")

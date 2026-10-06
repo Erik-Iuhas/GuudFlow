@@ -214,8 +214,9 @@ _REF_KIND = {"add_requirement": "requirement", "add_decision": "decision",
 class PlanTurn(_Model):
     """The project manager's tool payload for one turn."""
 
-    reply: str
+    # `changes` comes first so a model writes the part that matters before the prose.
     changes: list[Change] = Field(default_factory=list, max_length=MAX_CHANGES)
+    reply: str
     questions: list[str] = Field(default_factory=list)
 
 

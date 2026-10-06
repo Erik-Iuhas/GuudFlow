@@ -32,7 +32,7 @@ from core.spec import Spec
 log = logging.getLogger(__name__)
 
 TOOL_NAME = "submit_plan_turn"
-MAX_TOKENS = 8000
+MAX_TOKENS = 16000
 HISTORY_MESSAGES = 20
 SESSIONS_SHOWN = 3
 BACKLOG_SHOWN = 60
@@ -186,6 +186,13 @@ class ProjectManager:
                 system=system, messages=[LLMMessage(role="user", content=content)],
                 tools=[turn_tool()], max_tokens=MAX_TOKENS, **kwargs)
             responses.append(response)
+            if response.stop_reason == "max_tokens":
+                # A cut-off tool call parses as a shorter, valid-looking payload (the changes
+                # are lost and only the reply survives), so it is never accepted.
+                problems = ["your answer was cut off at the output limit: keep `reply` under "
+                            "200 words and propose fewer, smaller changes"]
+                log.warning("pm: attempt %d hit the output limit", attempt)
+                continue
             call = next((c for c in response.tool_calls if c.name == TOOL_NAME), None)
             if call is None:
                 problems = [f"you did not call {TOOL_NAME}"]
