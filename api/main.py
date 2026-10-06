@@ -46,6 +46,7 @@ from api.routes import invoke as invoke_router
 from api.routes import oneshot as oneshot_router
 from api.routes import meta as meta_router
 from api.routes import personas as personas_router
+from api.routes import pm as pm_router
 from api.routes import project_work as project_work_router
 from api.routes import record as record_router
 from api.routes import plan as plan_router
@@ -291,6 +292,7 @@ def create_app() -> FastAPI:
     app.include_router(run_artifacts_router.router)
     app.include_router(run_report_router.router)
     app.include_router(personas_router.router)
+    app.include_router(pm_router.router)
     app.include_router(meta_router.router)
     app.include_router(invoke_router.router)
     app.include_router(oneshot_router.router)

@@ -11,6 +11,7 @@ import { acceptanceRef, checkStates, routedToYou } from "./overviewModel";
 import { RoutedToYou } from "./RoutedToYou";
 import { AskBox } from "./WorkOverview";
 import { CHECK_MARK, CHECK_TEXT } from "./SpecResults";
+import { usePmName } from "../pm/api";
 
 const STATE_LABEL: Record<BacklogItemWire["status"], string> = {
   open: "open", in_run: "in a session", done: "done", dropped: "dropped",
@@ -56,10 +57,11 @@ export function WorkTechnical({
 }) {
   const spec = useSpec(projectId);
   const plan = usePlan(projectId);
+  const pmName = usePmName();
   const states = checkStates(spec.data);
   const g = groupBacklog(items);
   const rows = [...g.inRun, ...g.open, ...g.done];
-  const routed = routedToYou(seats, pendingRuns, plan.data);
+  const routed = routedToYou(seats, pendingRuns, plan.data, pmName);
   return (
     <div className="flex flex-col gap-4" data-testid="work-technical">
       <AskBox

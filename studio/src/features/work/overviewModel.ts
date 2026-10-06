@@ -102,6 +102,7 @@ export function routedToYou(
   seats: ProjectSeats | undefined,
   pendingRuns: readonly RunBranchWire[],
   plan: PlanWire | undefined,
+  pmName = "Jack",
 ): Routed {
   const cosigns = pendingRuns.filter((r) => r.needs_cosign && !r.cosign).map((r) => `Co-sign the code of ${r.run_id}`);
   const undecided = undecidedDecisions(plan?.draft);
@@ -110,7 +111,7 @@ export function routedToYou(
   const owner = [
     ...pendingRuns.map((r) => `Accept or reject ${r.run_id}`),
     ...(draftOpen ? ["A plan draft waits for your approval"] : []),
-    ...(q ? [`The project manager asks: ${q}`] : []),
+    ...(q ? [`${pmName} asks: ${q}`] : []),
   ];
   return {
     reviewer: seats?.reviewer && seats.reviewer !== "off" ? cosigns : null,

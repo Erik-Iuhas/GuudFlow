@@ -230,7 +230,7 @@ describe("review and co-sign", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Accept into the project" }));
-    expect(await screen.findByText(/The project manager is reviewing the session for spec changes/)).toBeInTheDocument();
+    expect(await screen.findByText(/Jack is reviewing the session for spec changes/)).toBeInTheDocument();
     await waitFor(() => expect(calls.some((c) => c.path === "/api/projects/p1/plan/after-session/r1")).toBe(true));
     expect(screen.getByRole("link", { name: "See Plan." })).toHaveAttribute("href", "/projects/p1?tab=plan");
   });

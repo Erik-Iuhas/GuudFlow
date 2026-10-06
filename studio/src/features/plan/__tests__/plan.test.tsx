@@ -103,8 +103,9 @@ describe("PlanTab conversation", () => {
     renderTab();
     fireEvent.click(await screen.findByRole("button", { name: "Draft the first plan" }));
     expect(await screen.findByText(/Here is draft one/)).toBeInTheDocument();
-    expect(screen.getByText("Project manager")).toBeInTheDocument();
-    expect(screen.getByText("PM")).toBeInTheDocument();
+    expect(screen.getByText("Jack")).toBeInTheDocument();
+    expect(screen.getByText("project manager")).toBeInTheDocument();
+    expect(screen.getByText("J")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Draft the first plan" })).toBeNull();
     expect(mutating()[0].path).toBe("/api/projects/p1/plan/start");
   });
@@ -129,11 +130,11 @@ describe("PlanTab conversation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Just discuss" }));
     expect(screen.getByRole("button", { name: "Just discuss" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
-    expect(await screen.findByText("Project manager is drafting…")).toBeInTheDocument();
+    expect(await screen.findByText("Jack is drafting…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     release(null);
     expect(await screen.findByText("Done")).toBeInTheDocument();
-    expect(screen.queryByText("Project manager is drafting…")).toBeNull();
+    expect(screen.queryByText("Jack is drafting…")).toBeNull();
     expect((screen.getByLabelText(/Answer, push back/) as HTMLTextAreaElement).value).toBe("");
     expect(mutating()[0].body).toEqual({ text: "Use SQLite", mode: "discuss" });
   });
@@ -253,7 +254,7 @@ describe("SpecView", () => {
     expect(screen.getByRole("img", { name: "unmet" })).toHaveTextContent("✕");
     expect(screen.getByText("assumed")).toBeInTheDocument();
     expect(screen.getByText("binding")).toBeInTheDocument();
-    expect(screen.getByText("decided by the project manager")).toBeInTheDocument();
+    expect(screen.getByText("decided by Jack")).toBeInTheDocument();
     expect(screen.getByText("No new runtime deps")).toBeInTheDocument();
   });
 
