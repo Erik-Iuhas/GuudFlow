@@ -345,3 +345,54 @@ model and role.
 - Technical detail (model per role, check commands, files touched) is shown inline in small
   type rather than hidden. What gets hidden is mechanics: tool calls, raw signals and card
   columns stay in the technical view.
+
+## 9. Seats and detail (third storyboard take, 2026-10-06)
+
+The goal is one product for both kinds of user: a technical person can step into a role on the
+team without leaving the project, and a pure end user can still run a project. Two independent
+controls do this.
+
+### 9.1 Seats: which jobs you hold
+
+| Seat | The human does | What the team does differently while a human holds it |
+|---|---|---|
+| **Owner** (always held by someone) | Requests, agreeing requirements and milestones, accepting sessions | The manager asks about scope and priority; nothing reaches `main` without an accept (or autopilot rules) |
+| **Lead** | Approves decisions (`D*`) and ticket splits | Decisions are proposed as *pending* instead of made. After a timeout (default 24 h) the manager decides and flags it. Scope: every decision, or only those that change requirements or dependencies |
+| **Reviewer** | Co-reviews tickets: reads the diff and the agent reviewer's findings, co-signs or requests changes | The agent reviewer still reviews first. In-scope tickets wait for the co-sign, and the human's comments become `Issue`s in the builder's next brief (same review edge, same round limit). Scope: every ticket, must-requirement tickets only, or only when the agent reviewer is unsure |
+| **Builder** | Takes tickets and works on a `human/*` branch with their own tools | The branch goes through the same checks as an agent branch (protected paths, symlinks, secret scan, project check) and the same review, then the runner merges it. Agents read the human's notes, and the board keeps agents off the ticket's `files_hint` while the human holds it |
+
+Empty seats are covered by the team as they are today. Quick picks set seats and detail
+together:
+
+| Quick pick | Seats | Detail |
+|---|---|---|
+| Just the outcome | Owner | Outcomes |
+| Product owner | Owner | Requirements |
+| Tech lead | Owner, Lead, Reviewer | Tickets |
+| Hands-on | all four | Code |
+
+Seats are per person, per project.
+
+### 9.2 Detail: how deep each screen shows things
+
+**Outcomes → Requirements → Tickets → Code.** It is the same data at each level, never a
+different product. At Outcomes, milestones read as plain progress and questions are shown with
+their user-facing consequences. At Code, diffs and review comments are inline. Every screen has
+the switch and remembers the last choice.
+
+The UI can *suggest* a change based on behaviour, for example "You've opened the full diff in your
+last 3 reviews. Should reviews open on the diff?". It never switches on its own.
+
+### 9.3 What it needs underneath
+
+- **Routing:** each item that needs a human (question, decision, co-sign, session review) carries
+  the seat it belongs to. "Routed to you" shows the ones for seats you hold. Items for empty seats
+  are handled by the team and listed for reference.
+- **Scheduler:**
+  - a pending Lead decision blocks only the tickets that depend on it;
+  - a human co-sign is one more step on the review edge;
+  - a human-held ticket is a card whose assignee is not an opencode role. It is not spawned, but
+    it is scheduled around (files, dependencies) and merged by the same runner path.
+- **A git endpoint for the Builder seat:** authenticated clone and push of the project repo,
+  limited to `human/*` branches; or the project's GitHub remote. This is new and needs its own
+  security review: tokens, branch restrictions, the same protected-path rules.
