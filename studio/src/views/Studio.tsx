@@ -1,27 +1,33 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { ApiError, invokeApi, modelsApi, projectsApi, runsApi, type ModelEntry } from "../api";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { ApiError, invokeApi, projectsApi, runsApi } from "../api";
 import { PersonaSlideOver } from "../components/PersonaSlideOver";
 import { WorkerSettingsPanel } from "../components/WorkerSettingsPanel";
 import { CostStrip } from "../components/CostStrip";
 import { PipelineGraph } from "../components/PipelineGraph";
-import { ResumeButton } from "../components/ResumeButton";
 import { RoadmapTab } from "../components/RoadmapTab";
-import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "../components/ui/dialog";
-import { Alert, Input, Label, Page, SectionTitle, Select, Table, Td, Textarea, Th, linkClass } from "../components/ui/form-controls";
+import { Alert, Input, Label, Page, SectionTitle, Textarea, linkClass } from "../components/ui/form-controls";
+import { Segmented } from "../components/ui/segmented";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { checkCls, runStatusVariant } from "../lib/field";
+import { checkCls } from "../lib/field";
 import { cn } from "../lib/utils";
 import type { AgentConfig, ProjectConfig, RunMeta } from "../types";
 import { ProjectInsights } from "../features/project/ProjectInsights";
+import { SeatChips } from "../features/project/SeatChips";
+import { SessionsTab } from "../features/project/SessionsTab";
+import { PROJECT_TABS, TAB_LABEL, normalizeTab, type ProjectTab } from "../features/project/projectTabs";
+import { useDetailLevel, type DetailLevel } from "../features/project/useDetailLevel";
 import { ProjectWork, type RunRequest } from "../features/work/ProjectWork";
 import { WorkSettings } from "../features/work/WorkSettings";
 import { Inputs } from "./Inputs";
 
-type Tab = "work" | "team" | "inputs" | "roadmap" | "insights" | "settings";
+const DETAIL_OPTIONS: { value: DetailLevel; label: string }[] = [
+  { value: "overview", label: "Overview" },
+  { value: "technical", label: "Technical" },
+];
 
 const DEFAULT_GATES = {
   pre_run_cost_preview: true,
@@ -38,20 +44,22 @@ export function Studio() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // The project is ongoing work (plan §13): its backlog and review queue come first.
-  const [tab, setTab] = useState<Tab>("work");
+  // The tab lives in `?tab=` so links work; old names (inputs, roadmap, insights) map onto new tabs.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: ProjectTab = normalizeTab(searchParams.get("tab"));
+  function setTab(next: ProjectTab) {
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set("tab", next);
+        return p;
+      },
+      { replace: true },
+    );
+  }
+  const [detail, setDetail] = useDetailLevel(id ?? "");
   const [settingsRole, setSettingsRole] = useState<string | null>(null);
   const [slideOverPersonaId, setSlideOverPersonaId] = useState<string | null>(null);
-  // Track 12 — model registry for the per-use-case sub-LLM picker.
-  // Loaded once; failure leaves the picker showing "(auto: cheapest)".
-  const [models, setModels] = useState<ModelEntry[]>([]);
-  useEffect(() => {
-    let alive = true;
-    modelsApi
-      .list()
-      .then((m) => { if (alive) setModels(m); })
-      .catch(() => { /* picker degrades gracefully */ });
-    return () => { alive = false; };
-  }, []);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -178,9 +186,13 @@ export function Studio() {
 
   return (
     <Page>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h1 className="m-0 text-[22px] font-semibold tracking-tight">{project.project_id}</h1>
-        <div className="flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="m-0 text-[22px] font-semibold tracking-tight">{project.project_id}</h1>
+          <SeatChips seats={project.seats} />
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Segmented label="Detail level" value={detail} onChange={setDetail} options={DETAIL_OPTIONS} />
           <Button variant="outline" onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
@@ -191,14 +203,11 @@ export function Studio() {
 
       {error && <Alert variant="error" className="mb-3">{error}</Alert>}
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)} className="mb-4">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as ProjectTab)} className="mb-4">
         <TabsList>
-          <TabsTrigger value="work">Work</TabsTrigger>
-          <TabsTrigger value="team">Team</TabsTrigger>
-          <TabsTrigger value="inputs">Inputs</TabsTrigger>
-          <TabsTrigger value="roadmap">Roadmap</TabsTrigger>
-          <TabsTrigger value="insights">Insights</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
+          {PROJECT_TABS.map((t) => (
+            <TabsTrigger key={t} value={t}>{TAB_LABEL[t]}</TabsTrigger>
+          ))}
         </TabsList>
       </Tabs>
 
@@ -265,78 +274,6 @@ export function Studio() {
                 </div>
               );
             })()}
-
-            {/* Track 12 — per-use-case sub-LLM model picker.
-                Three known use cases (mirrors agents/tools/llm_dispatch.py).
-                Empty selection = server-side fallback to cheapest tool-capable. */}
-            {(() => {
-              const useCases: { id: string; label: string; hint: string }[] = [
-                { id: "summarise-subtask", label: "Summarise subtask", hint: "context hot-swap (Track 8)" },
-                { id: "protocol-cleanup", label: "Protocol cleanup", hint: "fix prose → COMMIT block" },
-                { id: "llm-dispatch", label: "Generic dispatch", hint: "agent-crafted prompts" },
-              ];
-              const subModels = project.sub_llm_models ?? {};
-              const fmtCost = (m: ModelEntry) => {
-                const inC = m.cost_per_1k_input ?? 0;
-                const outC = m.cost_per_1k_output ?? 0;
-                return inC === 0 && outC === 0 ? "free" : `$${inC.toFixed(3)}/$${outC.toFixed(3)} per 1k`;
-              };
-              const grouped: Record<string, ModelEntry[]> = {};
-              for (const m of models) {
-                (grouped[m.provider] ||= []).push(m);
-              }
-              return (
-                <div className="mt-4">
-                  <Label className="mb-1.5">Sub-LLM models</Label>
-                  <p className="mb-1.5 mt-0 text-xs text-muted-foreground">
-                    Per-use-case model for tools that delegate to a cheap LLM. Empty = auto (cheapest tool-capable).
-                  </p>
-                  <Table>
-                    <thead>
-                      <tr>
-                        <Th className="w-[32%]">Use case</Th>
-                        <Th>Model</Th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {useCases.map((uc) => (
-                        <tr key={uc.id}>
-                          <Td>
-                            <div className="font-medium">{uc.label}</div>
-                            <div className="text-xs text-muted-foreground">{uc.hint}</div>
-                          </Td>
-                          <Td>
-                            <Select
-                              value={subModels[uc.id] ?? ""}
-                              onChange={(e) => {
-                                const next = { ...(project.sub_llm_models ?? {}) };
-                                if (e.target.value) {
-                                  next[uc.id] = e.target.value;
-                                } else {
-                                  delete next[uc.id];
-                                }
-                                setProject({ ...project, sub_llm_models: next });
-                              }}
-                            >
-                              <option value="">(auto: cheapest tool-capable)</option>
-                              {Object.entries(grouped).sort().map(([provider, ms]) => (
-                                <optgroup key={provider} label={provider}>
-                                  {ms.map((m) => (
-                                    <option key={m.id} value={m.id}>
-                                      {m.id} — {fmtCost(m)}
-                                    </option>
-                                  ))}
-                                </optgroup>
-                              ))}
-                            </Select>
-                          </Td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
-              );
-            })()}
           </Card>
 
           <CostStrip project={project} />
@@ -351,58 +288,20 @@ export function Studio() {
             />
           )}
           <Button variant="outline" className="mt-2" onClick={addAgent}>+ Add agent</Button>
-
-          <SectionTitle className="mt-6">Recent runs</SectionTitle>
-          {runs.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No runs yet. Hit "Run now" to start one.</p>
-          ) : (
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Run id</Th>
-                  <Th>Status</Th>
-                  <Th>Created</Th>
-                  <Th>Completed agents</Th>
-                  <Th></Th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((r) => (
-                  <tr key={r.run_id}>
-                    <Td>
-                      <Link to={`/runs/${r.run_id}`} className={cn(linkClass, "font-mono")}>
-                        {r.run_id}
-                      </Link>
-                    </Td>
-                    <Td>
-                      <Badge variant={runStatusVariant(r.status)}>{r.status}</Badge>
-                    </Td>
-                    <Td className="text-xs text-muted-foreground">{r.created_at?.replace("T", " ").split(".")[0]}</Td>
-                    <Td className="text-xs">{(r.completed_agents ?? []).join(", ")}</Td>
-                    <Td>
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button asChild variant="outline">
-                          <Link to={`/runs/${r.run_id}`}>Watch</Link>
-                        </Button>
-                        {/* Phase G.3 — quick-resume from the run history
-                            list. Same backend as the Run view's button. */}
-                        {r.status !== "complete" && r.status !== "running" &&
-                         r.status !== "queued" && (
-                          <ResumeButton runId={r.run_id} onResumed={() => void load()} />
-                        )}
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          )}
         </>
-      ) : tab === "inputs" ? (
-        id && <Inputs projectId={id} />
-      ) : tab === "roadmap" ? (
-        id && <RoadmapTab projectId={id} />
-      ) : tab === "insights" ? (
+      ) : tab === "plan" ? (
+        // A later package adds the plan conversation above these two.
+        id && (
+          <>
+            <SectionTitle>Notes</SectionTitle>
+            <RoadmapTab projectId={id} />
+            <SectionTitle className="mt-6">Files</SectionTitle>
+            <Inputs projectId={id} />
+          </>
+        )
+      ) : tab === "sessions" ? (
+        <SessionsTab runs={runs} onResumed={() => void load()} />
+      ) : tab === "record" ? (
         id && <ProjectInsights projectId={id} />
       ) : (
         <>

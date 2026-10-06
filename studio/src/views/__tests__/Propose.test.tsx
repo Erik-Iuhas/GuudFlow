@@ -84,25 +84,16 @@ describe("Propose capability switches", () => {
     }));
   });
 
-  it("legacy hides switches and saves harness legacy explicitly", async () => {
+  it("saves harness opencode explicitly (O15)", async () => {
     await proposeTeam();
-    fireEvent.change(screen.getByLabelText("Agent harness"), { target: { value: "legacy" } });
-    expect(screen.queryByLabelText("dev shell")).toBeNull();
+    expect(screen.queryByLabelText("Agent harness")).toBeNull();
     fireEvent.click(screen.getByText("Approve & create"));
     await waitFor(() => expect(mocks.create).toHaveBeenCalled());
-    const saved = mocks.create.mock.calls[0][0];
-    expect(saved.harness).toBe("legacy");
-    expect(saved.agents[0].capabilities).toBeUndefined();
-  });
-
-  it("defaults to the opencode harness (O15)", async () => {
-    await proposeTeam();
-    expect((screen.getByLabelText("Agent harness") as HTMLSelectElement).value).toBe("opencode");
+    expect(mocks.create.mock.calls[0][0].harness).toBe("opencode");
   });
 
   it("shows switches for opencode and persists role_type + capabilities", async () => {
     await proposeTeam();
-    fireEvent.change(screen.getByLabelText("Agent harness"), { target: { value: "opencode" } });
     // Graph view is the default: capabilities live in the node's side sheet.
     await waitFor(() => expect(mocks.resolve).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByTestId("team-node-dev"));
@@ -159,7 +150,6 @@ describe("Propose capability switches", () => {
   it("shows the server's validation error under the switches", async () => {
     const { ApiError } = await import("../../api");
     await proposeTeam();
-    fireEvent.change(screen.getByLabelText("Agent harness"), { target: { value: "opencode" } });
     fireEvent.click(screen.getByRole("button", { name: "List" }));
     const sandbox = await screen.findByLabelText("dev sandbox");
     mocks.resolve.mockRejectedValueOnce(new ApiError(422, "bad capability"));

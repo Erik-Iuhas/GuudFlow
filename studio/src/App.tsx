@@ -7,6 +7,7 @@ import { BoardPage } from "./features/board";
 import { RunReport } from "./features/report/RunReport";
 import { Dashboard } from "./views/Dashboard";
 import { Projects } from "./views/Projects";
+import { NewProject } from "./features/project/NewProject";
 import { Propose } from "./views/Propose";
 import { Roster } from "./views/Roster";
 import { RunRoute } from "./views/RunRoute";
@@ -40,7 +41,7 @@ const NAV: { to: string; label: string; end?: boolean }[] = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/projects", label: "Projects" },
   { to: "/oneshot", label: "One-shot" },
-  { to: "/propose", label: "Propose" },
+  { to: "/projects/new", label: "New project" },
   { to: "/roster", label: "Roster" },
   { to: "/training", label: "Training" },
   { to: "/settings", label: "Settings" },
@@ -122,6 +123,7 @@ function AppShell({
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/projects" element={<Projects />} />
+          <Route path="/projects/new" element={<NewProject />} />
           <Route path="/projects/:id" element={<Studio />} />
           <Route path="/propose" element={<Propose />} />
           <Route path="/oneshot" element={<OneShotLauncher />} />
