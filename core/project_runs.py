@@ -183,14 +183,16 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
     repo = ProjectRepo(data_root, project_id)
     synced = sync(repo, remote) if accept and remote is not None else None
     run = repo.accept(run_id, note) if accept else repo.reject(run_id, note)
-    if remote is not None and accept:
-        published = publish(repo, remote, run, http=http)
-        run = repo.record(run_id, sync=asdict(synced) if synced else None,
-                          published=asdict(published))
     items = Backlog(data_root, project_id).decide(run_id, accepted=accept, note=note)
     if accept:
         from core.spec_adherence import record_acceptance
         record_acceptance(data_root, project_id, run_id)
+        # The record goes onto main before publishing, so the published branch carries it.
+        write_record_files(data_root, project_id, run_id)
+        if remote is not None:
+            published = publish(repo, remote, repo.get(run_id) or run, http=http)
+            repo.record(run_id, sync=asdict(synced) if synced else None,
+                        published=asdict(published))
         run = repo.get(run_id) or run
         carry = Path(data_root) / "runs" / run_id / "carry_forward.json"
         target = Path(data_root) / "projects" / project_id / "context" / LAST_ACCEPTED_JSON
@@ -198,6 +200,32 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(carry, target)
     return RunDecision(run=run, items=items)
+
+
+def keeps_record_in_repo(data_root: Path, project_id: str) -> bool:
+    """Has the project opted in to `SPEC.md` and `docs/decisions/` in its repo?"""
+    projects = read_json(Path(data_root) / "projects.json", {})
+    doc = projects.get(project_id) if isinstance(projects, dict) else None
+    record = doc.get("record") if isinstance(doc, dict) else None
+    return bool(isinstance(record, dict) and record.get("keep_in_repo"))
+
+
+def write_record_files(data_root: Path, project_id: str, run_id: str) -> str | None:
+    """Commit the spec and decision records onto main after an accepted run, when the
+    project opted in. Never raises: the merge has already happened, and the record is
+    regenerated on the next accept. Returns the new main sha or None."""
+    if not keeps_record_in_repo(data_root, project_id):
+        return None
+    try:
+        from core.record import spec_files
+        files = spec_files(data_root, project_id)
+        if not files:
+            return None
+        return ProjectRepo(data_root, project_id).commit_files(
+            files, f"docs: update the project record after run {run_id}")
+    except Exception:  # noqa: BLE001 — see docstring
+        log.exception("writing the project record for run %s failed", run_id)
+        return None
 
 
 def last_accepted_text(data_root: Path, project_id: str) -> str:

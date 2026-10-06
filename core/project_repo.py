@@ -250,6 +250,28 @@ class ProjectRepo:
             states[run_id] = asdict(run)
         return run
 
+    def commit_files(self, files: dict[str, str], message: str) -> str | None:
+        """Write GuudFlow-generated files onto main as one commit (the project record,
+        plan §14 / PROJECT_FLOW_PLAN P8). Returns the new main sha, or None when nothing
+        changed. Paths must be relative and stay inside the repo."""
+        for path in files:
+            parts = Path(path).parts
+            if not parts or Path(path).is_absolute() or ".." in parts or parts[0] == ".git":
+                raise ProjectRepoError(f"refusing to write {path!r} into the project repo")
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "record"
+            _git("clone", "--quiet", "--no-local", "--branch", MAIN, str(self.path), str(work))
+            for path, content in files.items():
+                target = work / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+            _git("add", "--", *files, cwd=work)
+            if not _git("status", "--porcelain", cwd=work):
+                return None
+            _git(*_AUTHOR, "commit", "--quiet", "-m", message, cwd=work)
+            _git("push", "--quiet", "origin", MAIN, cwd=work)
+        return self.sha(MAIN)
+
     def reject(self, run_id: str, note: str = "") -> RunBranch:
         """Leave main as it is; the branch stays for reference."""
         with self.db.runs_doc() as states:
