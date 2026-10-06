@@ -14,7 +14,7 @@ keeps that rule in step with the decision.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
@@ -324,3 +324,31 @@ def drop_decision(doc: dict[str, Any], dec_id: str, *, at: float, by: str,  # An
     decision = Decision.from_dict(row)
     sync_decision_rule(doc, decision)
     return decision
+
+
+def set_check_states(doc: dict[str, Any], states: Mapping[str, bool], *, run_id: str,  # Any: JSON doc
+                     at: float) -> dict[str, str]:
+    """Set check states from an accepted session's review verdicts (plan §1 call 5).
+
+    `states` maps a check id ("R4.2") to met (True) or unmet (False). Unknown ids are skipped.
+    This is spec-version neutral: the spec version and the requirement's version stay as they
+    are; each requirement whose checks changed gets a history entry (`check_states`, note
+    "set by session"). Returns {check id: new state} for the checks that were written.
+    """
+    written: dict[str, str] = {}
+    for row in doc.get("requirements", []):
+        changed: dict[str, str] = {}
+        for check in row.get("checks", []):
+            if check.get("id") not in states:
+                continue
+            state = "met" if states[check["id"]] else "unmet"
+            if check.get("state") == state and check.get("run_id") == run_id:
+                continue
+            check["state"], check["run_id"] = state, run_id
+            changed[check["id"]] = state
+        if changed:
+            row.setdefault("history", []).append(
+                {"version": row.get("version", 1), "at": at, "by": f"session:{run_id}",
+                 "note": "set by session", "check_states": changed})
+            written.update(changed)
+    return written

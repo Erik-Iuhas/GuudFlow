@@ -203,6 +203,8 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         approval_gates=approval_gates,
         mode=str(data.get("mode") or "production"),
         training_scenario_id=data.get("training_scenario_id"),
+        start_mode=data.get("start_mode") if isinstance(data.get("start_mode"), str) else None,
+        seats=dict(data["seats"]) if isinstance(data.get("seats"), dict) else {},
         desk_seeds=desk_seeds,
         stories=stories,
         pr_mode=pr_mode,  # type: ignore[arg-type]

@@ -189,6 +189,9 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
                           published=asdict(published))
     items = Backlog(data_root, project_id).decide(run_id, accepted=accept, note=note)
     if accept:
+        from core.spec_adherence import record_acceptance
+        record_acceptance(data_root, project_id, run_id)
+        run = repo.get(run_id) or run
         carry = Path(data_root) / "runs" / run_id / "carry_forward.json"
         target = Path(data_root) / "projects" / project_id / "context" / LAST_ACCEPTED_JSON
         if carry.is_file():

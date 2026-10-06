@@ -12,7 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ValidationError
 
 from api.auth import require_bearer
@@ -223,3 +223,86 @@ async def discard_draft(request: Request, project_id: str) -> dict[str, Any]:  #
     except PlanDraftError as exc:
         raise _draft_error(exc) from None
     return {}
+
+
+# ── the spec in sessions (plan §1 calls 5-7, §6) ────────────────────────────
+@router.post("/{project_id}/plan/after-session/{run_id}")
+async def after_session(request: Request, project_id: str, run_id: str,
+                        body: StartBody | None = None) -> dict[str, Any]:  # Any: JSON
+    """Ask the project manager what a finished session means for the spec.
+
+    The report (summary, review notes, leftovers, unmet checks) is built from the run. In
+    `prototype_first` and `research_first` projects the first accepted session derives the spec
+    instead. Returns `{messages, draft}`; 502 when the model fails.
+    """
+    from core.project_repo import ProjectRepo
+    from core.spec_adherence import session_report
+
+    data_root, doc = await _project(request, project_id)
+    run = await asyncio.to_thread(ProjectRepo(data_root, project_id).get, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} not found in this project")
+    report = await asyncio.to_thread(session_report, data_root, project_id, run_id)
+    accepted = sorted((r for r in ProjectRepo(data_root, project_id).runs()
+                       if r.state == "accepted"), key=lambda r: r.decided_at or 0.0)
+    first = bool(accepted) and accepted[0].run_id == run_id
+    pm = await _manager(request, project_id, (body or StartBody()).meta_model)
+    derive = first and pm.start_mode in ("prototype_first", "research_first")
+    try:
+        outcome = await (pm.derive_spec(run_id, report) if derive
+                         else pm.after_session(run_id, report))
+    except ProjectManagerError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    except PlanDraftError as exc:
+        raise _draft_error(exc) from None
+    except Exception as exc:  # noqa: BLE001 — an LLM failure is a 502, not a crash
+        raise HTTPException(status_code=502,
+                            detail=f"the project manager could not answer: {exc}") from None
+    return _outcome_json(outcome)
+
+
+@router.get("/{project_id}/adherence")
+async def get_adherence(request: Request, project_id: str,
+                        last: int = Query(3, ge=1, le=50)) -> dict[str, Any]:  # Any: JSON
+    """How the last `last` sessions kept the binding rules, from their reviews.
+
+    `{runs: [{run_id, rule_verdicts, unmet, fixed}], unmet_merged}`; `unmet_merged` counts
+    rules still unmet on cards that finished `done` and must be 0.
+    """
+    from core.project_repo import ProjectRepo
+    from core.spec_adherence import adherence, read_board
+
+    data_root, _ = await _project(request, project_id)
+
+    def compute() -> dict[str, Any]:  # Any: JSON
+        rows: list[dict[str, Any]] = []  # Any: JSON
+        merged = 0
+        for run in ProjectRepo(data_root, project_id).runs()[:last]:
+            board = read_board(data_root / "runs" / run.run_id)
+            result = adherence(board)
+            merged += result["unmet_merged"]
+            rows.append({"run_id": run.run_id,
+                         "rule_verdicts": result["rule_verdicts"] or run.rule_verdicts or {},
+                         "unmet": result["unmet"], "fixed": result["fixed"]})
+        return {"runs": rows, "unmet_merged": merged}
+
+    return await asyncio.to_thread(compute)
+
+
+runs_router = APIRouter(prefix="/api/runs", tags=["plan"],
+                        dependencies=[Depends(require_bearer)])
+
+
+@runs_router.get("/{run_id}/spec-slice")
+async def get_spec_slice(request: Request, run_id: str) -> dict[str, Any]:  # Any: JSON
+    """What the run's items oblige the team to: requirements, decisions, rules and checks,
+    with the verdicts this run's reviews have given so far (works while the run is live)."""
+    from core.harness.spec_brief import spec_slice
+
+    meta = await request.app.state.run_store.get(run_id)
+    if meta is None or not meta.get("project_id"):
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+    project_id = str(meta["project_id"])
+    data_root, doc = await _project(request, project_id)
+    return await asyncio.to_thread(spec_slice, data_root, project_id, run_id,
+                                   doc.get("start_mode"))

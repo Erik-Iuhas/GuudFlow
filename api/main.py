@@ -282,6 +282,7 @@ def create_app() -> FastAPI:
     app.include_router(project_work_router.router)
     app.include_router(record_router.router)
     app.include_router(plan_router.router)
+    app.include_router(plan_router.runs_router)
     app.include_router(inputs_router.router)
     app.include_router(fs_router.router)
     app.include_router(agents_router.router)

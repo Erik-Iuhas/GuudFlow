@@ -343,7 +343,7 @@ checkbox restyle.
 | P3 Studio shell | done (tabs, detail switch, seat chips, New project page, Sessions tab, Team/Graph toggle) |
 | P4 Project manager + API | done (`core/pm_prompts.py`, `core/project_manager.py`, `api/routes/plan.py`, spec-first gate) |
 | P5 Studio Plan tab | done (`features/plan/*`, mounted in the Plan tab) |
-| P6 Harness integration | not started |
+| P6 Harness integration | done (`core/start_modes.py`, `core/harness/spec_brief.py`, `core/spec_adherence.py`; spec sections in `task_flow.py`; check states and rule verdicts on accept; co-sign route and accept gate; spec-slice, adherence and after-session routes) |
 | P7 Studio Work/Sessions/Team | not started |
 | P8 Record | not started |
 | P9 MCP Studio | not started |

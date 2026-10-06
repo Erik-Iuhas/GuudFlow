@@ -169,6 +169,10 @@ class ProjectConfig:
     # bundle from disk to score the run. Stored on the project at
     # invoke time by the training launcher.
     training_scenario_id: str | None = None
+    # Project flow (plan §2, §5): the start mode and the seats the project document sets.
+    # None / {} for projects (and one-shot runs) that never set them.
+    start_mode: str | None = None
+    seats: dict[str, Any] = field(default_factory=dict)
     # M5: consecutive-fail threshold for the redispatch loop. After this many
     # consecutive REJECTED on the same role (without an intervening APPROVED),
     # tech_lead is escalated instead of bouncing the work back again.
@@ -758,6 +762,10 @@ class AgentRunner:
         ok, why = should_auto_accept(marker, items_pending, cards, check_status)
         if not ok:
             return {"accepted": False, "reason": why}
+        from core.spec_adherence import needs_cosign
+        seat = str((self.project.seats or {}).get("reviewer") or "off")
+        if needs_cosign(data_root, self.project.project_id, self.run_id, seat):
+            return {"accepted": False, "reason": "the reviewer seat needs a human co-sign"}
         from core.project_remote import RemoteConfig
         from core.project_repo import ProjectRepoError
         from core.project_runs import decide_run
