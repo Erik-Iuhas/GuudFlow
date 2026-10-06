@@ -36,6 +36,8 @@ export interface AgentConfig {
   review_of?: string[];
   /** opencode harness: rework rounds a review edge allows before escalating. */
   max_review_rounds?: number;
+  /** Third-party MCP tools (`server__tool`). null/absent: the registry's defaults for the role type; a list is explicit; [] none. */
+  mcp_tools?: string[] | null;
 }
 
 export interface RoleRBAC {

@@ -4,6 +4,7 @@ import { modelsApi, toolsApi, type ModelEntry } from "../api";
 import { checkCls, checkLabelCls, errorCls, fieldCls, labelCls, sectionHeadingCls } from "../lib/field";
 import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
+import { McpToolsField } from "../features/mcp/McpToolsField";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
 
 interface Props {
@@ -673,6 +674,12 @@ export function WorkerSettingsPanel({
               void handleChange({ sub_llm_models_override: next })
             }
           />
+        </section>
+
+        {/* Third-party MCP tools */}
+        <section className="mb-5">
+          <h3 className={sectionHeadingCls}>MCP tools</h3>
+          <McpToolsField agent={current} onChange={(partial) => void handleChange(partial)} />
         </section>
 
         {/* Dependencies */}
