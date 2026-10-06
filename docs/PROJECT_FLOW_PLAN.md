@@ -590,7 +590,14 @@ by the session budget, and stalls are guarded by the stuck detectors.
   - `none`: no time limit; the budget and stuck detectors are the guards.
   - `soft` (the new default): at the time limit, stop starting new cards, let running cards and
     their reviews finish, then submit for review. A `TIME_LIMIT_REACHED` signal is shown in Studio.
-  - `hard`: today's behaviour, for CI or demos that must end on time.
+  - `hard`: today's behaviour. Kept only for CI and scripted runs that must end on time; Studio
+    does not offer it by default.
+- **The soft limit wakes the overseer.** A new stuck detector, `time_limit`, fires when the soft
+  limit is reached (and once early, at 80% of it). The overseer looks for loops and cards that are
+  going nowhere and redirects with its usual menu (`rebrief`, `split`, `restart_role`, `decide`,
+  `pause`). For example: "T7 has run 25 min with 3 failed reviews on the same issue; split it."
+  If nothing is stuck, it lets the running cards finish. Overseer wake caps still apply, and if its
+  wakes are used up the session goes to `HUMAN_NEEDED` instead of running on.
 - **Turn timeout becomes a stall timeout:** a card attempt is aborted only after N minutes with
   no model or tool activity (default 10). A long but busy turn keeps going. An optional absolute
   cap per turn stays available, off by default.
@@ -650,8 +657,8 @@ These are GuudFlow problems, not game ones. Details are in `docs/FIELD_NOTES.md`
   - the startup salvage offer.
 
 - **W8 Time limits.** The `none` / `soft` / `hard` session modes, the stall timeout instead of the
-  per-turn wall clock, and the Studio controls. Tests: a soft limit finishes running cards and
-  starts none; `none` never ends on time; a stall aborts and a busy turn does not.
+  per-turn wall clock, and the Studio controls. Tests: a soft limit finishes running cards,
+  starts none and wakes the overseer once; `none` never ends on time; a stall aborts and a busy turn does not.
 - **W9 Quips.** The office state, anti-repetition, the new events, and the subject and speaker
   fixes. Tests: office-state contents from a scripted board; review subject; no quip text in briefs.
 
