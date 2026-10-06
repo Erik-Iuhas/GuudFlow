@@ -199,8 +199,9 @@ def test_oneshot_summary_lists_merged_files(tmp_path: Path) -> None:
 
 def test_cli_parser_defaults_and_flags() -> None:
     a = build_parser().parse_args(["Do it"])
+    # No --sandbox: None, so HarnessSettings() takes $GUUDFLOW_SANDBOX (else auto).
     assert (a.goal, a.web, a.budget, a.demo, a.example, a.sandbox) == (
-        "Do it", "researcher", 5.0, False, None, "auto")
+        "Do it", "researcher", 5.0, False, None, None)
     b = build_parser().parse_args(["G", "--web", "off", "--budget", "2.5", "--demo",
                                    "--example", "api-client-library", "--sandbox", "host"])
     assert (b.web, b.budget, b.demo, b.example, b.sandbox) == (
