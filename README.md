@@ -134,7 +134,7 @@ in parallel, and a reviewer with a two-round review loop. An overseer is added a
      the gateway and the MCP server. The agent image is built on first use. This is the default
      (`--sandbox auto` picks Docker when the daemon is available) and is required when
      `GUUDFLOW_ENV=production`.
-   - **Without Docker:** use host mode, `--sandbox host`. Agents run as processes on your machine with
+   - **Without Docker:** use host mode: `GUUDFLOW_SANDBOX=host` (or `--sandbox host` on the CLI). Agents run as processes on your machine with
      no isolation, and a warning is logged on every spawn. Use it for trusted local demos only; it is
      refused when `GUUDFLOW_ENV=production`. Note that with `--sandbox auto` and no Docker, a run also
      falls back to host mode outside production.
@@ -373,6 +373,7 @@ you need.
 | `GUUDFLOW_API_TOKEN` | (unset) | Bearer token for credentialed routes. Unset = dev-permissive; required in production |
 | `GUUDFLOW_MODE` | `dev` | `dev` or `production`. Production refuses to start without Docker; gates `code-exec` to container path |
 | `GUUDFLOW_ENV` | unset | Set to `production` to make the opencode harness refuse host mode (Docker required) |
+| `GUUDFLOW_SANDBOX` | `auto` | `auto` (Docker when available, else host), `docker` (always) or `host` (no containers; trusted work only). See [docs/SETUP.md](docs/SETUP.md) |
 | `OPENCODE_BIN` | `.tools/opencode/...` | Path to the pinned opencode binary (see `scripts/install_opencode.sh`) |
 | `GUUDFLOW_DATA_DIR` | `./data` | Where runs, personas, and projects are stored |
 | `GUUDFLOW_DISABLE_INPROC_WORKER` | unset | Set to `1` to disable the in-process worker (use a separate worker process instead) |

@@ -39,24 +39,28 @@ the API.
 | Your machine | Recommended setup | Agent isolation |
 |---|---|---|
 | **Linux** (workstation, server, VM) | Native install + Docker Engine, or `docker compose up` (§5, option C) | Full: every role in its own hardened container on a private network |
-| **Windows** | WSL2 with a Linux distro, and Docker Engine installed *inside* that distro; then follow the Linux steps in WSL | Same as Linux (not separately verified) |
-| **macOS** | Native install in **host mode** for trusted local demos, or a Linux VM for real isolation | Host mode: none (see below) |
-| **Anywhere, just to look around** | Native install without Docker (host mode) | None |
+| **Windows** | WSL2 with a Linux distro; follow the Linux steps inside WSL. For sandboxes, install Docker Engine *inside* that distro. Without Docker, run in host mode. | With Docker Engine in WSL: same as Linux. Without: none |
+| **No Docker at all** (any OS, including macOS) | Native install with `GUUDFLOW_SANDBOX=host` | None: agents run as your user (see host mode below) |
 
-**Why not Docker Desktop (macOS/Windows)?** For each run, GuudFlow creates a private Docker network
-and binds the LLM gateway and MCP server to that network's gateway IP *on the host*, so sandboxes
-can reach those two services and nothing else. Docker Desktop keeps its networks inside its own VM,
-so that IP is not a local address on your Mac or Windows host. Sandboxed runs are not expected to
-work there; use WSL2 with Docker Engine, a Linux VM, or host mode.
+**Docker Desktop is not supported for sandboxes.** For each run, GuudFlow creates a private Docker
+network and binds the LLM gateway and MCP server to that network's gateway IP *on the host*, so
+sandboxes can reach those two services and nothing else. Docker Desktop keeps its networks inside its
+own VM, so that IP is not a local address on your machine. On Windows, use Docker Engine inside WSL2
+instead. Anywhere else without Docker Engine, use host mode.
 
 **Native or compose?** Both give full isolation on Linux. Compose needs only Docker on the machine
 and puts the API, Studio and opencode in one container. A native install is easier to develop on and
 to debug.
 
-**Host mode** (`--sandbox host`, or automatic when Docker is missing outside production) runs each
-opencode server as a normal process on your machine, with your user's permissions and no network
-isolation. GuudFlow logs `⚠️ DEV MODE` on every spawn. Use it only for projects and goals you trust.
-It is refused when `GUUDFLOW_ENV=production`.
+**Host mode** runs each opencode server, and the pre-review check, as a normal process on your
+machine, with your user's permissions and no network isolation.
+- **How to pick it:** set `GUUDFLOW_SANDBOX=host` in `.env` (or pass `--sandbox host` to the CLI).
+  Without the setting (`auto`), runs use Docker when the daemon is reachable and fall back to host
+  mode when it is not.
+- GuudFlow logs `⚠️ DEV MODE` on every spawn.
+- Use it only for projects and goals you trust: an agent can do anything your user can.
+- It is refused when `GUUDFLOW_ENV=production`.
+- `GUUDFLOW_SANDBOX=docker` does the opposite: a run fails rather than fall back to the host.
 
 ## 3. Prerequisites
 
@@ -296,6 +300,7 @@ researcher. See the README for the API equivalents (`/api/oneshot`, `/api/invoke
 | `GUUDFLOW_API_TOKEN` | unset | Bearer token for the API and Studio. Unset = open in dev mode, refused in production. |
 | `GUUDFLOW_MODE` | `dev` | `production` requires the token and Docker. |
 | `GUUDFLOW_ENV` | unset | `production` makes the harness refuse host mode (Docker required). Set it together with `GUUDFLOW_MODE=production`. |
+| `GUUDFLOW_SANDBOX` | `auto` | Where agents run: `auto` (Docker when available, else the host), `docker` (always; fail without it) or `host` (never in a container; trusted work only). The CLI's `--sandbox` overrides it. |
 | `GUUDFLOW_DATA_DIR` | `./data` | Where everything is stored (relative to the directory you start from). |
 | `GUUDFLOW_STUDIO_DIST` | unset | A built Studio (`studio/dist`) to serve at `/`. |
 | `GUUDFLOW_CORS_ORIGINS` | `*` | Comma-separated allowed origins. |
@@ -384,7 +389,7 @@ Then restart the API.
 | "opencode not installed" | Run `scripts/install_opencode.sh` (needs npm), or set `OPENCODE_BIN` to the pinned version. |
 | Runs log `DEV MODE: opencode agent running on host` | Docker is not reachable, so the run fell back to host mode. Check `docker info` works for the API's user, then restart the API. |
 | "Docker is required for sandboxed agents but is not available" | Production refuses host mode. Start Docker, or don't set `GUUDFLOW_ENV=production` for local trials. |
-| Sandboxed runs fail to start on macOS or Windows Docker Desktop | Expected (§2). Use WSL2 with Docker Engine, a Linux VM, or host mode. |
+| Sandboxed runs fail to start on Docker Desktop | Not supported (§2). On Windows, install Docker Engine inside WSL2; otherwise set `GUUDFLOW_SANDBOX=host`. |
 | Compose: runs fail with "no such file or directory" on a mount | The data directory is not at the same path inside and outside. Run `docker compose` from the repo root, or set `GUUDFLOW_HOST_DATA` to an absolute path. |
 | Compose: Studio not reachable from another machine | The API listens on `127.0.0.1` by default. Set `GUUDFLOW_BIND=0.0.0.0` (behind your own firewall or proxy). |
 | A local model (Ollama, LM Studio) fails with "Illegal header value" | Fixed: the gateway now sends no auth header to a provider without a key. Update and restart. |

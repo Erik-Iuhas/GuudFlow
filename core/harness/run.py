@@ -88,6 +88,20 @@ log = logging.getLogger(__name__)
 BindingFactory = Callable[["AgentConfig"], ProviderBinding]
 RolePermissionHook = Callable[[str, dict[str, Any]], Awaitable[PermissionReply]]
 SandboxMode = Literal["auto", "host", "docker"]
+SANDBOX_ENV = "GUUDFLOW_SANDBOX"
+
+
+def sandbox_from_env() -> SandboxMode:
+    """Where agents run by default: $GUUDFLOW_SANDBOX (auto | docker | host), else auto.
+
+    `host` runs agents with no container, for machines without Docker (trusted work only;
+    refused in production). `auto` uses Docker when the daemon is reachable.
+    """
+    value = os.environ.get(SANDBOX_ENV, "").strip().lower() or "auto"
+    if value not in ("auto", "docker", "host"):
+        log.warning("%s=%r is not auto, docker or host; using auto", SANDBOX_ENV, value)
+        return "auto"
+    return value  # type: ignore[return-value]
 
 DEFAULT_PROVIDER_URLS = {"anthropic": "https://api.anthropic.com/v1"}
 
@@ -119,7 +133,7 @@ class HarnessSettings:
     max_spawns_per_role: int = 12
     # "docker": every role in a hardened container (plan §5.3); "host": host_dev for
     # trusted local demos only (refused in production); "auto": docker when available.
-    sandbox: SandboxMode = "auto"
+    sandbox: SandboxMode = field(default_factory=sandbox_from_env)
     # Host-side tool overrides for tests (see each module's `tools()` signature).
     tool_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Task board (plan §4.6): "auto" drives the run by cards when the team has a

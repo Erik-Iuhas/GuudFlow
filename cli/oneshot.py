@@ -49,8 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--demo", action="store_true", help="auto-approve the team and its capabilities")
     p.add_argument("--example", default=None, metavar="NAME",
                    help="seed the run's inputs from data/example_projects/NAME (e.g. api-client-library)")
-    p.add_argument("--sandbox", choices=["auto", "docker", "host"], default="auto",
-                   help="where agents run (default auto: docker when available)")
+    p.add_argument("--sandbox", choices=["auto", "docker", "host"], default=None,
+                   help="where agents run (default $GUUDFLOW_SANDBOX, else auto: docker "
+                        "when available)")
     p.add_argument("--run-dir", default=None, help="run directory (default ./data/runs/<run id>)")
     p.add_argument("--max-minutes", type=float, default=60.0, help="wall-clock limit (default 60)")
     return p
@@ -70,7 +71,8 @@ async def run_oneshot(args: argparse.Namespace, settings: HarnessSettings | None
     run_root = Path(args.run_dir) if args.run_dir else Path("data") / "runs" / run_id
     runner = AgentRunner(project=project, run_id=run_id, run_root=run_root,
                          max_wall_seconds=args.max_minutes * 60)
-    runner.harness_settings = settings or HarnessSettings(sandbox=args.sandbox)
+    runner.harness_settings = settings or (
+        HarnessSettings(sandbox=args.sandbox) if args.sandbox else HarnessSettings())
     if args.example:
         seeded = seed_example_inputs(args.example, run_root)
         print(f"Seeded {len(seeded)} input file(s) from example {args.example!r}", flush=True)
