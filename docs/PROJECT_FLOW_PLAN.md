@@ -1,6 +1,6 @@
 # Plan, spec, seats and start modes: implementation plan
 
-**Status:** written 2026-10-06; in progress. The per-package status table is at the end (§9).
+**Status:** written 2026-10-06; stages 0–4 implemented. Stage 5 is still open (§8). The per-package status table is at the end (§9).
 **Design source:** storyboards v4 (the `GuudFlow storyboards v4` canvas), `docs/INTAKE_PLAN.md`
 §10–§11, `docs/MCP_PLAN.md`.
 **Scope:**
@@ -344,6 +344,16 @@ checkbox restyle.
 | P4 Project manager + API | done (`core/pm_prompts.py`, `core/project_manager.py`, `api/routes/plan.py`, spec-first gate) |
 | P5 Studio Plan tab | done (`features/plan/*`, mounted in the Plan tab) |
 | P6 Harness integration | done (`core/start_modes.py`, `core/harness/spec_brief.py`, `core/spec_adherence.py`; spec sections in `task_flow.py`; check states and rule verdicts on accept; co-sign route and accept gate; spec-slice, adherence and after-session routes) |
-| P7 Studio Work/Sessions/Team | not started |
-| P8 Record | not started |
-| P9 MCP Studio | not started |
+| P7 Studio Work/Sessions/Team | done (Work Overview/Technical, routed-to-you, spec results and co-sign in review, follow panel in the session Team view, seats and rules panels with adherence) |
+| P8 Record | done (`core/record.py` trace/export/spec files, `api/routes/record.py`, Record tab); `SPEC.md` and `docs/decisions/` committed to main on accept when `record.keep_in_repo` is on (`core/project_runs.write_record_files`) |
+| P9 MCP Studio | done (Settings → MCP servers, per-agent MCP tools field) |
+
+**Known gaps after this pass:**
+- Runs with no planner (no task board) get no spec sections in briefs.
+- The trace reads review verdicts from requirement check states, not from every review round
+  on the board.
+- `SPEC.md` and `docs/decisions/` are not protected paths. An agent edit to them is overwritten
+  by the next accept.
+- Visual e2e baselines (`studio/e2e/__screenshots__`) predate the new tabs and checkboxes, and
+  need regenerating.
+- The escape suite needs Docker. It did not run in this environment; CI's Docker job covers it.

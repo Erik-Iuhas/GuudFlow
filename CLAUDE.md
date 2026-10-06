@@ -34,6 +34,22 @@ fills in missing names). Briefs introduce teammates by name, notes may be addres
 commits and quips use the name, and a `TEAM` signal at run start tells Studio who is who.
 `from_agent` on signals stays the role.
 
+**Plan, spec, seats and start modes.** See `docs/PROJECT_FLOW_PLAN.md`.
+- **Project manager.** The meta-agent is the project manager (`core/project_manager.py`,
+  prompts in `core/pm_prompts.py`). It is a host-side LLM call that proposes changes to a
+  versioned **spec** through **drafts**. Every spec change goes through a draft (`core/plan_drafts.py`).
+- **The spec.** Requirements `R#` with checks `R#.#`, decisions `D#`, and rules `rule-N`
+  (`core/spec.py`), all in `work.db`. Work items are the backlog (`B#`, which `serves` requirements).
+- **Seats.** Owner, Lead and Reviewer change what the project manager does and who must approve.
+- **Start modes.** Five modes (`core/start_modes.py`) preset the team, the planner instructions,
+  the reviewer lines and gates.
+- **In sessions.** The spec reaches briefs through `core/harness/spec_brief.py`. Binding rules
+  become reviewer checklist lines. Check states and rule verdicts are recorded when a session is
+  accepted (`core/spec_adherence.py`).
+- **Record.** `core/record.py` gives the trace and export.
+- **MCP.** Third-party MCP servers are proxied on the host (`core/mcp_registry.py`,
+  `core/harness/mcp_proxy.py`; `docs/MCP_PLAN.md`).
+
 **Models & providers.** Studio's Settings page edits providers, models, prices and each tier's
 model (`core/model_config.py`, `api/routes/model_config.py`). The install's choices live in
 `{data_root}/model_config.json` (the shipped `data/models.json` is the default); provider keys typed
