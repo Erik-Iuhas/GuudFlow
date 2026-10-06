@@ -41,7 +41,7 @@ it on its own (budget re-briefs and a priority order). What still needed the ope
 ### F5. Raising the budget at the provider does not reach the session
 - **Seen:** the owner added credit to the Anthropic key twice ($5, then $20), expecting the session to use it. The session's own cap (`token_budget_usd`) stayed at $10 and would have stopped it with credit to spare. The owner had to tell the operator, and the operator called `PATCH /runs/{id}/limits`.
 - **Cause:** GuudFlow knows only its own cap. It cannot see the key's balance, and Studio does not say clearly that the two are separate.
-- **Proposed fix:** when spend reaches about 80% of the cap, Studio shows a clear "about to stop: raise the cap?" prompt (the limits control is already there) and posts it as an approval request. Studio states the run's cap next to the budget meter as "GuudFlow cap", distinct from provider credit. Optionally, show the provider's remaining balance where its API offers one. `open`
+- **Proposed fix:** the session budget is the only budget GuudFlow knows; provider credit is the owner's concern. At 80% of the budget, post an approval request ("about to stop: raise it?") with the limits control. `open`
 
 ### F6. After a budget raise, the team still worked as if money was nearly gone
 - **Seen:** the overseer had told both workers "budget nearly spent, finish fast". Raising the cap did not reach them; the operator had to post a priority comment.

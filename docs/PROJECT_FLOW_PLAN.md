@@ -533,14 +533,14 @@ characters, and checks without `then`.
 - **Deep links:** the API's Studio mount gets an SPA fallback, so `/projects/:id?tab=plan` can be
   reloaded.
 
-### 11.4 Budget and run limits (F5, F6)
-- **Warn before the cap.** At 80% of the run cap, post an approval request: "about to stop at the
-  cap: raise it?". Studio shows it in the cockpit with the limits control.
-- **Name the caps clearly.** Studio labels the run's cap as the "GuudFlow cap", next to the budget
-  meter, as distinct from provider credit. Optionally, show the provider's remaining balance where
-  its API exposes it.
-- **Tell the team.** `RUN_LIMITS_CHANGED` goes into every role's next brief, and the overseer's
-  budget re-brief is withdrawn when the cap rises.
+### 11.4 The session budget (F5, F6)
+A session has one budget: the GuudFlow cap set on the project or raised during the session.
+The provider account (API key credit) is the owner's concern and GuudFlow never reads or shows it.
+- **Warn before the cap.** At 80% of the session budget, post an approval request: "about to
+  stop at the budget: raise it?", shown in the cockpit with the limits control. Nobody has to
+  watch the meter to keep a session from stopping mid-card.
+- **Tell the team.** When the budget is raised, `RUN_LIMITS_CHANGED` goes into every role's next
+  brief, and the overseer's "budget nearly spent" re-brief is withdrawn.
 
 ### 11.5 GuudFlow bugs and gaps found while running pacrogue
 These are GuudFlow problems, not game ones. Details are in `docs/FIELD_NOTES.md`.
@@ -551,7 +551,7 @@ These are GuudFlow problems, not game ones. Details are in `docs/FIELD_NOTES.md`
 | F2 | Docker build cache filled the disk; nothing prunes it | worker disk check + prune offer (§11.6 W7) |
 | F3 | A session cut off by a host restart needed a manual API salvage | startup salvage offer in Studio; check H4 overlap (W7) |
 | F4 | A paused run could only be answered, or given more budget, through the API | fixed (`a49fca9`, respond + limits) |
-| F5 | Credit added at the provider never reaches the session's cap | §11.4 |
+| F5 | A session can stop at its budget with nobody warned in time | §11.4 |
 | F6 | After a budget raise, workers still had the "money nearly gone" re-brief | §11.4 |
 | F7 | Sessions carry whole conversations across cards (≈29% of cost) | §11.1 |
 | F8 | Idle roles re-send their full context after the cache expires | §11.1 |
