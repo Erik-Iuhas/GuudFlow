@@ -343,7 +343,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
         </div>
       )}
       {nodeView === "team" && (
-        <TeamView specs={allSpecs} models={models} selectedRole={selectedRole} onSelectRole={selectRole} />
+        <TeamView specs={allSpecs} models={models} selectedRole={selectedRole} onSelectRole={selectRole} runId={runId} />
       )}
       {nodeView === "graph" && graphOpen && (
         <div

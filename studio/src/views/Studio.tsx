@@ -24,6 +24,8 @@ import { ProjectWork, type RunRequest } from "../features/work/ProjectWork";
 import { WorkSettings } from "../features/work/WorkSettings";
 import { Inputs } from "./Inputs";
 import { PlanTab } from "../features/plan/PlanTab";
+import { SeatsPanel } from "../features/team/SeatsPanel";
+import { RulesPanel } from "../features/team/RulesPanel";
 
 const DETAIL_OPTIONS: { value: DetailLevel; label: string }[] = [
   { value: "overview", label: "Overview" },
@@ -213,9 +215,11 @@ export function Studio() {
       </Tabs>
 
       {tab === "work" ? (
-        id && <ProjectWork projectId={id} starting={starting} onStartRun={(r) => void runNow(false, r)} />
+        id && <ProjectWork projectId={id} seats={project.seats} starting={starting} onStartRun={(r) => void runNow(false, r)} />
       ) : tab === "team" ? (
         <>
+          <SeatsPanel project={project} onSaved={setProject} />
+          {id && <RulesPanel projectId={id} />}
           <Card className="mb-3 p-4">
             <Label>Goal</Label>
             <Textarea
