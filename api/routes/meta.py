@@ -89,6 +89,32 @@ def _skeleton_response(goal: str) -> dict[str, Any]:
     }
 
 
+# Team-template hints per start mode (project flow plan §5).
+START_MODE_HINTS: dict[str, str] = {
+    "spec_first": (
+        "start mode spec_first: project manager, one or two builders and a reviewer. "
+        "Every card should implement named requirement checks."
+    ),
+    "prototype_first": (
+        "start mode prototype_first: project manager, one builder and a reviewer. "
+        "The first session builds the thinnest end-to-end slice; skip polish."
+    ),
+    "test_first": (
+        "start mode test_first: include a tester role ahead of builders. The tester "
+        "writes failing tests for each item's checks first; builders depend on the tester."
+    ),
+    "research_first": (
+        "start mode research_first: project manager, a researcher with web access and a "
+        "reviewer. Research produces a decision note with options, evidence and a "
+        "recommendation; no product code yet."
+    ),
+    "maintain": (
+        "start mode maintain: project manager, one builder and a reviewer. Existing code: "
+        "the smallest safe change, and a regression test per fix."
+    ),
+}
+
+
 _VALID_META_MODEL_TIERS = frozenset({"heavy", "solid", "fast"})
 
 
@@ -129,6 +155,9 @@ async def propose(
                                         # the deterministic skeleton.
         "prior_run_id": "..."           # optional; triggers the
                                         # continuation prompt (D.3)
+        "start_mode": "test_first"      # optional; spec_first | prototype_first |
+                                        # test_first | research_first | maintain.
+                                        # Adds a team-template hint.
       }
     """
     goal = body.get("goal")
@@ -154,6 +183,15 @@ async def propose(
                 status_code=400,
                 detail=f"meta_model must be one of: {sorted(_VALID_META_MODEL_TIERS)}",
             )
+
+    start_mode = body.get("start_mode")
+    if start_mode is not None and (
+        not isinstance(start_mode, str) or start_mode not in START_MODE_HINTS
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"start_mode must be one of: {sorted(START_MODE_HINTS)}",
+        )
 
     # Greenfield (no project_id) is the normal Propose-view path: the
     # user is asking the meta-agent to design a team for a goal before
@@ -245,6 +283,7 @@ async def propose(
             harness=harness,
             playbook_text=playbook_text,
             backlog_text=backlog_text,
+            start_mode_hint=START_MODE_HINTS.get(start_mode or "", ""),
             model_registry=getattr(request.app.state, "model_registry", None),
         )
     except Exception as e:

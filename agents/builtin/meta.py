@@ -208,6 +208,7 @@ class MetaAgent(BaseAgent):
         harness: str = "legacy",
         playbook_text: str = "",
         backlog_text: str = "",
+        start_mode_hint: str = "",
         model_registry: "ModelRegistry | None" = None,
     ) -> TeamProposal:
         """Generate a team proposal for `goal` using inputs in
@@ -249,6 +250,12 @@ class MetaAgent(BaseAgent):
             inputs, archetypes, roster,
             playbook_text=playbook_text, backlog_text=backlog_text, harness=harness,
         )
+        if start_mode_hint.strip():
+            # Team-template hint for the project's start mode (project flow plan §5).
+            user_message += (
+                "\n\n=== Start mode (shapes the team template) ===\n"
+                f"{start_mode_hint.strip()}\n=== end start mode ==="
+            )
         system = (
             META_CONTINUATION_PROMPT
             if inputs.continuation is not None
