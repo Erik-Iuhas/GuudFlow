@@ -57,8 +57,11 @@ def _script(fake: FakeLLM) -> None:
                _done("T2", T2_ITEMS, "Added b.py with mul()."), Text("Done."))
     # The builders run in parallel, so the reviewer may get either card first:
     # pick the verdict from the card named in the brief.
+    # The reviewer keeps its session across cards, so look at the newest brief only.
     def verdict(body: dict[str, Any]) -> ToolCall:
-        text = str(body["messages"])
+        briefs = [m for m in body["messages"] if m.get("role") == "user"
+                  and "Your turn: reviewer" in str(m.get("content"))]
+        text = str(briefs[-1]["content"] if briefs else body["messages"])
         return _pass("T2", T2_ITEMS) if "Multiplication module" in text else _pass("T1", T1_ITEMS)
 
     fake.route("Your turn: reviewer", verdict, Text("Reviewed."), verdict, Text("Reviewed."))
