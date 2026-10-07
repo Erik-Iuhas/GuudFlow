@@ -63,6 +63,33 @@ describe("RunReportView", () => {
     expect(screen.getByTestId("carry-forward")).toHaveTextContent("Still open: T3 Docs");
   });
 
+  it("shows cost per card when the log is labelled", () => {
+    wrap({
+      ...REPORT_FIXTURE,
+      costs: {
+        ...REPORT_FIXTURE.costs,
+        by_card: [
+          { card: "T7", roles: ["render", "rev"], calls: 32, cost_usd: 2.1, fresh_turns: 2,
+            kept_turns: 1, carried_tokens: 41000, cold_calls: 1, cold_cost_usd: 0.4 },
+          { card: "planning", roles: ["planner"], calls: 9, cost_usd: 0.34, fresh_turns: 1,
+            kept_turns: 0, carried_tokens: 0, cold_calls: 0, cold_cost_usd: 0 },
+        ],
+      },
+    });
+    const rows = screen.getAllByTestId("card-cost-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("T7");
+    expect(rows[0]).toHaveTextContent("render, rev");
+    expect(rows[0]).toHaveTextContent("2 / 1");
+    expect(rows[0]).toHaveTextContent("41k");
+    expect(rows[1]).toHaveTextContent("—");
+  });
+
+  it("hides cost per card for older, unlabelled logs", () => {
+    wrap(REPORT_FIXTURE);
+    expect(screen.queryByTestId("card-cost-table")).toBeNull();
+  });
+
   it("degrades while the run has no retrospective or data", () => {
     wrap({
       ...REPORT_FIXTURE, retrospective: null, carry_forward: null, web: [], capabilities: [], branches: [],

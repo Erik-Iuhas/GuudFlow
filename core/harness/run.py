@@ -239,6 +239,7 @@ class OpencodeRun:
         self._notebooks: dict[str, str] = {}
         # Per role: (kept the session, why, context tokens carried in) for the current turn.
         self._session_choice: dict[str, tuple[bool, str, int]] = {}
+        self._turn_seq = 0
         self._desks: dict[str, Any] = {}           # role -> DeskIndex (agents.persona_desk)
         self._desk_seen: dict[str, set[str]] = {}  # role -> desk notes already in its session
         self.images = ImageBudget()
@@ -837,6 +838,12 @@ class OpencodeRun:
                           max_context_tokens=self.settings.session_keep_max_context),
             reviewer=role.role_type == "reviewer")
         self._session_choice[role_name] = (continuing, why, role.last_context if continuing else 0)
+        if self.gateway is not None:
+            self._turn_seq += 1
+            self.gateway.label(self.run_id, role_name, card=card_id,
+                               session="kept" if continuing else "fresh",
+                               carried_tokens=role.last_context if continuing else 0,
+                               turn=self._turn_seq)
         on_event = self._event_hook(role_name)
         on_permission = self._permission_hook(role_name)
         kept = False
@@ -1267,6 +1274,8 @@ class OpencodeRun:
                 client = role.client or await self._ensure_server(
                     role, self.clones.path(name), "notebook")
                 session = await client.create_session(title=f"{self.run_id}:{name}:notebook")
+                if self.gateway is not None:
+                    self.gateway.label(self.run_id, name, card=None, session="notebook")
                 await drive_turn(client, str(session["id"]),
                                  notebook_brief(self._notebooks.get(name),
                                                 self._own_handoffs(name)), agent=name,

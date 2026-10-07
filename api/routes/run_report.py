@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from api.auth import require_bearer
 
 from api.routes.runs import _run_working_dir
 from core.harness.artifacts import safe_resolve
+from core.harness.retrospective import cost_by_card
 from core.harness.retrospective import CARRY_FORWARD_JSON, RETRO_JSON
 from core.playbook import Playbook
 
@@ -76,7 +78,8 @@ def _num(value: Any) -> float:  # Any: untrusted JSON scalar
 def cost_rows(run_root: Path) -> dict[str, Any]:  # Any: JSON document
     """Per-role gateway usage from `llm_costs.jsonl`, plus the total."""
     by_role: dict[str, dict[str, Any]] = {}
-    for row in _jsonl(run_root / "llm_costs.jsonl"):
+    log_rows = _jsonl(run_root / "llm_costs.jsonl")
+    for row in log_rows:
         role = str(row.get("role") or "?")
         agg = by_role.setdefault(role, {"role": role, "calls": 0, "input_tokens": 0,
                                         "output_tokens": 0, "cache_read_tokens": 0,
@@ -93,7 +96,8 @@ def cost_rows(run_root: Path) -> dict[str, Any]:  # Any: JSON document
     total["cost_usd"] = round(total["cost_usd"], 6)
     for r in rows:
         r["cost_usd"] = round(r["cost_usd"], 6)
-    return {"rows": rows, "total": total}
+    return {"rows": rows, "total": total,
+            "by_card": [asdict(c) for c in cost_by_card(log_rows)]}
 
 
 def _interventions(board: list[dict[str, Any]],

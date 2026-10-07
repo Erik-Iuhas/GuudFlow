@@ -7,9 +7,12 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from core.harness.retrospective import (
     build_retrospective,
     carry_forward,
+    cost_by_card,
     finalize_run,
     load_prior_carry_forward,
     playbook_diff,
@@ -125,3 +128,27 @@ def test_load_prior_carry_forward(tmp_path: Path) -> None:
     docs = load_prior_carry_forward(new)
     assert len(docs) == 1 and docs[0]["run_id"] == "run_a"
     assert load_prior_carry_forward(tmp_path / "nowhere") == []
+
+
+def test_cost_by_card_groups_labelled_rows() -> None:
+    rows = [
+        {"role": "planner", "session": "fresh", "turn": 1, "cost_usd": 0.3},
+        {"role": "logic", "card": "T1", "session": "fresh", "turn": 2, "cost_usd": 0.5},
+        {"role": "logic", "card": "T1", "session": "fresh", "turn": 2, "cost_usd": 0.25},
+        {"role": "rev", "card": "T1", "session": "fresh", "turn": 3, "cost_usd": 0.1},
+        {"role": "logic", "card": "T1", "session": "kept", "turn": 4, "carried_tokens": 30_000,
+         "cost_usd": 0.2, "cold": True},
+        {"role": "logic", "session": "notebook", "cost_usd": 0.05},
+    ]
+    cards = {c.card: c for c in cost_by_card(rows)}
+    t1 = cards["T1"]
+    assert (t1.calls, t1.fresh_turns, t1.kept_turns, t1.carried_tokens) == (4, 2, 1, 30_000)
+    assert t1.cost_usd == pytest.approx(1.05) and t1.cold_cost_usd == pytest.approx(0.2)
+    assert sorted(t1.roles) == ["logic", "rev"]
+    assert cards["planning"].cost_usd == pytest.approx(0.3)
+    assert cards["notebooks"].roles == ["logic"]
+    assert list(cards)[0] == "T1"                       # most expensive first
+
+
+def test_cost_by_card_is_empty_for_unlabelled_logs() -> None:
+    assert cost_by_card([{"role": "dev", "cost_usd": 1.0}]) == []

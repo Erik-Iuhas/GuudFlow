@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import time
 from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -102,6 +103,19 @@ class UsageRecord:
     cache_read_tokens: int
     images: int
     cost_usd: float
+    # What the run said this role was doing (plan §11.1, W3): the card, whether its session
+    # was fresh or kept, and the context tokens it carried in when the turn started.
+    card: str | None = None
+    session: str | None = None
+    carried_tokens: int = 0
+    turn: int = 0                  # the run's turn number (one spawn of one role)
+    # A cold call: no cache hit on a large context after the role sat idle past the cache
+    # lifetime, so the whole context was re-sent at full input price.
+    cold: bool = False
+
+
+COLD_MIN_TOKENS = 20_000        # smaller contexts are a fresh brief, not a re-send
+CACHE_LIFETIME_SECONDS = 300.0
 
 
 @dataclass
@@ -254,6 +268,8 @@ class Gateway:
         self._keys: dict[str, VirtualKey] = {}
         self._run_budgets: dict[str, float] = dict(run_budget_usd or {})
         self._records: dict[str, list[UsageRecord]] = {}
+        self._labels: dict[tuple[str, str], dict[str, Any]] = {}
+        self._last_call: dict[tuple[str, str], float] = {}
 
     # ── key management ──────────────────────────────────────────────────────
     def issue_key(self, run_id: str, role: str, allowed_models: Iterable[str],
@@ -277,6 +293,12 @@ class Gateway:
         for key in [k for k, v in self._keys.items() if v.run_id == run_id]:
             del self._keys[key]
 
+    def label(self, run_id: str, role: str, *, card: str | None, session: str,
+              carried_tokens: int = 0, turn: int = 0) -> None:
+        """Tag the role's following requests with what it is doing (until the next label)."""
+        self._labels[(run_id, role)] = {"card": card, "session": session,
+                                        "carried_tokens": carried_tokens, "turn": turn}
+
     # ── accounting ──────────────────────────────────────────────────────────
     def spend(self, run_id: str, role: str | None = None) -> float:
         """USD spent by a run, optionally restricted to one role."""
@@ -298,11 +320,18 @@ class Gateway:
                     + usage.cache_creation_tokens * write
                     + usage.output_tokens * price.output_per_1k
                     + usage.cache_read_tokens * price.cache_read_per_1k) / 1000.0
+        who = (call.key.run_id, call.key.role)
+        now = time.monotonic()
+        idle = now - self._last_call[who] if who in self._last_call else 0.0
+        self._last_call[who] = now
         record = UsageRecord(
             ts=datetime.now(timezone.utc).isoformat(), run_id=call.key.run_id,
             role=call.key.role, upstream=call.upstream.name, model=call.model, status=status,
             input_tokens=input_tokens, output_tokens=usage.output_tokens,
-            cache_read_tokens=usage.cache_read_tokens, images=call.images, cost_usd=cost)
+            cache_read_tokens=usage.cache_read_tokens, images=call.images, cost_usd=cost,
+            cold=(usage.cache_read_tokens == 0 and input_tokens >= COLD_MIN_TOKENS
+                  and idle > CACHE_LIFETIME_SECONDS),
+            **self._labels.get(who, {}))
         call.key.spent_usd += cost
         self._records.setdefault(record.run_id, []).append(record)
         if self._cost_log is not None:

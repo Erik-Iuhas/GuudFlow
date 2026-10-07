@@ -94,6 +94,57 @@ class InterventionOutcome:
 
 
 @dataclass
+class CardCost:
+    """Spend on one card (or one non-card phase) from the gateway's labelled rows (W3)."""
+
+    card: str                      # task id, or "planning" / "notebooks" / "other"
+    roles: list[str]
+    calls: int = 0
+    cost_usd: float = 0.0
+    fresh_turns: int = 0           # turns that started a fresh session
+    kept_turns: int = 0            # turns that continued a session
+    carried_tokens: int = 0        # most context carried into one of its turns
+    cold_calls: int = 0
+    cold_cost_usd: float = 0.0
+
+
+def cost_by_card(rows: list[dict[str, Any]]) -> list[CardCost]:  # Any: cost-log rows
+    """Group cost-log rows by card, most expensive first. Unlabelled (older) logs give []."""
+    if not any("session" in r for r in rows):
+        return []
+    out: dict[str, CardCost] = {}
+    turn_seen: set[tuple[str, int]] = set()
+    for r in rows:
+        card = r.get("card") or ("notebooks" if r.get("session") == "notebook"
+                                 else "planning" if r.get("role") == "planner" else "other")
+        entry = out.setdefault(card, CardCost(card=card, roles=[]))
+        role = str(r.get("role") or "?")
+        if role not in entry.roles:
+            entry.roles.append(role)
+        cost = float(r.get("cost_usd") or 0.0)
+        entry.calls += 1
+        entry.cost_usd += cost
+        carried = int(r.get("carried_tokens") or 0)
+        entry.carried_tokens = max(entry.carried_tokens, carried)
+        session = str(r.get("session") or "")
+        # A turn is counted once: every call in it carries the same turn number.
+        turn = (role, int(r.get("turn") or 0))
+        if session in ("fresh", "kept") and turn not in turn_seen:
+            turn_seen.add(turn)
+            if session == "fresh":
+                entry.fresh_turns += 1
+            else:
+                entry.kept_turns += 1
+        if r.get("cold"):
+            entry.cold_calls += 1
+            entry.cold_cost_usd += cost
+    for entry in out.values():
+        entry.cost_usd = round(entry.cost_usd, 6)
+        entry.cold_cost_usd = round(entry.cold_cost_usd, 6)
+    return sorted(out.values(), key=lambda c: -c.cost_usd)
+
+
+@dataclass
 class Retrospective:
     """What happened in one run, computed without a model."""
 
@@ -106,6 +157,7 @@ class Retrospective:
     review_rounds_used: dict[str, int]               # "owner->reviewer" → max rounds
     stall_minutes: float
     roles_completed: list[str]
+    card_costs: list[CardCost] = field(default_factory=list)
 
     @property
     def total_cost(self) -> float:
@@ -115,6 +167,7 @@ class Retrospective:
     def metrics(self) -> dict[str, float]:
         """Per-run metrics stored in the playbook (§11.4 "measuring it")."""
         completed = max(1, len(self.roles_completed))
+        done_ids = {c.task_id for c in self.cards if c.column == "done"}
         return {
             "stall_minutes": round(self.stall_minutes, 1),
             "interventions": float(len(self.interventions)),
@@ -124,6 +177,10 @@ class Retrospective:
             "cards_total": float(len(self.cards)),
             "cost_usd": self.total_cost,
             "cost_per_completed_role": round(self.total_cost / completed, 6),
+            "cost_per_card_done": round(
+                sum(c.cost_usd for c in self.card_costs if c.card in done_ids)
+                / max(1, len(done_ids)), 6),
+            "cold_cost_usd": round(sum(c.cold_cost_usd for c in self.card_costs), 6),
         }
 
     def to_json(self) -> dict[str, Any]:  # Any: JSON document
@@ -156,7 +213,8 @@ def build_retrospective(run_root: Path, run_id: str) -> Retrospective:
                         and len(e["data"]["merge"]) == 2]
 
     cost: dict[str, float] = defaultdict(float)
-    for row in _jsonl(run_root / "llm_costs.jsonl"):
+    cost_rows = _jsonl(run_root / "llm_costs.jsonl")
+    for row in cost_rows:
         cost[str(row.get("role") or "?")] += float(row.get("cost_usd") or row.get("cost") or 0.0)
 
     status = "complete"
@@ -217,7 +275,8 @@ def build_retrospective(run_root: Path, run_id: str) -> Retrospective:
     return Retrospective(run_id=run_id, status=status, cost_by_role=dict(cost), cards=cards,
                          interventions=interventions, recurring_issues=recurring,
                          review_rounds_used=rounds_used, stall_minutes=stall,
-                         roles_completed=sorted(set(completed)))
+                         roles_completed=sorted(set(completed)),
+                         card_costs=cost_by_card(cost_rows))
 
 
 def playbook_diff(retro: Retrospective, playbook: Playbook) -> PlaybookDiff:

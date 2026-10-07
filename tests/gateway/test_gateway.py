@@ -444,3 +444,31 @@ async def test_e2e_real_sse_stream_through_gateway(tmp_path: Path) -> None:
         finally:
             await http.stop()
             await gw.aclose()
+
+
+async def test_cost_log_rows_carry_the_run_label(client: httpx.AsyncClient, gateway: Gateway,
+                                                 upstream: Upstreams, tmp_path: Path) -> None:
+    key = gateway.issue_key("run1", "dev", [CLAUDE])
+    gateway.label("run1", "dev", card="T3", session="kept", carried_tokens=41_000, turn=7)
+    await _spend_once(client, upstream, key)
+    row = json.loads((tmp_path / "cost.jsonl").read_text().splitlines()[0])
+    assert (row["card"], row["session"], row["carried_tokens"], row["turn"]) == (
+        "T3", "kept", 41_000, 7)
+    assert row["cold"] is False                     # the reply had cache reads
+
+
+def test_cold_call_is_a_big_uncached_context_after_idling(
+        gateway: Gateway, monkeypatch: pytest.MonkeyPatch) -> None:
+    from gateway import app as gateway_app
+    key = gateway.issue_key("run1", "dev", [CLAUDE])
+    call = gateway_app._Call(key=gateway._keys[key], upstream=UPSTREAMS["anthropic"],
+                             model=CLAUDE, images=0)
+    clock = iter([1000.0, 1100.0, 1500.0, 1900.0])
+    monkeypatch.setattr(gateway_app.time, "monotonic", lambda: next(clock))
+    big = gateway_app._Usage(input_tokens=150_000, output_tokens=10)
+    small = gateway_app._Usage(input_tokens=5_000, output_tokens=10)
+    gateway._record(call, 200, big)     # first call of the role: nothing to compare
+    gateway._record(call, 200, big)     # 100 s later: cache would still be warm
+    gateway._record(call, 200, big)     # 400 s idle, no cache read: a cold re-send
+    gateway._record(call, 200, small)   # 400 s idle but a small fresh brief
+    assert [r.cold for r in gateway.usage("run1")] == [False, False, True, False]

@@ -14,6 +14,19 @@ export interface CostRow {
   cost_usd: number;
 }
 
+/** Spend on one card from the gateway's labelled rows (plan §11.1, W3). */
+export interface CardCostRow {
+  card: string;
+  roles: string[];
+  calls: number;
+  cost_usd: number;
+  fresh_turns: number;
+  kept_turns: number;
+  carried_tokens: number;
+  cold_calls: number;
+  cold_cost_usd: number;
+}
+
 export interface CapabilityRow {
   role: string;
   timestamp?: string;
@@ -89,7 +102,7 @@ export interface RunReportData {
   last_signal_at: string | null;
   retrospective: RetrospectiveData | null;
   carry_forward: string | null;
-  costs: { rows: CostRow[]; total: Omit<CostRow, "role"> };
+  costs: { rows: CostRow[]; total: Omit<CostRow, "role">; by_card?: CardCostRow[] };
   capabilities: CapabilityRow[];
   web: WebRow[];
   interventions: ReportIntervention[];

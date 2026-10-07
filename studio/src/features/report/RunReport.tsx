@@ -119,6 +119,46 @@ function CostSection({ report }: { report: RunReportData }) {
   );
 }
 
+/** Spend per card (plan §11.1): fresh vs kept sessions, context carried in, cold re-sends. */
+function CardCostSection({ report }: { report: RunReportData }) {
+  const rows = report.costs.by_card ?? [];
+  if (rows.length === 0) return null;
+  return (
+    <Section title="Cost per card" id="cost-cards">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-sm" data-testid="card-cost-table">
+          <thead>
+            <tr>
+              <th className={TH}>Card</th>
+              <th className={TH}>Agents</th>
+              <th className={`${TH} text-right`}>Calls</th>
+              <th className={`${TH} text-right`}>Turns (fresh / kept)</th>
+              <th className={`${TH} text-right`}>Context carried in</th>
+              <th className={`${TH} text-right`}>Cold re-sends</th>
+              <th className={`${TH} text-right`}>Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.card} className="border-t border-border" data-testid="card-cost-row">
+                <th scope="row" className={`${TD} text-left font-medium`}>{r.card}</th>
+                <td className={TD}>{r.roles.join(", ")}</td>
+                <td className={NUM}>{r.calls}</td>
+                <td className={NUM}>{r.fresh_turns} / {r.kept_turns}</td>
+                <td className={NUM}>{r.carried_tokens ? formatTokens(r.carried_tokens) : "—"}</td>
+                <td className={NUM}>
+                  {r.cold_calls ? `${r.cold_calls} (${formatUsd(r.cold_cost_usd)})` : "—"}
+                </td>
+                <td className={NUM}>{formatUsd(r.cost_usd)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  );
+}
+
 function BranchBlock({ runId, branch }: { runId: string; branch: BranchRow }) {
   const [open, setOpen] = useState<string | null>(null);
   return (
@@ -329,6 +369,7 @@ export function RunReportView({ report }: { report: RunReportData }) {
     <div className="flex flex-col gap-3">
       <Summary report={report} />
       <CostSection report={report} />
+      <CardCostSection report={report} />
       <BranchesSection report={report} />
       <ScreenshotStrip runId={report.run_id} />
       <WebSection report={report} />
