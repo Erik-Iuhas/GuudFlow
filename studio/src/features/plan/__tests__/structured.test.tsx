@@ -100,10 +100,30 @@ describe("DraftPanel", () => {
     expect(statement.querySelector("ins")?.textContent).toBe("eight");
   });
 
+  it("shows a described reason first and folds its changes", () => {
+    const withReasons: DraftWire = {
+      ...draft,
+      groups: {
+        "Default dash": { name: "Default dash", summary: "A new run gets 3 dash charges.", because: "Two felt stingy.",
+          source: "person", quote: "give me three charges" },
+      },
+    };
+    wrap(<DraftPanel draft={withReasons} spec={spec} onTick={() => {}} onApprove={() => {}} onDiscard={() => {}} />);
+    const first = screen.getAllByTestId("theme")[0];
+    expect(within(first).getByTestId("why")).toHaveTextContent("give me three charges");
+    expect(within(first).getByTestId("why")).toHaveTextContent("you asked");
+    expect(within(first).getByTestId("reason-summary")).toHaveTextContent("A new run gets 3 dash charges.");
+    expect(within(first).getByLabelText("Touches")).toHaveTextContent("R1");
+    expect(screen.queryByTestId("change-c1")).toBeNull();                 // folded
+    expect(screen.getByTestId("change-c3")).toBeTruthy();                 // no described reason: open
+    fireEvent.click(within(first).getByRole("button", { name: "Show 2 changes" }));
+    expect(screen.getByTestId("change-c1")).toBeTruthy();
+  });
+
   it("ticks a whole theme and moves with the keyboard", () => {
     const onTick = vi.fn();
     wrap(<DraftPanel draft={draft} spec={spec} onTick={onTick} onApprove={() => {}} onDiscard={() => {}} />);
-    fireEvent.click(within(screen.getAllByTestId("theme")[0]).getByRole("button", { name: "Accept all" }));
+    fireEvent.click(within(screen.getAllByTestId("theme")[0]).getByRole("button", { name: "Accept this reason" }));
     expect(onTick.mock.calls).toEqual([["c1", true], ["c2", true]]);
     onTick.mockClear();
     const panel = screen.getByLabelText(/j and k move/);

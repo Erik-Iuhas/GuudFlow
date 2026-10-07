@@ -60,6 +60,18 @@ export interface RequirementWire {
   status: "active" | "dropped";
   source: string;
   version: number;
+  /** Where it came from: the draft and the reason it was added for. */
+  origin?: HistoryStamp | null;
+  /** Earlier versions, each with the draft that changed it and why. */
+  history?: (HistoryStamp & { version?: number; title?: string; text?: string; params?: ParamWire[] })[];
+}
+
+/** Which draft (or session) changed something, when, and why. */
+export interface HistoryStamp {
+  draft?: string;
+  at?: number;
+  by?: string;
+  why?: ReasonWire;
 }
 
 export interface DecisionWire {
@@ -145,11 +157,24 @@ export interface DraftChangeWire {
   touched: boolean;
 }
 
+/** Why a set of draft changes is proposed (core/plan_drafts.py ChangeGroup). */
+export interface ReasonWire {
+  name: string;
+  /** What changes, in plain words. */
+  summary: string;
+  because: string;
+  source?: "person" | "session" | "pm";
+  /** The exact words that asked for it. */
+  quote?: string | null;
+}
+
 export interface DraftWire {
   id: string;
   base_version: number;
   status: "open" | "approved" | "discarded";
   changes: DraftChangeWire[];
+  /** Reasons by name; each change's `group` names one. Older drafts have none. */
+  groups?: Record<string, ReasonWire>;
 }
 
 export interface PlanMessageWire {
