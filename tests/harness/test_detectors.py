@@ -148,3 +148,37 @@ def test_situation_report_mentions_everything() -> None:
                  "web requests 1", "last result: a: done"):
         assert text in report, text
     assert json.dumps(report)  # plain text, serialisable
+
+
+# ── time_limit (plan §11.6) ─────────────────────────────────────────────────
+
+def _timed(used_minutes: float, mode: str = "soft") -> RunView:
+    start = NOW - used_minutes * 60
+    return RunView(signals=[], cards=[_card("T1"), _card("T2", column="done")], role_states={},
+                   running=["a"], now=NOW, started_at=start, deadline_at=start + 60 * 60,
+                   deadline_mode=mode)
+
+
+def test_time_limit_warns_at_80_percent_then_fires_at_the_limit() -> None:
+    from core.harness.detectors import time_limit
+    assert time_limit(_timed(30), CFG) == []
+    warn = time_limit(_timed(50), CFG)
+    assert [s.subject for s in warn] == ["warning"] and "50 of 60 minutes" in warn[0].detail
+    reached = time_limit(_timed(61), CFG)
+    assert [s.subject for s in reached] == ["reached"]
+    assert "1 card(s) not done (T1)" in reached[0].detail and "running: a" in reached[0].detail
+    assert time_limit(_timed(61, mode="hard"), CFG) == []
+
+
+def test_time_limit_fires_once_and_does_not_use_up_wakes() -> None:
+    watch = StallWatch(max_wakes=1)
+    stall = Stall("time_limit", "warning", "x")
+    assert watch.offer([stall], now=NOW) == [stall]
+    watch.take()
+    assert watch.wakes == 0                                   # a free wake
+    assert watch.offer([stall], now=NOW + 10_000) == []       # never again
+    watch.offer([Stall("no_progress", "", "y")], now=NOW)
+    watch.take()
+    assert watch.exhausted                                    # the one counted wake is used
+    watch.offer([Stall("time_limit", "reached", "z")], now=NOW)
+    assert watch.free_only                                    # the cap does not block it

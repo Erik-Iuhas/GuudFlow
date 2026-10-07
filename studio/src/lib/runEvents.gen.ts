@@ -58,7 +58,10 @@ export type SignalType =
   | "TASK_MOVED"
   | "TASK_THREAD"
   | "RUN_SUBMITTED"
-  | "RUN_LIMITS_CHANGED";
+  | "RUN_LIMITS_CHANGED"
+  | "TIME_LIMIT_REACHED"
+  | "OVERSEER_WAKE"
+  | "BUDGET_WARNING";
 
 export type TaskColumn = "todo" | "in_progress" | "review" | "done" | "blocked" | "needs_attention";
 

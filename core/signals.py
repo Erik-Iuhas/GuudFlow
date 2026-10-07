@@ -155,6 +155,13 @@ class SignalType(str, Enum):
     RUN_SUBMITTED = "RUN_SUBMITTED"
     # A human raised the budget or extended the deadline of a live run.
     RUN_LIMITS_CHANGED = "RUN_LIMITS_CHANGED"
+    # The session reached its soft time limit (plan §11.6): no new work starts; running
+    # cards and their reviews finish, then the session goes to review.
+    TIME_LIMIT_REACHED = "TIME_LIMIT_REACHED"
+    # A stuck detector woke the overseer; detail names the detector and its numbers.
+    OVERSEER_WAKE = "OVERSEER_WAKE"
+    # Spend passed the warning share of the session budget (plan §11.4).
+    BUDGET_WARNING = "BUDGET_WARNING"
 
 
 Priority = Literal["normal", "high"]

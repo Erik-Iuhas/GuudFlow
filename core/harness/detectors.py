@@ -18,6 +18,8 @@ situation report.
 | needs_attention       | a card is in needs_attention (failed, rounds exhausted, …)      |
 | card_aging            | a card sat in one column past its size limit (§4.6)             |
 | escalation            | an ESCALATION signal was posted (replaces the tech lead)        |
+| time_limit            | a soft time limit is 80% used, then reached (once each; these   |
+|                       | wakes do not count against the overseer's cap, plan §11.6)      |
 """
 
 from __future__ import annotations
@@ -34,7 +36,11 @@ from core.workspace import Task
 
 Detector = Literal["no_progress", "same_review_issue", "blocked_chain", "burn_without_output",
                    "permission_thrash", "validation_failures", "needs_attention", "card_aging",
-                   "escalation"]
+                   "escalation", "time_limit"]
+# Wakes caused only by these do not count against the per-run wake cap.
+FREE_DETECTORS: frozenset[str] = frozenset({"time_limit"})
+# These fire once per subject, never again after their cooldown.
+ONCE_DETECTORS: frozenset[str] = frozenset({"time_limit"})
 
 _PROGRESS = frozenset({SignalType.COMPLETE, SignalType.GIT_MERGE})
 
@@ -65,6 +71,8 @@ class RunView:
     budget_usd: float | None = None
     now: float = field(default_factory=time.time)
     started_at: float = field(default_factory=time.time)
+    deadline_at: float | None = None
+    deadline_mode: str = "hard"
 
 
 @dataclass(frozen=True)
@@ -78,6 +86,7 @@ class DetectorConfig:
     permission_denials: int = 3
     validation_failures: int = 2
     max_chain: int = 2
+    time_warn_fraction: float = 0.8
 
 
 def _ts(sig: Signal) -> float:
@@ -229,9 +238,35 @@ def escalation(view: RunView, cfg: DetectorConfig) -> list[Stall]:
             for s in view.signals if s.type is SignalType.ESCALATION]
 
 
+def time_limit(view: RunView, cfg: DetectorConfig) -> list[Stall]:
+    """A soft time limit is close or reached: look for loops before time runs out."""
+    if view.deadline_mode != "soft" or view.deadline_at is None:
+        return []
+    total = view.deadline_at - view.started_at
+    used = view.now - view.started_at
+    if total <= 0:
+        return []
+    open_cards = [c.task_id for c in view.cards if c.column not in ("done",)]
+    running = ", ".join(view.running) or "nothing"
+    left = f"{len(open_cards)} card(s) not done ({', '.join(open_cards[:8])})" if open_cards \
+        else "every card is done"
+    if used >= total:
+        return [Stall("time_limit", "reached",
+                      f"The session's soft time limit is reached ({total / 60:.0f} min). No new "
+                      f"cards start; running: {running}; {left}. Look for loops or cards going "
+                      f"nowhere and redirect them (split, rebrief, restart_role, decide). If "
+                      f"nothing is stuck, change nothing: running work finishes on its own.")]
+    if used >= cfg.time_warn_fraction * total:
+        return [Stall("time_limit", "warning",
+                      f"{used / 60:.0f} of {total / 60:.0f} minutes used; {left}; running: "
+                      f"{running}. Check for loops or cards going nowhere while there is time to "
+                      f"redirect them. If nothing is stuck, change nothing.")]
+    return []
+
+
 DETECTORS: tuple[Callable[[RunView, DetectorConfig], list[Stall]], ...] = (
     needs_attention, escalation, same_review_issue, blocked_chain, validation_failures,
-    permission_thrash, burn_without_output, card_aging, no_progress)
+    permission_thrash, burn_without_output, card_aging, no_progress, time_limit)
 
 
 def detect(view: RunView, cfg: DetectorConfig | None = None) -> list[Stall]:
@@ -256,7 +291,8 @@ class StallWatch:
         fresh = []
         for stall in stalls:
             last = self._last.get(stall.key)
-            if last is not None and now - last < self.cooldown_seconds:
+            if last is not None and (stall.detector in ONCE_DETECTORS
+                                     or now - last < self.cooldown_seconds):
                 continue
             if any(p.key == stall.key for p in self.pending):
                 continue
@@ -270,10 +306,15 @@ class StallWatch:
         """The run used all its overseer wakes."""
         return self.wakes >= self.max_wakes
 
+    @property
+    def free_only(self) -> bool:
+        """Everything pending is a wake that does not count against the cap."""
+        return bool(self.pending) and all(s.detector in FREE_DETECTORS for s in self.pending)
+
     def take(self) -> list[Stall]:
         """Start a wake: hand over everything pending."""
         stalls, self.pending = self.pending, []
-        if stalls:
+        if any(s.detector not in FREE_DETECTORS for s in stalls):
             self.wakes += 1
         return stalls
 

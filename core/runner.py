@@ -139,6 +139,9 @@ class ProjectConfig:
     max_iterations: int = 5
     # Wall-clock budget for one run (session), in minutes (`max_run_minutes`).
     max_run_minutes: int = 30
+    # How that limit acts (plan §11.6): "soft" (default) stops new work and lets running
+    # cards finish; "hard" ends the session on time (CI, demos); "none" has no limit.
+    time_limit: str = "soft"
     escalation_thresholds: dict[str, int] = field(
         default_factory=lambda: {"tech_lead": 2},
     )
@@ -306,8 +309,10 @@ class AgentRunner:
         self.workspace.set_task_persister(self._build_task_persister())
         self.workspace.set_artifact_persister(self._build_artifact_persister())
         # Run-level deadline, checked by the scheduler.
-        if max_wall_seconds is not None:
+        mode = str(getattr(project, "time_limit", "soft") or "soft")
+        if max_wall_seconds is not None and mode != "none":
             self.workspace.deadline_at = _time.time() + max_wall_seconds
+            self.workspace.deadline_mode = "hard" if mode == "hard" else "soft"
         # Per-project `local_path_in_place` source repo: agents work directly
         # in the user's directory instead of a fresh copy under
         # `<run>/workspace/working/`.

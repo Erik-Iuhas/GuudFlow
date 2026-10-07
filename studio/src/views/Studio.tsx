@@ -23,6 +23,7 @@ import { useDetailLevel, type DetailLevel } from "../features/project/useDetailL
 import { ProjectWork, type RunRequest } from "../features/work/ProjectWork";
 import { WorkSettings } from "../features/work/WorkSettings";
 import { Inputs } from "./Inputs";
+import { SessionTimeCard } from "../features/project/SessionTimeCard";
 import { PlanTab } from "../features/plan/PlanTab";
 import { SeatsPanel } from "../features/team/SeatsPanel";
 import { RulesPanel } from "../features/team/RulesPanel";
@@ -325,6 +326,7 @@ export function Studio() {
               })
             }
           />
+          <SessionTimeCard project={project} onChange={setProject} />
           <WorkSettings
             gates={project.approval_gates ?? {}}
             onChange={(patch) =>

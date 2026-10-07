@@ -91,6 +91,9 @@ class OverseerFlow:
     detector_cfg: DetectorConfig = field(default_factory=DetectorConfig)
     watch: StallWatch = field(default_factory=StallWatch)
     addenda: dict[str, list[str]] = field(default_factory=dict)
+    # The detectors of the wake each pending addendum came from (same order as `addenda`),
+    # so a budget raise can withdraw guidance that only answered a budget wake (§11.4).
+    _addenda_from: dict[str, list[frozenset[str]]] = field(default_factory=dict)
     restarts_used: dict[str, int] = field(default_factory=dict)
     paused_for_cap: bool = False
     _current: list[Stall] = field(default_factory=list)
@@ -111,7 +114,7 @@ class OverseerFlow:
         self.watch.offer(stalls, now=view.now)
         if not self.watch.pending:
             return False
-        if self.watch.exhausted:
+        if self.watch.exhausted and not self.watch.free_only:
             self._pause_for_cap(view)
             return False
         return True
@@ -157,6 +160,15 @@ class OverseerFlow:
         from core.harness.task_flow import TurnPlan
 
         self._current = self.watch.take()
+        # Say on the board why the overseer woke (Studio shows it; it was invisible before).
+        self.post(SignalType.OVERSEER_WAKE, self.overseer_role,
+                  "overseer woken: " + "; ".join(
+                      f"{s.detector}{' ' + s.subject if s.subject else ''}" for s in self._current),
+                  json.dumps({"stalls": [{"detector": s.detector, "subject": s.subject,
+                                          "detail": s.detail} for s in self._current],
+                              "spent_usd": round(view.spent_usd, 4), "budget_usd": view.budget_usd,
+                              "wakes_used": self.watch.wakes,
+                              "wakes_max": self.watch.max_wakes}))
         if any(s.detector == "burn_without_output" for s in self._current):
             self._burn_woken = (view.spent_usd, view.budget_usd or 0.0)
         report = situation_report(view, self._current, last_results)
@@ -193,6 +205,8 @@ class OverseerFlow:
         board = self.board
         if isinstance(iv, Rebrief):
             self.addenda.setdefault(iv.role, []).append(iv.addendum)
+            self._addenda_from.setdefault(iv.role, []).append(
+                frozenset(s.detector for s in self._current))
             for card_id in self._stuck_cards(iv.role, iv.task_id):
                 assert board is not None
                 board.note(card_id, "intervention", self.overseer_role, f"rebrief: {iv.addendum}")
@@ -303,9 +317,27 @@ class OverseerFlow:
         _run(["git", *safe, "commit", "--quiet", "-m",
               f"docs(decisions): {iv.decision[:60]}"], cwd=self.main_dir)
 
+    def withdraw_budget_guidance(self) -> int:
+        """The budget was raised: drop pending guidance that came only from budget wakes
+        ("money is nearly gone, finish fast"). Returns how many notes were dropped."""
+        dropped = 0
+        for role in list(self.addenda):
+            sources = self._addenda_from.get(role, [])
+            keep = [(n, src) for n, src in zip(self.addenda[role], sources)
+                    if src and src != frozenset({"burn_without_output"})]
+            keep += [(n, frozenset()) for n in self.addenda[role][len(sources):]]
+            dropped += len(self.addenda[role]) - len(keep)
+            self.addenda[role] = [n for n, _ in keep]
+            self._addenda_from[role] = [src for _, src in keep]
+            if not self.addenda[role]:
+                del self.addenda[role]
+        self._burn_woken = None          # a new budget: a burn wake may fire again later
+        return dropped
+
     def brief_addenda(self, role: str) -> tuple[tuple[str, str], ...]:
         """Overseer guidance for the role's next brief (consumed once)."""
         notes = self.addenda.pop(role, [])
+        self._addenda_from.pop(role, None)
         if not notes:
             return ()
         return (("Guidance from the overseer (read first)", "\n".join(f"- {n}" for n in notes)),)

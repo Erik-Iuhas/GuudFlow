@@ -98,11 +98,14 @@ async def drive_turn(
     agent: str | None = None,
     on_event: EventHook | None = None,
     on_permission: PermissionHook = reject_all,
-    timeout: float = 1200.0,
+    timeout: float | None = 1200.0,
+    stall: float | None = None,
 ) -> TurnStats:
     """Send `text` to the session and return once the session is idle again.
 
-    On timeout the session is aborted and `stats.timed_out` is set; the caller
+    `stall`: abort when no event arrives for this many seconds (plan §11.6: a busy turn
+    keeps going however long it takes; a hung one stops). `timeout`: an optional absolute
+    cap. Either way the session is aborted and `stats.timed_out` is set; the caller
     decides what that means for the role.
     """
     stats = TurnStats(session_id=session_id)
@@ -117,8 +120,16 @@ async def drive_turn(
         await client.prompt_async(session_id, [text_part(text)], agent=agent)
         try:
             await asyncio.wait_for(
-                _consume(client, events, session_id, tracker, stats, on_event, on_permission),
+                _consume(client, events, session_id, tracker, stats, on_event, on_permission,
+                         stall),
                 timeout)
+        except _Stalled:
+            stats.timed_out = True
+            stats.errors.append(f"turn made no progress for {stall:g}s and was aborted")
+            try:
+                await client.abort(session_id)
+            except OpencodeError:
+                log.warning("abort of %s failed", session_id)
         except asyncio.TimeoutError:
             stats.timed_out = True
             stats.errors.append(f"turn exceeded {timeout:.0f}s and was aborted")
@@ -141,12 +152,23 @@ def _observe(event: dict[str, Any], tracker: _UsageTracker, on_event: EventHook 
             log.exception("event hook failed")
 
 
+class _Stalled(Exception):
+    """No event arrived within the stall window."""
+
+
 async def _consume(client: OpencodeClient, events: Any, session_id: str,
                    tracker: _UsageTracker, stats: TurnStats, on_event: EventHook | None,
-                   on_permission: PermissionHook) -> None:
+                   on_permission: PermissionHook, stall: float | None = None) -> None:
     # `events` is the async generator from client.events(); typed Any to avoid
     # re-declaring opencode's event union.
-    async for event in events:
+    while True:
+        try:
+            event = (await asyncio.wait_for(anext(events), stall) if stall
+                     else await anext(events))
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError:
+            raise _Stalled() from None
         _observe(event, tracker, on_event)
         kind = event.get("type")
         props = event.get("properties") or {}

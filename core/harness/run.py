@@ -150,7 +150,10 @@ class HarnessSettings:
     """Knobs for an opencode run. Defaults suit a real run; tests override them."""
 
     production: bool = field(default_factory=lambda: os.environ.get("GUUDFLOW_ENV") == "production")
-    turn_timeout: float = 1200.0
+    # A turn is aborted after `turn_stall_timeout` seconds with no activity (plan §11.6);
+    # `turn_timeout` is an optional absolute cap per turn, off by default.
+    turn_timeout: float | None = None
+    turn_stall_timeout: float = 600.0
     followup_timeout: float = 300.0   # retry / wrap-up / conflict follow-ups in the same session
     steps: int = 60
     binding_factory: BindingFactory | None = None
@@ -169,6 +172,7 @@ class HarnessSettings:
     max_turns_per_session: int = 8
     session_keep_idle: float = 240.0
     session_keep_max_context: int = 60_000
+    budget_warn_fraction: float = 0.8
     # At the end of a run each role that worked writes its notebook for the next session.
     notebooks: bool = True
     notebook_timeout: float = 120.0
@@ -240,6 +244,8 @@ class OpencodeRun:
         # Per role: (kept the session, why, context tokens carried in) for the current turn.
         self._session_choice: dict[str, tuple[bool, str, int]] = {}
         self._turn_seq = 0
+        self._budget_warned: float | None = None
+        self._limits_seen: dict[str, str] = {}      # role -> last RUN_LIMITS_CHANGED briefed
         self._desks: dict[str, Any] = {}           # role -> DeskIndex (agents.persona_desk)
         self._desk_seen: dict[str, set[str]] = {}  # role -> desk notes already in its session
         self.images = ImageBudget()
@@ -342,8 +348,9 @@ class OpencodeRun:
                                   max_iterations=self.settings.max_spawns_per_role,
                                   transition_rules=False,
                                   max_parallel=self.settings.max_parallel,
-                                  watchdog=self._watchdog if self.overseer else None,
+                                  watchdog=self._watchdog,
                                   watchdog_interval=self.settings.watchdog_interval)
+            scheduler.drain_filter = self._may_start_while_draining
             self.runner._scheduler = scheduler  # noqa: SLF001 — lets force_stop() reach it
             if self.flow is not None:
                 # Humans edit the board through the card API (S34): re-arm roles
@@ -481,11 +488,16 @@ class OpencodeRun:
             running=[r for r in self._roles if scheduler.is_running(r)],
             spent_usd=self.gateway.spend(self.run_id) if self.gateway else 0.0,
             budget_usd=float(budget) if isinstance(budget, (int, float)) else None,
-            started_at=self._started)
+            started_at=self._started,
+            deadline_at=self.workspace.deadline_at,
+            deadline_mode=self.workspace.deadline_mode)
 
     def _watchdog(self) -> None:
-        """Scheduler hook: run the stall detectors; wake the overseer when needed."""
-        assert self.overseer is not None
+        """Scheduler hook: the budget warning, then the stall detectors (wake the overseer
+        when needed)."""
+        self._budget_watch()
+        if self.overseer is None:
+            return
         name = self.overseer.overseer_role
         if self.overseer.check(self._run_view()) and name in self.workspace.completed_agents:
             self._scheduler().rearm(name)
@@ -569,9 +581,45 @@ class OpencodeRun:
                                     [self._http.port, self._gw_http.port])
 
     def _set_budget(self, usd: float) -> None:
-        """Raise (or set) the run's spend cap while it runs (API: PATCH /limits)."""
+        """Raise (or set) the run's spend cap while it runs (API: PATCH /limits). Guidance the
+        overseer gave because money was nearly gone is withdrawn (plan §11.4)."""
         self.gateway.set_run_budget(self.run_id, float(usd))
         self.runner.project.approval_gates["token_budget_usd"] = float(usd)
+        if self.overseer is not None:
+            self.overseer.withdraw_budget_guidance()
+
+    def _budget_watch(self) -> None:
+        """Warn once per budget when spend passes `budget_warn_fraction` of it (plan §11.4)."""
+        budget = self.runner.project.approval_gates.get("token_budget_usd")
+        if self.gateway is None or not isinstance(budget, (int, float)) or budget <= 0:
+            return
+        spent = self.gateway.spend(self.run_id)
+        if spent < self.settings.budget_warn_fraction * budget or self._budget_warned == budget:
+            return
+        self._budget_warned = float(budget)
+        self.workspace.post_signal(Signal(
+            type=SignalType.BUDGET_WARNING, from_agent="system", priority="high",
+            iteration=self.workspace.iteration,
+            summary=(f"${spent:.2f} of the ${budget:.2f} session budget spent "
+                     f"({spent / budget:.0%}); the session stops at the budget. Raise it?"),
+            detail=json.dumps({"spent_usd": round(spent, 4), "budget_usd": float(budget)})))
+
+    def _limits_section(self, role: str) -> tuple[tuple[str, str], ...]:
+        """A limits change the role has not heard about yet (plan §11.4), once per change."""
+        changes = [s for s in self.workspace.board if s.type is SignalType.RUN_LIMITS_CHANGED]
+        if not changes or self._limits_seen.get(role) == changes[-1].id:
+            return ()
+        self._limits_seen[role] = changes[-1].id
+        budget = self.runner.project.approval_gates.get("token_budget_usd")
+        spent = self.gateway.spend(self.run_id) if self.gateway is not None else 0.0
+        lines = [f"The owner changed this session's limits: {changes[-1].summary.split(': ', 1)[-1]}."]
+        if isinstance(budget, (int, float)):
+            lines.append(f"Budget now ${budget:.2f}; ${spent:.2f} spent so far.")
+        if self.workspace.deadline_at is None:
+            lines.append("There is no time limit now.")
+        lines.append("Earlier guidance that money or time was nearly gone no longer applies; "
+                     "work at the normal pace, and keep cards complete and tested.")
+        return (("Session limits changed", " ".join(lines)),)
 
     def _host_tools(self) -> list[McpTool]:
         overrides = self.settings.tool_overrides
@@ -688,7 +736,8 @@ class OpencodeRun:
         config = build_config(role=name, agent=agent, binding=via_gateway,
                               mcp_url=self._http.url + "/", mcp_token=role.token,
                               extra_providers=self.settings.extra_providers)
-        timeout = self.settings.turn_timeout + 60
+        # The event stream's read timeout must outlast the stall window (and any turn cap).
+        timeout = max(self.settings.turn_timeout or 0.0, self.settings.turn_stall_timeout) + 60
         if self.mode == "docker":
             from worker.sandbox_manager import SandboxSpec
             assert self.sandboxes is not None and self.network is not None
@@ -860,7 +909,8 @@ class OpencodeRun:
                                      self._brief(role, plan, continuation=continuing),
                                      agent=role_name, on_event=on_event,
                                      on_permission=on_permission,
-                                     timeout=self.settings.turn_timeout)
+                                     timeout=self.settings.turn_timeout,
+                                     stall=self.settings.turn_stall_timeout)
             kept = await self._turn_body(role, client, session_id, stats, plan,
                                          on_event, on_permission)
             role.last_context = stats.last_context
@@ -1101,7 +1151,8 @@ class OpencodeRun:
             + ((("This run's backlog items", backlog_text(self.backlog)),)
                if self.backlog and self.flow is None else ())
             + (self.overseer.brief_addenda(cfg.role) if self.overseer is not None
-               and not self._is_overseer(cfg.role) else ()),
+               and not self._is_overseer(cfg.role) else ())
+            + self._limits_section(cfg.role),
         ))
 
     def _input_sections(self, role: str, plan: TurnPlan | None,
@@ -1286,6 +1337,14 @@ class OpencodeRun:
                                  timeout=self.settings.notebook_timeout)
             except Exception:  # noqa: BLE001 — a notebook is a convenience, never a failure
                 log.exception("%s: writing the notebook failed in %s", name, self.run_id)
+
+    def _may_start_while_draining(self, role: str) -> bool:
+        """After a soft time limit (plan §11.6): the overseer, and reviews of cards that are
+        already submitted, still start; new building does not."""
+        if self._is_overseer(role):
+            return True
+        return (self.flow is not None and self._roles[role].role_type == "reviewer"
+                and self.flow.board.next_review(role) is not None)
 
     def _own_handoffs(self, role: str) -> str | None:
         """The role's handoffs from this run, for its notebook (None when there are none)."""

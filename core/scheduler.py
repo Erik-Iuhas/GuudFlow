@@ -109,7 +109,8 @@ class SchedulerStatus(str, Enum):
     COMPLETE = "complete"                       # every agent reached completed_agents
     MAX_ITERATIONS = "max_iterations"           # an agent was respawned past the cap
     STUCK = "stuck"                             # nothing spawnable, nothing running, not complete
-    DEADLINE_EXCEEDED = "deadline_exceeded"     # workspace.deadline_at passed
+    DEADLINE_EXCEEDED = "deadline_exceeded"     # workspace.deadline_at passed (hard mode)
+    TIME_LIMIT = "time_limit"                   # soft deadline passed, running work finished
     STOPPED = "stopped"                         # force_cancel() — user pressed Stop
 
 
@@ -183,6 +184,10 @@ class Scheduler:
         # roles (the overseer); it must not block.
         self.watchdog = watchdog
         self.watchdog_interval = watchdog_interval
+        # Soft time limit (plan §11.6): once the deadline passes, only roles this allows
+        # are started (the run allows reviews of cards already submitted).
+        self.drain_filter: Callable[[str], bool] | None = None
+        self._paused_since: float | None = None
         self._review_rounds: dict[tuple[str, str], int] = defaultdict(int)
         self._blocked_on: dict[str, str] = {}      # role → role it waits on
         self._parked: set[str] = set()
@@ -397,9 +402,14 @@ class Scheduler:
                 if self._force_stopped:
                     return self._result(SchedulerStatus.STOPPED)
 
-                # 0. Wall-clock deadline check — runs before anything else.
+                # 0. Wall-clock deadline check — runs before anything else. A hard
+                #    deadline ends the run; a soft one starts draining (plan §11.6).
+                self._account_pause()
                 if self._deadline_exceeded():
-                    return self._result(SchedulerStatus.DEADLINE_EXCEEDED)
+                    if self.workspace.deadline_mode != "soft":
+                        return self._result(SchedulerStatus.DEADLINE_EXCEEDED)
+                    if not self.workspace.draining:
+                        self._start_draining()
 
                 # 0b. M1 deadline watcher — expire WAITING_FOR_PEER /
                 #     WAITING_FOR_SKIP_CONFIRM interrupts past their deadline_ts.
@@ -415,6 +425,9 @@ class Scheduler:
                 #    and WAITING_FOR_SKIP_CONFIRM are filtered inside _ready_to_spawn.
                 if not self.workspace.pending_human:
                     for spec in self._ready_to_spawn():
+                        if self.workspace.draining and not (
+                                self.drain_filter is not None and self.drain_filter(spec.role)):
+                            continue
                         self._spawn(spec)
 
                 # 2. Successful exit — every non-failed agent is complete or sat-out.
@@ -426,6 +439,8 @@ class Scheduler:
                     return self._result(SchedulerStatus.MAX_ITERATIONS)
 
                 # 4. Nothing in flight.
+                if not self._tasks and self.workspace.draining:
+                    return self._result(SchedulerStatus.TIME_LIMIT)
                 if not self._tasks:
                     if self._any_waiting():
                         # Agents are parked waiting for external events; sleep.
@@ -792,7 +807,33 @@ class Scheduler:
         deadline = self.workspace.deadline_at
         if deadline is None:
             return False
+        if self.workspace.deadline_mode == "soft" and self.workspace.pending_human:
+            return False        # paused for a human: the soft clock is stopped
         return time.time() > deadline
+
+    def _account_pause(self) -> None:
+        """Soft mode: time paused for a human moves the deadline out by as much."""
+        ws = self.workspace
+        if ws.deadline_mode != "soft" or ws.deadline_at is None:
+            return
+        if ws.pending_human and self._paused_since is None:
+            self._paused_since = time.time()
+        elif not ws.pending_human and self._paused_since is not None:
+            ws.deadline_at += time.time() - self._paused_since
+            self._paused_since = None
+
+    def _start_draining(self) -> None:
+        """The soft deadline passed: stop starting work and say so on the board."""
+        import json
+
+        from core.signals import Signal, SignalType
+        self.workspace.draining = True
+        running = sorted(self._tasks)
+        self.workspace.post_signal(Signal(
+            type=SignalType.TIME_LIMIT_REACHED, from_agent="system",
+            summary=("time limit reached: no new work starts; "
+                     + (f"finishing {', '.join(running)}" if running else "nothing running")),
+            detail=json.dumps({"running": running, "deadline_at": self.workspace.deadline_at})))
 
     def _iterations_exceeded(self) -> bool:
         """True if any role has been spawned at the cap without completing.

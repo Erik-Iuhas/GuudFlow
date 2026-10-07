@@ -431,6 +431,12 @@ class Workspace:
     # from a configurable budget. The scheduler checks this between
     # spawn passes and returns SchedulerStatus.DEADLINE_EXCEEDED if hit.
     deadline_at: float | None = None
+    # How the deadline acts (plan §11.6): "hard" stops the session when it passes; "soft"
+    # stops new work, lets running cards and their reviews finish, and does not count time
+    # paused for a human. "none" sessions have no deadline_at at all.
+    deadline_mode: str = "hard"
+    # True once a soft deadline passed: the scheduler starts only what `drain_filter` allows.
+    draining: bool = False
 
     # Live subscribers — notified after every post_signal. Excluded from
     # serialisation; populated by the API's WebSocket bridge.

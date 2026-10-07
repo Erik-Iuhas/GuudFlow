@@ -77,6 +77,31 @@ def _run_minutes(raw: object) -> int:
     return max(MIN_RUN_MINUTES, min(MAX_RUN_MINUTES, minutes))
 
 
+MIN_FREE_BYTES = 1024 ** 3      # below this a session cannot run safely
+
+
+def check_disk_before_run(data_root: Path) -> str | None:
+    """None when there is room for a session; otherwise why it cannot start. Low (below
+    GUUDFLOW_DISK_WARN_GB) is logged, and pruned first when GUUDFLOW_AUTO_PRUNE=1."""
+    from core.disk import disk_report, prune
+    try:
+        report = disk_report(data_root)
+    except OSError:
+        return None
+    if report.low and os.environ.get("GUUDFLOW_AUTO_PRUNE") == "1":
+        result = prune(data_root)
+        _logger.warning("disk low (%d MB free): pruned, %s", report.free_bytes // 2**20,
+                        "; ".join(result.steps))
+        report = disk_report(data_root)
+    if report.free_bytes < MIN_FREE_BYTES:
+        return (f"the disk is almost full ({report.free_bytes // 2**20} MB free where GuudFlow "
+                f"keeps its data); free some space or prune Docker build cache in Studio, "
+                f"then start the session again")
+    if report.low:
+        _logger.warning("disk low: %d MB free under %s", report.free_bytes // 2**20, data_root)
+    return None
+
+
 def serialise_project(data: dict[str, Any]) -> ProjectConfig:
     """Turn a stored project dict into a ProjectConfig dataclass.
 
@@ -212,6 +237,8 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
         mcp_servers=list(data.get("mcp_servers") or []),
         max_iterations=int(data.get("max_iterations", 5)),
         max_run_minutes=_run_minutes(data.get("max_run_minutes")),
+        time_limit=(data.get("time_limit") if data.get("time_limit") in ("none", "soft", "hard")
+                    else "soft"),
         escalation_thresholds=escalation_thresholds,
         approval_gates=approval_gates,
         mode=str(data.get("mode") or "production"),
@@ -684,6 +711,13 @@ class JobRunner:
     async def run_one(self, job: Job) -> None:
         """Execute a single job end-to-end. Idempotent on status updates."""
         await self.queue.update_status(job.job_id, JOB_RUNNING)
+
+        # 0. Disk (FIELD_NOTES F2): a full disk breaks git, SQLite and sandboxes in confusing
+        #    ways. Prune when configured and low; refuse to start when almost nothing is left.
+        problem = await asyncio.to_thread(check_disk_before_run, self.data_root)
+        if problem is not None:
+            await self.queue.update_status(job.job_id, JOB_FAILED, error=problem)
+            return
 
         # 1. Load project config.
         try:

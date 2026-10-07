@@ -199,7 +199,7 @@ export const runsApi = {
       true,
     ),
   /** Raise a live run's budget and/or push its deadline out. */
-  setLimits: (id: string, limits: { budget_usd?: number | null; extend_minutes?: number | null }) =>
+  setLimits: (id: string, limits: { budget_usd?: number | null; extend_minutes?: number | null; time_limit?: "none" | "soft" | "hard" }) =>
     request<{ ok: boolean; budget_usd: number | null; spend_usd: number; deadline_at: number | null }>(
       "PATCH",
       `/api/runs/${encodeURIComponent(id)}/limits`,
@@ -680,6 +680,21 @@ export const metaApi = {
       },
       true,
     ),
+};
+
+export interface DiskStatus {
+  path: string;
+  free_bytes: number;
+  total_bytes: number;
+  warn_below_bytes: number;
+  low: boolean;
+}
+
+/** Host health (api/routes/system.py): disk space and a prune of sandbox leftovers. */
+export const systemApi = {
+  disk: () => request<DiskStatus>("GET", "/api/system/disk", undefined, true),
+  prune: () =>
+    request<{ steps: string[]; freed_bytes: number; disk: DiskStatus }>("POST", "/api/system/prune", {}, true),
 };
 
 export const oneshotApi = {

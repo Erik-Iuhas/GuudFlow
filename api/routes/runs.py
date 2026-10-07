@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -770,6 +770,9 @@ class LimitsBody(BaseModel):
 
     budget_usd: float | None = None
     extend_minutes: int | None = None
+    # plan §11.6: "none" removes the time limit, "soft" lets running work finish, "hard"
+    # ends the session on time.
+    time_limit: Literal["none", "soft", "hard"] | None = None
 
 
 MAX_BUDGET_USD = 1000.0
@@ -780,7 +783,9 @@ async def change_limits(request: Request, run_id: str, body: LimitsBody) -> dict
     """Raise a live run's spend cap and/or push its deadline out.
 
     `budget_usd` must exceed what the run has spent and be at most 1000;
-    `extend_minutes` (1..240) is added to the run's deadline.
+    `extend_minutes` (1..240) is added to the run's deadline; `time_limit` switches how the
+    deadline acts (none / soft / hard). A later deadline or "none" ends a soft-limit drain,
+    so new work starts again.
     """
     import time
 
@@ -788,8 +793,13 @@ async def change_limits(request: Request, run_id: str, body: LimitsBody) -> dict
     workspace = await registry.get(run_id)
     if workspace is None:
         raise HTTPException(status_code=410, detail=f"run {run_id!r} is not active")
-    if body.budget_usd is None and body.extend_minutes is None:
-        raise HTTPException(status_code=400, detail="give budget_usd and/or extend_minutes")
+    if body.budget_usd is None and body.extend_minutes is None and body.time_limit is None:
+        raise HTTPException(status_code=400,
+                            detail="give budget_usd, extend_minutes and/or time_limit")
+    if (body.time_limit in ("soft", "hard") and workspace.deadline_at is None
+            and body.extend_minutes is None):
+        raise HTTPException(status_code=400,
+                            detail="this session has no time limit; give extend_minutes too")
     if body.extend_minutes is not None and not 1 <= body.extend_minutes <= 240:
         raise HTTPException(status_code=400, detail="extend_minutes must be 1..240")
     spend_fn = workspace.controls.get("spend")
@@ -808,9 +818,17 @@ async def change_limits(request: Request, run_id: str, body: LimitsBody) -> dict
     if body.budget_usd is not None:
         workspace.controls["set_budget"](body.budget_usd)
         changes["budget_usd"] = body.budget_usd
-    if body.extend_minutes is not None:
+    if body.time_limit == "none":
+        workspace.deadline_at = None
+        workspace.draining = False
+        changes["time_limit"] = "none"
+    elif body.time_limit is not None:
+        workspace.deadline_mode = body.time_limit
+        changes["time_limit"] = body.time_limit
+    if body.extend_minutes is not None and body.time_limit != "none":
         base = max(workspace.deadline_at or time.time(), time.time())
         workspace.deadline_at = base + body.extend_minutes * 60
+        workspace.draining = False      # a later deadline: new work may start again
         changes["extend_minutes"] = body.extend_minutes
     workspace.post_signal(Signal(
         type=SignalType.RUN_LIMITS_CHANGED, iteration=workspace.iteration,
@@ -826,7 +844,8 @@ async def change_limits(request: Request, run_id: str, body: LimitsBody) -> dict
         gate = runner.project.approval_gates.get("token_budget_usd")
         budget = float(gate) if isinstance(gate, (int, float)) else None
     return {"ok": True, "budget_usd": budget, "spend_usd": spend,
-            "deadline_at": workspace.deadline_at}
+            "deadline_at": workspace.deadline_at,
+            "time_limit": "none" if workspace.deadline_at is None else workspace.deadline_mode}
 
 
 class VisualFeedback(BaseModel):

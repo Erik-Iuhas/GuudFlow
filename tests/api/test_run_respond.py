@@ -115,3 +115,23 @@ async def test_limits_extend_without_deadline_starts_from_now(client, app, auth_
                            headers=auth_header)
     assert r.status_code == 200
     assert ws.deadline_at is not None and ws.deadline_at > time.time() + 800
+
+
+async def test_limits_switch_time_limit_mode(client, app, auth_header):
+    ws = _register_workspace(app, "run_lim4")
+    ws.deadline_at, ws.deadline_mode, ws.draining = time.time() - 5, "soft", True
+    url = "/api/runs/run_lim4/limits"
+    r = await client.patch(url, json={"time_limit": "hard"}, headers=auth_header)
+    assert r.status_code == 200 and r.json()["time_limit"] == "hard" and ws.deadline_mode == "hard"
+    # A later deadline ends a soft drain: new work may start again.
+    ws.deadline_mode = "soft"
+    r = await client.patch(url, json={"extend_minutes": 15}, headers=auth_header)
+    assert r.status_code == 200 and ws.draining is False
+    r = await client.patch(url, json={"time_limit": "none"}, headers=auth_header)
+    assert r.json()["time_limit"] == "none" and ws.deadline_at is None
+    # From "none", a soft or hard limit needs a length.
+    r = await client.patch(url, json={"time_limit": "soft"}, headers=auth_header)
+    assert r.status_code == 400 and "extend_minutes" in r.json()["detail"]
+    r = await client.patch(url, json={"time_limit": "soft", "extend_minutes": 20}, headers=auth_header)
+    assert r.status_code == 200 and ws.deadline_at > time.time() + 1100
+    assert any(s.type is SignalType.RUN_LIMITS_CHANGED and "time_limit" in s.summary for s in ws.board)

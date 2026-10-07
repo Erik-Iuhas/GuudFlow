@@ -51,6 +51,10 @@ export interface ProjectConfig {
   rbac?: Record<string, RoleRBAC>;
   mcp_servers?: unknown[];
   max_iterations?: number;
+  /** Session time limit in minutes (5..240). */
+  max_run_minutes?: number;
+  /** How the limit acts (plan §11.6): soft (default) lets running cards finish. */
+  time_limit?: "none" | "soft" | "hard";
   approval_gates?: Partial<ApprovalGates>;
   /** "legacy" only on request; a missing value means the opencode harness (plan O15). */
   harness?: "legacy" | "opencode";

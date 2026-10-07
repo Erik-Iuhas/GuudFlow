@@ -3,7 +3,14 @@ import { ApiError, runsApi } from "../../api";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/form-controls";
 
-type Limits = { budget_usd?: number | null; extend_minutes?: number | null };
+type TimeLimit = "none" | "soft" | "hard";
+type Limits = { budget_usd?: number | null; extend_minutes?: number | null; time_limit?: TimeLimit };
+
+const TIME_LIMIT_LABEL: Record<TimeLimit, string> = {
+  soft: "Soft: finish running cards",
+  hard: "Hard: stop on time",
+  none: "No time limit",
+};
 
 /** Raise a live run's budget or add time, next to the budget meter. */
 export function LimitsControl({ runId, budgetUsd, onSubmit }: {
@@ -57,6 +64,23 @@ export function LimitsControl({ runId, budgetUsd, onSubmit }: {
           +{m} min
         </Button>
       ))}
+      <select
+        aria-label="Time limit"
+        className="h-8 rounded-md border border-input bg-background px-2"
+        disabled={busy}
+        value=""
+        onChange={(e) => {
+          const mode = e.target.value as TimeLimit;
+          if (mode) void apply({ time_limit: mode }, TIME_LIMIT_LABEL[mode]);
+        }}
+      >
+        <option value="">Time limit…</option>
+        {(["soft", "hard", "none"] as const).map((m) => (
+          <option key={m} value={m}>
+            {TIME_LIMIT_LABEL[m]}
+          </option>
+        ))}
+      </select>
       {done && <span role="status" className="text-muted-foreground">{done}</span>}
       {error && <span role="alert" className="text-destructive">{error}</span>}
     </div>

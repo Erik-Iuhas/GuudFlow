@@ -128,6 +128,15 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
   const firstTs = useRunStore((s) => s.signals[0]?.timestamp);
   const lastTs = useRunStore((s) => s.signals[s.signals.length - 1]?.timestamp);
   const humanNeeded = useRunStore((s) => s.humanNeeded);
+  // plan §11.4: the latest budget warning, unless the limits changed after it.
+  const budgetWarning = useRunStore((s) => {
+    for (let i = s.signals.length - 1; i >= 0; i--) {
+      const t = s.signals[i].type;
+      if (t === "RUN_LIMITS_CHANGED") return null;
+      if (t === "BUDGET_WARNING") return s.signals[i].summary;
+    }
+    return null;
+  });
   const interventionCount = useRunStore((s) => s.interventions.length);
   const cardCount = useRunStore((s) => Object.keys(s.cards).length);
   const quips = useQuipStream(runId);
@@ -409,6 +418,11 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
             <ApprovalsBar runId={runId} />
           </div>
           <div className="flex flex-col items-end gap-1">
+            {budgetWarning && live && !terminal && (
+              <p role="alert" className="m-0 max-w-md rounded-md border border-status-waiting/50 bg-status-waiting/10 px-2 py-1 text-xs" data-testid="budget-warning">
+                {budgetWarning}
+              </p>
+            )}
             <BudgetMeter budgetUsd={budgetUsd} />
             {live && !terminal && <LimitsControl runId={runId} budgetUsd={budgetUsd} />}
           </div>
