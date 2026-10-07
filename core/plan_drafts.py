@@ -29,6 +29,8 @@ from core.work_db import WorkDB, WorkTxn
 MAX_CHANGES = 20
 MIN_REASON = 20
 _REF = re.compile(r"^new:[0-9]+$")
+# A tunable-looking number in a statement: digits, not part of an id like R4 or a version.
+_NUMBER = re.compile(r"(?<![A-Za-z0-9.])[0-9]+(?:\.[0-9]+)?(?![0-9])")
 _BACKLOG_ID = re.compile(r"^B[0-9]+$")
 _DECISION_ID = re.compile(r"^D[0-9]+$")
 _DECISION_OPS = ("add_decision", "supersede_decision")
@@ -429,14 +431,25 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
             problems.append(f"change {n} ({ch.op}): reason must be at least {MIN_REASON} "
                             f"characters and say why")
 
+    def statement_ok(n: int, ch: Any, text: str, has_params: bool) -> None:  # Any: Change
+        nums = sorted(set(_NUMBER.findall(text)))
+        if has_params and nums:
+            problems.append(f"change {n} ({ch.op}): the statement has numbers "
+                            f"({', '.join(nums)}); put tunable numbers in params")
+
     for n, ch in enumerate(turn.changes, 1):
         if isinstance(ch, AddRequirement):
+            statement_ok(n, ch, ch.text, bool(ch.params))
             if ch.kind != "non_goal" and not [
                     c for c in ch.checks if (c if isinstance(c, str) else c.text).strip()]:
                 problems.append(f"change {n} ({ch.op}): needs at least one check "
                                 f"(only a non_goal may have none)")
         elif isinstance(ch, EditRequirement):
             fields = _set_fields(ch)
+            if fields & {"text", "checks"}:
+                problems.append(f"change {n} ({ch.op}): change the statement with set_statement "
+                                f"and checks with add_check / edit_check / remove_check, one "
+                                f"at a time; edit_requirement is for kind, priority and flags")
             try:
                 req = spec.requirement(ch.id)
             except SpecError:
@@ -468,6 +481,9 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
             broad = ({"checks"} if "check" in ch.op else set()) | (
                 {"params"} if "param" in ch.op else set())
             pinned(n, ch, req.pinned_fields, pin_keys(ch) | broad)
+            if ch.op == "set_statement":
+                statement_ok(n, ch, ch.text, bool(req.params) or any(
+                    o.op == "set_param" and o.id == req_id for o in turn.changes))
             if ch.op in ("edit_check", "remove_check") and not any(
                     c.id == ch.id for c in req.checks):
                 problems.append(f"change {n} ({ch.op}): unknown check {ch.id}")

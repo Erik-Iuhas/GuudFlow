@@ -168,3 +168,34 @@ def test_resolve_refreshes_old_copies_and_marks_removed_checks(pd: PlanDrafts) -
     spec = Spec(pd.db.read_spec_doc())
     assert resolve_acceptance(spec, ["R1.1: a stale copy", "R1.2: gone now", "own line"]) == [
         "R1.1: a new run has 2 charges", "R1.2: gone now (removed from the spec)", "own line"]
+
+
+# ── PM-turn validation (W5) ─────────────────────────────────────────────────
+
+def test_pm_may_not_rewrite_text_or_checks_through_edit_requirement(pd: PlanDrafts) -> None:
+    out = _problems(pd, {"op": "edit_requirement", "id": "R1", "text": "whole new paragraph"})
+    assert out and "set_statement" in out[0]
+    assert _problems(pd, {"op": "edit_requirement", "id": "R1", "priority": "should"}) == []
+
+
+def test_numbers_belong_in_params_when_a_requirement_has_them(pd: PlanDrafts) -> None:
+    out = _problems(pd, {"op": "set_statement", "id": "R1",
+                         "text": "Every run starts with 3 charges that refill in 8 s."})
+    assert out and "(3, 8)" in out[0] and "params" in out[0]
+    assert _problems(pd, {"op": "set_statement", "id": "R1",
+                          "text": "Every run starts with a few dash charges."}) == []
+    plain = dict(DASH, ref="new:2", params=[], text="A run is 5 levels long.")
+    assert _problems(pd, plain) == []                  # no params: numbers may stay
+
+
+def test_titles_are_capped_by_the_schema() -> None:
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        _turn(dict(DASH, title="x" * 61))
+
+
+def test_prompt_shows_the_shape_and_the_field_ops() -> None:
+    from core.pm_prompts import Seats, pm_system_prompt
+    text = pm_system_prompt(seats=Seats(), start_mode="prototype_first", phase="plan")
+    for needle in ('"params"', "set_param", "edit_check", "`group`", "No tunable numbers"):
+        assert needle in text

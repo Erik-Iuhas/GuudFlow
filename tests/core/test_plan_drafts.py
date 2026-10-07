@@ -148,7 +148,7 @@ def test_pinned_fields_refused(pd: PlanDrafts) -> None:
                               {"op": "edit_item", "id": "B1", "title": "PM title"}))
     assert len(out) == 2 and all("human-set" in p for p in out)
     # other fields are fine
-    assert _problems(pd, _turn({"op": "edit_requirement", "id": "R1", "text": "reworded"},
+    assert _problems(pd, _turn({"op": "set_statement", "id": "R1", "text": "reworded"},
                                {"op": "edit_item", "id": "B1", "notes": "x"})) == []
 
 
