@@ -4,6 +4,7 @@ import { Button } from "../../components/ui/button";
 import {
   useApproveDraft,
   useDiscardDraft,
+  useEditSpec,
   usePlan,
   useSendMessage,
   useSpec,
@@ -11,6 +12,7 @@ import {
   useTickChange,
 } from "./api";
 import { useProject } from "../../api/queries";
+import { useBacklog } from "../work/api";
 import { Conversation } from "./Conversation";
 import { DraftPanel } from "./DraftPanel";
 import { SpecView } from "./SpecView";
@@ -31,6 +33,8 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
   const approve = useApproveDraft(projectId);
   const discard = useDiscardDraft(projectId);
   const project = useProject(projectId);
+  const backlog = useBacklog(projectId);
+  const edit = useEditSpec(projectId);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [approvedVersion, setApprovedVersion] = useState<number | null>(null);
 
@@ -40,12 +44,13 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
   const draft = plan.data?.draft ?? null;
   const shown: Panel = draft ? (panel ?? "draft") : "spec";
   const pending = start.isPending || send.isPending;
-  const panelError = tick.error ?? approve.error ?? discard.error;
+  const panelError = tick.error ?? approve.error ?? discard.error ?? edit.error;
 
   return (
     <div className="flex flex-col gap-4 min-[1000px]:flex-row min-[1000px]:items-start">
       <Conversation
         messages={plan.data?.messages ?? []}
+        currentDraftId={draft?.id ?? null}
         pending={pending}
         onStart={() => {
           setApprovedVersion(null);
@@ -95,7 +100,7 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
             onDiscard={() => discard.mutate(undefined, { onSuccess: () => setPanel(null) })}
           />
         ) : spec.data ? (
-          <SpecView spec={spec.data} />
+          <SpecView spec={spec.data} items={backlog.data} onEdit={(change) => edit.mutate(change)} />
         ) : spec.error ? (
           <Alert variant="error">{message(spec.error)}</Alert>
         ) : (

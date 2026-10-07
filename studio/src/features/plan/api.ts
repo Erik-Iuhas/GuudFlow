@@ -14,16 +14,44 @@ import { workKeys } from "../work/api";
 export type CheckState = "unknown" | "met" | "unmet";
 export type PlanMode = "update" | "discuss";
 
+export type CheckMethod = "unit" | "manual" | "visual" | "perf";
+
 export interface CheckWire {
   id: string;
   text: string;
   state: CheckState;
   run_id: string | null;
+  method?: CheckMethod | null;
+  given?: string;
+  test?: string | null;
+}
+
+export type ParamValue = string | number | boolean;
+
+export interface ParamWire {
+  key: string;
+  value: ParamValue;
+  unit?: string;
+  assumed?: boolean;
+  note?: string;
+}
+
+/** A structured check in a draft change (core/plan_drafts.py CheckSpec). */
+export interface CheckSpecWire {
+  text: string;
+  method?: CheckMethod | null;
+  given?: string;
+  test?: string | null;
 }
 
 export interface RequirementWire {
   id: string;
+  /** Short name; older rows get one derived from the text. */
+  title?: string;
   text: string;
+  params?: ParamWire[];
+  rationale?: string;
+  pinned_fields?: string[];
   kind: string;
   priority: string;
   checks: CheckWire[];
@@ -68,6 +96,19 @@ export interface ChangeWire {
   op: string;
   id?: string;
   ref?: string;
+  /** Theme label; changes with the same group can be ticked together. */
+  group?: string | null;
+  // Field-level requirement ops (set_param, add_check, edit_check, ...).
+  key?: string;
+  value?: ParamValue;
+  unit?: string | null;
+  note?: string | null;
+  check?: CheckSpecWire;
+  method?: CheckMethod | null;
+  given?: string | null;
+  test?: string | null;
+  params?: ParamWire[];
+  rationale?: string;
   text?: string;
   title?: string;
   choice?: string;
@@ -75,7 +116,7 @@ export interface ChangeWire {
   kind?: string;
   priority?: string | number;
   size?: string;
-  checks?: string[];
+  checks?: (string | CheckSpecWire)[];
   acceptance?: string[];
   serves?: string[];
   depends_on?: string[];
@@ -185,6 +226,8 @@ export const planApi = {
     send<DraftWire>("PATCH", `/api/projects/${enc(projectId)}/plan/draft/${enc(cid)}`, { accepted }),
   approve: (projectId: string) =>
     send<ApproveResult>("POST", `/api/projects/${enc(projectId)}/plan/draft/approve`, {}),
+  edit: (projectId: string, change: ChangeWire) =>
+    send<ApproveResult>("POST", `/api/projects/${enc(projectId)}/spec/edit`, { change }),
   discard: (projectId: string) =>
     send<Record<string, never>>("POST", `/api/projects/${enc(projectId)}/plan/draft/discard`, {}),
 };
@@ -250,4 +293,10 @@ export function useApproveDraft(projectId: string): UseMutationResult<ApproveRes
 export function useDiscardDraft(projectId: string): UseMutationResult<unknown, Error, void> {
   const qc = useQueryClient();
   return useMutation({ mutationFn: () => planApi.discard(projectId), onSuccess: () => invalidateAll(qc, projectId) });
+}
+
+/** A person's direct spec edit (applied at once and pinned), e.g. confirming a param. */
+export function useEditSpec(projectId: string): UseMutationResult<ApproveResult, Error, ChangeWire> {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (change) => planApi.edit(projectId, change), onSuccess: () => invalidateAll(qc, projectId) });
 }

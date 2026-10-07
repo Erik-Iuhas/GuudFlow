@@ -35,6 +35,9 @@ except ImportError:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import Response
+from starlette.types import Scope
 
 from agents.builtin import register_builtins
 from api.routes import agents as agents_router
@@ -263,6 +266,21 @@ async def lifespan(app: FastAPI):
                 app.state.worker_task.cancel()
 
 
+class StudioFiles(StaticFiles):
+    """Studio's bundle with an SPA fallback: a deep link such as `/projects/x?tab=plan` that
+    names no file gets `index.html`, so reloading a Studio page works (plan §11.3). Unknown
+    `/api/...` paths and paths with a file extension still 404."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            last = path.rsplit("/", 1)[-1]
+            if exc.status_code != 404 or path.startswith("api") or "." in last:
+                raise
+            return await super().get_response("index.html", scope)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="GuudFlow",
@@ -319,7 +337,7 @@ def create_app() -> FastAPI:
     if studio_dist and Path(studio_dist).is_dir():
         app.mount(
             "/",
-            StaticFiles(directory=studio_dist, html=True),
+            StudioFiles(directory=studio_dist, html=True),
             name="studio",
         )
 

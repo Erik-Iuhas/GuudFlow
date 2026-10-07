@@ -175,8 +175,11 @@ describe("PlanTab draft", () => {
     for (const name of ["Requirements", "Decisions", "Work items"]) {
       expect(screen.getByRole("region", { name })).toBeInTheDocument();
     }
-    const old = screen.getByText("Users can sign in");
-    expect(old.tagName).toBe("DEL");
+    // An edited statement shows as a word diff: only the added words are marked.
+    const diff = within(screen.getByTestId("change-c1")).getByTestId("text-diff");
+    expect(diff).toHaveTextContent("Users can sign in with a passkey");
+    expect(diff.querySelector("del")).toBeNull();
+    expect(diff.querySelector("ins")?.textContent).toBe(" with a passkey");
     const add = screen.getByTestId("change-c2");
     expect(within(add).getByText("file opens in Excel")).toBeInTheDocument();
     expect(within(add).getByText("assumed")).toBeInTheDocument();

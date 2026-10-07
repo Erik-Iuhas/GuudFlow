@@ -4,7 +4,8 @@ import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
 import type { PlanMessageWire, PlanMode } from "./api";
 import { usePmName } from "../pm/api";
-import { timeLabel } from "./model";
+import { Markdown } from "../../lib/markdown";
+import { foldThread, timeLabel } from "./model";
 
 export interface ConversationProps {
   messages: readonly PlanMessageWire[];
@@ -16,6 +17,8 @@ export interface ConversationProps {
   onStart: () => Promise<unknown>;
   /** Pending-state text for the draft button, e.g. an error from the last start. */
   error?: string | null;
+  /** The open draft's id; its thread stays open and earlier drafts' threads fold. */
+  currentDraftId?: string | null;
 }
 
 /** "draft 3" from a draft id such as "draft-3" or "d3". */
@@ -46,15 +49,18 @@ function Message({ m, pmName }: { m: PlanMessageWire; pmName: string }) {
           {draft && <span>{pm ? `proposed changes in draft ${draft}` : `draft ${draft}`}</span>}
           {m.mode === "discuss" && !pm && <span>just discussing</span>}
         </div>
-        {/* Plain text only; line breaks are kept by CSS. */}
-        <p className="mt-1 whitespace-pre-wrap break-words text-sm">{m.text}</p>
+        {pm ? (
+          <Markdown text={m.text} className="mt-1 break-words text-sm" />
+        ) : (
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm">{m.text}</p>
+        )}
       </div>
     </li>
   );
 }
 
 /** The plan conversation: the thread, an empty state and the composer. */
-export function Conversation({ messages, pending, onSend, onStart, error }: ConversationProps) {
+export function Conversation({ messages, pending, onSend, onStart, error, currentDraftId }: ConversationProps) {
   const pmName = usePmName();
   const [text, setText] = useState("");
   const [mode, setMode] = useState<PlanMode>("update");
@@ -97,6 +103,7 @@ export function Conversation({ messages, pending, onSend, onStart, error }: Conv
   }
 
   const empty = messages.length === 0 && !pending;
+  const thread = foldThread(messages, currentDraftId ?? null);
   const shownError = failure ?? error ?? null;
 
   return (
@@ -114,11 +121,25 @@ export function Conversation({ messages, pending, onSend, onStart, error }: Conv
           </Button>
         </div>
       ) : (
-        <ol className="flex flex-col gap-4" aria-live="polite">
-          {messages.map((m) => (
-            <Message key={m.id} m={m} pmName={pmName} />
+        <div className="flex flex-col gap-3">
+          {thread.folded.map((g) => (
+            <details key={g.key} className="rounded-md border border-border px-3 py-2 text-sm" data-testid="folded-thread">
+              <summary className="cursor-pointer text-xs text-muted-foreground">
+                {g.label} · {g.messages.length} message{g.messages.length === 1 ? "" : "s"}
+              </summary>
+              <ol className="mt-3 flex flex-col gap-4">
+                {g.messages.map((m) => (
+                  <Message key={m.id} m={m} pmName={pmName} />
+                ))}
+              </ol>
+            </details>
           ))}
-        </ol>
+          <ol className="flex flex-col gap-4" aria-live="polite">
+            {thread.open.map((m) => (
+              <Message key={m.id} m={m} pmName={pmName} />
+            ))}
+          </ol>
+        </div>
       )}
       {pending && (
         <p role="status" className="text-sm text-muted-foreground">
