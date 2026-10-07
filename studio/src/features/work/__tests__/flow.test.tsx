@@ -83,7 +83,7 @@ const items = [
   item("B2", { title: "Reports", status: "in_run", run_id: "r9" }),
   item("B3", { title: "Search", status: "in_run", run_id: "r8", pending: "done" }),
   ...["B4", "B5", "B6", "B7", "B8", "B9"].map((id, n) =>
-    item(id, { title: `Done ${id}`, status: "done", updated_at: n, history: [{ summary: `shipped ${id}` }] })),
+    item(id, { title: `Done ${id}`, status: "done", updated_at: n, history: [{ summary: `reviewer report on ${id}`, note: `Accepted ${id}. Looks right.` }] })),
 ];
 
 describe("WorkOverview", () => {
@@ -98,12 +98,13 @@ describe("WorkOverview", () => {
     expect(lane("Waiting for you").getByText("Search")).toBeInTheDocument();
     expect(lane("Done").getAllByRole("listitem")).toHaveLength(4);
     expect(lane("Done").getByText("+2 more")).toBeInTheDocument();
-    expect(lane("Done").getByText("shipped B9")).toBeInTheDocument();
+    expect(lane("Done").getByText("Accepted B9.")).toBeInTheDocument();      // the person's note, first sentence
+    expect(screen.queryByText(/reviewer report/)).toBeNull();
     expect(screen.queryByText("B1")).toBeNull();
     // Needs you: the waiting session, and the spec changes of the last week only.
     expect(within(screen.getByTestId("needs-you")).getByRole("button", { name: "Review and accept" })).toBeInTheDocument();
     // One short line per change, never the old text: id, title, draft and new version.
-    expect(await screen.findByText(/R4 ".*": changed in draft-4 \(now v3\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/R4 .*: changed in draft-4 \(now v3\)/)).toBeInTheDocument();
     expect(screen.queryByText(/draft-1/)).toBeNull();
   });
 
@@ -285,5 +286,23 @@ describe("FollowPanel", () => {
     await waitFor(() => expect(calls.length).toBeGreaterThan(0));
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.queryByTestId("follow-panel")).toBeNull();
+  });
+});
+
+describe("overview lines carry reasons", () => {
+  it("shows an open item's update reason and a requirement change's reason", async () => {
+    const { cardSubtext, weekChanges } = await import("../overviewModel");
+    const base = { id: "B6", title: "Abilities", acceptance: [], kind: "code", size: "M", priority: 1, notes: "", files_hint: [],
+      source: "human", created_at: 0, updated_at: 0, run_id: null, pending: null, depends_on: [] };
+    expect(cardSubtext({ ...base, status: "open", history: [
+      { run_id: "r3", decision: "accepted", at: 1 },
+      { draft: "draft-4", change: "edited: acceptance", at: 2, why: { summary: "Dash becomes the default. Dark is removed." } },
+    ] } as never)).toBe("Updated: Dash becomes the default.");
+    expect(cardSubtext({ ...base, status: "open", history: [] } as never)).toBe("Medium job");
+    const now = 1_000_000;
+    const lines = weekChanges({ requirements: [{ id: "R7", title: "Feel", text: "", kind: "quality", priority: "must", checks: [],
+      assumed: false, experiment: false, status: "active", source: "pm", version: 3,
+      history: [{ at: now - 10, draft: "draft-2", why: { name: "Palette fix" } }, { at: now - 5, by: "session:run_9", check_states: { "R7.1": "met" } }] }] } as never, now);
+    expect(lines.map((l) => l.text)).toEqual(["R7 Feel: checks settled in run_9", "R7 Feel: Palette fix in draft-2"]);
   });
 });

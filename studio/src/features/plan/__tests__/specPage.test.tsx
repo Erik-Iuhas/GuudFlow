@@ -27,6 +27,7 @@ const dash: RequirementWire = {
   history: [
     { draft: "draft-4", at: 3, version: 1, why: why("Default dash", "Default dash with charges") },
     { draft: "draft-4", at: 3, version: 2, why: why("Default dash", "Default dash with charges") },
+    { at: 4, by: "session:run_9", check_states: { "R4.1": "met", "R4.2": "unmet" } },
   ],
 };
 const old: RequirementWire = { ...dash, id: "R1", title: "No build step", params: [], origin: null, history: [],
@@ -40,7 +41,9 @@ describe("requirement page", () => {
     expect(originEvents(dash).map((e) => [e.where, e.what, e.quote])).toEqual([
       ["draft-2", "created", "two abilities to pick from"],
       ["draft-4", "changed", "Default dash with charges"],
+      ["run_9", "checked in a session", null],
     ]);
+    expect(originEvents(dash)[2].summary).toBe("1 check met, 1 not met");
   });
 
   it("shows values, checks, origin and the work that serves it", () => {

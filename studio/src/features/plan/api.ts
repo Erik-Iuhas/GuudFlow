@@ -63,7 +63,11 @@ export interface RequirementWire {
   /** Where it came from: the draft and the reason it was added for. */
   origin?: HistoryStamp | null;
   /** Earlier versions, each with the draft that changed it and why. */
-  history?: (HistoryStamp & { version?: number; title?: string; text?: string; params?: ParamWire[] })[];
+  history?: (HistoryStamp & {
+    version?: number; title?: string; text?: string; params?: ParamWire[];
+    /** Rows a session wrote when it was accepted: the check states it set. */
+    check_states?: Record<string, CheckState>;
+  })[];
 }
 
 /** Which draft (or session) changed something, when, and why. */

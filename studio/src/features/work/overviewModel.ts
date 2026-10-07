@@ -1,7 +1,7 @@
 import type { ProjectSeats } from "../../types";
 import type { CheckState, DecisionWire, DraftWire, PlanWire, RequirementWire } from "../plan/api";
 import type { BacklogItemWire, RunBranchWire } from "./api";
-import { groupBacklog } from "./model";
+import { groupBacklog, recentUpdate } from "./model";
 
 export interface Lanes {
   upNext: BacklogItemWire[];
@@ -38,27 +38,48 @@ export function lastSummary(item: BacklogItemWire): string {
   return "";
 }
 
-/** One plain line under a card in Overview: a size, a state or the last summary. No ids. */
+/** The first sentence of a text, at most `max` characters. */
+export function firstSentence(text: string, max = 110): string {
+  const t = text.trim().split(/(?<=[.!?])\s/)[0] ?? "";
+  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
+}
+
+/**
+ * One plain line under a card in Overview (plan §12): for done work the person's own note when
+ * they accepted it; for open work what changed since it was last worked on and why, else its
+ * size. Never the reviewer's long report. No ids.
+ */
 export function cardSubtext(item: BacklogItemWire): string {
-  if (item.status === "done") return lastSummary(item) || "Finished";
+  const history = item.history ?? [];
+  if (item.status === "done") {
+    const note = [...history].reverse().find((h) => typeof h.note === "string" && h.note.trim());
+    return note ? firstSentence(String(note.note)) : "Finished";
+  }
   if (item.status === "in_run") {
     if (item.pending === "done") return "Finished, waiting for your review";
     if (item.pending === "partial") return "Partly done, waiting for your review";
     if (item.pending === "not_started") return "Not started, waiting for your review";
     return "Being worked on in a session";
   }
+  const update = recentUpdate(history);
+  if (update?.why) return `Updated: ${firstSentence(update.why)}`;
   return `${SIZE_WORDS[item.size.toUpperCase()] ?? item.size} job`;
 }
 
 const WEEK_S = 7 * 24 * 3600;
 
-interface HistoryEntry { at?: number; version?: unknown; reason?: unknown; draft?: unknown }
+interface HistoryEntry {
+  at?: number; version?: unknown; reason?: unknown; draft?: unknown; by?: unknown;
+  why?: { name?: string } | null; check_states?: Record<string, string>;
+}
 
-/** One short line per change: what changed, never the old text itself. */
+/** One short line per change: why it changed (the draft's reason), never the old text itself. */
 function entryText(e: HistoryEntry): string {
   if (typeof e.reason === "string" && e.reason.trim()) return `dropped (${e.reason.trim()})`;
-  const v = typeof e.version === "number" ? ` (now v${e.version + 1})` : "";
+  if (!e.draft && e.check_states) return `checks settled in ${String(e.by ?? "a session").replace(/^session:/, "")}`;
   const by = typeof e.draft === "string" && e.draft ? ` in ${e.draft}` : "";
+  if (e.why?.name) return `${e.why.name}${by}`;
+  const v = typeof e.version === "number" ? ` (now v${e.version + 1})` : "";
   return `changed${by}${v}`;
 }
 
@@ -71,10 +92,10 @@ export function weekChanges(
   const add = (label: string, title: string, history: HistoryEntry[] | undefined) => {
     for (const e of history ?? []) {
       if (typeof e.at !== "number" || nowS - e.at > WEEK_S) continue;
-      out.push({ at: e.at, text: `${label} "${title}": ${entryText(e)}` });
+      out.push({ at: e.at, text: `${label} ${title}: ${entryText(e)}` });
     }
   };
-  for (const r of spec?.requirements ?? []) add(`Requirement ${r.id}`, r.title || r.text, r.history);
+  for (const r of spec?.requirements ?? []) add(r.id, r.title || r.text, r.history);
   for (const d of spec?.decisions ?? []) add("Decision", d.title, d.history);
   return out.sort((a, b) => b.at - a.at);
 }

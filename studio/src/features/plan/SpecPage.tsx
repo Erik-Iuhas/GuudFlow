@@ -48,7 +48,17 @@ export function originEvents(r: RequirementWire): OriginEvent[] {
   // One draft can change several fields; show it once.
   const seen = new Set<string>();
   for (const h of r.history ?? []) {
-    const key = h.draft ?? `${h.at}`;
+    if (!h.draft && h.check_states) {
+      // An accepted session set check states: say how many it settled.
+      const states = Object.values(h.check_states);
+      const met = states.filter((x) => x === "met").length;
+      const unmet = states.filter((x) => x === "unmet").length;
+      out.push({ where: (h.by ?? "").replace(/^session:/, ""), at: h.at ?? null, what: "checked in a session",
+        summary: `${met} check${met === 1 ? "" : "s"} met${unmet ? `, ${unmet} not met` : ""}`, because: null, quote: null });
+      continue;
+    }
+    if (!h.draft) continue;
+    const key = h.draft;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(ev(h, "changed"));
