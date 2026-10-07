@@ -22,6 +22,7 @@ import logging
 from typing import Any, Callable
 
 from core.llm import LLMClient, LLMMessage
+from core.quip_office import BANNED_OPENERS, office_state
 from core.scheduler import SchedulerResult
 from core.workspace import Workspace
 
@@ -42,6 +43,14 @@ class Quip:
     role: str     # agent role
     text: str
     event: str    # "agent_complete" | "approved" | "rejected" | "run_complete"
+
+
+def _detail(sig: Any) -> dict[str, Any]:  # Any: Signal / JSON detail
+    try:
+        data = json.loads(getattr(sig, "detail", None) or "{}")
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 class QuipEngine:
@@ -144,17 +153,21 @@ class QuipEngine:
         self._save(quip)
 
     async def on_review_verdict(
-        self, role: str, verdict: str, workspace: Workspace
+        self, role: str, verdict: str, workspace: Workspace, task_id: str | None = None,
     ) -> None:
-        """The reviewer reacts to their own APPROVED / REJECTED verdict."""
+        """The reviewer reacts to their own APPROVED / REJECTED verdict on one card."""
         voice = self._voice_for(role)
-        reviewed_names = ", ".join(
-            self._persona_name_for_role(r) for r in workspace.completed_agents[:-1]
-        ) or "the work"
-        if verdict == "APPROVED":
-            context = f"You just approved {reviewed_names}. It passed your review."
+        card = workspace.tasks.get(task_id) if task_id else None
+        if card is not None:
+            builder = self._persona_name_for_role(card.assigned_to)
+            title = getattr(card, "title", "") or card.goal
+            subject = f"{card.task_id}, {builder}'s card \"{title}\""
         else:
-            context = f"You just rejected {reviewed_names}. It did not meet your standard."
+            subject = "the card you were reviewing"
+        if verdict == "APPROVED":
+            context = f"You just approved {subject}. It passed your review."
+        else:
+            context = f"You just sent {subject} back. It did not meet your standard yet."
         quip = await self._generate(voice, context, workspace=workspace, event=verdict.lower())
         self._save(quip)
 
@@ -209,6 +222,20 @@ class QuipEngine:
             f"{len(workspace.completed_agents)} agents complete so far."
         )
         quip = await self._generate(voice, context, workspace=workspace, event="iteration_complete")
+        self._save(quip)
+
+    async def on_board_event(self, event: str, summary: str, workspace: Workspace,
+                             role: str | None = None) -> None:
+        """A teammate reacts to a run-level moment (budget, time, overseer, review)."""
+        voice = self._voice_for(role) if role else self._random_voice()
+        context = {
+            "budget_warning": f"Heads up from the system: {summary}",
+            "limits_changed": f"The owner just changed the session's limits: {summary}",
+            "time_limit": f"The session hit its time limit: {summary}",
+            "overseer_wake": f"The overseer just woke up to look at the team: {summary}",
+            "submitted": f"The session's work just went to the owner for review: {summary}",
+        }.get(event, summary)
+        quip = await self._generate(voice, context, workspace=workspace, event=event)
         self._save(quip)
 
     async def on_event(self, summary: str, event: str = "system") -> None:
@@ -277,8 +304,9 @@ class QuipEngine:
         return "Your coworkers on this run: " + ", ".join(entries) + ". Use their names, not their roles."
 
     def _random_voice(self) -> AgentVoice:
-        if self._voices:
-            return random.choice(self._voices)
+        team = [v for v in self._voices if v.role != "overseer"] or self._voices
+        if team:
+            return random.choice(team)
         return self._fallback_voice("system")
 
     def _fallback_voice(self, role: str) -> AgentVoice:
@@ -294,13 +322,25 @@ class QuipEngine:
         workspace: Workspace | None = None,
     ) -> Quip:
         roster = self._roster_block(workspace, exclude_role=voice.role)
+        ws = workspace or self._workspace
+        office = (office_state(ws, {v.role: v.name for v in self._voices}, voice.role,
+                               [v.role for v in self._voices], self._personas_root)
+                  if ws is not None else "")
+        mine = [q.text for q in self._quips if q.role == voice.role][-5:]
         system = (
             f"{voice.character}\n\n"
             + (f"{roster}\n\n" if roster else "")
+            + (f"The office right now (facts, not opinions):\n{office}\n\n" if office else "")
             + "React to what just happened in ONE punchy sentence — in character, "
             "no quotation marks, no preamble. "
             f"Write only in first person (use 'I', 'my', 'me'). "
-            f"Do NOT write your name ({voice.name}) anywhere in your response."
+            f"Do NOT write your name ({voice.name}) anywhere in your response. "
+            "You may rib a teammate about something true above (a streak, a send-back, who "
+            "spent the most) the way coworkers do, but keep it light: never question "
+            "anyone's competence and never invent facts. "
+            f"Do not open with stock phrases like: {'; '.join(BANNED_OPENERS)}."
+            + ("\nYou said these recently; say something new:\n"
+               + "\n".join(f"- {t}" for t in mine) if mine else "")
         )
         try:
             response = await self.llm.complete(
@@ -354,35 +394,47 @@ class QuipPump:
     capped per run so the quip board stays a cheap side channel.
     """
 
-    def __init__(self, engine: "QuipEngine", workspace: Workspace, limit: int = 20) -> None:
+    def __init__(self, engine: "QuipEngine", workspace: Workspace, limit: int = 30) -> None:
         self.engine = engine
         self.workspace = workspace
         self.limit = limit
         self.sent = 0
-        self._queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue()
+        # (role, event, task id or summary); role "" means a random teammate speaks.
+        self._queue: asyncio.Queue[tuple[str, str, str] | None] = asyncio.Queue()
         self._last: tuple[str, str] | None = None
+
+    # Run-level moments worth a line (plan §11.5), by signal type name.
+    BOARD_EVENTS = {"BUDGET_WARNING": "budget_warning", "RUN_LIMITS_CHANGED": "limits_changed",
+                    "TIME_LIMIT_REACHED": "time_limit", "OVERSEER_WAKE": "overseer_wake",
+                    "RUN_SUBMITTED": "submitted"}
 
     def on_signal(self, sig: Any) -> None:  # Any: core.signals.Signal (avoids a cycle)
         """Workspace subscriber: queue the quip-worthy events."""
         from core.signals import SignalType
         role = str(getattr(sig, "from_agent", "") or "")
-        if not role or role in ("runner", "visual-check"):
-            return
         kind = sig.type
         event: str | None = None
-        if kind is SignalType.STARTED:
+        extra = ""
+        if kind.value in self.BOARD_EVENTS:
+            event, extra = self.BOARD_EVENTS[kind.value], str(sig.summary or "")
+            role = ""                    # a teammate reacts, not the system
+        elif not role or role in ("runner", "visual-check", "system"):
+            return
+        elif kind is SignalType.STARTED:
             event = "started"
         elif kind is SignalType.COMPLETE:
             event = "complete"
         elif kind is SignalType.REJECTED:
-            event = "REJECTED"
+            event, extra = "REJECTED", str(_detail(sig).get("task_id") or "")
         elif kind is SignalType.AGENT_RESULT and ": review pass" in (sig.summary or ""):
+            result = _detail(sig).get("result")
             event = "APPROVED"
+            extra = str(result.get("task_id") or "") if isinstance(result, dict) else ""
         if event is None or (role, event) == self._last or self.sent >= self.limit:
             return
         self._last = (role, event)
         self.sent += 1
-        self._queue.put_nowait((role, event))
+        self._queue.put_nowait((role, event, extra))
 
     async def run(self) -> None:
         """Generate queued quips until `close()`; one failure never stops the rest."""
@@ -390,14 +442,17 @@ class QuipPump:
             item = await self._queue.get()
             if item is None:
                 return
-            role, event = item
+            role, event, extra = item
             try:
                 if event == "started":
                     await self.engine.on_agent_started(role, self.workspace)
                 elif event == "complete":
                     await self.engine.on_agent_complete(role, self.workspace)
+                elif event in ("APPROVED", "REJECTED"):
+                    await self.engine.on_review_verdict(role, event, self.workspace,
+                                                        task_id=extra or None)
                 else:
-                    await self.engine.on_review_verdict(role, event, self.workspace)
+                    await self.engine.on_board_event(event, extra, self.workspace)
             except Exception:  # noqa: BLE001 — quips are decoration; log and carry on
                 log.exception("quip for %s/%s failed", role, event)
 

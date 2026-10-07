@@ -223,7 +223,7 @@ async def test_quip_pump_turns_live_signals_into_quips() -> None:
     class Engine:
         async def on_agent_started(self, role, ws): calls.append((role, "started"))
         async def on_agent_complete(self, role, ws): calls.append((role, "complete"))
-        async def on_review_verdict(self, role, verdict, ws):
+        async def on_review_verdict(self, role, verdict, ws, task_id=None):
             if verdict == "REJECTED":
                 raise RuntimeError("model down")   # one failure does not stop the rest
             calls.append((role, verdict))
