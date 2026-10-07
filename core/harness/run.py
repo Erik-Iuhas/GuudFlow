@@ -58,7 +58,8 @@ from core.harness.capabilities import (
 from core.harness.config_gen import ProviderBinding, agent_entry, build_config
 from core.harness.event_bridge import EventBridge
 from core.harness.git_roles import CollectResult, RoleClones
-from core.harness.handoff import host_facts
+from core.harness.handoff import host_facts, latest_per_card, render_handoffs, stored_handoffs
+from core.harness.session_policy import SessionLimits, SessionState, keep_session
 from core.harness import mcp_proxy
 from core.mcp_registry import McpRegistry
 from core.harness.mcp_server import McpIdentity, McpServer, McpTool, RunningHttpServer, ToolResult, serve_app
@@ -159,12 +160,15 @@ class HarnessSettings:
     on_permission: RolePermissionHook | None = None
     on_event: Callable[[str, dict[str, Any]], None] | None = None
     keep_servers: bool = False  # tests: keep servers between spawns of the same run
-    # A role keeps its opencode server and session from card to card, so it does not
-    # re-read the code it just worked on. Rotated after `max_turns_per_session` turns,
-    # after a failed or timed-out turn, when its work is set aside, or when its config
-    # changes. The overseer always starts fresh.
+    # A role keeps its opencode server between cards. Each card starts a fresh session and
+    # reads handoffs from earlier cards (plan §11.1); the session is kept only when the next
+    # card continues the last one, the cache is still warm and the context is small
+    # (core/harness/session_policy.py). Also rotated after a failed or timed-out turn, when
+    # work is set aside, or when the config changes. The overseer and reviewers start fresh.
     session_reuse: bool = True
     max_turns_per_session: int = 8
+    session_keep_idle: float = 240.0
+    session_keep_max_context: int = 60_000
     # At the end of a run each role that worked writes its notebook for the next session.
     notebooks: bool = True
     notebook_timeout: float = 120.0
@@ -202,6 +206,9 @@ class _Role:
     session_turns: int = 0
     config_key: str = ""                 # the config the server started with
     turns_done: int = 0                  # turns with an accepted result in this run
+    last_turn_end: float = 0.0           # monotonic time the last turn in the session ended
+    last_context: int = 0                # context size of the session's last model call
+    last_card: str | None = None         # the card of the session's last turn
 
 
 class OpencodeRun:
@@ -230,6 +237,8 @@ class OpencodeRun:
         self._started = 0.0
         self._carry_text = ""
         self._notebooks: dict[str, str] = {}
+        # Per role: (kept the session, why, context tokens carried in) for the current turn.
+        self._session_choice: dict[str, tuple[bool, str, int]] = {}
         self._desks: dict[str, Any] = {}           # role -> DeskIndex (agents.persona_desk)
         self._desk_seen: dict[str, set[str]] = {}  # role -> desk notes already in its session
         self.images = ImageBudget()
@@ -816,8 +825,18 @@ class OpencodeRun:
 
         self.images.new_turn(role_name)
         reuse = self._reuses_session(role)
-        continuing = (reuse and role.session_id is not None
-                      and role.session_turns < self.settings.max_turns_per_session)
+        card_id = plan.card_id if plan is not None else None
+        continuing, why = keep_session(
+            SessionState(has_session=role.session_id is not None, turns=role.session_turns,
+                         idle_seconds=time.monotonic() - role.last_turn_end,
+                         context_tokens=role.last_context,
+                         continues_card=(self.flow.continues(role.last_card, card_id)
+                                         if self.flow is not None else True)),
+            SessionLimits(enabled=reuse, max_turns=self.settings.max_turns_per_session,
+                          max_idle_seconds=self.settings.session_keep_idle,
+                          max_context_tokens=self.settings.session_keep_max_context),
+            reviewer=role.role_type == "reviewer")
+        self._session_choice[role_name] = (continuing, why, role.last_context if continuing else 0)
         on_event = self._event_hook(role_name)
         on_permission = self._permission_hook(role_name)
         kept = False
@@ -835,7 +854,9 @@ class OpencodeRun:
                                      timeout=self.settings.turn_timeout)
             kept = await self._turn_body(role, client, session_id, stats, plan,
                                          on_event, on_permission)
+            role.last_context = stats.last_context
         finally:
+            role.last_turn_end, role.last_card = time.monotonic(), card_id
             if not (kept and reuse) and not self.settings.keep_servers:
                 await self._stop_server(role)
 
@@ -1230,25 +1251,38 @@ class OpencodeRun:
     async def _write_notebooks(self) -> None:
         """End of run: each role that worked writes its notebook, one after another.
 
-        Uses the role's live session (its context is still there), so it is cheap. Skipped
-        when the human stopped the run. Never raises.
+        Each writes in a fresh session from its handoffs for the run. Skipped when the
+        human stopped the run. Never raises.
         """
         stop = self.workspace.pending_human
         if not self.settings.notebooks or (stop is not None and stop.from_agent == "system"):
             return
         for role in self._roles.values():
             name = role.cfg.role
-            if (self._is_overseer(name) or role.turns_done == 0 or role.client is None
-                    or role.session_id is None):
+            if self._is_overseer(name) or role.turns_done == 0:
                 continue
             try:
-                await drive_turn(role.client, role.session_id,
-                                 notebook_brief(self._notebooks.get(name)), agent=name,
+                # A fresh session briefed with this run's handoffs (plan §11.1): resuming the
+                # role's last session could re-send a large, cold context for a short note.
+                client = role.client or await self._ensure_server(
+                    role, self.clones.path(name), "notebook")
+                session = await client.create_session(title=f"{self.run_id}:{name}:notebook")
+                await drive_turn(client, str(session["id"]),
+                                 notebook_brief(self._notebooks.get(name),
+                                                self._own_handoffs(name)), agent=name,
                                  on_event=self._event_hook(name),
                                  on_permission=self._permission_hook(name),
                                  timeout=self.settings.notebook_timeout)
             except Exception:  # noqa: BLE001 — a notebook is a convenience, never a failure
                 log.exception("%s: writing the notebook failed in %s", name, self.run_id)
+
+    def _own_handoffs(self, role: str) -> str | None:
+        """The role's handoffs from this run, for its notebook (None when there are none)."""
+        if self.flow is None:
+            return None
+        mine = [("your card", h) for h in latest_per_card(stored_handoffs(self.flow.board)).values()
+                if h.author == role]
+        return render_handoffs(mine, self.names) if mine else None
 
     def _link_tool_dir(self, role: str, workdir: Path) -> None:
         """Host mode: expose the host-only tool dir at <worktree>/.guudflow (a sandbox
@@ -1381,6 +1415,7 @@ def _merge_stats(into: TurnStats, more: TurnStats) -> None:
     into.permission_asks += more.permission_asks
     into.errors += more.errors
     into.timed_out = into.timed_out or more.timed_out
+    into.last_context = more.last_context or into.last_context
 
 
 def cleanup_role_homes(run_root: Path) -> None:

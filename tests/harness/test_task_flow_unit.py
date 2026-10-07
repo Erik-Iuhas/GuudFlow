@@ -95,3 +95,21 @@ def test_planner_brief_carries_the_measured_card_target() -> None:
     plan = flow.begin_turn("planner")
     assert plan is not None
     assert "at most 8 cards" in dict(plan.extra_sections)["Budget and card size"]
+
+
+def test_continues_same_card_dependency_or_shared_files() -> None:
+    flow, _, _ = _flow()
+    flow.plan_accepted(PlanResult(tasks=[
+        PlannedTask(id="T1", title="Status endpoint", owner_role="api", acceptance=["works"],
+                    files_hint=["api.py"], size="S", kind="code"),
+        PlannedTask(id="T2", title="Status client", owner_role="api", acceptance=["works"],
+                    depends_on=["T1"], size="S", kind="code"),
+        PlannedTask(id="T3", title="Status docs", owner_role="api", acceptance=["works"],
+                    files_hint=["api.py", "README.md"], size="S", kind="code"),
+        PlannedTask(id="T4", title="Unrelated page", owner_role="api", acceptance=["works"],
+                    files_hint=["page.py"], size="S", kind="code")]))
+    assert flow.continues("T1", "T1")
+    assert flow.continues("T1", "T2")          # depends on it
+    assert flow.continues("T1", "T3")          # shares api.py
+    assert not flow.continues("T1", "T4")
+    assert flow.continues(None, "T4")          # nothing to compare: role mode

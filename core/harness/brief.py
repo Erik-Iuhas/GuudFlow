@@ -177,16 +177,22 @@ HANDOFF_INSTRUCTIONS = (
 NOTEBOOK_LIMIT = 6000
 
 
-def notebook_brief(previous: str | None) -> str:
-    """End of the session: ask the role to write its notebook for the next session."""
+def notebook_brief(previous: str | None, handoffs: str | None = None) -> str:
+    """End of the session: ask the role to write its notebook for the next session.
+
+    It runs in a fresh session, so the role's handoffs from this run stand in for the
+    conversation (plan §11.1)."""
+    done = ("\n\nYour handoffs from the cards you finished this session:\n" + handoffs
+            if handoffs else "")
     old = ("\n\nYour notebook from the previous session, to update rather than repeat:\n"
            + wrap_untrusted("your notebook", previous)) if previous else ""
     return ("The session is over; do not change any files. Write your notebook for the next "
-            "session, when you will start without this conversation. Call "
+            "session, when you will start without this session's conversations. Read the "
+            "code where you need to. Call "
             "`guudflow_notebook` once with markdown (under 500 words): where things live in "
             "the code you own (files and what they do), conventions and decisions you follow, "
             "commands that work (tests, checks), gotchas that cost you time, and what is "
-            "unfinished or fragile. Facts only, no narrative." + old)
+            "unfinished or fragile. Facts only, no narrative." + done + old)
 
 
 def retry_brief(error: str | None) -> str:

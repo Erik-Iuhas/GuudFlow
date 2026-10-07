@@ -245,6 +245,18 @@ class TaskFlow:
                                       extra_lines=extra)
         return ((("The spec", text),) if text else ()), extra
 
+    def continues(self, previous: str | None, card_id: str | None) -> bool:
+        """Does `card_id` continue `previous` (same card, depends on it, or shares files)?"""
+        if previous is None or card_id is None:
+            return True     # role mode: no cards to compare
+        if previous == card_id:
+            return True
+        tasks = self.workspace.tasks
+        if previous not in tasks or card_id not in tasks:
+            return False
+        nxt, prev = tasks[card_id], tasks[previous]
+        return previous in nxt.depends_on or bool(set(nxt.files_hint) & set(prev.files_hint))
+
     def _handoff_section(self, role: str, task_id: str, *, reviewer: bool = False
                          ) -> tuple[tuple[str, str], ...]:
         """Handoffs from earlier cards for this turn (plan §11.1)."""

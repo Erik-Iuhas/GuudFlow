@@ -129,6 +129,14 @@ async def test_cards_drive_the_run_with_a_review_loop(tmp_path: Path, fake_llm: 
                     if "Your turn: frontend" in str(r["messages"]))
     assert "Handoffs from earlier cards" in frontend and "this card depends on it" in frontend
 
+    # Session policy (plan §11.1): the reviewer starts every review fresh, and the rework
+    # of the same card continues the builder's warm session.
+    reviewer_briefs = [str(r["messages"]) for r in fake_llm.tool_requests()
+                       if "# Your turn: reviewer" in str(r["messages"])]
+    assert reviewer_briefs and not any("Next piece of work in the same session" in m
+                                       for m in reviewer_briefs)
+    assert rework and "Next piece of work in the same session" in rework[0]
+
     # Work landed on main.
     main = runner.git.working_dir
     assert (main / "api.py").read_text().endswith("return 'ok'\n")

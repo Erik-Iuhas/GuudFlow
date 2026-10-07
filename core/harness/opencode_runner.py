@@ -48,6 +48,8 @@ class TurnStats:
     permission_asks: int = 0
     errors: list[str] = field(default_factory=list)
     timed_out: bool = False
+    # Context size of the last model call (input + cache read): what a session carries on.
+    last_context: int = 0
 
 
 class _UsageTracker:
@@ -82,6 +84,10 @@ class _UsageTracker:
             stats.tokens["reasoning"] += int(tok.get("reasoning") or 0)
             stats.tokens["cache_read"] += int((tok.get("cache") or {}).get("read") or 0)
         stats.tool_calls = [self.tools[i] for i in self.tool_order]
+        if self.messages:
+            tok = list(self.messages.values())[-1].get("tokens") or {}
+            stats.last_context = (int(tok.get("input") or 0)
+                                  + int((tok.get("cache") or {}).get("read") or 0))
 
 
 async def drive_turn(
