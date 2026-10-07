@@ -545,9 +545,10 @@ The provider account (API key credit) is the owner's concern and GuudFlow never 
 ### 11.5 Quips as a work simulator
 **Problem.** Quips are flat and repetitive. Across 60 quips in three sessions, "rolling up my sleeves"
 or "cracking my knuckles" came up about 15 times. The generator only gets the speaker's character, a
-list of coworker names and the event, so nobody knows anything about anyone. Two bugs:
-- review quips name the wrong subject ("I gave overseer the green light", "Arlo's card");
-- the quip log does not record the speaker.
+list of coworker names and the event, so nobody knows anything about anyone. One bug: review
+quips name the wrong subject ("I gave overseer the green light", "Arlo's card"). (An earlier note
+said the quip log does not record the speaker; that was wrong: every entry has `persona` and
+`role`.)
 
 **Design.** Each quip call gets a small, factual "office state", so workers know about each other
 and where they stand. Just enough for some spice, built from data GuudFlow already has (no extra
@@ -574,8 +575,7 @@ LLM call):
 - quips stay on the fast tier.
 
 **Fixes:**
-- review events pass the card id and builder name as the subject ("T4, Sol's abilities");
-- the speaker's name and role are written in every quip entry.
+- review events pass the card id and builder name as the subject ("T4, Sol's abilities").
 
 ### 11.6 Time limits that do not cut work off
 **Problem.** Two wall clocks:
@@ -630,7 +630,6 @@ These are GuudFlow problems, not game ones. Details are in `docs/FIELD_NOTES.md`
 | — | Check ids are re-matched by text, so a one-word edit makes a new check | §11.2 |
 | — | Items keep stale copies of check text | §11.2 |
 | — | Review quips name the wrong subject ("gave overseer the green light") | §11.5 |
-| — | The quip log does not record the speaker | §11.5 |
 | — | Quips repeat the same openers and know nothing about teammates | §11.5 |
 | — | Session deadline and turn timeout cut work off; there is no "no limit" option | §11.6 |
 
@@ -686,3 +685,31 @@ That is the owner's call; running session 4 on the new spec shape would also tes
   with the spec, backlog, drafts and Jack's chat), the personas and the cost logs of the three
   sessions. It contains no keys. To restore, extract it into a data root and point
   `GUUDFLOW_DATA_DIR` there. The API key and token were never stored in it, so set them again.
+
+### 11.10 Implementation status (2026-10-07)
+W1–W9 are implemented, with tests. Where the build differs from the text above:
+- **Handoff is optional in the schema.** A done result without one still validates; GuudFlow then
+  stores a fallback from the summary (source `fallback`) and the brief asks for a handoff every
+  time. Refusing results would fail workers (and the scripted test fakes) over a missing note.
+  An explicitly empty handoff is refused.
+- **Host facts** are files with line counts and exported names; the test count is not included
+  (it comes with the session's check run instead).
+- **No safety-net summarize** inside one long card: a fresh session per card plus the 60 k keep
+  rule kept carried context small in tests; add it if a single card is seen to grow past ~150 k.
+- **Structured requirements migrate on read**, not by rewriting the database: an older row gets a
+  title from its first clause and each check a method from its prefix; the values are stored the
+  next time the requirement is edited. Numbers are **not** moved into params automatically (a rule
+  cannot name the keys reliably); the PM proposes `set_param` changes, which a person ticks.
+- **The spec markdown is the existing `SPEC.md` record** (`core/record.py`), now with titles,
+  params and check methods, rewritten after approved drafts and direct edits as well as accepted
+  sessions (when the project keeps its record in the repo). It is not a protected path.
+- **Items reference checks** by id. Older items that copied `R4.8: <text>` are resolved the same
+  way, so they show the current text without a migration.
+- **Budget**: the warning is a `BUDGET_WARNING` signal shown above the budget meter in the cockpit,
+  not a blocking approval request.
+- **Salvage** (F3) lists sessions that hold backlog items, are not live and wrote no `meta.json`,
+  and submits their merged work with `POST /api/projects/{id}/interrupted/{run}/salvage`.
+- **Disk** (F2): `GET /api/system/disk`, `POST /api/system/prune` (stopped GuudFlow sandbox
+  containers, build cache, dangling images), a Dashboard banner, and a worker check that refuses
+  to start a session under 1 GB free (prunes first with `GUUDFLOW_AUTO_PRUNE=1`).
+- **Quips**: the speaker was already recorded (see §11.5); random speakers are never the overseer.
