@@ -472,11 +472,24 @@ def _req_block(d: _Data, req: Row) -> list[str]:
                      ", dropped" if r.status == "dropped" else ""])
     made = d.creating_draft(r.id)
     who = f"; added by {made.approved_by} in {made.id}, {_when(made.closed_at)}" if made else ""
-    lines = [f"### {r.id}. {r.text}", f"{r.kind}, {r.priority}{flags}; version {r.version}{who}", ""]
+    lines = [f"### {r.id}. {r.title}", f"{r.kind}, {r.priority}{flags}; version {r.version}{who}",
+             "", r.text, ""]
+    if r.params:
+        lines += ["| Param | Value | |", "|---|---|---|"]
+        lines += [f"| {p.key} | {p.value}{(' ' + p.unit) if p.unit else ''} | "
+                  f"{'assumed' if p.assumed else 'confirmed'}{(', ' + p.note) if p.note else ''} |"
+                  for p in r.params]
+        lines.append("")
+    if r.rationale:
+        lines += [f"Why: {r.rationale}", ""]
     for c in r.checks:
         extra = f" ({c.state}, session {c.run_id})" if c.state == "unmet" and c.run_id else (
             " (unmet)" if c.state == "unmet" else "")
-        lines.append(f"- [{'x' if c.state == 'met' else ' '}] {c.id} {c.text}{extra}")
+        how = f" _{c.method}_" if c.method else ""
+        test = f" (test `{c.test}`)" if c.test else ""
+        given = f"given {c.given}, " if c.given else ""
+        lines.append(f"- [{'x' if c.state == 'met' else ' '}] {c.id}{how} {given}{c.text}"
+                     f"{test}{extra}")
     items = d.items_serving(r.id)
     if items:
         lines += ["", "Work: " + "; ".join(f"{i.id} {i.title} ({i.status})" for i in items)]

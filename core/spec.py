@@ -19,12 +19,45 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 Kind = Literal["feature", "constraint", "quality", "non_goal"]
+CheckMethod = Literal["unit", "manual", "visual", "perf"]
+CHECK_METHODS: tuple[str, ...] = ("unit", "manual", "visual", "perf")
+TITLE_LIMIT = 60
+ParamValue = str | int | float | bool
 Priority = Literal["must", "should", "could", "wont"]
 CheckState = Literal["unknown", "met", "unmet"]
 KINDS: tuple[str, ...] = ("feature", "constraint", "quality", "non_goal")
 PRIORITIES: tuple[str, ...] = ("must", "should", "could", "wont")
 REQ_ID = re.compile(r"^R[0-9]+$")
 _CHECK_ID = re.compile(r"^(R[0-9]+)\.([0-9]+)$")
+CHECK_REF = re.compile(r"^(R[0-9]+\.[0-9]+)(?::\s*(.*))?$", re.DOTALL)
+# Older checks say how they are verified in a prefix ("Bun test: ...", "Manual: ...").
+_METHOD_PREFIX = re.compile(
+    r"^(?P<p>(?:manual(?: and)? )?(?:bun |unit |py)?tests?|manual(?: screenshot)?|screenshot|"
+    r"visual(?: check)?|perf(?:ormance)?)\s*(?:over [^:]{1,40})?:\s*", re.IGNORECASE)
+
+
+def infer_method(text: str) -> CheckMethod | None:
+    """How an older, free-text check is verified, from its prefix (None if it has none)."""
+    found = _METHOD_PREFIX.match(text.strip())
+    if not found:
+        return None
+    prefix = found.group("p").casefold()
+    if "test" in prefix:
+        return "unit"
+    if "screenshot" in prefix or "visual" in prefix:
+        return "visual"
+    if prefix.startswith("perf"):
+        return "perf"
+    return "manual"
+
+
+def derive_title(text: str) -> str:
+    """A short title from an older requirement's text: its first clause, at most 60 chars."""
+    first = re.split(r"(?<=[a-z0-9)])[:.;]\s|\s[—–-]\s", text.strip(), maxsplit=1)[0].strip()
+    if len(first) <= TITLE_LIMIT:
+        return first.rstrip(".:")
+    cut = first[:TITLE_LIMIT - 1].rsplit(" ", 1)[0]
+    return cut.rstrip(",;:") + "…"
 
 
 class SpecError(ValueError):
@@ -35,10 +68,13 @@ class SpecError(ValueError):
 class Check:
     """One acceptance check of a requirement."""
 
-    id: str                      # "R4.2"
-    text: str
+    id: str                      # "R4.2"; stable: edits address it, numbers are never reused
+    text: str                    # what must hold ("then")
     state: CheckState = "unknown"
     run_id: str | None = None    # the accepted session whose review set the state
+    method: CheckMethod | None = None   # unit | manual | visual | perf
+    given: str = ""              # optional setup ("given")
+    test: str | None = None      # linked test, "file::name", for unit checks
 
     def to_dict(self) -> dict[str, Any]:  # Any: JSON row
         """JSON form."""
@@ -46,9 +82,38 @@ class Check:
 
     @classmethod
     def from_dict(cls, row: dict[str, Any]) -> Check:  # Any: JSON row
-        """Load a check, ignoring unknown keys."""
-        return cls(id=str(row["id"]), text=str(row.get("text", "")),
-                   state=row.get("state", "unknown"), run_id=row.get("run_id"))
+        """Load a check, ignoring unknown keys. Older checks get a method from their prefix."""
+        text = str(row.get("text", ""))
+        method = row.get("method")
+        return cls(id=str(row["id"]), text=text, state=row.get("state", "unknown"),
+                   run_id=row.get("run_id"),
+                   method=method if method in CHECK_METHODS else infer_method(text),
+                   given=str(row.get("given") or ""), test=row.get("test") or None)
+
+
+@dataclass
+class Param:
+    """A tunable value of a requirement ("charges: 2"), kept out of the prose (plan §11.2)."""
+
+    key: str
+    value: ParamValue
+    unit: str = ""
+    assumed: bool = False        # proposed by the PM; a human has not confirmed it
+    note: str = ""
+
+    def to_dict(self) -> dict[str, Any]:  # Any: JSON row
+        """JSON form."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> Param:  # Any: JSON row
+        """Load a param, ignoring unknown keys."""
+        return cls(key=str(row["key"]), value=row.get("value", ""), unit=str(row.get("unit") or ""),
+                   assumed=bool(row.get("assumed", False)), note=str(row.get("note") or ""))
+
+    def render(self) -> str:
+        """`charges = 2` / `recharge = 10 s`."""
+        return f"{self.key} = {self.value}{(' ' + self.unit) if self.unit else ''}"
 
 
 @dataclass
@@ -56,10 +121,13 @@ class Requirement:
     """One requirement ("R4")."""
 
     id: str
-    text: str
+    text: str                        # the statement: 1-2 sentences of behaviour
     kind: Kind
     priority: Priority
     checks: list[Check] = field(default_factory=list)
+    title: str = ""                  # short name (derived from `text` for older rows)
+    params: list[Param] = field(default_factory=list)
+    rationale: str = ""
     assumed: bool = False            # PM assumption, not yet confirmed by a human
     experiment: bool = False
     status: Literal["active", "dropped"] = "active"
@@ -74,13 +142,25 @@ class Requirement:
         """JSON form."""
         return asdict(self)
 
+    def __post_init__(self) -> None:
+        if not self.title:
+            self.title = derive_title(self.text)
+
+    def param(self, key: str) -> Param | None:
+        """One param by key."""
+        return next((p for p in self.params if p.key == key), None)
+
     @classmethod
     def from_dict(cls, row: dict[str, Any]) -> Requirement:  # Any: JSON row
         """Load a requirement, ignoring unknown keys."""
+        text = str(row.get("text", ""))
         return cls(
-            id=str(row["id"]), text=str(row.get("text", "")), kind=row.get("kind", "feature"),
+            id=str(row["id"]), text=text, kind=row.get("kind", "feature"),
             priority=row.get("priority", "should"),
             checks=[Check.from_dict(c) for c in row.get("checks", [])],
+            title=str(row.get("title") or ""),
+            params=[Param.from_dict(p) for p in row.get("params", []) if p.get("key")],
+            rationale=str(row.get("rationale") or ""),
             assumed=bool(row.get("assumed", False)), experiment=bool(row.get("experiment", False)),
             status=row.get("status", "active"), source=str(row.get("source", "human")),
             version=int(row.get("version", 1)), history=list(row.get("history", [])),
@@ -215,8 +295,12 @@ class Spec:
             for r in reqs[:limit]:
                 flags = "".join([", assumed" if r.assumed else "",
                                  ", experiment" if r.experiment else ""])
-                lines.append(f"- **{r.id}** [{r.kind}, {r.priority}{flags}] {r.text}")
-                lines += [f"    - {c.id} ({c.state}): {c.text}" for c in r.checks]
+                lines.append(f"- **{r.id} {r.title}** [{r.kind}, {r.priority}{flags}] {r.text}")
+                if r.params:
+                    lines.append("    - params: " + "; ".join(
+                        p.render() + (" (assumed)" if p.assumed else "") for p in r.params))
+                lines += [f"    - {c.id} ({c.state}{', ' + c.method if c.method else ''}): {c.text}"
+                          for c in r.checks]
             lines += _more(len(reqs), limit)
             sections.append("\n".join(lines))
         decs = [d for d in self.decisions if d.status == "accepted"]
@@ -274,6 +358,48 @@ def make_checks(req_id: str, texts: Sequence[str], existing: Sequence[Check] = (
             continue
         top += 1
         out.append(Check(id=f"{req_id}.{top}", text=text))
+    return out
+
+
+def structured_check(check_id: str, spec: Any) -> Check:  # Any: str or a CheckSpec model
+    """A new check from a draft: a plain string (method inferred from its prefix) or a
+    structured `CheckSpec` (`core.plan_drafts`)."""
+    if isinstance(spec, str):
+        return Check(id=check_id, text=spec.strip(), method=infer_method(spec))
+    return Check(id=check_id, text=spec.text.strip(), method=spec.method or infer_method(spec.text),
+                 given=spec.given.strip(), test=(spec.test or "").strip() or None)
+
+
+def structured_checks(req_id: str, specs: Sequence[Any]) -> list[Check]:  # Any: str/CheckSpec
+    """Numbered checks for a new requirement (blank strings skipped)."""
+    out: list[Check] = []
+    for spec in specs:
+        if not (spec if isinstance(spec, str) else spec.text).strip():
+            continue
+        out.append(structured_check(f"{req_id}.{len(out) + 1}", spec))
+    return out
+
+
+def resolve_acceptance(spec: Spec, lines: Sequence[str]) -> list[str]:
+    """Item acceptance lines with check references resolved to the current check text.
+
+    Items store `"R4.8"` (or, written before plan §11.2, `"R4.8: <text at the time>"`); both
+    become `"R4.8: <current text>"`. A check that no longer exists is marked so; any other
+    line is the item's own and stays as written."""
+    out: list[str] = []
+    for line in lines:
+        found = CHECK_REF.match(line.strip())
+        if not found:
+            out.append(line)
+            continue
+        try:
+            check = spec.check(found.group(1))
+            req = spec.requirement(found.group(1).split(".")[0])
+        except SpecError:
+            out.append(f"{found.group(1)}: {found.group(2) or ''} (removed from the spec)".strip())
+            continue
+        out.append(f"{check.id}: {check.text}" + (" (requirement dropped)"
+                                                    if req.status != "active" else ""))
     return out
 
 

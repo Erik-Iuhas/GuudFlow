@@ -307,6 +307,8 @@ class OpencodeRun:
             # The spec and the start mode (plan §4); None keeps briefs as they were.
             flow.spec = SpecBrief.load(self._data_root(), self.runner.project.project_id,
                                        getattr(self.runner.project, "start_mode", None))
+            if flow.spec is not None:
+                flow.backlog = self.backlog = flow.spec.resolve(self.backlog)
             flow.tool_dir_for = self.clones.tool_dir
             flow.ref_roots = [self.runner.run_root / "inputs", self.runner.git.working_dir]
             flow.run_root = self.runner.run_root

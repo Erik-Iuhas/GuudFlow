@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from core.backlog import BacklogItem
-from core.spec import Decision, Requirement, Rule, Spec
+from core.spec import Decision, Requirement, Rule, Spec, resolve_acceptance
 from core.spec_adherence import CHECK_LINE
 from core.start_modes import DEFAULT_RULES, PLANNER_TEXT, REVIEWER_LINES, START_MODES
 from core.work_db import WorkDB
@@ -60,6 +60,10 @@ class SpecBrief:
         return cls(spec=spec, start_mode=mode)
 
     # ── what applies ────────────────────────────────────────────────────────
+    def resolve(self, items: Sequence[BacklogItem]) -> list[BacklogItem]:
+        """Items with their check references resolved to the current check text (§11.2)."""
+        return resolve_items(self.spec, items)
+
     def rules(self, role_type: str) -> list[Rule]:
         """Active spec rules for the role type, plus the start mode's default rules the spec
         does not already say."""
@@ -157,6 +161,11 @@ def _req_text(req: Requirement, served_by: Sequence[str]) -> str:
     lines = [f"- **{req.id}** [{req.kind}, {req.priority}{flags}] {_one_line(req.text)}{by}"]
     lines += [f"    - {c.id}: {_one_line(c.text)}" for c in req.checks]
     return "\n".join(lines)
+
+
+def resolve_items(spec: Spec, items: Sequence[BacklogItem]) -> list[BacklogItem]:
+    """Backlog items whose acceptance check references (`R4.8`) read as the current text."""
+    return [replace(i, acceptance=resolve_acceptance(spec, i.acceptance)) for i in items]
 
 
 def missing_check_lines(items: Sequence[BacklogItem],

@@ -133,7 +133,7 @@ def test_spec_lookup_and_render() -> None:
     with pytest.raises(SpecError):
         spec.check("nope")
     text = spec.render(10)
-    assert "**R1**" in text and "R1.1 (unknown): Login works" in text
+    assert "**R1 Users can sign in**" in text and "R1.1 (unknown): Login works" in text
     assert "R2" not in text and "D2" not in text and "rule-3" not in text
     assert "(binding)" in text and "because single file" in text
     assert "rule-2" in text

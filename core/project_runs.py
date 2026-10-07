@@ -322,6 +322,13 @@ def write_record_files(data_root: Path, project_id: str, run_id: str) -> str | N
     """Commit the spec and decision records onto main after an accepted run, when the
     project opted in. Never raises: the merge has already happened, and the record is
     regenerated on the next accept. Returns the new main sha or None."""
+    return write_record(data_root, project_id, f"after run {run_id}")
+
+
+def write_record(data_root: Path, project_id: str, why: str) -> str | None:
+    """Commit `SPEC.md` and the decision records onto main ("docs: update the project
+    record <why>") when the project opted in: after an accepted run, an approved draft or a
+    direct spec edit (plan §11.2). Never raises; returns the new main sha or None."""
     if not keeps_record_in_repo(data_root, project_id):
         return None
     try:
@@ -330,9 +337,9 @@ def write_record_files(data_root: Path, project_id: str, run_id: str) -> str | N
         if not files:
             return None
         return ProjectRepo(data_root, project_id).commit_files(
-            files, f"docs: update the project record after run {run_id}")
+            files, f"docs: update the project record {why}")
     except Exception:  # noqa: BLE001 — see docstring
-        log.exception("writing the project record for run %s failed", run_id)
+        log.exception("writing the project record %s failed", why)
         return None
 
 

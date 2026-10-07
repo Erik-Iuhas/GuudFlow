@@ -14,7 +14,7 @@ from core.backlog import Backlog, BacklogError, BacklogItem
 from core.plan_drafts import (
     AddDecision, AddItem, AddRequirement, AddRule, DropRequirement, DropRule, EditItem,
     EditRequirement, PlanDraftError, PlanDrafts, PlanTurn, SupersedeDecision, validate_turn)
-from core.spec import Spec
+from core.spec import Spec, resolve_acceptance
 
 REASON = "because the team already runs it"
 
@@ -185,7 +185,10 @@ def test_item_acceptance_copies_checks_with_ids_then_own_lines(pd: PlanDrafts) -
                                        acceptance=["R1.1: login works", "docs updated", ""])))
     it = Backlog(pd.db.project_dir.parent.parent, "p").get("B1")
     assert it.serves == ["R1"]
-    assert it.acceptance == ["R1.1: login works", "R1.2: bad password refused", "docs updated"]
+    # Items reference checks by id (plan §11.2); readers resolve them to the current text.
+    assert it.acceptance == ["R1.1", "R1.2", "docs updated"]
+    assert resolve_acceptance(Spec(pd.db.read_spec_doc()), it.acceptance) == [
+        "R1.1: login works", "R1.2: bad password refused", "docs updated"]
     assert it.source == "pm"
 
 
@@ -195,7 +198,7 @@ def test_item_serves_existing_requirement_and_dependencies(pd: PlanDrafts) -> No
                                  item("new:2", title="Schema first")))
     assert res.created == {"new:1": "B1", "new:2": "B2"}
     bl = Backlog(pd.db.project_dir.parent.parent, "p")
-    assert bl.get("B1").depends_on == ["B2"] and bl.get("B1").acceptance[0].startswith("R1.1:")
+    assert bl.get("B1").depends_on == ["B2"] and bl.get("B1").acceptance[0] == "R1.1"
 
 
 def test_edit_requirement_history_checks_and_version(pd: PlanDrafts) -> None:

@@ -20,6 +20,7 @@ from api.routes.pm import remember_draft
 from core.backlog import BacklogError
 from core.plan_drafts import TEAM_OPS, Draft, PlanDraftError, PlanDrafts, parse_change
 from core.project_manager import ProjectManager, ProjectManagerError, TurnOutcome
+from core.project_runs import write_record
 from core.spec import Spec, SpecError
 from core.team_changes import TeamChangeError, apply_team_changes
 
@@ -143,6 +144,8 @@ async def edit_spec(request: Request, project_id: str, body: EditBody) -> dict[s
                                          change, APPROVER)
     except (PlanDraftError, SpecError, BacklogError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
+    await asyncio.to_thread(write_record, data_root, project_id,
+                            f"after a spec edit (version {result.version})")
     return asdict(result)
 
 
@@ -218,6 +221,8 @@ async def approve_draft(request: Request, project_id: str) -> dict[str, Any]:  #
     except (SpecError, BacklogError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     await remember_draft(request, project_id, current, True)
+    await asyncio.to_thread(write_record, data_root, project_id,
+                            f"after {current.id} (spec version {result.version})")
     team: dict[str, list[str]] = {"added": [], "edited": [], "removed": []}
     if result.team_changes:
         # QUESTION: known two-store limitation. work.db (spec, drafts) and the project store

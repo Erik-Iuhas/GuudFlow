@@ -71,3 +71,28 @@ def test_commit_files_is_a_no_op_when_nothing_changed_and_refuses_escapes(tmp_pa
     for bad in ("../x.md", "/etc/x", ".git/config"):
         with pytest.raises(ProjectRepoError):
             repo.commit_files({bad: "x"}, "docs: bad")
+
+
+def test_an_approved_draft_rewrites_the_record_with_structured_fields(tmp_path: Path) -> None:
+    from core.plan_drafts import PlanDrafts, PlanTurn
+    from core.project_runs import write_record
+
+    repo = ProjectRepo(tmp_path, "p1")
+    repo.ensure(None)
+    _opt_in(tmp_path, True)
+    drafts = PlanDrafts(tmp_path, "p1")
+    d = drafts.merge_pm_turn(drafts.open_draft(), PlanTurn.model_validate({"reply": "ok", "changes": [
+        {"op": "add_requirement", "ref": "new:1", "title": "Default dash",
+         "text": "Every run starts with a dash.", "kind": "feature", "priority": "must",
+         "params": [{"key": "charges", "value": 2, "assumed": True}],
+         "checks": [{"text": "a new run has 2 charges", "method": "unit",
+                     "test": "tests/dash.test.js::charges"}]}]}), False)
+    drafts.set_change(d.id, d.changes[0].cid, True)
+    drafts.approve(d.id, "erik")
+
+    assert write_record(tmp_path, "p1", "after draft-1 (spec version 1)") is not None
+    spec = subprocess.run(["git", "show", "main:SPEC.md"], cwd=repo.path, capture_output=True,
+                          text=True, check=True).stdout
+    assert "### R1. Default dash" in spec and "Every run starts with a dash." in spec
+    assert "| charges | 2 | assumed |" in spec
+    assert "R1.1 _unit_ a new run has 2 charges (test `tests/dash.test.js::charges`)" in spec

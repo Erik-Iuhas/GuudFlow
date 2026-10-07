@@ -27,7 +27,10 @@ from core.project_remote import RemoteConfig, RemoteError, sync
 from core.pm_prompts import Seats
 from api.routes.pm import schedule_distill
 from core.project_runs import decide_run
+from core.harness.spec_brief import resolve_items
+from core.spec import Spec
 from core.spec_adherence import cosigned, needs_cosign
+from core.work_db import WorkDB
 
 router = APIRouter(prefix="/api/projects", tags=["project-work"],
                    dependencies=[Depends(require_bearer)])
@@ -108,8 +111,9 @@ async def _run_is_live(request: Request, run_id: str) -> bool:
 async def list_backlog(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
     """Every item in working order (in a run, open by priority, done, dropped)."""
     data_root = await _project(request, project_id)
+    spec = Spec(WorkDB(Path(data_root) / "projects" / project_id).read_spec_doc())
     return {"items": [{**asdict(i), "total_cost_usd": i.total_cost()}
-                      for i in Backlog(data_root, project_id).items()]}
+                      for i in resolve_items(spec, Backlog(data_root, project_id).items())]}
 
 
 @router.post("/{project_id}/backlog", status_code=201)

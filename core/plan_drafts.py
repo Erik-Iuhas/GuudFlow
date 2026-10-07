@@ -21,8 +21,9 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from core.backlog import BacklogError, _check_deps, add_to_doc, update_in_doc
 from core.harness.capabilities import ROLE_TYPES, Capabilities, CapabilityError
 from core.spec import (
-    REQ_ID, Check, Decision, Requirement, Rule, Spec, SpecError,
-    find_row, highest_check_number, make_checks, next_id, sync_decision_rule)
+    CHECK_REF, REQ_ID, Check, Decision, Param, Requirement, Rule, Spec, SpecError, derive_title,
+    find_row, highest_check_number, make_checks, next_id, structured_check, structured_checks,
+    sync_decision_rule)
 from core.work_db import WorkDB, WorkTxn
 
 MAX_CHANGES = 20
@@ -50,21 +51,53 @@ class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class AddRequirement(_Model):
+class _Op(_Model):
+    """A change. `group` labels a theme ("Default dash") so a person can tick it as one."""
+
+    group: str | None = Field(default=None, max_length=40)
+
+
+ParamValue = str | int | float | bool
+
+
+class CheckSpec(_Model):
+    """A structured check (plan §11.2): what must hold, how it is verified, the linked test."""
+
+    text: str = Field(min_length=3)                 # "then": what must hold
+    method: Literal["unit", "manual", "visual", "perf"] | None = None
+    given: str = ""
+    test: str | None = None                         # "file::name" for unit checks
+
+
+class ParamSpec(_Model):
+    """A tunable value of a requirement."""
+
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    value: ParamValue
+    unit: str = ""
+    assumed: bool = False
+    note: str = ""
+
+
+class AddRequirement(_Op):
     """Add a requirement; it needs at least one check unless it is a non-goal."""
 
     op: Literal["add_requirement"]
     ref: str = Field(pattern=_REF.pattern)
-    text: str = Field(min_length=3)
+    title: str = Field(default="", max_length=60)
+    text: str = Field(min_length=3)                  # the statement
     kind: ReqKind
     priority: ReqPriority
-    checks: list[str] = Field(default_factory=list)
+    params: list[ParamSpec] = Field(default_factory=list)
+    checks: list[str | CheckSpec] = Field(default_factory=list)
+    rationale: str = ""
     assumed: bool = False
     experiment: bool = False
 
 
-class EditRequirement(_Model):
-    """Change fields of a requirement (`checks` is the full new list)."""
+class EditRequirement(_Op):
+    """Change kind, priority or flags of a requirement. `text` and `checks` (the full new list)
+    remain for human edits; the PM uses the field-level ops below instead."""
 
     op: Literal["edit_requirement"]
     id: str = Field(pattern=REQ_ID.pattern)
@@ -76,7 +109,7 @@ class EditRequirement(_Model):
     experiment: bool | None = None
 
 
-class DropRequirement(_Model):
+class DropRequirement(_Op):
     """Drop a requirement."""
 
     op: Literal["drop_requirement"]
@@ -84,7 +117,73 @@ class DropRequirement(_Model):
     reason: str = Field(min_length=3)
 
 
-class AddDecision(_Model):
+class SetTitle(_Op):
+    """Rename a requirement."""
+
+    op: Literal["set_title"]
+    id: str = Field(pattern=REQ_ID.pattern)
+    title: str = Field(min_length=3, max_length=60)
+
+
+class SetStatement(_Op):
+    """Replace a requirement's statement (its behaviour, without tunable numbers)."""
+
+    op: Literal["set_statement"]
+    id: str = Field(pattern=REQ_ID.pattern)
+    text: str = Field(min_length=3)
+
+
+class SetParam(_Op):
+    """Add or change one tunable value of a requirement."""
+
+    op: Literal["set_param"]
+    id: str = Field(pattern=REQ_ID.pattern)
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    value: ParamValue
+    unit: str | None = None
+    assumed: bool | None = None
+    note: str | None = None
+
+
+class RemoveParam(_Op):
+    """Remove a tunable value from a requirement."""
+
+    op: Literal["remove_param"]
+    id: str = Field(pattern=REQ_ID.pattern)
+    key: str
+
+
+class AddCheck(_Op):
+    """Add a check to a requirement; it gets the next unused number."""
+
+    op: Literal["add_check"]
+    id: str = Field(pattern=REQ_ID.pattern)
+    check: CheckSpec
+
+
+class EditCheck(_Op):
+    """Change one check by its id ("R4.8"); the id and its state history stay."""
+
+    op: Literal["edit_check"]
+    id: str = Field(pattern=r"^R[0-9]+\.[0-9]+$")
+    text: str | None = Field(default=None, min_length=3)
+    method: Literal["unit", "manual", "visual", "perf"] | None = None
+    given: str | None = None
+    test: str | None = None
+
+
+class RemoveCheck(_Op):
+    """Remove one check by id; its number is never reused."""
+
+    op: Literal["remove_check"]
+    id: str = Field(pattern=r"^R[0-9]+\.[0-9]+$")
+
+
+FIELD_OPS = ("set_title", "set_statement", "set_param", "remove_param", "add_check",
+             "edit_check", "remove_check")
+
+
+class AddDecision(_Op):
     """Record a decision; the reason is at least 20 characters."""
 
     op: Literal["add_decision"]
@@ -96,7 +195,7 @@ class AddDecision(_Model):
     binding: bool = False
 
 
-class SupersedeDecision(_Model):
+class SupersedeDecision(_Op):
     """Replace decision `id` with a new one."""
 
     op: Literal["supersede_decision"]
@@ -109,7 +208,7 @@ class SupersedeDecision(_Model):
     binding: bool = False
 
 
-class AddItem(_Model):
+class AddItem(_Op):
     """Add a backlog item; `serves` copies those requirements' checks into its acceptance."""
 
     op: Literal["add_item"]
@@ -122,7 +221,7 @@ class AddItem(_Model):
     depends_on: list[str] = Field(default_factory=list)   # B ids or refs
 
 
-class EditItem(_Model):
+class EditItem(_Op):
     """Edit editable fields of a backlog item."""
 
     op: Literal["edit_item"]
@@ -138,7 +237,7 @@ class EditItem(_Model):
     serves: list[str] | None = None
 
 
-class DropItem(_Model):
+class DropItem(_Op):
     """Drop an open backlog item that is no longer needed (it stays visible as dropped)."""
 
     op: Literal["drop_item"]
@@ -146,7 +245,7 @@ class DropItem(_Model):
     reason: str = Field(min_length=3)
 
 
-class AddRule(_Model):
+class AddRule(_Op):
     """Add a project rule (QUESTION: `ref` is optional and not in plan §3)."""
 
     op: Literal["add_rule"]
@@ -156,7 +255,7 @@ class AddRule(_Model):
     ref: str | None = Field(default=None, pattern=_REF.pattern)
 
 
-class DropRule(_Model):
+class DropRule(_Op):
     """Drop a rule that no decision owns."""
 
     op: Literal["drop_rule"]
@@ -164,7 +263,7 @@ class DropRule(_Model):
     reason: str = Field(min_length=3)
 
 
-class AddRole(_Model):
+class AddRole(_Op):
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
     """Add a role to the project's team (plan §10.2); a human always ticks it."""
@@ -183,7 +282,7 @@ class AddRole(_Model):
     reason: str
 
 
-class EditRole(_Model):
+class EditRole(_Op):
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
     """Change fields of an existing role (the role name itself cannot change)."""
@@ -201,7 +300,7 @@ class EditRole(_Model):
     reason: str
 
 
-class RemoveRole(_Model):
+class RemoveRole(_Op):
     """Remove a role from the team."""
 
     op: Literal["remove_role"]
@@ -210,7 +309,8 @@ class RemoveRole(_Model):
 
 
 Change = Annotated[
-    AddRequirement | EditRequirement | DropRequirement | AddDecision | SupersedeDecision
+    AddRequirement | EditRequirement | DropRequirement | SetTitle | SetStatement | SetParam
+    | RemoveParam | AddCheck | EditCheck | RemoveCheck | AddDecision | SupersedeDecision
     | AddItem | EditItem | DropItem | AddRule | DropRule | AddRole | EditRole | RemoveRole,
     Field(discriminator="op")]
 _CHANGE_ADAPTER: TypeAdapter[Any] = TypeAdapter(Change)  # Any: the union members above
@@ -233,9 +333,30 @@ def parse_change(row: dict[str, Any]) -> Any:  # Any: one member of the `Change`
     return _CHANGE_ADAPTER.validate_python(row)
 
 
-def _set_fields(change: Any, skip: tuple[str, ...] = ("op", "id")) -> set[str]:  # Any: Change
+def _set_fields(change: Any, skip: tuple[str, ...] = ("op", "id", "group")) -> set[str]:  # Any: Change
     """Fields an edit sets (not None)."""
     return {k for k, v in change.model_dump().items() if k not in skip and v is not None}
+
+
+def pin_keys(change: Any) -> set[str]:  # Any: Change
+    """The pinnable fields a field-level op touches ("title", "text", "param:charges",
+    "check:R4.2"); a human's direct edit pins them and the PM may not change them."""
+    op = change.op
+    if op == "set_title":
+        return {"title"}
+    if op == "set_statement":
+        return {"text"}
+    if op in ("set_param", "remove_param"):
+        return {f"param:{change.key}"}
+    if op in ("edit_check", "remove_check"):
+        return {f"check:{change.id}"}
+    if op == "add_check":
+        return set()
+    return _set_fields(change)
+
+
+def _check_req_id(check_id: str) -> str:
+    return check_id.split(".", 1)[0]
 
 
 # ── validation ──────────────────────────────────────────────────────────────
@@ -310,7 +431,8 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
 
     for n, ch in enumerate(turn.changes, 1):
         if isinstance(ch, AddRequirement):
-            if ch.kind != "non_goal" and not [c for c in ch.checks if c.strip()]:
+            if ch.kind != "non_goal" and not [
+                    c for c in ch.checks if (c if isinstance(c, str) else c.text).strip()]:
                 problems.append(f"change {n} ({ch.op}): needs at least one check "
                                 f"(only a non_goal may have none)")
         elif isinstance(ch, EditRequirement):
@@ -332,6 +454,30 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
             if ch.kind is not None and ch.kind != "non_goal" and ch.checks is None \
                     and not req.checks:
                 problems.append(f"change {n} ({ch.op}): kind {ch.kind} needs at least one check")
+        elif ch.op in FIELD_OPS:
+            req_id = _check_req_id(ch.id) if ch.op in ("edit_check", "remove_check") else ch.id
+            try:
+                req = spec.requirement(req_id)
+            except SpecError:
+                problems.append(f"change {n} ({ch.op}): unknown requirement {req_id}")
+                continue
+            if req.status != "active":
+                problems.append(f"change {n} ({ch.op}): {req_id} is dropped")
+                continue
+            # A human's older whole-field edit pinned "checks" or "params" as a whole.
+            broad = ({"checks"} if "check" in ch.op else set()) | (
+                {"params"} if "param" in ch.op else set())
+            pinned(n, ch, req.pinned_fields, pin_keys(ch) | broad)
+            if ch.op in ("edit_check", "remove_check") and not any(
+                    c.id == ch.id for c in req.checks):
+                problems.append(f"change {n} ({ch.op}): unknown check {ch.id}")
+            elif ch.op == "edit_check" and not _set_fields(ch):
+                problems.append(f"change {n} ({ch.op}): sets no field")
+            elif ch.op == "remove_check" and req.kind != "non_goal" and len(req.checks) <= 1 \
+                    and not any(o.op == "add_check" and o.id == req_id for o in turn.changes):
+                problems.append(f"change {n} ({ch.op}): {req_id} would have no check left")
+            elif ch.op == "remove_param" and req.param(ch.key) is None:
+                problems.append(f"change {n} ({ch.op}): {req_id} has no param {ch.key!r}")
         elif isinstance(ch, DropRequirement):
             try:
                 if spec.requirement(ch.id).status != "active":
@@ -770,13 +916,16 @@ class _Applier:
         self.team_changes: list[dict[str, Any]] = []  # Any: dumped team Changes
 
     def apply(self, chosen: list[DraftChange]) -> dict[str, str]:
-        """Apply in phases (requirements, decisions, rules, new items, item edits, item
-        dependencies) so refs may point forward; any failure raises PlanDraftError."""
+        """Apply in phases (requirements, their fields and checks, decisions, rules, new items,
+        item edits, item dependencies) so refs may point forward; any failure raises
+        PlanDraftError."""
         parsed = [(dc, parse_change(dc.change)) for dc in chosen]
         self.team_changes = [ch.model_dump(mode="json", exclude_none=True) for _, ch in parsed
                              if isinstance(ch, (AddRole, EditRole, RemoveRole))]
         phases: list[tuple[type, ...]] = [
             (AddRequirement, EditRequirement, DropRequirement),
+            (SetTitle, SetStatement, SetParam, RemoveParam, AddCheck, EditCheck),
+            (RemoveCheck,),                  # after add_check, so a swap keeps one check
             (AddDecision, SupersedeDecision), (AddRule, DropRule), (AddItem,), (EditItem,), (DropItem,)]
         try:
             for dc, ch in parsed:                      # ids for everything but items
@@ -837,14 +986,20 @@ class _Applier:
         spec = self.txn.spec
         if isinstance(ch, AddRequirement):
             rid = self.ids[ch.ref]
-            if ch.kind != "non_goal" and not [c for c in ch.checks if c.strip()]:
+            if ch.kind != "non_goal" and not [c for c in ch.checks
+                                              if (c if isinstance(c, str) else c.text).strip()]:
                 raise SpecError("a requirement needs at least one check")
             req = Requirement(id=rid, text=ch.text.strip(), kind=ch.kind, priority=ch.priority,
-                              checks=make_checks(rid, ch.checks), assumed=ch.assumed,
+                              checks=structured_checks(rid, ch.checks),
+                              title=ch.title.strip() or derive_title(ch.text),
+                              params=[Param(**p.model_dump()) for p in ch.params],
+                              rationale=ch.rationale.strip(), assumed=ch.assumed,
                               experiment=ch.experiment, source=self._who(dc))
             spec.setdefault("requirements", []).append(req.to_dict())
         elif isinstance(ch, EditRequirement):
             self._edit_requirement(ch)
+        elif ch.op in FIELD_OPS:
+            self._field_op(ch)
         elif isinstance(ch, DropRequirement):
             row = find_row(spec, "requirements", ch.id)
             if row.get("status") != "active":
@@ -897,12 +1052,63 @@ class _Applier:
                 {"decision": f"dropped by {self.by}: {ch.reason.strip()}", "at": self.now,
                  "draft": self.draft_id})
 
+    def _field_op(self, ch: Any) -> None:  # Any: a field-level Change member
+        """Apply one field-level requirement op (plan §11.2)."""
+        req_id = _check_req_id(ch.id) if ch.op in ("edit_check", "remove_check") else ch.id
+        row = find_row(self.txn.spec, "requirements", req_id)
+        if row.get("status") != "active":
+            raise SpecError(f"{req_id} is dropped")
+        current = Requirement.from_dict(row)
+        self._push_history(row)
+        row["title"] = row.get("title") or current.title     # older rows get their title stored
+        if ch.op == "set_title":
+            row["title"] = ch.title.strip()
+        elif ch.op == "set_statement":
+            _follow_title(row, ch.text)
+            row["text"] = ch.text.strip()
+        elif ch.op == "set_param":
+            params = [p.to_dict() for p in current.params]
+            old = next((p for p in params if p["key"] == ch.key), None)
+            new = dict(old or {"key": ch.key, "unit": "", "assumed": False, "note": ""})
+            new["value"] = ch.value
+            for name in ("unit", "assumed", "note"):
+                if getattr(ch, name) is not None:
+                    new[name] = getattr(ch, name)
+            if self.pin:
+                new["assumed"] = False       # a human set it: confirmed
+            row["params"] = [new if p is old else p for p in params] if old else params + [new]
+        elif ch.op == "remove_param":
+            row["params"] = [p.to_dict() for p in current.params if p.key != ch.key]
+        elif ch.op == "add_check":
+            number = highest_check_number(row) + 1
+            row["checks"] = [c.to_dict() for c in current.checks] + [
+                structured_check(f"{req_id}.{number}", ch.check).to_dict()]
+        elif ch.op == "edit_check":
+            checks = [c.to_dict() for c in current.checks]
+            target = next((c for c in checks if c["id"] == ch.id), None)
+            if target is None:
+                raise SpecError(f"unknown check {ch.id}")
+            for name in ("text", "method", "given", "test"):
+                value = getattr(ch, name)
+                if value is not None:
+                    target[name] = value.strip() if isinstance(value, str) else value
+            row["checks"] = checks
+        elif ch.op == "remove_check":
+            if not any(c.id == ch.id for c in current.checks):
+                raise SpecError(f"unknown check {ch.id}")
+            row["checks"] = [c.to_dict() for c in current.checks if c.id != ch.id]
+        if row.get("kind") != "non_goal" and not row.get("checks"):
+            raise SpecError("a requirement needs at least one check")
+        if self.pin:
+            row["pinned_fields"] = sorted(set(row.get("pinned_fields") or []) | pin_keys(ch))
+
     def _push_history(self, row: dict[str, Any], **extra: Any) -> None:  # Any: JSON row
         entry = {"version": row.get("version", 1), "at": self.now, "by": self.by,
                  "draft": self.draft_id}
-        for key in ("text", "checks", "priority", "kind", "assumed"):
+        for key in ("title", "text", "params", "checks", "priority", "kind", "assumed"):
             if key in row:
-                entry[key] = [dict(c) for c in row[key]] if key == "checks" else row[key]
+                entry[key] = ([dict(c) for c in row[key]] if key in ("checks", "params")
+                              else row[key])
         entry.update(extra)
         row.setdefault("history", []).append(entry)
         row["version"] = int(row.get("version", 1)) + 1
@@ -916,6 +1122,8 @@ class _Applier:
             raise SpecError("the edit sets no field")
         self._push_history(row)
         reserved = highest_check_number(row)
+        if "text" in fields:
+            _follow_title(row, ch.text)
         for key in ("text", "priority", "kind", "assumed", "experiment"):
             if key in fields:
                 row[key] = getattr(ch, key).strip() if key == "text" else getattr(ch, key)
@@ -945,19 +1153,28 @@ class _Applier:
         lines: list[str] = []
         seen: set[str] = set()
         for rid in serves:
+            # References, not copies (plan §11.2): readers resolve "R4.8" to the current text.
             for c in find_row(self.txn.spec, "requirements", rid).get("checks", []):
-                line = f"{c['id']}: {c['text']}"
+                line = str(c["id"])
                 if line.casefold() not in seen:
                     seen.add(line.casefold())
                     lines.append(line)
         for own in ch.acceptance:
-            if own.strip() and own.strip().casefold() not in seen:
-                seen.add(own.strip().casefold())
-                lines.append(own.strip())
+            cited = CHECK_REF.match(own.strip())
+            line = cited.group(1) if cited else own.strip()   # a cited check is a reference
+            if line and line.casefold() not in seen:
+                seen.add(line.casefold())
+                lines.append(line)
         item = add_to_doc(self.txn.backlog, ch.title, lines, kind=ch.kind, size=ch.size,
                           source=self._who(dc), serves=serves)
         self.ids[ch.ref] = item.id
         self.created[ch.ref] = item.id
+
+
+def _follow_title(row: dict[str, Any], new_text: str) -> None:  # Any: JSON row
+    """A title nobody set (derived from the text) follows the text when it changes."""
+    if not row.get("title") or row["title"] == derive_title(str(row.get("text", ""))):
+        row["title"] = derive_title(new_text)
 
 
 def _where(dc: DraftChange | None) -> str:
