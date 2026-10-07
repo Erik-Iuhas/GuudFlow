@@ -1,0 +1,305 @@
+# Role contracts, project kinds and a shared knowledge base
+
+Status: plan, not started (2026-10-07). Builds on `PROJECT_FLOW_PLAN.md` (§10 Jack, §11 handoffs and
+structured requirements, §12 reasons) and the opencode harness plan. Nothing here is built yet.
+
+## 0. Why
+
+Pacrogue reached a playable game in three sessions, but mostly because the domain is familiar, the
+scope is small, three early decisions acted as an architecture, and the owner reviewed every session
+by hand. Where nothing held the structure, it slipped:
+
+- **No design.** Requirements went straight to cards. The planner reinvented the structure every
+  session; builders guessed each other's interfaces. Nobody owned the dash, so it ended up inside
+  Wall Burst. The offer table and the ability registry had no contract, so Magnet was offered
+  without being built. `game.js` grew to 932 lines because it was the one place both sides met.
+- **The interface doc exists, by accident.** The header of `game.js` and Sol's notebook are a
+  real design and knowledge base. Sol wrote them for himself; nobody else reads them, and nothing
+  keeps them true.
+- **"Met" is a claim.** A check is met when the reviewer says so. Nothing runs the test a check
+  names, so a green check proves the reviewer agreed, not that the behaviour holds.
+- **Roles are a prompt and a hope.** A role is a name, a role type (capabilities) and a free-text
+  responsibility. Nothing says what it must hand over, to whom, or what "done" means for it. Jack
+  picks a team from archetype descriptions written for the retired harness.
+
+The goal: roles that behave like a real project team (each owns something, hands something over,
+and is checked by someone else), common artifacts that carry knowledge between roles and sessions,
+and proof that work was done. Software first, without baking software into the core: a research
+report or a docs project should be able to use the same machinery.
+
+## 1. Four pieces
+
+| Piece | What it is | Owned by |
+|---|---|---|
+| **Role contract** | What a role owns, reads, produces, hands off, how its work is checked, when it escalates, what it may not do. Versioned data, not prose. | The contract library (GuudFlow ships a set; a project may adapt) |
+| **Project kind** | A template for a kind of work: lifecycle phases, the artifacts each phase needs, the contracts that fill it, the gates between phases. | The library; Jack picks one with the owner |
+| **Shared artifacts** | The common ground roles hand work through: spec, design, knowledge base, verification ledger. Typed, versioned, each with one owner. | Per artifact (below) |
+| **Learning loop** | How contracts and kinds get better across projects: retrospectives measure each contract, evidence-backed changes are proposed, a human approves. | Jack proposes; a human ticks |
+
+## 2. Role contracts
+
+### 2.1 Shape
+
+A contract is YAML in `data/contracts/{id}.yaml` (shipped) with project overrides in
+`data/projects/{id}/contracts/{id}.yaml`. Loaded by `core/contracts.py` into a dataclass.
+
+```yaml
+id: tech_lead
+version: 1
+title: Tech lead
+purpose: Turns the spec into a design the builders can follow, and plans each session against it.
+role_type: architect            # capabilities preset (core/harness/capabilities.py)
+model_tier: heavy
+owns: [design, session_plan]    # artifacts only this role may change (through drafts)
+reads: [spec, design, knowledge_base, verification_ledger, code]
+produces:
+  - artifact: design            # proposed as a design draft, ticked by the Lead seat or auto
+  - artifact: session_plan      # the card list (today's PlanResult)
+hands_off:
+  - to: builder
+    what: cards that name the design element they implement and the checks they serve
+  - to: product_manager
+    what: feasibility notes on spec drafts (a check that cannot be tested, a missing requirement)
+done_when:
+  - every card in the plan implements a named component or interface, or supports another card
+  - every interface a card touches is declared in the design before the card starts
+  - every requirement the session serves is reachable from some card
+checked_by: reviewer             # who verifies this role's output, and against what
+escalates_when:
+  - a spec requirement cannot be met without a decision the owner must make
+may_not:
+  - write product code
+  - change requirements (proposes through Jack instead)
+rules:                           # pre-assigned lines in the role's prompt (persona layer 3.7)
+  - Name every interface before a builder depends on it.
+  - Prefer a small number of modules with narrow interfaces over a central file everyone edits.
+measures:                        # what the retrospective scores (§6)
+  - interface_drift: exported names that differ from the declared interface
+  - plan_churn: cards split, reassigned or added mid-session
+```
+
+The fields that change behaviour:
+
+- `owns` decides who may propose changes to which artifact. A draft change to an artifact the
+  proposer does not own is refused, the way a pinned field is refused today.
+- `produces` and `hands_off` become the role's result schema and its brief's "how to finish"
+  section. A builder's handoff (§11.1) is already one of these; contracts make every role have one.
+- `done_when` becomes acceptance lines the role's result must answer, like card acceptance.
+- `checked_by` wires the review edge: the reviewer of a tech lead's design is not the tech lead.
+- `rules` are the pre-prompt: injected as the project-rules layer, above memory (hard rule 24).
+- `measures` are computed by the retrospective, never self-reported.
+
+### 2.2 The software set (first release)
+
+| Contract | Owns | Hands off | Checked by |
+|---|---|---|---|
+| `product_manager` (Jack) | spec, backlog | requirements and checks to the tech lead | the Owner (drafts) |
+| `tech_lead` | design, session plan | cards against the design to builders; feasibility to Jack | reviewer (cards vs design), Lead seat (design) |
+| `builder` | its cards' code | a handoff per card | reviewer, test run |
+| `tester` | tests for checks | a test per unit check, named `file::name` | test run (red before, green after) |
+| `reviewer` | review verdicts | verdicts per check and per interface | the Owner at acceptance |
+| `researcher` | research notes | a decision note with options and evidence | tech lead or Jack (who asked) |
+| `overseer` | interventions | interventions with rationale | caps, the Owner |
+
+Changes to today's roles:
+
+- **Jack stops writing technical decisions.** "Logic and drawing are kept apart" becomes a design
+  decision owned by the tech lead. Jack keeps product decisions ("Rush replaces Dark"). The
+  `LEAD_EMPTY` prompt that makes Jack the technical lead goes away; the tech lead contract fills
+  the empty Lead seat instead, and a human Lead approves its drafts when the seat is held.
+- **The planner becomes part of the tech lead.** Breaking a session into cards against the design
+  is the tech lead's job. `planner` stays as a role type for kinds without a tech lead.
+- **The overseer stays separate.** It is the in-session incident responder; the tech lead is the
+  architect between and at the start of sessions.
+- **The tech lead runs in a sandbox with a checkout.** Jack is a host-side call that sees file
+  names only; the design needs someone who can read the code.
+
+### 2.3 Beyond software (to prove the shape, not to ship first)
+
+The same fields describe non-code teams. Two sets are written as part of the first release so the
+schema is tested against them, and shipped behind the project-kind picker:
+
+- **Research report:** `editor` (owns the outline and the brief), `researcher` (owns sources and
+  notes), `writer` (owns sections), `fact_checker` (checks each claim against a cited source).
+- **Docs:** `docs_lead` (owns the information architecture), `writer`, `reviewer` (accuracy against
+  the code), `tester` (every code sample runs).
+
+What stays software-only: sandboxes with a repo, merges, the test runner. A kind declares which of
+these it uses; nothing in the core assumes them.
+
+### 2.4 Migration from archetypes
+
+`docs/worker-archetypes.yaml` is the legacy harness's catalog (responsibility prompts in the old
+APPROVED/REJECTED voice). Its `when_to_use` texts move into contracts as `purpose`, its tools map to
+`role_type`, and the meta proposal (`core/meta_proposal.py`) reads contracts instead. The YAML stays
+for old runs until the legacy views go.
+
+## 3. Project kinds
+
+A kind is YAML in `data/kinds/{id}.yaml`:
+
+```yaml
+id: software_app
+title: Software you keep building
+phases:
+  - id: discover
+    owner: product_manager
+    produces: [spec]
+    gate: owner approves the first draft
+  - id: design
+    owner: tech_lead
+    needs: [spec]
+    produces: [design]
+    gate: Lead seat approves (or auto when empty)
+  - id: build
+    owner: tech_lead            # plans; builders and testers do the cards
+    needs: [spec, design]
+    produces: [code, tests, handoffs]
+    gate: every served check verified or claimed with evidence
+  - id: accept
+    owner: owner
+    needs: [verification_ledger]
+    gate: owner accepts the session
+  - id: learn
+    owner: product_manager
+    produces: [knowledge_base, retrospective]
+team: [product_manager, tech_lead, builder, builder, tester, reviewer]
+start_modes: [spec_first, prototype_first, test_first, research_first, maintain]
+uses: [sandbox, repo, test_runner]
+```
+
+- Start modes (`core/start_modes.py`) become variations within a kind: `test_first` adds a
+  tester-before-builder edge, `prototype_first` lets design be a sketch, `maintain` skips design
+  unless a card changes an interface.
+- Kinds in the first release: `software_app`, `library`, `game` (a `software_app` with visual and
+  feel checks), `maintenance`, plus `research_report` and `docs` (§2.3).
+- Jack picks the kind with the owner in the first plan turn, proposes the team from its `team`,
+  and fills names and personas as today. Team changes still go through drafts (`core/team_changes.py`).
+
+The lifecycle is visible: Studio's Work tab shows the phase each item is in and what gate it waits on.
+
+## 4. Shared artifacts (the common ground)
+
+Every artifact has one owner contract, a version, and changes only through drafts with reasons
+(§12 of the flow plan). Readers get it in their brief as a section, never as free text from another
+agent.
+
+### 4.1 Spec (exists)
+Requirements, checks, product decisions, rules. Owner: `product_manager`.
+
+### 4.2 Design (new)
+Owner: `tech_lead`. Stored in `work.db` like the spec, rendered to `DESIGN.md` in the project repo.
+
+- **Components:** id (`C3`), name, paths it owns (`web/src/logic/abilities/**`), responsibility,
+  the requirements it serves.
+- **Interfaces:** id (`I5`), the component that provides it, a signature or event or data shape
+  (`step(input: {dir, actions}) -> Event[]`), which components use it.
+- **Data model:** the shapes that cross interfaces (game state, events), with field meanings.
+- **Flows:** short Mermaid diagrams (sequence or state) for the paths that matter: one step of
+  play, a dash, a level transition. Studio renders them; they stay text so drafts can diff them.
+- **Technical decisions:** what Jack's D# technical decisions become (`TD1`), with options rejected.
+
+Links: cards say `implements: [I5]` alongside `serves: [R4.2]`; `files_hint` comes from the
+component's paths, so overlap detection follows the design.
+
+Drift check (host side, cheap): after each merge, the exported names GuudFlow already extracts for
+handoffs (§11.1) are compared with the declared interfaces of the component that owns those files.
+A new export not in the design, or a declared one that disappeared, is flagged on the card and
+counts toward the tech lead's `interface_drift` measure.
+
+### 4.3 Knowledge base (new, grows every session)
+Owner: `tech_lead` for software kinds (the editor for a report). Three layers, kept apart because
+they are trusted differently:
+
+1. **Facts** (generated by GuudFlow, always true): a project map of modules and their exports, the
+   test map (check → test → last result), commands that work, file sizes. Rebuilt after each
+   accepted session. No model writes this layer.
+2. **Notes** (proposed by agents, approved): conventions, gotchas, how-tos. Today these live in
+   per-role notebooks (Sol's notebook is the best knowledge of pacrogue's code that exists). At
+   session end, notebook entries that more than one role would need are proposed for promotion; the
+   tech lead (or the Lead seat) ticks them like draft changes. Stale notes are flagged when the files
+   they name change.
+3. **History** (the record): decisions, sessions, reasons. Already in `core/record.py`.
+
+Every brief gets the parts of the knowledge base that touch the card's component, wrapped as GuudFlow
+content (layer 1) or as approved notes (layer 2, approved by a person or the tech lead, so trusted).
+Notebooks stay as each role's scratch pad.
+
+### 4.4 Verification ledger (new)
+Owner: GuudFlow (no model writes it). Per check: its state and the evidence behind it.
+
+- **verified**: its linked test ran on the host after the merge and passed (and, in `test_first`,
+  failed before the change);
+- **claimed**: the reviewer said met, with no test run (manual checks, or no test linked);
+- **failing**: its test failed;
+- **confirmed by a person**: a manual or visual check the owner ticked at acceptance.
+
+Unit checks must name a test; the tester contract owns writing it. The project's `check_command`
+(plan §14.3) gains a way to report per-test results (JUnit XML or `bun test --reporter`), and
+`core/spec_adherence.py` records evidence, not just the reviewer's word. Acceptance shows the ledger.
+
+## 5. How the pieces meet in a session
+
+1. **Jack** (spec owner) has the drafts approved. The kind says the design phase comes next.
+2. **Tech lead** reads the spec, the design, the knowledge base and the code; proposes design changes
+   with reasons (new interface I7 for the dash, component C2 split); a human Lead or the auto-tick
+   approves. Then it plans the session: cards that implement design elements and serve checks.
+3. **Tester** writes the tests named by the session's unit checks, where the mode asks for tests first.
+4. **Builders** get cards with: the checks they serve, the interfaces they implement and use (from
+   the design), the knowledge-base notes for their component, and handoffs from earlier cards.
+5. **After each merge** GuudFlow runs the linked tests (ledger) and the drift check (design).
+6. **Reviewer** checks the card against its checks and against the interfaces it touches.
+7. **Acceptance** shows the ledger: verified, claimed, failing, needs your eyes.
+8. **Learn:** the retrospective scores each contract's measures; notebook notes are proposed for the
+   knowledge base; Jack proposes contract or kind changes when the evidence supports them.
+
+## 6. Learning across projects
+
+- Each contract's `measures` are computed per session by the retrospective
+  (`core/harness/retrospective.py`): interface drift, plan churn, checks verified vs claimed,
+  review rounds, reopened cards.
+- Evidence-backed changes to a contract (a rule that would have prevented a repeated failure) are
+  proposed as drafts against the library or the project's override, following rules 16 and 22
+  (evidence runs, recency-weighted confidence, lifecycle). Never applied without a human.
+- Jack's memory (`core/pm_memory.py`) records which kind and team worked for which goal, so the next
+  project starts from experience. This is the "grows across projects" part; the knowledge base is
+  the "grows within a project" part.
+
+## 7. Work packages
+
+Ordered so each is useful on its own. Each lands with tests; Studio parts get a storyboard first.
+
+| # | Package | Main files | Depends on |
+|---|---|---|---|
+| RC1 | Contract schema and loader; the software set as YAML; contract rules injected as the role-rules layer | `core/contracts.py`, `data/contracts/*.yaml`, `core/harness/persona_prompt.py` | — |
+| RC2 | Verification ledger: per-test results from the check command, test ↔ check mapping, evidence states, acceptance view | `core/project_checks.py`, `core/spec_adherence.py`, Studio review | — |
+| RC3 | Tech lead role: sandboxed, owns the session plan (planner folded in), feasibility notes on drafts; Jack's `LEAD_EMPTY` removed | `core/harness/task_flow.py`, `core/pm_prompts.py`, team proposal | RC1 |
+| RC4 | Design artifact: components, interfaces, data model, Mermaid flows, technical decisions; design drafts with reasons; `DESIGN.md` record | `core/design.py`, `core/plan_drafts.py`, `core/record.py` | RC3 |
+| RC5 | Cards link to design (`implements`), files_hint from components, drift check after merge, reviewer checks interfaces | `core/harness/tasks.py`, `handoff.py`, `run.py` | RC4 |
+| RC6 | Knowledge base: facts layer generated, notebook promotion as drafts, KB sections in briefs, stale-note flags | `core/knowledge.py`, `brief.py` | RC4 |
+| RC7 | Project kinds: YAML, phases and gates, Jack picks a kind and proposes the team from it; Work tab shows phases | `core/kinds.py`, `core/project_manager.py`, Studio | RC1, RC3 |
+| RC8 | Non-software sets (research report, docs) to prove the schema; kinds declare `uses` | `data/contracts`, `data/kinds` | RC7 |
+| RC9 | Contract measures in the retrospective; evidence-backed contract proposals | `retrospective.py`, `pm_memory.py` | RC1, RC5 |
+
+RC1 and RC2 do not depend on each other and help the next pacrogue session even alone: RC2 makes
+session 4's results provable. RC3 to RC5 are the design layer. RC6 turns notebooks into shared
+knowledge. RC7 to RC9 generalise.
+
+## 8. Pacrogue
+
+- **Session 4 as planned** (draft-4 approved, current team) works without any of this.
+- **With RC1 and RC2 first**, session 4's dash and Rush checks come back verified or failing
+  instead of claimed, and roles get contract rules.
+- **With RC3 to RC5**, the tech lead would first record pacrogue's real design (components and
+  interfaces read from the code, `game.js` header and Sol's notebook), then plan session 4 against
+  it. That is when "who owns the dash" gets an answer before anyone builds it.
+
+## 9. Open questions
+
+1. Does the tech lead approve design changes itself when no human holds the Lead seat (as Jack's
+   decisions auto-tick today), or must the Owner tick design drafts too?
+2. Should a project be able to run without a design phase (prototype-first, maintenance), and who
+   decides that: the kind, the start mode, or Jack per session?
+3. How many non-software kinds should the first release prove the schema against: none (software
+   only, keep the fields general), one (research report), or two (research report and docs)?
+4. Session 4 before or after RC1–RC2?

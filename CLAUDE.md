@@ -54,6 +54,8 @@ commits and quips use the name, and a `TEAM` signal at run start tells Studio wh
   against what was said) and cards say which spec checks they serve or which cards they support
   (`PlannedTask.serves` / `supports`). See plan §12.
 - **Record.** `core/record.py` gives the trace and export.
+- **Next (planned, not built):** role contracts, project kinds, a design artifact owned by a tech
+  lead, a shared knowledge base and a verification ledger: `docs/ROLE_CONTRACTS_PLAN.md`.
 - **MCP.** Third-party MCP servers are proxied on the host (`core/mcp_registry.py`,
   `core/harness/mcp_proxy.py`; `docs/MCP_PLAN.md`).
 
