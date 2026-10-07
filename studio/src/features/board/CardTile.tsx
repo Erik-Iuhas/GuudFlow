@@ -22,6 +22,21 @@ interface Props {
   onMove: (id: string, toIndex: number) => void;
 }
 
+/** Why a card exists, as small chips: the checks it serves, or the cards it supports. */
+export function CardLinks({ card }: { card: Pick<CardView, "id" | "serves" | "supports"> }) {
+  const serves = card.serves ?? [];
+  const supports = card.supports ?? [];
+  if (!serves.length && !supports.length) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1 text-[11px]" data-testid={`links-${card.id}`}>
+      {serves.map((s) => (
+        <span key={s} className="rounded border border-primary/40 px-1 font-mono text-primary">{s}</span>
+      ))}
+      {!serves.length && <span className="text-muted-foreground">for {supports.join(", ")}</span>}
+    </div>
+  );
+}
+
 /** One card on the board. Dragging only reorders it within its cell; it never changes column. */
 export function CardTile({
   card, priority, index, count, cellId, sortable, now, blocked, onOpen, onMove,
@@ -90,6 +105,8 @@ export function CardTile({
           </span>
         )}
       </div>
+
+      <CardLinks card={card} />
 
       <div className="mt-1.5 flex flex-wrap items-center gap-1">
         <span className="text-xs text-muted-foreground" data-testid={`owner-${card.id}`}>

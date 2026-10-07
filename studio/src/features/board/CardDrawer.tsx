@@ -17,13 +17,19 @@ import {
   THREAD_KIND_LABEL,
   acceptanceState,
   mergeRanges,
+  servedRequirements,
+  splitCheckLine,
 } from "./boardModel";
 import { useCommentOnCard } from "./useCardMutations";
+import type { SpecWire } from "../plan/api";
+import type { CardView } from "../../stores/runEvents";
 
 interface Props {
   runId: string;
   cardId: string | null;
   onClose: () => void;
+  /** The project's spec, to name the requirements and checks a card serves. */
+  spec?: SpecWire;
 }
 
 const SECTION = "grid gap-2";
@@ -75,18 +81,68 @@ function HandoffBody({ data }: { data: Record<string, unknown> | undefined }) {
   );
 }
 
-export function CardDrawer({ runId, cardId, onClose }: Props) {
+/**
+ * Why a card exists (plan §12): requirement → check → backlog item → card, with the spec's
+ * words; or the cards it supports; or a plain note that it is not linked.
+ */
+export function WhyThisCard({ card, spec }: { card: CardView; spec?: SpecWire }) {
+  const reqs = servedRequirements(card);
+  const checks = (card.serves ?? []).filter((s) => s.includes("."));
+  const chip = "rounded border px-1.5 font-mono text-xs";
+  const req = (id: string) => spec?.requirements.find((r) => r.id === id);
+  const checkText = (id: string) => req(id.split(".")[0])?.checks.find((c) => c.id === id)?.text;
+  return (
+    <section className="grid gap-1.5 rounded-r-md border-l-[3px] border-l-primary bg-primary/10 px-3 py-2" aria-label="Why this card">
+      <h3 className="m-0 text-[11px] font-semibold uppercase tracking-wide text-primary">Why this card</h3>
+      {reqs.length > 0 ? (
+        reqs.map((rid) => {
+          const r = req(rid);
+          const mine = checks.filter((c) => c.startsWith(`${rid}.`));
+          return (
+            <div key={rid} className="grid gap-1 text-sm" data-testid={`why-${rid}`}>
+              <p className="m-0 flex flex-wrap items-center gap-1.5">
+                <span className={cn(chip, "border-primary/40 text-primary")}>{rid}</span>
+                <span>{r?.title || r?.text || ""}</span>
+                {card.backlogId && (
+                  <>
+                    <span aria-hidden className="text-muted-foreground">→</span>
+                    <span className={cn(chip, "border-border text-muted-foreground")}>{card.backlogId}</span>
+                  </>
+                )}
+                <span aria-hidden className="text-muted-foreground">→</span>
+                <span className={cn(chip, "border-border")}>{card.id}</span>
+              </p>
+              {mine.map((c) => (
+                <p key={c} className="m-0 pl-2 text-xs text-muted-foreground">
+                  <span className="mr-1.5 font-mono text-foreground">{c}</span>
+                  {checkText(c) ?? ""}
+                </p>
+              ))}
+              {!mine.length && <p className="m-0 pl-2 text-xs text-muted-foreground">Works towards the whole requirement.</p>}
+            </div>
+          );
+        })
+      ) : (card.supports ?? []).length > 0 ? (
+        <p className="m-0 text-sm">Support work for {(card.supports ?? []).join(", ")}: it serves no requirement itself.</p>
+      ) : (
+        <p className="m-0 text-sm text-muted-foreground">Not linked to the spec{card.backlogId ? ` (item ${card.backlogId})` : ""}.</p>
+      )}
+    </section>
+  );
+}
+
+export function CardDrawer({ runId, cardId, onClose, spec }: Props) {
   const card = useRunStore((s) => (cardId ? s.cards[cardId] : undefined));
   return (
     <Sheet open={Boolean(cardId && card)} onOpenChange={(open) => !open && onClose()}>
       <SheetContent className="max-w-xl overflow-y-auto" aria-describedby="card-drawer-desc">
-        {card && <DrawerBody runId={runId} cardId={card.id} />}
+        {card && <DrawerBody runId={runId} cardId={card.id} spec={spec} />}
       </SheetContent>
     </Sheet>
   );
 }
 
-function DrawerBody({ runId, cardId }: { runId: string; cardId: string }) {
+function DrawerBody({ runId, cardId, spec }: { runId: string; cardId: string; spec?: SpecWire }) {
   const card = useRunStore((s) => s.cards[cardId]);
   const signals = useRunStore((s) => s.signals);
   const artifacts = useRunStore((s) => s.artifacts);
@@ -114,6 +170,8 @@ function DrawerBody({ runId, cardId }: { runId: string; cardId: string }) {
         </div>
       </SheetHeader>
 
+      <WhyThisCard card={card} spec={spec} />
+
       <section className={SECTION} aria-label="Acceptance checklist">
         <h3 className={H}>Acceptance</h3>
         {checklist.length === 0 ? (
@@ -131,7 +189,15 @@ function DrawerBody({ runId, cardId }: { runId: string; cardId: string }) {
                   className="mt-1"
                 />
                 <span>
-                  <span className={cn(item.met && "text-muted-foreground")}>{item.text}</span>
+                  {(() => {
+                    const { check, rest } = splitCheckLine(item.text);
+                    return (
+                      <span className={cn(item.met && "text-muted-foreground")}>
+                        {check && <span className="mr-1.5 rounded border border-primary/40 px-1 font-mono text-xs text-primary">{check}</span>}
+                        {check ? rest : item.text}
+                      </span>
+                    );
+                  })()}
                   {item.evidence && (
                     <span className="block text-xs text-muted-foreground">{item.evidence}</span>
                   )}

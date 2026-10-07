@@ -257,8 +257,8 @@ export const planApi = {
     send<Record<string, never>>("POST", `/api/projects/${enc(projectId)}/plan/draft/discard`, {}),
 };
 
-export function useSpec(projectId: string): UseQueryResult<SpecWire> {
-  return useQuery({ queryKey: planKeys.spec(projectId), queryFn: () => planApi.spec(projectId) });
+export function useSpec(projectId: string, enabled = true): UseQueryResult<SpecWire> {
+  return useQuery({ queryKey: planKeys.spec(projectId), queryFn: () => planApi.spec(projectId), enabled: enabled && !!projectId });
 }
 
 export function usePlan(projectId: string): UseQueryResult<PlanWire> {

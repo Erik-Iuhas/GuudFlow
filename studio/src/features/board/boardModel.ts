@@ -280,3 +280,47 @@ export function mergeRanges(card: CardView): Array<[string, string]> {
   }
   return out;
 }
+
+/** What a card serves, as the board shows it (plan §12). */
+export interface ReasonGroup {
+  /** "R5", "support" (cards helping other cards) or "none" (no link). */
+  key: string;
+  /** The requirement's title when the spec is known. */
+  title: string;
+  checks: string[];
+  cards: CardView[];
+}
+
+/** The requirement ids a card serves ("R5.2" → "R5"), in order. */
+export function servedRequirements(card: Pick<CardView, "serves">): string[] {
+  return [...new Set((card.serves ?? []).map((s) => s.split(".")[0]))];
+}
+
+/**
+ * Cards grouped by the first requirement they serve; then cards that only support other cards,
+ * then cards with no link. `titles` maps requirement ids to titles (from the spec).
+ */
+export function reasonGroups(cards: CardView[], titles: Record<string, string> = {}): ReasonGroup[] {
+  const groups = new Map<string, ReasonGroup>();
+  const add = (key: string, title: string, card: CardView) => {
+    if (!groups.has(key)) groups.set(key, { key, title, checks: [], cards: [] });
+    const g = groups.get(key)!;
+    g.cards.push(card);
+    for (const s of card.serves ?? []) if (s.includes(".") && s.startsWith(`${key}.`) && !g.checks.includes(s)) g.checks.push(s);
+  };
+  const sorted = [...cards].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  for (const c of sorted) {
+    const req = servedRequirements(c)[0];
+    if (req) add(req, titles[req] ?? "", c);
+    else if ((c.supports ?? []).length) add("support", "Support work", c);
+    else add("none", "Not linked to the spec", c);
+  }
+  const rank = (k: string) => (k === "support" ? 1 : k === "none" ? 2 : 0);
+  return [...groups.values()].sort((a, b) => rank(a.key) - rank(b.key) || a.key.localeCompare(b.key, undefined, { numeric: true }));
+}
+
+/** The check id an acceptance line starts with ("R5.2: ..."), and the rest of the line. */
+export function splitCheckLine(text: string): { check: string | null; rest: string } {
+  const m = /^\s*(R\d+\.\d+)\s*:\s*(.*)$/i.exec(text);
+  return m ? { check: m[1].toUpperCase(), rest: m[2] } : { check: null, rest: text };
+}

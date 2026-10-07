@@ -130,6 +130,11 @@ export interface CardWire {
   depends_on?: string[];
   column_since?: string | null;
   thread?: TaskThreadDetail[];
+  backlog_id?: string | null;
+  /** Spec checks (R4.2) or requirements (R4) the card serves. */
+  serves?: string[];
+  /** For a card that serves none: the cards it helps. */
+  supports?: string[];
 }
 
 export interface Signal {

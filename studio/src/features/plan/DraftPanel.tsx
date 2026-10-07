@@ -284,8 +284,8 @@ export function touchedIds(views: ChangeView[]): string[] {
 export function WhyBox({ reason, pmName }: { reason: ReasonWire; pmName: string }) {
   const who = reason.source === "pm" ? `${pmName}'s suggestion` : SOURCE_LABEL[reason.source ?? "pm"];
   return (
-    <div className="rounded-r-md border-l-[3px] border-l-violet-400 bg-violet-500/10 px-3 py-2 text-sm" data-testid="why">
-      <span className="mr-2 text-[11px] font-semibold uppercase tracking-wide text-violet-300">Why</span>
+    <div className="rounded-r-md border-l-[3px] border-l-primary bg-primary/10 px-3 py-2 text-sm" data-testid="why">
+      <span className="mr-2 text-[11px] font-semibold uppercase tracking-wide text-primary">Why</span>
       {reason.quote ? (
         <>
           <q className="italic">{reason.quote}</q>

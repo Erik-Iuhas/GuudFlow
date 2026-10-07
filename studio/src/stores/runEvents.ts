@@ -52,6 +52,11 @@ export interface CardView {
   thread: TaskThreadDetail[];
   dependsOn: string[];
   since?: string;
+  /** Why the card exists: the spec checks or requirements it serves, its backlog item, or the
+   * cards it supports. */
+  serves?: string[];
+  supports?: string[];
+  backlogId?: string | null;
   /** True while the card only came from a TASK_ASSIGNED signal (REST has not filled it in). */
   stub?: boolean;
 }
@@ -493,6 +498,7 @@ export function createRunStore(runId: string): RunStore {
           size: w.size ?? "", priority: w.priority ?? 0, round: w.review_round ?? 0,
           acceptance: w.acceptance ?? [], thread: w.thread ?? [], dependsOn: w.depends_on ?? [],
           since: w.column_since ?? undefined,
+          serves: w.serves ?? [], supports: w.supports ?? [], backlogId: w.backlog_id ?? null,
         };
         // Live state wins: a card that signals already moved keeps its column/round/thread.
         next[w.id] = prev && !prev.stub

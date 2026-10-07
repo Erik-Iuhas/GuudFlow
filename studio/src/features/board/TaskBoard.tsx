@@ -14,13 +14,14 @@ import {
 } from "@dnd-kit/sortable";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRunCards, useRunMeta } from "../../api/queries";
+import { useSpec, type SpecWire } from "../plan/api";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/utils";
 import { useRunStore, useRunStoreApi } from "../../stores/runStoreContext";
 import { AddCardDialog } from "./AddCardDialog";
 import { CardDrawer } from "./CardDrawer";
-import { CardTile } from "./CardTile";
+import { CardLinks, CardTile } from "./CardTile";
 import {
   COLUMNS,
   DEFAULT_REVIEW_CAP,
@@ -28,7 +29,10 @@ import {
   buildLanes,
   columnCounts,
   computeReorder,
+  reasonGroups,
+  COLUMN_LABEL,
 } from "./boardModel";
+import type { CardView } from "../../stores/runEvents";
 import { useSetPriority } from "./useCardMutations";
 
 interface Props {
@@ -69,6 +73,9 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
   const setPriority = useSetPriority(runId);
   const now = useNow();
 
+  const projectId = meta.data?.project_id ?? "";
+  const spec = useSpec(projectId, !!projectId).data;
+  const [view, setView] = useState<"role" | "requirement">("role");
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -151,6 +158,14 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
       <header className="flex flex-wrap items-center gap-2">
         <h2 className="m-0 mr-auto text-base font-semibold">Task board</h2>
         <span className="text-xs text-muted-foreground">{`${list.length} cards`}</span>
+        <div role="group" aria-label="Group cards" className="inline-flex overflow-hidden rounded-md border border-border text-xs">
+          {(["role", "requirement"] as const).map((v) => (
+            <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}
+              className={cn("border-0 px-2 py-1", view === v ? "bg-accent text-foreground" : "bg-transparent text-muted-foreground")}>
+              {v === "role" ? "By role" : "By requirement"}
+            </button>
+          ))}
+        </div>
         <Button
           size="sm"
           onClick={() => setAdding(true)}
@@ -183,6 +198,8 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
             <p className="m-0 mt-1">Cards appear here as soon as the plan is validated.</p>
           </div>
         )
+      ) : view === "requirement" ? (
+        <ByRequirement cards={list} spec={spec} onOpen={setOpenId} />
       ) : (
         <div className="overflow-x-auto">
           <div className="min-w-[72rem]">
@@ -264,7 +281,7 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
         </div>
       )}
 
-      <CardDrawer runId={runId} cardId={openId} onClose={() => setOpenId(null)} />
+      <CardDrawer runId={runId} cardId={openId} onClose={() => setOpenId(null)} spec={spec} />
       <AddCardDialog
         runId={runId}
         roles={roles}
@@ -272,5 +289,51 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
         onOpenChange={setAdding}
       />
     </section>
+  );
+}
+
+/** Cards grouped by the requirement they serve (plan §12), with how many of its checks are done. */
+function ByRequirement({ cards, spec, onOpen }: {
+  cards: CardView[];
+  spec: SpecWire | undefined;
+  onOpen: (id: string) => void;
+}) {
+  const titles = Object.fromEntries((spec?.requirements ?? []).map((r) => [r.id, r.title || r.text]));
+  const groups = reasonGroups(cards, titles);
+  return (
+    <div className="grid gap-3" data-testid="by-requirement">
+      {groups.map((g) => {
+        const done = g.cards.filter((c) => c.column === "done").length;
+        return (
+          <section key={g.key} aria-label={g.key === "support" || g.key === "none" ? g.title : `${g.key} ${g.title}`}
+            className={cn("grid gap-2 rounded-md border border-border p-3", g.key === "none" && "border-dashed")}>
+            <h3 className="m-0 flex flex-wrap items-baseline gap-2 text-sm font-semibold">
+              {g.key !== "support" && g.key !== "none" && (
+                <span className="rounded border border-primary/40 px-1.5 font-mono text-xs text-primary">{g.key}</span>
+              )}
+              <span>{g.title || g.key}</span>
+              <span className="text-xs font-normal text-muted-foreground">
+                {done} of {g.cards.length} card{g.cards.length === 1 ? "" : "s"} done
+                {g.checks.length > 0 && ` · checks ${g.checks.join(", ")}`}
+              </span>
+            </h3>
+            <ul className="m-0 grid list-none gap-2 p-0 sm:grid-cols-2 xl:grid-cols-3">
+              {g.cards.map((c) => (
+                <li key={c.id}>
+                  <button type="button" onClick={() => onOpen(c.id)}
+                    className={cn("w-full rounded-md border border-border bg-card p-2 text-left text-sm",
+                      c.column === "done" && "border-status-complete/50")}>
+                    <span className="mr-1 font-mono text-xs text-muted-foreground">{c.id}</span>
+                    <span className="font-medium">{c.title}</span>
+                    <span className="block text-xs text-muted-foreground">{COLUMN_LABEL[c.column]} · {c.owner}</span>
+                    <CardLinks card={c} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
   );
 }
