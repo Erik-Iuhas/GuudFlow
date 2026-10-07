@@ -25,6 +25,7 @@ import { WorkSettings } from "../features/work/WorkSettings";
 import { Inputs } from "./Inputs";
 import { SessionTimeCard } from "../features/project/SessionTimeCard";
 import { PlanTab } from "../features/plan/PlanTab";
+import { SpecPage } from "../features/plan/SpecPage";
 import { SeatsPanel } from "../features/team/SeatsPanel";
 import { RulesPanel } from "../features/team/RulesPanel";
 import { RecordTab } from "../features/record/RecordTab";
@@ -306,6 +307,8 @@ export function Studio() {
             <Inputs projectId={id} />
           </>
         )
+      ) : tab === "spec" ? (
+        id && <SpecPage projectId={id} />
       ) : tab === "sessions" ? (
         <SessionsTab runs={runs} onResumed={() => void load()} />
       ) : tab === "record" ? (

@@ -24,6 +24,7 @@ vi.mock("../../../components/RoadmapTab", () => ({ RoadmapTab: () => <div>roadma
 vi.mock("../../../views/Inputs", () => ({ Inputs: () => <div>inputs content</div> }));
 vi.mock("../ProjectInsights", () => ({ ProjectInsights: () => <div>insights content</div> }));
 vi.mock("../../plan/PlanTab", () => ({ PlanTab: () => <div>plan conversation</div> }));
+vi.mock("../../plan/SpecPage", () => ({ SpecPage: () => <div>spec page</div> }));
 vi.mock("../../record/RecordTab", () => ({ RecordTab: () => <div>record content</div> }));
 vi.mock("../../../components/CostStrip", () => ({ CostStrip: () => <div /> }));
 vi.mock("../../../components/PipelineGraph", () => ({ PipelineGraph: () => <div /> }));
@@ -102,7 +103,7 @@ describe("Studio project page", () => {
     renderStudio("/projects/p1");
     expect(await screen.findByText("work content")).toBeTruthy();
     const names = screen.getAllByRole("tab").map((t) => t.textContent);
-    expect(names).toEqual(["Work", "Plan", "Sessions", "Team", "Record", "Settings"]);
+    expect(names).toEqual(["Work", "Plan", "Spec", "Sessions", "Team", "Record", "Settings"]);
     expect(screen.getByRole("tab", { name: "Work" }).getAttribute("aria-selected")).toBe("true");
   });
 

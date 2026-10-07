@@ -16,11 +16,11 @@ const stateMark: Record<CheckState, { mark: string; label: string; cls: string }
 
 type Filter = "all" | "unmet" | "assumed";
 
-function isAssumed(r: RequirementWire): boolean {
+export function isAssumed(r: RequirementWire): boolean {
   return r.assumed || (r.params ?? []).some((p) => p.assumed);
 }
 
-function isUnmet(r: RequirementWire): boolean {
+export function isUnmet(r: RequirementWire): boolean {
   return r.checks.some((c) => c.state !== "met");
 }
 

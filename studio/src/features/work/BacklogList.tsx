@@ -4,7 +4,7 @@ import { Button } from "../../components/ui/button";
 import { Input, Label, Select, Textarea } from "../../components/ui/form-controls";
 import { formatUsd } from "../../lib/cost";
 import type { BacklogItemWire, NewItem } from "./api";
-import { OUTCOME_LABEL, groupBacklog, movedPriority, parseAcceptance, parseItemIds } from "./model";
+import { OUTCOME_LABEL, groupBacklog, itemEvents, movedPriority, parseAcceptance, parseItemIds, recentUpdate } from "./model";
 
 // A disabled arrow just fades: no muted box at the ends of the list.
 const ARROW = "disabled:border-transparent disabled:bg-transparent";
@@ -118,6 +118,8 @@ function ItemRow({
   muted?: boolean;
 }) {
   const last = [...item.history].reverse().find((h) => typeof h.summary === "string" && h.summary);
+  const events = itemEvents(item.history);
+  const update = recentUpdate(item.history);
   return (
     <li className="flex gap-2 rounded-lg border border-border bg-card p-3 text-card-foreground" data-testid={`backlog-${item.id}`}>
       {lead}
@@ -133,6 +135,14 @@ function ItemRow({
           {item.source.startsWith("run:") && (
             <span className="text-xs text-muted-foreground">from {item.source.slice(4)}</span>
           )}
+          {(item.serves ?? []).length > 0 && (
+            <span className="text-xs text-muted-foreground" data-testid={`serves-${item.id}`}>
+              serves{" "}
+              {(item.serves ?? []).map((r) => (
+                <span key={r} className="mr-1 rounded border border-primary/40 px-1 font-mono text-primary">{r}</span>
+              ))}
+            </span>
+          )}
           {(item.total_cost_usd ?? 0) > 0 && (
             <span className="text-xs text-muted-foreground">{formatUsd(item.total_cost_usd ?? 0)} spent</span>
           )}
@@ -147,10 +157,34 @@ function ItemRow({
             })}
           </ul>
         )}
+        {update && (
+          <p className="m-0 mt-1 rounded-r border-l-2 border-l-primary bg-primary/10 px-2 py-1 text-xs" data-testid={`update-${item.id}`}>
+            <span className="font-medium">Updated in {update.where}</span> ({update.what})
+            {update.why && <>: {update.why}</>}
+            {update.quote && <span className="text-muted-foreground"> · because <q className="italic">{update.quote}</q></span>}
+          </p>
+        )}
         {last && (
           <p className="m-0 mt-1 text-xs text-muted-foreground">
             Last run ({String(last.run_id)}): {String(last.summary)}
           </p>
+        )}
+        {events.length > 0 && (
+          <details className="mt-1 text-xs">
+            <summary className="cursor-pointer text-muted-foreground">History ({events.length})</summary>
+            <ol className="m-0 mt-1 grid list-none gap-1 p-0" data-testid={`history-${item.id}`}>
+              {events.map((e, i) => (
+                <li key={i} className="grid grid-cols-[6.5rem_1fr] gap-2">
+                  <span className="font-mono text-muted-foreground">{e.where || "—"}</span>
+                  <span>
+                    {e.what}
+                    {e.why && <span className="text-muted-foreground"> · {e.why}</span>}
+                    {e.quote && <span className="text-muted-foreground"> · <q className="italic">{e.quote}</q></span>}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </details>
         )}
       </div>
       <div className="flex shrink-0 items-start gap-1">{children}</div>
