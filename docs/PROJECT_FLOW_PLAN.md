@@ -681,7 +681,11 @@ That is the owner's call; running session 4 on the new spec shape would also tes
   The owner wants to review it in Studio before approving.
 - **Session 4 settings:** Sonnet 5.5 for all workers (the owner kept Sonnet), a $15 GuudFlow cap,
   75 minutes, review for size M and up.
-- **State snapshot:** `snapshots/pacrogue-2026-10-06.tar.gz` holds the project (repo, `work.db`
+- **Reasons backfilled (2026-10-07, §12.5):** `snapshots/pacrogue-2026-10-07.tar.gz` is the same
+  state with reasons and card links filled in as if sessions 1–3 had recorded them; draft-4 now
+  reads as four reasons (Default dash, Readable board, Pick screen and HUD fixes, Optional extra).
+  Its changes are still the old whole-text edits; approving it as is works.
+- **State snapshot (before the backfill):** `snapshots/pacrogue-2026-10-06.tar.gz` holds the project (repo, `work.db`
   with the spec, backlog, drafts and Jack's chat), the personas and the cost logs of the three
   sessions. It contains no keys. To restore, extract it into a data root and point
   `GUUDFLOW_DATA_DIR` there. The API key and token were never stored in it, so set them again.
@@ -713,3 +717,47 @@ W1–W9 are implemented, with tests. Where the build differs from the text above
   containers, build cache, dangling images), a Dashboard banner, and a worker check that refuses
   to start a session under 1 GB free (prunes first with `GUUDFLOW_AUTO_PRUNE=1`).
 - **Quips**: the speaker was already recorded (see §11.5); random speakers are never the overseer.
+
+## 12. Addendum: every change carries its reason (2026-10-07)
+Reviewing a draft or a session was hard because changes arrived as field edits with no link to why.
+The storyboards v5 (Design canvas "GuudFlow storyboards v5", artboards 11–14) put the reason first.
+
+### 12.1 Cards say why they exist
+- `PlannedTask.serves` lists the spec checks (`R4.2`) or requirements (`R4`) a card works towards;
+  `supports` lists the cards a card helps when it serves no requirement (a shared helper).
+- With a spec, the plan check refuses a card that serves nothing and supports nothing, and a
+  `serves` id that is not an active requirement or check. A card's `R#.#:` acceptance lines count
+  as serving those checks; a card naming nothing falls back to its backlog item's requirements.
+- Cards store `serves` and `supports` (`tasks.jsonl`, `card_view`). Splits keep them, unblock cards
+  support the blocked card, carried cards keep theirs. The card brief says which checks it is for.
+- Studio: tiles show check chips (or "for T7"), the board groups cards **by requirement**, and the
+  card drawer opens with **Why this card**: requirement → check → item → card in the spec's words.
+
+### 12.2 Draft changes carry a reason
+- `PlanTurn.groups` describes each reason: `name`, `summary` (what changes, plain words),
+  `because`, `source` (`person`, `session`, `pm`) and an optional `quote`. Every change names its
+  reason in `group`; a change without a described reason is refused, and a quote must be words a
+  person said in the conversation or that the session report contains (`validate_reasons`).
+- Drafts keep `groups`; approval writes the reason (`why`) onto requirement history rows, a new
+  requirement's `origin` and the work item's history. A person's direct edit keeps their own `why`.
+- Studio reviews a draft **reason by reason**: the quote, what changes, the ids it touches, accept
+  or reject as a whole; the field changes fold underneath.
+
+### 12.3 Items keep their history
+Backlog rows say what they serve, show "Updated in draft-N" with the reason when the item changed
+after it was last worked on, and fold a history of drafts and sessions. The Work overview shows a
+done item's acceptance note (not the reviewer's report) and an open item's latest reason; "Spec
+changes this week" names each change's reason and folds a session's settled checks into one line.
+
+### 12.4 The Spec tab
+A page per requirement: a list with progress dots (all, some, no checks met) and filters; the
+statement and values (assumed ones confirmed or edited in place); checks with method, test and
+state; **where it came from** (origin, each draft with its words, sessions that settled checks);
+and the work that serves it. Decisions and rules fold under the list.
+
+### 12.5 Backfill of pacrogue
+`snapshots/backfill_pacrogue.py` (idempotent) gave drafts 1–4 reasons quoting the owner's messages
+and acceptance notes, set requirement origins and history reasons, wrote draft entries into item
+histories in time order, set B8 to serve R7, and filled `serves` on every session's cards (three
+by hand where neither check lines nor the item said). Old card check ids that were renumbered
+later (R3.1, R4.2, …) are kept as historical ids; the board still groups them by requirement.

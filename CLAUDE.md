@@ -50,6 +50,9 @@ commits and quips use the name, and a `TEAM` signal at run start tells Studio wh
 - **In sessions.** The spec reaches briefs through `core/harness/spec_brief.py`. Binding rules
   become reviewer checklist lines. Check states and rule verdicts are recorded when a session is
   accepted (`core/spec_adherence.py`).
+- **Reasons.** Every draft change names a described reason (`PlanTurn.groups`, quotes checked
+  against what was said) and cards say which spec checks they serve or which cards they support
+  (`PlannedTask.serves` / `supports`). See plan §12.
 - **Record.** `core/record.py` gives the trace and export.
 - **MCP.** Third-party MCP servers are proxied on the host (`core/mcp_registry.py`,
   `core/harness/mcp_proxy.py`; `docs/MCP_PLAN.md`).
