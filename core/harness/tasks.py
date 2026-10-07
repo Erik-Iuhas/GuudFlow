@@ -187,7 +187,8 @@ def check_task_result(result: AgentResult, task_id: str, acceptance: Sequence[st
 
 
 ThreadKind = Literal[
-    "note", "blocked_on", "review_issue", "decision", "intervention", "human_comment", "artifact"
+    "note", "blocked_on", "review_issue", "decision", "intervention", "human_comment", "artifact",
+    "handoff",
 ]
 
 

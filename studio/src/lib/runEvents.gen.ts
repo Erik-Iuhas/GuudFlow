@@ -62,7 +62,7 @@ export type SignalType =
 
 export type TaskColumn = "todo" | "in_progress" | "review" | "done" | "blocked" | "needs_attention";
 
-export type ThreadKind = "note" | "blocked_on" | "review_issue" | "decision" | "intervention" | "human_comment" | "artifact";
+export type ThreadKind = "note" | "blocked_on" | "review_issue" | "decision" | "intervention" | "human_comment" | "artifact" | "handoff";
 
 export type InterventionType = "rebrief" | "decide" | "reassign" | "split" | "extend_review" | "restart_role" | "pause" | "propose_team_change";
 

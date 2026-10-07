@@ -110,6 +110,24 @@ class RoleClones:
         return _run(["git", f"--git-dir={self.git_dir(role)}", f"--work-tree={self.path(role)}",
                      *_SAFE_GIT, *args], cwd=self.git_dir(role))
 
+    def main_numstat(self, base: str, head: str) -> list[tuple[str, int, int]]:
+        """(path, added, removed) for each file `head` changed on main since `base`."""
+        out = _run(["git", *_SAFE_GIT, "diff", "--numstat", base, head], cwd=self.main.working_dir)
+        rows = []
+        for line in out.splitlines():
+            added, removed, path = (line.split("\t", 2) + ["", "", ""])[:3]
+            if path:
+                rows.append((path, int(added) if added.isdigit() else 0,
+                             int(removed) if removed.isdigit() else 0))
+        return rows
+
+    def main_file(self, rev: str, path: str) -> str:
+        """A file's text on main at `rev` ("" if it does not exist there)."""
+        try:
+            return _run(["git", *_SAFE_GIT, "show", f"{rev}:{path}"], cwd=self.main.working_dir)
+        except GitRoleError:
+            return ""
+
     def ensure(self, role: str, author: str) -> Path:
         """Create the role's checkout (idempotent) on `agent/{role}` from main."""
         work, gdir = self.path(role), self.git_dir(role)

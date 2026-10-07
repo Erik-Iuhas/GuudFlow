@@ -46,6 +46,7 @@ export const THREAD_KIND_LABEL: Record<ThreadKind, string> = {
   intervention: "Overseer",
   human_comment: "Human",
   artifact: "Artifact",
+  handoff: "Handoff",
 };
 
 /** Text glyphs (not emoji) standing in for icons; each is aria-hidden next to a text label. */
@@ -57,6 +58,7 @@ export const THREAD_KIND_ICON: Record<ThreadKind, string> = {
   intervention: "⚙",
   human_comment: "☺",
   artifact: "▣",
+  handoff: "⇢",
 };
 
 function naturalId(a: string, b: string): number {

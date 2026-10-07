@@ -85,7 +85,7 @@ DETAIL_SHAPES: dict[str, dict[str, str]] = {
 ENUMS: dict[str, tuple[str, ...]] = {
     "TaskColumn": ("todo", "in_progress", "review", "done", "blocked", "needs_attention"),
     "ThreadKind": ("note", "blocked_on", "review_issue", "decision", "intervention",
-                   "human_comment", "artifact"),
+                   "human_comment", "artifact", "handoff"),
     "InterventionType": ("rebrief", "decide", "reassign", "split", "extend_review",
                          "restart_role", "pause", "propose_team_change"),
 }

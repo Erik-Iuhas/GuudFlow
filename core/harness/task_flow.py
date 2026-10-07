@@ -18,6 +18,7 @@ downstream of the planner then works one card per turn.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from core.harness.handoff import HostFacts, render_handoffs, select_handoffs, thread_data
 from core.harness.result_inbox import ResultCheck
 from core.harness.results import AgentResult, ReviewResult
 from core.harness.spec_brief import SpecBrief, missing_check_lines
@@ -34,6 +36,8 @@ from core.harness import visual_review
 from core.harness.visual_review import PrecheckResult
 from core.signals import Signal, SignalType
 from core.workspace import AgentState, HumanRequest, Workspace
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from core.backlog import BacklogItem
@@ -99,6 +103,9 @@ class TaskFlow:
     spec: SpecBrief | None = None
     # Planner sizing: (session budget, measured average finished-card cost).
     size_budget: tuple[float | None, float | None] = (None, None)
+    # Card handoffs (plan §11.1): git facts for a merged (base, head) range, and worker names.
+    facts_for: Callable[[str, str], HostFacts] | None = None
+    names: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def build(cls, agents: Sequence["AgentConfig"], role_types: dict[str, str],
@@ -201,7 +208,9 @@ class TaskFlow:
             criteria += [line for line in extra if line not in criteria]
             visual = self._visual_review_text(role, card.task_id)
             return TurnPlan(
-                model=ReviewResult, card_id=card.task_id, extra_sections=spec_section,
+                model=ReviewResult, card_id=card.task_id,
+                extra_sections=spec_section + self._handoff_section(role, card.task_id,
+                                                                   reviewer=True),
                 task_text=self.board.brief_for(card.task_id, reviewer=True) + visual
                 + f"\n\nThe card's work was done by **{card.assigned_to}** and is merged into "
                   f"your working copy. Call `guudflow_changes` with `task_id` "
@@ -217,7 +226,8 @@ class TaskFlow:
                       if card.kind == "visual" and self.tool_dir_for is not None else "")
         return TurnPlan(
             model=AgentResult, card_id=card.task_id,
-            extra_sections=self._card_spec(role, card)[0],
+            extra_sections=self._card_spec(role, card)[0]
+            + self._handoff_section(role, card.task_id),
             task_text=self.board.brief_for(card.task_id) + self_check,
             check=lambda r, tid=card.task_id: (_check_done(r, tid, criteria)
                                                if isinstance(r, AgentResult) else []))
@@ -234,6 +244,28 @@ class TaskFlow:
                                       owner_type=owner_type if reviewer else None,
                                       extra_lines=extra)
         return ((("The spec", text),) if text else ()), extra
+
+    def _handoff_section(self, role: str, task_id: str, *, reviewer: bool = False
+                         ) -> tuple[tuple[str, str], ...]:
+        """Handoffs from earlier cards for this turn (plan §11.1)."""
+        picked = select_handoffs(self.board, role, task_id, reviewer=reviewer)
+        if not picked:
+            return ()
+        title = ("The builder's handoff" if reviewer else "Handoffs from earlier cards")
+        return ((title, render_handoffs(picked, self.names)),)
+
+    def _record_handoff(self, role: str, card_id: str, result: AgentResult,
+                        merged: tuple[str, str]) -> None:
+        """Store the done result's handoff, with git facts, on the card thread."""
+        facts = HostFacts()
+        base, head = merged
+        if self.facts_for is not None and base and head and base != head:
+            try:
+                facts = self.facts_for(base, head)
+            except Exception as e:  # noqa: BLE001 — facts are a bonus; the handoff still lands
+                log.warning("handoff facts for %s failed: %s", card_id, e)
+        text, data = thread_data(result, facts)
+        self.board.note(card_id, "handoff", role, text, data)
 
     def end_turn(self, role: str) -> None:
         """Always called when a spawn ends."""
@@ -286,6 +318,7 @@ class TaskFlow:
             return
         assert isinstance(result, AgentResult)
         if result.status == "done":
+            self._record_handoff(role, card_id, result, merged)
             if not self._visual_precheck(role, card_id):
                 return
             self.board.submitted(card_id, result, commit=commit)

@@ -58,6 +58,7 @@ from core.harness.capabilities import (
 from core.harness.config_gen import ProviderBinding, agent_entry, build_config
 from core.harness.event_bridge import EventBridge
 from core.harness.git_roles import CollectResult, RoleClones
+from core.harness.handoff import host_facts
 from core.harness import mcp_proxy
 from core.mcp_registry import McpRegistry
 from core.harness.mcp_server import McpIdentity, McpServer, McpTool, RunningHttpServer, ToolResult, serve_app
@@ -299,6 +300,10 @@ class OpencodeRun:
             flow.tool_dir_for = self.clones.tool_dir
             flow.ref_roots = [self.runner.run_root / "inputs", self.runner.git.working_dir]
             flow.run_root = self.runner.run_root
+            flow.names = self.names
+            flow.facts_for = lambda base, head: host_facts(
+                self.clones.main_numstat(base, head),
+                lambda path, rev=head: self.clones.main_file(rev, path))
             flow.vision_for = lambda r: (r in self._roles and
                                          self._roles[r].compiled.capabilities.vision == "on")
             self._unsubscribe_flow = self.workspace.subscribe(flow.on_signal)

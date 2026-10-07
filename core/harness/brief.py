@@ -135,7 +135,8 @@ def build_brief(inp: BriefInputs) -> str:
         parts.append(_section(title, body))
     if inp.continuation:
         parts.append(_section("How to finish", f"Same rules as before. Finish this piece by "
-                              f"calling `{SUBMIT_TOOL_NAME}` once, as your last action."))
+                              f"calling `{SUBMIT_TOOL_NAME}` once, as your last action."
+                              + ("" if inp.is_reviewer else " " + HANDOFF_INSTRUCTIONS)))
     else:
         parts.append(_section("How to work", _how_to_work(inp.is_reviewer)))
     return "\n".join(parts)
@@ -159,11 +160,19 @@ def _how_to_work(is_reviewer: bool) -> str:
         finish = (f"Finish by calling `{SUBMIT_TOOL_NAME}` once, as your last action, with "
                   "`status` done (with a specific summary and the files you changed), blocked "
                   "(with `blocked_on`: which role must act and exactly what you need) or failed "
-                  "(with why). If the call is rejected, fix the listed problems and call it again.")
+                  "(with why). If the call is rejected, fix the listed problems and call it again. "
+                  + HANDOFF_INSTRUCTIONS)
     return (f"{doing}\n\nYou cannot talk to other agents directly and nobody will answer "
             f"questions mid-turn: decide sensibly, note assumptions in your summary, and use "
             f"`notes_for` to leave a note for a teammate (by name or role).\n\n{finish}")
 
+
+HANDOFF_INSTRUCTIONS = (
+    "With `status` done, also fill `handoff`: the next card starts a fresh session and reads "
+    "it instead of your conversation. `changed`: files and the functions or contracts they "
+    "expose; `decisions`: choices and gotchas to respect (one per entry); `tests`: what is "
+    "covered and what is not; `next`: what the following card should know. Facts only, "
+    "under 300 words.")
 
 NOTEBOOK_LIMIT = 6000
 

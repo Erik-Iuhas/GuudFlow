@@ -120,6 +120,15 @@ async def test_cards_drive_the_run_with_a_review_loop(tmp_path: Path, fake_llm: 
                       and "guudflow_changes" in str(r["messages"]))
     assert "api.py" in diff_reply and "ui.py" not in diff_reply.split("guudflow_changes", 1)[1][:2000]
 
+    # Each done result left a handoff with git facts on its card (plan §11.1); the
+    # frontend's card depends on T1, so its brief carried T1's handoff.
+    t1_handoffs = [e for e in tasks["T1"].thread if e["kind"] == "handoff"]
+    assert t1_handoffs and t1_handoffs[-1]["data"]["facts"]["files"][0][0] == "api.py"
+    assert "api.py: status()" in t1_handoffs[-1]["data"]["facts"]["exports"]
+    frontend = next(str(r["messages"]) for r in fake_llm.tool_requests()
+                    if "Your turn: frontend" in str(r["messages"]))
+    assert "Handoffs from earlier cards" in frontend and "this card depends on it" in frontend
+
     # Work landed on main.
     main = runner.git.working_dir
     assert (main / "api.py").read_text().endswith("return 'ok'\n")

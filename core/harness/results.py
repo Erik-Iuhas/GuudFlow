@@ -61,6 +61,36 @@ class ItemVerdict(BaseModel):
         return self
 
 
+HANDOFF_CHAR_LIMIT = 6000  # about 1.5 k tokens (plan §11.1)
+
+
+class Handoff(BaseModel):
+    """What the next card needs to know, written while the work is fresh (plan §11.1).
+
+    It replaces carrying the whole conversation from card to card: the next card starts
+    a fresh session and reads this instead.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    changed: str = Field(min_length=10, description=(
+        "Files you changed and the functions, APIs or contracts they expose to others."))
+    decisions: list[str] = Field(default=[], description=(
+        "Choices and gotchas the next card must respect, one per entry."))
+    tests: str = Field(default="", description="What the tests cover and what they do not.")
+    next: str = Field(default="", description="What the following card should know or do.")
+
+    @model_validator(mode="after")
+    def _check_size(self) -> "Handoff":
+        size = len(self.changed) + len(self.tests) + len(self.next) + sum(map(len, self.decisions))
+        if size > HANDOFF_CHAR_LIMIT:
+            raise ValueError(f"handoff: {size} characters, keep it under {HANDOFF_CHAR_LIMIT}; "
+                             "facts the next card needs, not a narrative")
+        if any(not d.strip() for d in self.decisions):
+            raise ValueError("handoff.decisions: entries must be non-empty")
+        return self
+
+
 class AgentResult(BaseModel):
     """Result for builders, architects and testers."""
 
@@ -73,6 +103,7 @@ class AgentResult(BaseModel):
     files_changed: list[str] = []
     blocked_on: BlockedOn | None = None
     notes_for: dict[str, str] = {}
+    handoff: Handoff | None = None
 
     @model_validator(mode="after")
     def _check_blocked_on(self) -> "AgentResult":
