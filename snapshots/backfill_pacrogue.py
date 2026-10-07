@@ -1,6 +1,6 @@
 """Backfill pacrogue with reasons and card links, as if earlier sessions had recorded them.
 
-- Drafts 1-4: each change gets a reason (group) quoting the words that asked for it.
+- Drafts 1-3: each change gets a reason (group) quoting the words that asked for it.
 - Requirements: origin (the draft that created them) and `why` on history rows from drafts.
 - Backlog items: a history entry for each draft that created or edited them, in time order;
   B8 serves R7.
@@ -97,25 +97,7 @@ REASONS: dict[str, list[tuple[dict, list[str]]]] = {
            "bun test already guards the logic.", "person",
            "drop the constraint tests item (B9) for now"), ["c15"]),
     ],
-    "draft-4": [
-        (g("Default dash", "Every run starts with a Space dash that has charges; power pellets refill "
-           "them. Dash and Wall Burst become upgrades of it, and Phase is cut because every dash "
-           "already passes through ghosts.",
-           "You want the player to have a real choice instead of waiting for power pellets.",
-           "person", "Default dash for everyone: every run starts with a dash (Space) that lets "
-           "Pac-Man go through ghosts or eat them during the dash."),
-         ["c1", "c2", "c6", "c7", "c10"]),
-        (g("Readable board", "Dark is replaced by Rush (more power pellets), no family or effect may hide "
-           "the maze or the ghosts, and the boss gets 5 HP.",
-           "You need to see the ghosts to plan.", "person", "Drop the Dark family."),
-         ["c4", "c5", "c8", "c9", "c11"]),
-        (g("Pick screen and HUD fixes", "The pick screen only offers abilities that are built, and the "
-           "HUD never shows DEAD.", "Session 3 offered Magnet, which is not built, and showed "
-           "DOTS: DEAD.", "person", "Fix the pick screen offering Magnet, which is not built"),
-         ["c3"]),
-        (g("Optional extra", "B7 shrinks to Magnet and the OVERDRIVE combo, run only if money is left.",
-           "Phase and DETONATE are no longer needed.", "pm", None), ["c12"]),
-    ],
+    # draft-4 was rewritten in the structured format by redo_draft4.py, with its own reasons.
 }
 
 # Cards whose check lines and item do not say what they serve.

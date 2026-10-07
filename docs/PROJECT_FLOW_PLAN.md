@@ -684,7 +684,13 @@ That is the owner's call; running session 4 on the new spec shape would also tes
 - **Reasons backfilled (2026-10-07, §12.5):** `snapshots/pacrogue-2026-10-07.tar.gz` is the same
   state with reasons and card links filled in as if sessions 1–3 had recorded them; draft-4 now
   reads as four reasons (Default dash, Readable board, Pick screen and HUD fixes, Optional extra).
-  Its changes are still the old whole-text edits; approving it as is works.
+- **Draft-4 rewritten in the structured format** (`snapshots/redo_draft4.py`, 20 changes, passes
+  `validate_turn`): same scope and numbers, but field-level ops (`set_statement`, `edit_check`,
+  `add_check`, `remove_check`), the new requirements' numbers as assumed params (`charges`,
+  `dash_steps`, `safe_steps_after`, `recharge_steps`, `dash_kill_points`, `inverted_max_frames`),
+  two items that reference checks by id (default dash + Dash/Wall Burst; Rush, boss, offers and
+  HUD), R10 trimmed to Magnet and OVERDRIVE (Phase and DETONATE checks removed), and B7 after both.
+  The two decisions start ticked (no Lead seat); everything else waits for the owner.
 - **State snapshot (before the backfill):** `snapshots/pacrogue-2026-10-06.tar.gz` holds the project (repo, `work.db`
   with the spec, backlog, drafts and Jack's chat), the personas and the cost logs of the three
   sessions. It contains no keys. To restore, extract it into a data root and point
@@ -756,7 +762,7 @@ state; **where it came from** (origin, each draft with its words, sessions that 
 and the work that serves it. Decisions and rules fold under the list.
 
 ### 12.5 Backfill of pacrogue
-`snapshots/backfill_pacrogue.py` (idempotent) gave drafts 1–4 reasons quoting the owner's messages
+`snapshots/backfill_pacrogue.py` (idempotent) gave drafts 1–3 reasons quoting the owner's messages
 and acceptance notes, set requirement origins and history reasons, wrote draft entries into item
 histories in time order, set B8 to serve R7, and filled `serves` on every session's cards (three
 by hand where neither check lines nor the item said). Old card check ids that were renumbered
