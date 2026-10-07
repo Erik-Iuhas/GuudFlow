@@ -89,6 +89,15 @@ class SpecBrief:
         found = {r.id: r for r in self.spec.requirements if r.status == "active"}
         return [found[i] for i in wanted if i in found]
 
+    def ids(self) -> list[str]:
+        """Active requirement ids and their check ids (what a card may say it serves)."""
+        out: list[str] = []
+        for r in self.spec.requirements:
+            if r.status == "active":
+                out.append(r.id)
+                out += [c.id for c in r.checks]
+        return out
+
     # ── review lines ────────────────────────────────────────────────────────
     def rule_lines(self, owner_type: str) -> list[str]:
         """One `rule-N: <text>` line per binding rule that applies to the card's owner."""
@@ -119,14 +128,22 @@ class SpecBrief:
         return "\n\n".join(parts) if parts else None
 
     def card_section(self, role_type: str, item: BacklogItem | None, *,
-                     owner_type: str | None = None, extra_lines: Sequence[str] = ()
-                     ) -> str | None:
-        """"The spec" for a card role (the card's item) or its reviewer (`extra_lines`)."""
+                     owner_type: str | None = None, extra_lines: Sequence[str] = (),
+                     serves: Sequence[str] = ()) -> str | None:
+        """"The spec" for a card role (the card's item) or its reviewer (`extra_lines`).
+
+        `serves` (the card's checks or requirements) names the requirements first and marks
+        the checks this card is for."""
         parts: list[str] = []
-        reqs = self.requirements_of(item.serves) if item is not None else []
+        wanted = [s.split(".")[0] for s in serves] + (list(item.serves) if item else [])
+        reqs = self.requirements_of(wanted)
         if reqs:
             parts.append("Requirements this card serves:\n"
                          + "\n".join(_req_text(r, []) for r in reqs))
+        checks = [s for s in serves if "." in s]
+        if checks:
+            parts.append("This card is for " + ", ".join(checks)
+                         + ". Say in your summary how each one is met.")
         parts += self._shared(role_type=owner_type or role_type)
         if extra_lines:
             parts.append(

@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from core.harness.results import AgentResult, ReviewResult
-from core.harness.tasks import PlanResult, ThreadEntry, ThreadKind, render_thread
+from core.harness.tasks import PlanResult, ThreadEntry, ThreadKind, card_serves, render_thread
 from core.signals import Signal, SignalType
 from core.workspace import Task, TaskStatus, Workspace
 
@@ -108,8 +108,12 @@ class TaskBoard:
     review_min_size: str = "S"
 
     # ── creation ──────────────────────────────────────────────────────────
-    def create_from_plan(self, plan: PlanResult, planner: str) -> list[Task]:
-        """Create one card per planned task (the runner calls this, never an agent)."""
+    def create_from_plan(self, plan: PlanResult, planner: str,
+                         item_serves: Mapping[str, Sequence[str]] | None = None) -> list[Task]:
+        """Create one card per planned task (the runner calls this, never an agent).
+
+        `item_serves` (backlog item → requirement ids) fills in what a card serves when it
+        names nothing itself."""
         cards = []
         for i, planned in enumerate(plan.tasks):
             card = Task(task_id=planned.id, story_id="plan", assigned_to=planned.owner_role,
@@ -120,7 +124,10 @@ class TaskBoard:
                         depends_on=list(planned.depends_on),
                         visual_refs=list(planned.visual_refs), column="todo",
                         priority=-i, column_since=self.clock(),
-                        backlog_id=planned.backlog_id)
+                        backlog_id=planned.backlog_id,
+                        serves=card_serves(planned.acceptance, planned.serves,
+                                           (item_serves or {}).get(planned.backlog_id or "", ())),
+                        supports=list(planned.supports))
             self.workspace.add_task(card)
             cards.append(card)
         self.planned = True
@@ -128,13 +135,15 @@ class TaskBoard:
 
     def add_card(self, *, owner: str, title: str, acceptance: Sequence[str], created_by: str,
                  kind: str = "code", size: str = "S", depends_on: Sequence[str] = (),
-                 files_hint: Sequence[str] = (), priority: int = 0) -> Task:
+                 files_hint: Sequence[str] = (), priority: int = 0,
+                 serves: Sequence[str] = (), supports: Sequence[str] = ()) -> Task:
         """Add a card outside the plan (unblock cards, overseer splits, humans)."""
         card = Task(task_id=self._next_id(), story_id="board", assigned_to=owner,
                     created_by=created_by, created_at_iter=self.workspace.iteration,
                     goal=title, title=title, acceptance_criteria=list(acceptance), kind=kind,
                     size=size, files_hint=list(files_hint), depends_on=list(depends_on),
-                    column="todo", priority=priority, column_since=self.clock())
+                    column="todo", priority=priority, column_since=self.clock(),
+                    serves=card_serves(acceptance, serves), supports=list(supports))
         self.workspace.add_task(card)
         self.planned = True
         return card
@@ -348,7 +357,7 @@ class TaskBoard:
         card = self.card(task_id)
         unblock = self.add_card(owner=on_role, created_by=card.assigned_to,
                                 title=f"Unblock {task_id}: {need[:70]}", acceptance=[need],
-                                priority=card.priority + 1)
+                                priority=card.priority + 1, supports=[task_id])
         card.depends_on.append(unblock.task_id)
         self.note(task_id, "blocked_on", card.assigned_to, f"waiting on {on_role}: {need}",
                   {"role": on_role, "unblock_card": unblock.task_id})

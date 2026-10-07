@@ -426,6 +426,8 @@ def serialise_task(task) -> dict[str, Any]:
         "column_since": task.column_since,
         "thread": [dict(e) for e in task.thread],
         "backlog_id": task.backlog_id,
+        "serves": list(task.serves),
+        "supports": list(task.supports),
     }
 
 

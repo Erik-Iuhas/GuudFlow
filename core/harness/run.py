@@ -450,7 +450,8 @@ class OpencodeRun:
                 card = self.flow.board.add_card(
                     owner=owner, title=str(old.get("title") or "carried card")[:120],
                     acceptance=acceptance, created_by="carry_forward",
-                    kind=str(old.get("kind") or "code"))
+                    kind=str(old.get("kind") or "code"),
+                    serves=[str(x) for x in old.get("serves") or []])
                 for entry in old.get("thread") or []:
                     if isinstance(entry, dict) and entry.get("kind") and entry.get("text"):
                         card.thread.append({**entry, "task_id": card.task_id})

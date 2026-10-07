@@ -4,9 +4,10 @@ See docs/OPENCODE_HARNESS_PLAN.md section 4.6. ``AcceptanceCheck`` and
 ``ItemVerdict`` live in :mod:`core.harness.results` (which this module imports,
 never the reverse) and are re-exported here.
 """
-from collections.abc import Collection, Sequence
+import re
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -24,6 +25,7 @@ __all__ = [
     "PlanResult",
     "ThreadKind",
     "ThreadEntry",
+    "card_serves",
     "check_plan",
     "validate_plan",
     "check_task_result",
@@ -51,6 +53,10 @@ class PlannedTask(BaseModel):
     visual_refs: list[str] = []
     # The project backlog item this task works on (plan §13); omit for extra work.
     backlog_id: str | None = Field(default=None, pattern=r"^B[0-9]+$")
+    # Why the card exists: the spec checks (R4.2) or requirements (R4) it serves. A card that
+    # serves none names the cards it helps in `supports` (a shared helper for T7 and T8).
+    serves: list[Annotated[str, Field(pattern=r"^R[0-9]+(\.[0-9]+)?$")]] = []
+    supports: list[Annotated[str, Field(pattern=r"^T[0-9]+$")]] = []
 
     @field_validator("acceptance")
     @classmethod
@@ -99,14 +105,56 @@ def _find_cycle(graph: dict[str, list[str]]) -> list[str] | None:
     return None
 
 
+_CHECK_LINE = re.compile(r"^\s*(R[0-9]+\.[0-9]+)\s*:", re.IGNORECASE)
+
+
+def card_serves(acceptance: Sequence[str], serves: Sequence[str],
+                item_serves: Sequence[str] = ()) -> list[str]:
+    """What a card serves: its own `serves`, the checks its `R#.#:` acceptance lines carry and,
+    when it names nothing itself, the requirements of its backlog item."""
+    out = [s.upper() for s in serves]
+    for line in acceptance:
+        found = _CHECK_LINE.match(line)
+        if found:
+            out.append(found.group(1).upper())
+    if not out:
+        out = [s.upper() for s in item_serves]
+    return list(dict.fromkeys(out))
+
+
 def check_plan(plan: PlanResult, team_roles: Collection[str],
-               backlog_ids: Collection[str] = ()) -> list[str]:
+               backlog_ids: Collection[str] = (), *,
+               spec_ids: Collection[str] | None = None,
+               item_serves: Mapping[str, Sequence[str]] | None = None) -> list[str]:
     """Check a schema-valid plan against the team; return one problem per line (empty = ok).
 
     With `backlog_ids` (the run's backlog items, plan §13) every item must be
     covered by at least one task, and tasks may only name those items.
+
+    With `spec_ids` (the active requirement and check ids, when the project has a spec) every
+    card must say why it exists: it serves a requirement or check (its `serves`, an `R#.#:`
+    acceptance line or its backlog item's requirements), or it names the cards it `supports`.
     """
     problems: list[str] = []
+    ids = {t.id for t in plan.tasks}
+    for task in plan.tasks:
+        for sid in task.supports:
+            if sid == task.id or sid not in ids:
+                problems.append(f"{task.id}: supports '{sid}', which is not another card "
+                                f"in this plan")
+    if spec_ids is not None:
+        known = {i.upper() for i in spec_ids}
+        for task in plan.tasks:
+            for sid in task.serves:
+                if sid.upper() not in known:
+                    problems.append(f"{task.id}: serves '{sid}', which is not an active "
+                                    f"requirement or check of the spec")
+            served = card_serves(task.acceptance, task.serves,
+                                 (item_serves or {}).get(task.backlog_id or "", ()))
+            if known and not served and not task.supports:
+                problems.append(f"{task.id}: say why this card exists: set `serves` to the "
+                                f"checks (R4.2) or requirements (R4) it serves, or `supports` "
+                                f"to the cards it helps")
     wanted = set(backlog_ids)
     for task in plan.tasks:
         if task.backlog_id is not None and task.backlog_id not in wanted:

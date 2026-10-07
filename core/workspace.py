@@ -284,6 +284,9 @@ class Task:
     thread: list[dict[str, Any]] = field(default_factory=list)
     # Project backlog item this card works on (plan §13); None for extra cards.
     backlog_id: str | None = None
+    # Spec checks (R4.2) or requirements (R4) the card serves, or the cards it supports.
+    serves: list[str] = field(default_factory=list)
+    supports: list[str] = field(default_factory=list)
 
 
 # Map a TaskStatus transition to the SignalType the runner posts when

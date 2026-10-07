@@ -185,16 +185,20 @@ class TaskFlow:
             sections: tuple[tuple[str, str], ...] = (
                 ("Budget and card size", self._sizing_text()),
                 ("Your output: the task list", _planner_instructions(owners)))
+            spec_ids: list[str] | None = None
             if self.spec is not None:
                 text = self.spec.planner_section(self.backlog)
                 if text:
                     sections = (("The spec", text),) + sections
+                spec_ids = self.spec.ids()
             if self.backlog:
                 sections = (("This run's backlog items", backlog_text(self.backlog)),) + sections
+            item_serves = self._item_serves()
             return TurnPlan(
                 model=PlanResult,
-                check=lambda r: (check_plan(r, owners, items) if isinstance(r, PlanResult)
-                                 else []),
+                check=lambda r: (check_plan(r, owners, items, spec_ids=spec_ids,
+                                            item_serves=item_serves)
+                                 if isinstance(r, PlanResult) else []),
                 extra_sections=sections)
         if role not in self.card_roles:
             return None
@@ -242,7 +246,7 @@ class TaskFlow:
         extra = self.spec.reviewer_lines(owner_type) if reviewer else []
         text = self.spec.card_section(self.role_types.get(role, ""), item,
                                       owner_type=owner_type if reviewer else None,
-                                      extra_lines=extra)
+                                      extra_lines=extra, serves=card.serves)
         return ((("The spec", text),) if text else ()), extra
 
     def continues(self, previous: str | None, card_id: str | None) -> bool:
@@ -283,9 +287,13 @@ class TaskFlow:
         """Always called when a spawn ends."""
         self.board.finish_turn(role)
 
+    def _item_serves(self) -> dict[str, list[str]]:
+        """Backlog item id → the requirement ids it serves."""
+        return {i.id: list(i.serves) for i in self.backlog}
+
     def plan_accepted(self, plan: PlanResult) -> None:
         """Create the cards and give card roles enough spawns for them."""
-        self.board.create_from_plan(plan, self.planner)
+        self.board.create_from_plan(plan, self.planner, self._item_serves())
         if self.spec is not None:
             missing = missing_check_lines(self.backlog, [t.acceptance for t in plan.tasks])
             if missing:
@@ -486,6 +494,9 @@ def _planner_instructions(owners: list[str]) -> str:
         "- size S (≈10 min) or M (≈25 min); split anything larger. Never use L.\n"
         "- `kind` is code, test, docs, research or visual; give `files_hint` where the work "
         "will land, so cards touching the same files are not run in parallel.\n"
+        "- every card says why it exists: `serves` lists the spec checks (R4.2) or "
+        "requirements (R4) it works towards, when the project has a spec. A card that serves "
+        "none (a shared helper, a refactor) lists the cards it helps in `supports`.\n"
         "- do not write the code yourself; put design notes in `notes`.")
 
 

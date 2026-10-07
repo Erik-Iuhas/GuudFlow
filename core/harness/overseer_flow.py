@@ -271,7 +271,8 @@ class OverseerFlow:
             card = board.add_card(owner=original.assigned_to, title=part.title,
                                   acceptance=part.acceptance, created_by=self.overseer_role,
                                   kind=original.kind, size="S", depends_on=previous,
-                                  files_hint=original.files_hint, priority=original.priority)
+                                  files_hint=original.files_hint, priority=original.priority,
+                                  serves=original.serves, supports=original.supports)
             previous = [card.task_id]
             new_ids.append(card.task_id)
         for other in board.cards():

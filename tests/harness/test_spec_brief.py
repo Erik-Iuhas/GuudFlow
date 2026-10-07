@@ -306,3 +306,58 @@ def test_no_spec_no_mode_changes_nothing_for_cards() -> None:
     assert reviewer is not None and reviewer.extra_sections == () and reviewer.check is not None
     items = [ItemVerdict(item=i, met=True) for i in (R11, R12, OWN)]
     assert reviewer.check(ReviewResult(verdict="pass", task_id="T1", items=items)) == []
+
+
+# ── why a card exists (cards link to the spec) ──────────────────────────────
+def test_card_serves_combines_own_lines_and_item() -> None:
+    from core.harness.tasks import card_serves
+    assert card_serves([R11, OWN], ["R2"]) == ["R2", "R1.1"]
+    assert card_serves([OWN], [], ["R1"]) == ["R1"]                # falls back to the item
+    assert card_serves([R12], [], ["R1"]) == ["R1.2"]              # own lines win
+
+
+def test_plan_check_wants_a_reason_per_card(tmp_path: Path) -> None:
+    from core.harness.tasks import check_plan
+    seed_spec(tmp_path)
+    flow, _ = _flow(SpecBrief.load(tmp_path, "p1", None), [_item()])
+    turn = flow.begin_turn("planner")
+    assert turn is not None
+    helper = PlannedTask(id="T2", title="Shared helper", owner_role="api", size="S",
+                         kind="code", acceptance=[OWN])
+    plan = PlanResult(tasks=[_plan().tasks[0], helper])
+    problems = turn.check(plan)
+    assert len(problems) == 1 and "T2: say why this card exists" in problems[0]
+    helper.supports = ["T1"]
+    assert turn.check(plan) == []
+    helper.serves, helper.supports = ["R9.9"], []
+    assert any("serves 'R9.9'" in p for p in turn.check(plan))
+    helper.serves, helper.supports = [], ["T7"]
+    assert any("supports 'T7'" in p for p in check_plan(plan, ["api"], ["B1"]))
+    # Without a spec nothing is asked.
+    helper.supports = []
+    assert check_plan(plan, ["api"], ["B1"]) == []
+
+
+def test_cards_store_what_they_serve(tmp_path: Path) -> None:
+    seed_spec(tmp_path)
+    flow, _ = _flow(SpecBrief.load(tmp_path, "p1", None), [_item()])
+    plan = _plan(acceptance=[OWN])
+    plan.tasks.append(PlannedTask(id="T2", title="Shared helper", owner_role="tester",
+                                  size="S", kind="code", acceptance=[R12], supports=["T1"]))
+    flow.plan_accepted(plan)
+    assert flow.board.card("T1").serves == ["R1"]                  # from its item
+    assert flow.board.card("T2").serves == ["R1.2"]
+    assert flow.board.card("T2").supports == ["T1"]
+    flow.board.blocked("T1", "tester", "the fixture loader is missing")
+    extra = [c for c in flow.board.cards() if c.task_id not in ("T1", "T2")][0]
+    assert extra.supports == ["T1"]
+
+
+def test_card_brief_names_the_checks_it_is_for(tmp_path: Path) -> None:
+    seed_spec(tmp_path)
+    flow, _ = _flow(SpecBrief.load(tmp_path, "p1", None), [_item()])
+    flow.plan_accepted(_plan(acceptance=[R11, OWN]))
+    turn = flow.begin_turn("api")
+    assert turn is not None
+    text = _sections(turn)["The spec"]
+    assert "This card is for R1.1." in text and "**R1**" in text
