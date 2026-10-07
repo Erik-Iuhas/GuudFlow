@@ -303,6 +303,6 @@ describe("overview lines carry reasons", () => {
     const lines = weekChanges({ requirements: [{ id: "R7", title: "Feel", text: "", kind: "quality", priority: "must", checks: [],
       assumed: false, experiment: false, status: "active", source: "pm", version: 3,
       history: [{ at: now - 10, draft: "draft-2", why: { name: "Palette fix" } }, { at: now - 5, by: "session:run_9", check_states: { "R7.1": "met" } }] }] } as never, now);
-    expect(lines.map((l) => l.text)).toEqual(["R7 Feel: checks settled in run_9", "R7 Feel: Palette fix in draft-2"]);
+    expect(lines.map((l) => l.text)).toEqual(["run_9 settled checks on R7", "R7 Feel: Palette fix in draft-2"]);
   });
 });

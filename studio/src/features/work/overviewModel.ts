@@ -76,7 +76,6 @@ interface HistoryEntry {
 /** One short line per change: why it changed (the draft's reason), never the old text itself. */
 function entryText(e: HistoryEntry): string {
   if (typeof e.reason === "string" && e.reason.trim()) return `dropped (${e.reason.trim()})`;
-  if (!e.draft && e.check_states) return `checks settled in ${String(e.by ?? "a session").replace(/^session:/, "")}`;
   const by = typeof e.draft === "string" && e.draft ? ` in ${e.draft}` : "";
   if (e.why?.name) return `${e.why.name}${by}`;
   const v = typeof e.version === "number" ? ` (now v${e.version + 1})` : "";
@@ -89,14 +88,25 @@ export function weekChanges(
   nowS: number = Date.now() / 1000,
 ): { at: number; text: string }[] {
   const out: { at: number; text: string }[] = [];
+  // A session that settled checks on several requirements is one line, not one per requirement.
+  const sessions = new Map<string, { at: number; ids: string[] }>();
   const add = (label: string, title: string, history: HistoryEntry[] | undefined) => {
     for (const e of history ?? []) {
       if (typeof e.at !== "number" || nowS - e.at > WEEK_S) continue;
+      if (!e.draft && e.check_states) {
+        const run = String(e.by ?? "a session").replace(/^session:/, "");
+        const s = sessions.get(run) ?? { at: e.at, ids: [] };
+        s.at = Math.max(s.at, e.at);
+        s.ids.push(label);
+        sessions.set(run, s);
+        continue;
+      }
       out.push({ at: e.at, text: `${label} ${title}: ${entryText(e)}` });
     }
   };
   for (const r of spec?.requirements ?? []) add(r.id, r.title || r.text, r.history);
   for (const d of spec?.decisions ?? []) add("Decision", d.title, d.history);
+  for (const [run, v] of sessions) out.push({ at: v.at, text: `${run} settled checks on ${v.ids.join(", ")}` });
   return out.sort((a, b) => b.at - a.at);
 }
 
