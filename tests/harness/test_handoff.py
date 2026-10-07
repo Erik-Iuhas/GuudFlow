@@ -70,7 +70,7 @@ def test_exported_names_js_and_python() -> None:
     js = ("export function createGame(opts) {}\nexport const step = (state, input) => state;\n"
           "export class Board {}\nfunction hidden() {}\nexport default async function run() {}\n")
     assert exported_names("web/src/game.js", js) == [
-        "createGame(opts)", "step(state, input)", "Board", "run()"]
+        "createGame(opts)", "step(state, input)", "run()", "Board"]
     py = "def load(path):\n    pass\ndef _private():\n    pass\nclass Spec:\n    pass\n"
     assert exported_names("core/spec.py", py) == ["load(path)", "Spec"]
 

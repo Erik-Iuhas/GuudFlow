@@ -72,7 +72,7 @@ const spec: SpecWire & { requirements: { history?: unknown[] }[] } = {
       { id: "R4.2", text: "bad login refused", state: "unmet", run_id: "r1" },
       { id: "R4.3", text: "lockout", state: "unknown", run_id: null },
     ],
-    history: [{ at: NOW - 3600, summary: "added a lockout check" }, { at: NOW - 30 * 86400, summary: "old news" }],
+    history: [{ at: NOW - 3600, version: 2, draft: "draft-4" }, { at: NOW - 30 * 86400, version: 1, draft: "draft-1" }],
   }],
   decisions: [],
   rules: [],
@@ -102,8 +102,9 @@ describe("WorkOverview", () => {
     expect(screen.queryByText("B1")).toBeNull();
     // Needs you: the waiting session, and the spec changes of the last week only.
     expect(within(screen.getByTestId("needs-you")).getByRole("button", { name: "Review and accept" })).toBeInTheDocument();
-    expect(await screen.findByText(/added a lockout check/)).toBeInTheDocument();
-    expect(screen.queryByText(/old news/)).toBeNull();
+    // One short line per change, never the old text: id, title, draft and new version.
+    expect(await screen.findByText(/R4 ".*": changed in draft-4 \(now v3\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/draft-1/)).toBeNull();
   });
 
   it("sends the ask box to the plan as an update, then opens the Plan tab", async () => {

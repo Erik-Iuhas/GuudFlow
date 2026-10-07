@@ -52,11 +52,14 @@ export function cardSubtext(item: BacklogItemWire): string {
 
 const WEEK_S = 7 * 24 * 3600;
 
-interface HistoryEntry { at?: number; summary?: unknown; change?: unknown; op?: unknown; text?: unknown; reason?: unknown }
+interface HistoryEntry { at?: number; version?: unknown; reason?: unknown; draft?: unknown }
 
+/** One short line per change: what changed, never the old text itself. */
 function entryText(e: HistoryEntry): string {
-  for (const v of [e.summary, e.text, e.change, e.op]) if (typeof v === "string" && v.trim()) return v.replace(/_/g, " ").trim();
-  return "changed";
+  if (typeof e.reason === "string" && e.reason.trim()) return `dropped (${e.reason.trim()})`;
+  const v = typeof e.version === "number" ? ` (now v${e.version + 1})` : "";
+  const by = typeof e.draft === "string" && e.draft ? ` in ${e.draft}` : "";
+  return `changed${by}${v}`;
 }
 
 /** Requirement and decision history entries from the last 7 days, newest first, in plain text. */
@@ -71,7 +74,7 @@ export function weekChanges(
       out.push({ at: e.at, text: `${label} "${title}": ${entryText(e)}` });
     }
   };
-  for (const r of spec?.requirements ?? []) add("Requirement", r.text, r.history);
+  for (const r of spec?.requirements ?? []) add(`Requirement ${r.id}`, r.title || r.text, r.history);
   for (const d of spec?.decisions ?? []) add("Decision", d.title, d.history);
   return out.sort((a, b) => b.at - a.at);
 }

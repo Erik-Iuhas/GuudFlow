@@ -69,7 +69,8 @@ def exported_names(path: str, text: str) -> list[str]:
                 arrow = _JS_ARROW.match(text, match.end())
                 params = arrow.group(1) if arrow else ""
             names.append(f"{name}{params or ''}")
-    return names
+    # Functions (with parameters) first: they are the contract; constants come last.
+    return sorted(names, key=lambda n: "(" not in n)
 
 
 def host_facts(numstat: Sequence[tuple[str, int, int]],

@@ -151,7 +151,8 @@ export function WorkOverview({
               <p className="m-0 text-xs text-muted-foreground">The spec has not changed this week.</p>
             ) : (
               <ul className="m-0 flex list-none flex-col gap-1 p-0 text-xs">
-                {changes.map((c, i) => <li key={i}>{c.text}</li>)}
+                {changes.slice(0, 8).map((c, i) => <li key={i}>{c.text}</li>)}
+                {changes.length > 8 && <li className="text-muted-foreground">+{changes.length - 8} more (see the Record tab)</li>}
               </ul>
             )}
           </Card>

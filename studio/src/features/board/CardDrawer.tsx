@@ -30,6 +30,51 @@ const SECTION = "grid gap-2";
 const H = "m-0 text-sm font-semibold";
 
 /** Side drawer for one card: acceptance checklist, thread, diffs, artifacts and a comment box. */
+interface HandoffData {
+  handoff?: { changed?: string; decisions?: string[]; tests?: string; next?: string };
+  facts?: { files?: [string, number, number][]; exports?: string[] };
+  source?: string;
+}
+
+/** A card's handoff (plan §11.1): what the next card reads instead of this card's conversation. */
+function HandoffBody({ data }: { data: Record<string, unknown> | undefined }) {
+  const d = (data ?? {}) as HandoffData;
+  const h = d.handoff ?? {};
+  const files = d.facts?.files ?? [];
+  return (
+    <div className="mt-1 grid gap-1 text-sm" data-testid="handoff">
+      {d.source === "fallback" && <p className="m-0 text-xs text-muted-foreground">No handoff written; the result summary stands in.</p>}
+      {h.changed && <p className="m-0"><span className="font-medium">Changed: </span>{h.changed}</p>}
+      {(h.decisions?.length ?? 0) > 0 && (
+        <div>
+          <span className="font-medium">Decisions and gotchas</span>
+          <ul className="m-0 list-disc pl-5">{h.decisions!.map((x, i) => <li key={i}>{x}</li>)}</ul>
+        </div>
+      )}
+      {h.tests && <p className="m-0"><span className="font-medium">Tests: </span>{h.tests}</p>}
+      {h.next && <p className="m-0"><span className="font-medium">For the next card: </span>{h.next}</p>}
+      {files.length > 0 && (
+        <p className="m-0 text-xs text-muted-foreground">
+          Files: {files.map(([p, a, r]) => `${p} (+${a}/−${r})`).join(", ")}
+        </p>
+      )}
+      {(d.facts?.exports?.length ?? 0) > 0 && (
+        <ul className="m-0 list-none p-0 font-mono text-[11px] text-muted-foreground">
+          {Object.entries(
+            d.facts!.exports!.reduce<Record<string, string[]>>((acc, e) => {
+              const [file, name] = e.split(": ", 2);
+              (acc[file] ??= []).push(name ?? "");
+              return acc;
+            }, {}),
+          ).map(([file, names]) => (
+            <li key={file}><span className="text-foreground">{file}</span>: {names.join(", ")}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function CardDrawer({ runId, cardId, onClose }: Props) {
   const card = useRunStore((s) => (cardId ? s.cards[cardId] : undefined));
   return (
@@ -118,7 +163,11 @@ function DrawerBody({ runId, cardId }: { runId: string; cardId: string }) {
                   <span className="font-medium">{THREAD_KIND_LABEL[entry.kind] ?? entry.kind}</span>
                   <span>{entry.author}</span>
                 </div>
-                <div className="whitespace-pre-wrap break-words">{entry.text}</div>
+                {entry.kind === "handoff" ? (
+                  <HandoffBody data={entry.data} />
+                ) : (
+                  <div className="whitespace-pre-wrap break-words">{entry.text}</div>
+                )}
               </li>
             ))}
           </ol>

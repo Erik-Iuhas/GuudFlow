@@ -139,7 +139,12 @@ function ItemRow({
         </div>
         {item.acceptance.length > 0 && (
           <ul className="m-0 mt-1 pl-4 text-sm text-muted-foreground">
-            {item.acceptance.map((a) => <li key={a}>{a}</li>)}
+            {item.acceptance.map((a) => {
+              const m = a.match(/^(R\d+\.\d+):\s*(.*)$/s);
+              return m ? (
+                <li key={a}><span className="mr-1 font-mono text-xs">{m[1]}</span>{m[2]}</li>
+              ) : <li key={a}>{a}</li>;
+            })}
           </ul>
         )}
         {last && (

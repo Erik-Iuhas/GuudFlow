@@ -150,8 +150,10 @@ function RequirementNode({ r, items }: { r: RequirementWire; items: BacklogItemW
                 </span>
                 <span className="font-mono text-muted-foreground">{c.id}</span>
                 <MethodBadge method={c.method} />
-                <span className="min-w-0 flex-1">{c.text}</span>
-                {c.test && <code className="font-mono text-[10px] text-muted-foreground">{c.test}</code>}
+                <span className="min-w-0 flex-1">
+                  {c.text}
+                  {c.test && <code className="block font-mono text-[10px] text-muted-foreground">test: {c.test}</code>}
+                </span>
               </li>
             );
           })}

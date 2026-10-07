@@ -85,6 +85,7 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
             draft={draft}
             spec={spec.data}
             team={project.data?.agents}
+            items={backlog.data}
             busy={tick.isPending || approve.isPending || discard.isPending}
             error={panelError ? message(panelError) : null}
             onTick={(cid, accepted) => tick.mutate({ cid, accepted })}

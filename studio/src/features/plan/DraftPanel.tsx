@@ -14,6 +14,7 @@ import {
   type ChangeView,
   type CheckRow,
   type DiffPiece,
+  type DraftItem,
   type TeamMember,
 } from "./model";
 
@@ -23,6 +24,8 @@ export interface DraftPanelProps {
   spec: SpecWire | undefined;
   /** The project's current team, used to show the old values of role edits. */
   team?: TeamMember[];
+  /** Backlog items, used to show what an item edit changes. */
+  items?: DraftItem[];
   busy?: boolean;
   error?: string | null;
   onTick: (cid: string, accepted: boolean | null) => void;
@@ -44,6 +47,15 @@ export function MethodBadge({ method }: { method: CheckMethod | null | undefined
 }
 
 export function Diff({ pieces }: { pieces: DiffPiece[] }) {
+  if (pieces.length === 2 && pieces[0].kind === "del" && pieces[1].kind === "add" && pieces[0].text.length > 60) {
+    // Mostly rewritten: old and new as two blocks read better than a word diff.
+    return (
+      <span className="grid gap-1">
+        <del className="bg-status-failed/10 text-muted-foreground">{pieces[0].text}</del>
+        <ins className="bg-status-complete/15 no-underline">{pieces[1].text}</ins>
+      </span>
+    );
+  }
   return (
     <>
       {pieces.map((p, i) =>
@@ -89,13 +101,15 @@ function CheckList({ rows }: { rows: CheckRow[] }) {
   return (
     <ul className="mt-1 flex flex-col gap-1 text-xs">
       {rows.map((k) => (
-        <li key={k.id} className="flex flex-wrap items-baseline gap-1.5" data-testid="check-row">
-          <span className="font-mono text-muted-foreground">{k.id}</span>
-          <MethodBadge method={k.method} />
-          <span className="min-w-0 flex-1">
-            <Diff pieces={k.text} />
+        <li key={k.id} className="grid grid-cols-[auto_1fr] gap-x-1.5" data-testid="check-row">
+          <span className="flex items-baseline gap-1.5">
+            <span className="font-mono text-muted-foreground">{k.id}</span>
+            <MethodBadge method={k.method} />
           </span>
-          {k.test && <code className="font-mono text-[10px] text-muted-foreground">{k.test}</code>}
+          <span className="min-w-0">
+            <Diff pieces={k.text} />
+            {k.test && <code className="block font-mono text-[10px] text-muted-foreground">test: {k.test}</code>}
+          </span>
         </li>
       ))}
     </ul>
@@ -148,6 +162,26 @@ function Details({ v }: { v: ChangeView }) {
         </table>
       )}
       {v.checks.length > 0 && <CheckList rows={v.checks} />}
+      {v.itemLines.length > 0 && (
+        <ul className="mt-1 flex flex-col gap-0.5 text-xs" data-testid="item-lines" aria-label="Acceptance">
+          {v.itemLines.map((l, i) => {
+            const body = (
+              <>
+                {l.ref && <span className="mr-1 font-mono text-muted-foreground">{l.ref}</span>}
+                {l.text}
+              </>
+            );
+            return (
+              <li key={i} className="flex gap-1.5">
+                <span aria-hidden className="w-3 shrink-0 font-mono">{l.kind === "add" ? "+" : l.kind === "del" ? "−" : ""}</span>
+                {l.kind === "add" ? <ins className="bg-status-complete/15 no-underline">{body}</ins>
+                  : l.kind === "del" ? <del className="text-muted-foreground">{body}</del>
+                  : <span className="text-muted-foreground">{body}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {itemBits.length > 0 && <p className="mt-1 text-xs text-muted-foreground">{itemBits.join(" · ")}</p>}
       {v.section === "Decisions" && c.reason && <p className="mt-1 text-xs text-muted-foreground">{c.reason}</p>}
       {v.section === "Decisions" && (c.binding || serves) && (
@@ -235,10 +269,10 @@ function SectionList({ views, focusedCid, onTick }: { views: ChangeView[]; focus
  * theme tickable as a whole, then by section; structured diffs for statements, params and
  * checks. Keyboard: j/k move, y/n accept or reject the focused change.
  */
-export function DraftPanel({ draft, spec, team, busy, error, onTick, onApprove, onDiscard }: DraftPanelProps) {
+export function DraftPanel({ draft, spec, team, items, busy, error, onTick, onApprove, onDiscard }: DraftPanelProps) {
   const counts = draftCounts(draft);
   const blocker = approveBlocker(counts);
-  const sectionGroups = groupChanges(draft, spec, team);
+  const sectionGroups = groupChanges(draft, spec, team, items);
   const views = useMemo(() => sectionGroups.flatMap((g) => g.changes), [sectionGroups]);
   const themes = themeGroups(views);
   const ordered = themes.flatMap((t) => t.changes);

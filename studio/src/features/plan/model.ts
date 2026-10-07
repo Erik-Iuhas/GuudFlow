@@ -38,6 +38,14 @@ export interface DiffPiece {
   kind: "same" | "add" | "del";
 }
 
+/** Word diff, or the old and new text as two blocks when most of it was rewritten. */
+export function readableDiff(a: string, b: string): DiffPiece[] {
+  const d = wordDiff(a, b);
+  const kept = d.filter((p) => p.kind === "same").reduce((n, p) => n + p.text.trim().length, 0);
+  if (a && kept < 0.4 * Math.max(a.length, b.length)) return [{ text: a, kind: "del" }, { text: b, kind: "add" }];
+  return d;
+}
+
 /** Word-level diff (LCS over words and the spaces between them). */
 export function wordDiff(a: string, b: string): DiffPiece[] {
   const x = a.split(/(\s+)/).filter((t) => t !== "");
@@ -118,7 +126,51 @@ export interface ChangeView {
   params: ParamRow[];
   /** add_check / edit_check / remove_check, and the checks of a new requirement. */
   checks: CheckRow[];
+  /** add_item / edit_item: acceptance lines, check references resolved, marked added/removed. */
+  itemLines: ItemLine[];
   change: ChangeWire;
+}
+
+export interface ItemLine {
+  /** The check id for a reference ("R12.1"), else null for the item's own line. */
+  ref: string | null;
+  text: string;
+  kind: "same" | "add" | "del";
+}
+
+/** Minimal backlog item shape the draft view needs (features/work/api BacklogItemWire). */
+export interface DraftItem {
+  id: string;
+  title: string;
+  acceptance: string[];
+}
+
+const CHECK_REF = /^(R\d+\.\d+)(?::\s*(.*))?$/s;
+
+function resolveLine(line: string, spec: SpecWire | undefined): ItemLine {
+  const m = line.trim().match(CHECK_REF);
+  if (!m) return { ref: null, text: line, kind: "same" };
+  const req = spec?.requirements.find((r) => r.id === m[1].split(".")[0]);
+  const check = req?.checks.find((k) => k.id === m[1]);
+  return { ref: m[1], text: check?.text ?? m[2] ?? "(not in the spec)", kind: "same" };
+}
+
+function itemLines(c: ChangeWire, spec: SpecWire | undefined, items: DraftItem[] | undefined): ItemLine[] {
+  if (c.op !== "add_item" && !(c.op === "edit_item" && c.acceptance)) return [];
+  const next = (c.acceptance ?? []).map((l) => resolveLine(l, spec));
+  if (c.op === "add_item") {
+    // Checks of the requirements it serves are added by reference on approval.
+    const served = (c.serves ?? []).flatMap((rid) => spec?.requirements.find((r) => r.id === rid)?.checks ?? []);
+    return [...served.map((k) => ({ ref: k.id, text: k.text, kind: "add" as const })), ...next.map((l) => ({ ...l, kind: "add" as const }))];
+  }
+  const old = (items?.find((i) => i.id === c.id)?.acceptance ?? []).map((l) => resolveLine(l, spec));
+  const key = (l: ItemLine) => l.ref ?? l.text.trim().toLowerCase();
+  const oldKeys = new Set(old.map(key));
+  const newKeys = new Set(next.map(key));
+  return [
+    ...next.map((l) => ({ ...l, kind: oldKeys.has(key(l)) ? ("same" as const) : ("add" as const) })),
+    ...old.filter((l) => !newKeys.has(key(l))).map((l) => ({ ...l, kind: "del" as const })),
+  ];
 }
 
 const FIELD_OPS = new Set(["set_title", "set_statement", "set_param", "remove_param", "add_check", "edit_check", "remove_check"]);
@@ -158,7 +210,7 @@ export function refLabel(ref: string): string {
 }
 
 function editedFields(c: ChangeWire): string {
-  const skip = new Set(["op", "id", "ref"]);
+  const skip = new Set(["op", "id", "ref", "group"]);
   const names = Object.entries(c)
     .filter(([k, v]) => !skip.has(k) && v !== undefined && v !== null)
     .map(([k]) => k);
@@ -233,7 +285,7 @@ function summaryOf(c: ChangeWire): string {
     case "add_item":
       return c.title ?? "";
     case "edit_item":
-      return c.title ?? editedFields(c);
+      return editedFields(c);
     default:
       return c.op;
   }
@@ -246,7 +298,7 @@ function structured(c: ChangeWire, spec: SpecWire | undefined) {
   const params: ParamRow[] = [];
   const checks: CheckRow[] = [];
   if ((c.op === "set_statement" || c.op === "edit_requirement") && c.text !== undefined && c.text !== null)
-    textDiff = wordDiff(req?.text ?? "", c.text);
+    textDiff = readableDiff(req?.text ?? "", c.text);
   if (c.op === "edit_requirement" && c.checks && req) {
     // An older whole-list edit: match checks by text; the rest are added or removed.
     const next = c.checks.map((k) => checkSpec(k).text.trim());
@@ -285,15 +337,16 @@ function structured(c: ChangeWire, spec: SpecWire | undefined) {
     checks.push({
       id: c.id ?? "",
       method: (c.method ?? old?.method ?? null) as CheckMethod | null,
-      text: c.op === "remove_check" ? [{ text: before, kind: "del" }] : c.text !== undefined && c.text !== null ? wordDiff(before, c.text) : [{ text: before, kind: "same" }],
+      text: c.op === "remove_check" ? [{ text: before, kind: "del" }] : c.text !== undefined && c.text !== null ? readableDiff(before, c.text) : [{ text: before, kind: "same" }],
       test: (c.test ?? old?.test ?? null) as string | null,
     });
   }
   return { reqId, reqTitle: req?.title ?? (c.op === "add_requirement" ? (c.title ?? null) : null), textDiff, params, checks };
 }
 
-export function viewChange(dc: DraftChangeWire, spec: SpecWire | undefined, team?: TeamMember[]): ChangeView {
+export function viewChange(dc: DraftChangeWire, spec: SpecWire | undefined, team?: TeamMember[], items?: DraftItem[]): ChangeView {
   const c = dc.change;
+  const oldItem = c.op === "edit_item" ? items?.find((i) => i.id === c.id) : undefined;
   const name = c.id ?? c.role ?? (c.ref ? refLabel(c.ref) : dc.cid);
   return {
     cid: dc.cid,
@@ -308,6 +361,8 @@ export function viewChange(dc: DraftChangeWire, spec: SpecWire | undefined, team
     teamFields: teamFieldChanges(c, team),
     group: c.group ?? null,
     ...structured(c, spec),
+    ...(oldItem && c.title ? { textDiff: wordDiff(oldItem.title, c.title) } : {}),
+    itemLines: itemLines(c, spec, items),
     change: c,
   };
 }
@@ -332,8 +387,9 @@ export function groupChanges(
   draft: DraftWire,
   spec: SpecWire | undefined,
   team?: TeamMember[],
+  items?: DraftItem[],
 ): { section: Section; changes: ChangeView[] }[] {
-  const views = draft.changes.map((c) => viewChange(c, spec, team));
+  const views = draft.changes.map((c) => viewChange(c, spec, team, items));
   return SECTIONS.map((section) => ({ section, changes: views.filter((v) => v.section === section) })).filter(
     (g) => g.changes.length > 0,
   );
