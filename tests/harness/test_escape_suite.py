@@ -162,7 +162,7 @@ async def test_sandbox_contains_every_probe(tmp_path: Path, fake_llm: FakeLLM,
     assert r["mcp_read_board"]["status"] == 200
     assert r["mcp_tools_list"] == sorted({"ask_human", "post_note", "read_board", "report_progress",
                                           "request_package", "submit_result", "changes",
-                                          "history"}), r["mcp_tools_list"]
+                                          "history", "notebook"}), r["mcp_tools_list"]
     for key in ("mcp_web_search", "mcp_screenshot"):
         call = r[key]
         assert "is not available to role 'builder'" in call["body"], call
