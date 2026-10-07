@@ -59,6 +59,13 @@ describe("requirement page", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Assumed/ }));
     expect(screen.getAllByTestId(/^req-R/).map((e) => e.dataset.testid)).toEqual(["req-R4"]);
   });
+
+  it("confirms a requirement assumed as a whole", () => {
+    const onEdit = vi.fn();
+    wrap(<SpecPageView spec={{ ...spec, requirements: [{ ...old, assumed: true }] }} onEdit={onEdit} />);
+    fireEvent.click(within(screen.getByTestId("assumed-req")).getByRole("button", { name: "Confirm" }));
+    expect(onEdit).toHaveBeenCalledWith({ op: "edit_requirement", id: "R1", assumed: false });
+  });
 });
 
 describe("item history", () => {

@@ -92,7 +92,7 @@ function AssumedValues({ r, onEdit }: { r: RequirementWire; onEdit?: (c: ChangeW
       {list.map((a) => (
         <div key={a.key ?? "req"} className="flex flex-wrap items-center gap-2 text-sm" data-testid={`assumed-${a.key ?? "req"}`}>
           <span className="min-w-0 flex-1">{a.key ? <><span className="font-mono">{a.key}</span> = {a.value}</> : "the whole requirement"}</span>
-          {onEdit && editing !== a.key && (
+          {onEdit && !(a.key && editing === a.key) && (
             <>
               <Button size="sm" variant="outline" className="h-7"
                 onClick={() => onEdit(a.key === null || a.raw === null ? { op: "edit_requirement", id: r.id, assumed: false }
@@ -127,7 +127,7 @@ const STATE = {
 function RequirementDetail({ r, onEdit }: { r: RequirementWire; onEdit?: (c: ChangeWire) => void }) {
   const events = originEvents(r);
   return (
-    <article className="grid content-start gap-4" data-testid="req-detail" aria-label={`${r.id} ${r.title || r.text}`}>
+    <article className="grid min-w-0 content-start gap-4" data-testid="req-detail" aria-label={`${r.id} ${r.title || r.text}`}>
       <header className="grid gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded border border-primary/40 px-1.5 font-mono text-sm text-primary">{r.id}</span>
@@ -230,7 +230,7 @@ export function SpecPageView({ spec, items = [], onEdit }: { spec: SpecWire; ite
   const count = (f: Filter) => active.filter((r) => (f === "unmet" ? isUnmet(r) : f === "assumed" ? isAssumed(r) : true)).length;
   return (
     <div className="grid gap-4 min-[1100px]:grid-cols-[17rem_minmax(0,1fr)_18rem]">
-      <nav aria-label="Requirements" className="grid content-start gap-1">
+      <nav aria-label="Requirements" className="grid min-w-0 content-start gap-1">
         <div role="group" aria-label="Filter requirements" className="mb-2 flex flex-wrap gap-1">
           {(["all", "unmet", "assumed"] as const).map((f) => (
             <Button key={f} size="sm" className="h-7 px-2 text-xs" variant={filter === f ? "default" : "outline"} aria-pressed={filter === f} onClick={() => setFilter(f)}>
@@ -244,12 +244,12 @@ export function SpecPageView({ spec, items = [], onEdit }: { spec: SpecWire; ite
           return (
             <button key={r.id} type="button" data-testid={`req-${r.id}`} aria-current={current?.id === r.id || undefined}
               onClick={() => setPicked(r.id)}
-              className={cn("flex items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm",
+              className={cn("flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-md border-0 px-2 py-1.5 text-left text-sm",
                 current?.id === r.id ? "bg-accent text-foreground" : "bg-transparent text-muted-foreground hover:bg-accent/50")}>
-              <span className={p.cls} aria-label={p.label}>{p.mark}</span>
-              <span className="font-mono text-xs">{r.id}</span>
+              <span className={cn("shrink-0", p.cls)} aria-label={p.label}>{p.mark}</span>
+              <span className="shrink-0 font-mono text-xs">{r.id}</span>
               <span className="min-w-0 flex-1 truncate">{r.title || r.text}</span>
-              {isAssumed(r) && <span className="text-[11px] text-status-waiting">assumed</span>}
+              {isAssumed(r) && <span className="shrink-0 text-[11px] text-status-waiting">assumed</span>}
             </button>
           );
         })}
