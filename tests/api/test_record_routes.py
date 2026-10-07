@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from core.plan_drafts import PlanDrafts, PlanTurn
+from tests.spec_fixtures import with_reasons
 
 
 async def _project(client, auth_header, data_root: Path) -> None:
@@ -13,11 +14,11 @@ async def _project(client, auth_header, data_root: Path) -> None:
                           headers=auth_header)
     assert r.status_code in (200, 201)
     pd = PlanDrafts(data_root, "p1")
-    turn = PlanTurn.model_validate({"reply": "ok", "changes": [
+    turn = PlanTurn.model_validate(with_reasons({"reply": "ok", "changes": [
         {"op": "add_requirement", "ref": "new:1", "text": "Users can sign in", "kind": "feature",
          "priority": "must", "checks": ["login works"]},
         {"op": "add_decision", "ref": "new:2", "title": "Storage", "choice": "SQLite",
-         "reason": "boring and testable, no server to run", "serves": ["new:1"]}]})
+         "reason": "boring and testable, no server to run", "serves": ["new:1"]}]}))
     d = pd.merge_pm_turn(pd.open_draft(), turn, False)
     for c in d.changes:
         pd.set_change(d.id, c.cid, True)

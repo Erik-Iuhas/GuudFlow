@@ -9,10 +9,11 @@ import pytest
 from core.backlog import Backlog
 from core.plan_drafts import PlanDrafts, PlanTurn, parse_change, validate_turn
 from core.spec import Check, Requirement, Spec, derive_title, infer_method, resolve_acceptance
+from tests.spec_fixtures import with_reasons
 
 
 def _turn(*changes: dict[str, Any]) -> PlanTurn:
-    return PlanTurn.model_validate({"reply": "ok", "changes": list(changes)})
+    return PlanTurn.model_validate(with_reasons({"reply": "ok", "changes": list(changes)}))
 
 
 def _approve_all(pd: PlanDrafts, *changes: dict[str, Any]) -> Any:

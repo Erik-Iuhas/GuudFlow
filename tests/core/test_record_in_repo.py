@@ -11,6 +11,7 @@ import pytest
 from core.project_repo import ProjectRepo, ProjectRepoError
 from core.project_runs import decide_run, keeps_record_in_repo
 from tests.spec_fixtures import seed_spec
+from tests.spec_fixtures import with_reasons
 
 
 def _submit(data_root: Path, run_id: str = "run_a", project_id: str = "p1") -> ProjectRepo:
@@ -81,12 +82,12 @@ def test_an_approved_draft_rewrites_the_record_with_structured_fields(tmp_path: 
     repo.ensure(None)
     _opt_in(tmp_path, True)
     drafts = PlanDrafts(tmp_path, "p1")
-    d = drafts.merge_pm_turn(drafts.open_draft(), PlanTurn.model_validate({"reply": "ok", "changes": [
+    d = drafts.merge_pm_turn(drafts.open_draft(), PlanTurn.model_validate(with_reasons({"reply": "ok", "changes": [
         {"op": "add_requirement", "ref": "new:1", "title": "Default dash",
          "text": "Every run starts with a dash.", "kind": "feature", "priority": "must",
          "params": [{"key": "charges", "value": 2, "assumed": True}],
          "checks": [{"text": "a new run has 2 charges", "method": "unit",
-                     "test": "tests/dash.test.js::charges"}]}]}), False)
+                     "test": "tests/dash.test.js::charges"}]}]})), False)
     drafts.set_change(d.id, d.changes[0].cid, True)
     drafts.approve(d.id, "erik")
 

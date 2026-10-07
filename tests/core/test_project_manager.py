@@ -13,6 +13,7 @@ from core.llm.client import LLMResponse, MockLLMClient, MockTurn, ToolCall
 from core.plan_drafts import PlanDrafts
 from core.project_manager import TOOL_NAME, ProjectManager, ProjectManagerError, turn_tool
 from core.project_repo import ProjectRepo
+from tests.spec_fixtures import with_reasons
 
 DOC = {"goal": "A recipe box app", "start_mode": "spec_first"}
 REASON = "boring and testable, no server to run"
@@ -30,8 +31,8 @@ def dec(ref: str = "new:2") -> dict[str, Any]:
 
 def call(reply: str = "Done.", changes: list[dict[str, Any]] | None = None,
          **extra: Any) -> MockTurn:
-    return MockTurn(tool_calls=[ToolCall("1", TOOL_NAME, {
-        "reply": reply, "changes": changes or [], **extra})])
+    return MockTurn(tool_calls=[ToolCall("1", TOOL_NAME, with_reasons({
+        "reply": reply, "changes": changes or [], **extra}))])
 
 
 def pm(tmp_path: Path, *turns: MockTurn, doc: dict[str, Any] | None = None

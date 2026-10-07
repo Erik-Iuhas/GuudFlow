@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Collection, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -321,10 +322,26 @@ _REF_KIND = {"add_requirement": "requirement", "add_decision": "decision",
              "add_role": "role"}
 
 
+class ChangeGroup(_Model):
+    """Why a set of changes is proposed (plan §12): one reason, in plain words.
+
+    Every change names its group in `group`. A person reviews a draft reason by reason: the
+    quote or finding that asked for it, what changes for them, and the changes themselves.
+    """
+
+    name: str = Field(min_length=1, max_length=40)       # what the changes' `group` says
+    summary: str = Field(min_length=10, max_length=400)  # what changes, for a person
+    because: str = Field(min_length=10, max_length=400)  # the reason
+    source: Literal["person", "session", "pm"] = "pm"    # who asked for it
+    quote: str | None = Field(default=None, max_length=300)  # the exact words that asked
+
+
 class PlanTurn(_Model):
     """The project manager's tool payload for one turn."""
 
-    # `changes` comes first so a model writes the part that matters before the prose.
+    # The reasons come first, then the changes, so the model says why before what; the
+    # prose reply comes last.
+    groups: list[ChangeGroup] = Field(default_factory=list, max_length=MAX_CHANGES)
     changes: list[Change] = Field(default_factory=list, max_length=MAX_CHANGES)
     reply: str
     questions: list[str] = Field(default_factory=list)
@@ -362,16 +379,52 @@ def _check_req_id(check_id: str) -> str:
 
 
 # ── validation ──────────────────────────────────────────────────────────────
-def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # Any: JSON doc
-                  team: list[dict[str, Any]] | None = None) -> list[str]:  # Any: agent rows
-    """Problems with a PM turn, one line each (empty when it is fine).
+def _plain(text: str) -> str:
+    """Casefolded words only, for matching a quote against what was said."""
+    return " ".join(re.findall(r"[\w.%$-]+", text.casefold()))
 
-    Checks that ids exist, refs resolve within the turn, dependencies have no cycle, a
-    decision's reason is long enough, a requirement has a check (unless a non-goal) and no
-    edit touches a field a human pinned. `team` is the project's current `agents` (empty when
-    unknown); team ops are checked against it (see `_validate_team`).
+
+def validate_reasons(turn: PlanTurn, sources: Sequence[str] | None = None,
+                     known: Collection[str] = ()) -> list[str]:
+    """Every change belongs to a described reason; quotes are words that were really said.
+
+    `sources` are the texts a quote may come from (the people's messages and the session
+    report); None skips the quote check. `known` are reasons the open draft already describes.
     """
     problems: list[str] = []
+    names = [g.name for g in turn.groups]
+    for dup in sorted({n for n in names if names.count(n) > 1}):
+        problems.append(f"groups: {dup!r} is described twice")
+    known = set(names) | set(known)
+    for n, ch in enumerate(turn.changes, 1):
+        if not ch.group:
+            problems.append(f"change {n} ({ch.op}): set `group` to the name of the reason it "
+                            f"belongs to (describe each reason in `groups`)")
+        elif ch.group not in known:
+            problems.append(f"change {n} ({ch.op}): group {ch.group!r} is not described in "
+                            f"`groups`")
+    if sources is not None:
+        said = [_plain(t) for t in sources]
+        for g in turn.groups:
+            if g.quote and g.source != "pm" and not any(_plain(g.quote) in t for t in said):
+                problems.append(f"groups: the quote of {g.name!r} is not in the conversation "
+                                f"or the session report; quote exact words or leave it out")
+    return problems
+
+
+def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # Any: JSON doc
+                  team: list[dict[str, Any]] | None = None,  # Any: agent rows
+                  sources: Sequence[str] | None = None,
+                  known_groups: Collection[str] = ()) -> list[str]:
+    """Problems with a PM turn, one line each (empty when it is fine).
+
+    Checks that every change carries a described reason (`validate_reasons`), ids exist, refs
+    resolve within the turn, dependencies have no cycle, a decision's reason is long enough,
+    a requirement has a check (unless a non-goal) and no edit touches a field a human pinned.
+    `team` is the project's current `agents` (empty when unknown); team ops are checked
+    against it (see `_validate_team`).
+    """
+    problems: list[str] = validate_reasons(turn, sources, known_groups)
     refs: dict[str, str] = {}
     for n, ch in enumerate(turn.changes, 1):
         ref = getattr(ch, "ref", None)
@@ -595,7 +648,7 @@ def _validate_team(turn: PlanTurn, team: list[dict[str, Any]]) -> list[str]:  # 
             if ch.role not in existing and ch.role not in added:
                 problems.append(f"{where}: unknown role {ch.role}")
                 continue
-            if not _set_fields(ch, ("op", "role", "reason")):
+            if not _set_fields(ch, ("op", "role", "reason", "group")):
                 problems.append(f"{where}: sets no field")
             if ch.role_type is not None and ch.role_type not in ROLE_TYPES:
                 problems.append(f"{where}: role_type {ch.role_type!r} is not one of "
@@ -687,6 +740,13 @@ class Draft:
     approved_by: str | None = None
     version: int | None = None                     # the spec version approval produced
     created: dict[str, str] = field(default_factory=dict)
+    # The reasons (dumped ChangeGroup) by name; each change's `group` names one.
+    groups: dict[str, dict[str, Any]] = field(default_factory=dict)  # Any: JSON rows
+
+    def why(self, change: DraftChange) -> dict[str, Any] | None:  # Any: JSON row
+        """The reason a change belongs to, if it has one."""
+        name = change.change.get("group")
+        return self.groups.get(name) if isinstance(name, str) else None
 
     def to_dict(self) -> dict[str, Any]:  # Any: JSON row
         """JSON form."""
@@ -811,6 +871,9 @@ class PlanDrafts:
                                         by="pm"))
                 d.next_cid += 1
             d.changes = kept
+            d.groups.update({g.name: g.model_dump() for g in turn.groups})
+            used = {c.change.get("group") for c in d.changes}
+            d.groups = {k: v for k, v in d.groups.items() if k in used}
             row.clear()
             row.update(d.to_dict())
             return d
@@ -831,8 +894,14 @@ class PlanDrafts:
         with self.db.drafts_doc() as doc:
             row = next(r for r in doc["drafts"] if r.get("status") == "open")
             d = Draft.from_dict(row)
-            dc = DraftChange(cid=f"c{d.next_cid}", change=parsed.model_dump(mode="json"),
-                             accepted=None, by=by)
+            dumped = parsed.model_dump(mode="json")
+            name = dumped.get("group") or f"Team change from the {by}"[:40]
+            dumped["group"] = name
+            d.groups.setdefault(name, {
+                "name": name, "summary": f"The {by} suggests a change to the team.",
+                "because": str(dumped.get("reason") or "no reason given"), "source": "session",
+                "quote": None})
+            dc = DraftChange(cid=f"c{d.next_cid}", change=dumped, accepted=None, by=by)
             d.next_cid += 1
             d.changes.append(dc)
             row.clear()
@@ -871,15 +940,24 @@ class PlanDrafts:
         with self.db.transaction() as txn:
             return self._approve(txn, _draft_row(txn.drafts, draft_id), by, pin=False)
 
-    def apply_direct(self, change: Any, by: str) -> ApproveResult:  # Any: a `Change` member
+    def apply_direct(self, change: Any, by: str,  # Any: a `Change` member
+                     why: str | None = None) -> ApproveResult:
         """A human's direct edit: a one-change draft approved on the spot.
 
-        The fields the human edited are recorded as pinned on the object.
+        The fields the human edited are recorded as pinned on the object; `why` (the person's
+        own words) is kept as the change's reason.
         """
         with self.db.transaction() as txn:
             row = self._new_draft(txn)
             d = Draft.from_dict(row)
-            d.changes = [DraftChange(cid="c1", change=change.model_dump(mode="json"),
+            dumped = change.model_dump(mode="json")
+            dumped["group"] = "Your edit"
+            target = getattr(change, "id", None) or getattr(change, "title", None) or change.op
+            d.groups = {"Your edit": {
+                "name": "Your edit", "summary": f"Edited {target} by hand.",
+                "because": (why or "").strip() or "Edited by hand.", "source": "person",
+                "quote": (why or "").strip() or None}}
+            d.changes = [DraftChange(cid="c1", change=dumped,
                                      accepted=True, by="human", touched=True)]
             d.next_cid = 2
             row.clear()
@@ -910,7 +988,7 @@ class PlanDrafts:
         if not chosen:
             raise PlanDraftError(f"{d.id} has no ticked change; discard it instead")
         now = time.time()
-        applier = _Applier(txn, d.id, by, pin, now)
+        applier = _Applier(txn, d.id, by, pin, now, d.groups)
         created = applier.apply(chosen)
         txn.spec["version"] = int(txn.spec.get("version", 0)) + 1
         d.status, d.closed_at, d.approved_by = "approved", now, by
@@ -924,8 +1002,10 @@ class PlanDrafts:
 class _Applier:
     """Applies a draft's ticked changes to the documents of one transaction."""
 
-    def __init__(self, txn: WorkTxn, draft_id: str, by: str, pin: bool, now: float) -> None:
+    def __init__(self, txn: WorkTxn, draft_id: str, by: str, pin: bool, now: float,
+                 groups: dict[str, dict[str, Any]] | None = None) -> None:  # Any: JSON rows
         self.txn, self.draft_id, self.by, self.pin, self.now = txn, draft_id, by, pin, now
+        self.groups = groups or {}
         self.ids: dict[str, str] = {}
         self.current: DraftChange | None = None
         self.created: dict[str, str] = {}
@@ -936,7 +1016,8 @@ class _Applier:
         item edits, item dependencies) so refs may point forward; any failure raises
         PlanDraftError."""
         parsed = [(dc, parse_change(dc.change)) for dc in chosen]
-        self.team_changes = [ch.model_dump(mode="json", exclude_none=True) for _, ch in parsed
+        self.team_changes = [ch.model_dump(mode="json", exclude_none=True, exclude={"group"})
+                             for _, ch in parsed
                              if isinstance(ch, (AddRole, EditRole, RemoveRole))]
         phases: list[tuple[type, ...]] = [
             (AddRequirement, EditRequirement, DropRequirement),
@@ -997,6 +1078,23 @@ class _Applier:
     def _who(self, dc: DraftChange) -> str:
         return "human" if dc.by == "human" else "pm"
 
+    def _why(self) -> dict[str, Any]:  # Any: JSON row
+        """The current change's reason, as stored on history rows (empty when it has none)."""
+        name = self.current.change.get("group") if self.current else None
+        g = self.groups.get(name) if isinstance(name, str) else None
+        if g is None:
+            return {}
+        return {"why": {k: g.get(k) for k in ("name", "summary", "because", "source", "quote")}}
+
+    def _item_history(self, item_id: str, change: str) -> None:
+        """Note on an item what a draft changed and why."""
+        row = next((r for r in self.txn.backlog.get("items", []) if r.get("id") == item_id),
+                   None)
+        if row is not None:
+            row.setdefault("history", []).append({"draft": self.draft_id, "at": self.now,
+                                                  "by": self.by, "change": change,
+                                                  **self._why()})
+
     # ── one change ──────────────────────────────────────────────────────────
     def _one(self, dc: DraftChange, ch: Any) -> None:  # Any: a Change member
         spec = self.txn.spec
@@ -1010,7 +1108,9 @@ class _Applier:
                               title=ch.title.strip() or derive_title(ch.text),
                               params=[Param(**p.model_dump()) for p in ch.params],
                               rationale=ch.rationale.strip(), assumed=ch.assumed,
-                              experiment=ch.experiment, source=self._who(dc))
+                              experiment=ch.experiment, source=self._who(dc),
+                              origin={"draft": self.draft_id, "at": self.now, "by": self.by,
+                                      **self._why()})
             spec.setdefault("requirements", []).append(req.to_dict())
         elif isinstance(ch, EditRequirement):
             self._edit_requirement(ch)
@@ -1050,11 +1150,15 @@ class _Applier:
             self._add_item(dc, ch)
         elif isinstance(ch, EditItem):
             fields = {k: v for k, v in ch.model_dump().items()
-                      if k not in ("op", "id", "depends_on") and v is not None}
+                      if k not in ("op", "id", "depends_on", "group") and v is not None}
             if "serves" in fields:
                 fields["serves"] = self._serves(fields["serves"])
             if fields:
                 update_in_doc(self.txn.backlog, ch.id, pin=self.pin, **fields)
+            if fields or ch.depends_on is not None:
+                self._item_history(ch.id, "edited: " + ", ".join(
+                    sorted(set(fields) | ({"depends_on"} if ch.depends_on is not None
+                                          else set()))))
         elif isinstance(ch, DropItem):
             row = next((r for r in self.txn.backlog.get("items", []) if r.get("id") == ch.id),
                        None)
@@ -1066,7 +1170,7 @@ class _Applier:
             row["status"], row["updated_at"] = "dropped", self.now
             row.setdefault("history", []).append(
                 {"decision": f"dropped by {self.by}: {ch.reason.strip()}", "at": self.now,
-                 "draft": self.draft_id})
+                 "draft": self.draft_id, "change": "dropped", **self._why()})
 
     def _field_op(self, ch: Any) -> None:  # Any: a field-level Change member
         """Apply one field-level requirement op (plan §11.2)."""
@@ -1120,7 +1224,7 @@ class _Applier:
 
     def _push_history(self, row: dict[str, Any], **extra: Any) -> None:  # Any: JSON row
         entry = {"version": row.get("version", 1), "at": self.now, "by": self.by,
-                 "draft": self.draft_id}
+                 "draft": self.draft_id, **self._why()}
         for key in ("title", "text", "params", "checks", "priority", "kind", "assumed"):
             if key in row:
                 entry[key] = ([dict(c) for c in row[key]] if key in ("checks", "params")
@@ -1185,6 +1289,7 @@ class _Applier:
                           source=self._who(dc), serves=serves)
         self.ids[ch.ref] = item.id
         self.created[ch.ref] = item.id
+        self._item_history(item.id, "created")
 
 
 def _follow_title(row: dict[str, Any], new_text: str) -> None:  # Any: JSON row

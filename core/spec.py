@@ -137,6 +137,8 @@ class Requirement:
     history: list[dict[str, Any]] = field(default_factory=list)  # Any: JSON rows
     # QUESTION: not in plan §2; needed for "an edit to a pinned field is refused" (§3).
     pinned_fields: list[str] = field(default_factory=list)
+    # Where it came from: {draft, at, by, because, quote, source} (plan §12).
+    origin: dict[str, Any] | None = None  # Any: JSON row
 
     def to_dict(self) -> dict[str, Any]:  # Any: JSON row
         """JSON form."""
@@ -164,7 +166,8 @@ class Requirement:
             assumed=bool(row.get("assumed", False)), experiment=bool(row.get("experiment", False)),
             status=row.get("status", "active"), source=str(row.get("source", "human")),
             version=int(row.get("version", 1)), history=list(row.get("history", [])),
-            pinned_fields=list(row.get("pinned_fields", [])))
+            pinned_fields=list(row.get("pinned_fields", [])),
+            origin=dict(row["origin"]) if isinstance(row.get("origin"), dict) else None)
 
 
 @dataclass

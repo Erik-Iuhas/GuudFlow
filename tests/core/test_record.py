@@ -13,12 +13,13 @@ from core.backlog import Backlog, CardOutcome
 from core.plan_drafts import PlanDrafts, PlanTurn
 from core.project_repo import ProjectRepo
 from core.record import RecordError, export, spec_files, trace
+from tests.spec_fixtures import with_reasons
 
 REASON = "because the team already runs it"
 
 
 def _turn(*changes: dict[str, Any]) -> PlanTurn:
-    return PlanTurn.model_validate({"reply": "ok", "changes": list(changes)})
+    return PlanTurn.model_validate(with_reasons({"reply": "ok", "changes": list(changes)}))
 
 
 def _approve(pd: PlanDrafts, *changes: dict[str, Any], who: str = "erik") -> dict[str, str]:

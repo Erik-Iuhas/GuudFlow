@@ -9,14 +9,15 @@ from typing import Any
 from core.llm.client import MockLLMClient, MockTurn, ToolCall
 from core.pm_persona import pm_dir
 from core.project_manager import TOOL_NAME
+from tests.spec_fixtures import with_reasons
 
 REQ = {"op": "add_requirement", "ref": "new:1", "text": "Save a recipe", "kind": "feature",
        "priority": "must", "checks": ["a saved recipe shows in the list"]}
 
 
 def _turn(*changes: dict[str, Any]) -> MockTurn:
-    return MockTurn(tool_calls=[ToolCall("1", TOOL_NAME, {"reply": "ok",
-                                                          "changes": list(changes)})])
+    return MockTurn(tool_calls=[ToolCall("1", TOOL_NAME, with_reasons({
+        "reply": "ok", "changes": list(changes)}))])
 
 
 async def _project(client, auth_header) -> None:

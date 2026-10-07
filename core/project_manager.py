@@ -129,7 +129,9 @@ class ProjectManager:
                                                None, mode))
         context = await asyncio.to_thread(self._context, text, instruction, extra_context)
         context = _insert_memory(context, await self._memory_context(text))
-        turn, usage = await self._ask(phase, context)
+        sources = [str(m["text"]) for m in await asyncio.to_thread(self.drafts.messages, 500)
+                   if m.get("author") == "human"] + ([extra_context] if extra_context else [])
+        turn, usage = await self._ask(phase, context, sources)
         draft: Draft | None
         if mode == "update" and turn.changes:
             draft = await asyncio.to_thread(self._merge, turn)
@@ -167,7 +169,8 @@ class ProjectManager:
                          "or found."))
 
     # ── the model call ──────────────────────────────────────────────────────
-    async def _ask(self, phase: Phase, context: str) -> tuple[PlanTurn, list[LLMResponse]]:
+    async def _ask(self, phase: Phase, context: str, sources: list[str] | None = None
+                   ) -> tuple[PlanTurn, list[LLMResponse]]:
         system = pm_system_prompt(seats=self.seats, start_mode=self.start_mode, phase=phase)
         if self._persona is not None:
             system = persona_layers(self._persona) + "\n\n" + system
@@ -202,7 +205,9 @@ class ProjectManager:
             if turn is None:
                 problems = (error or "invalid payload").splitlines()
                 continue
-            problems = validate_turn(turn, spec, backlog_doc, self._team())
+            current = self.drafts.current()
+            problems = validate_turn(turn, spec, backlog_doc, self._team(), sources,
+                                     set(current.groups) if current else ())
             if not problems:
                 return turn, responses
         raise ProjectManagerError(problems)
@@ -322,6 +327,9 @@ class ProjectManager:
         if draft is None or not draft.changes:
             return "(none)"
         lines = [f"Draft {draft.id}, based on spec version {draft.base_version}:"]
+        if draft.groups:
+            lines.append("Reasons: " + "; ".join(
+                f"{name} ({g.get('because', '')})" for name, g in draft.groups.items()))
         for c in draft.changes:
             state = {True: "ticked", False: "rejected", None: "undecided"}[c.accepted]
             body = json.dumps(c.change, ensure_ascii=False)

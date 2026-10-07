@@ -72,3 +72,18 @@ def write_board(data_root: Path, run_id: str, rows: list[dict[str, Any]],
     (root / "meta.json").write_text(json.dumps({"run_id": run_id, "project_id": project_id,
                                                 "status": "complete"}), encoding="utf-8")
     return root
+
+
+def with_reasons(payload: dict) -> dict:
+    """A PM turn payload whose changes all carry a described reason (plan §12).
+
+    Changes without a `group` get "Test reason"; every group used is described.
+    """
+    changes = [dict(c) for c in payload.get("changes") or []]
+    for c in changes:
+        c.setdefault("group", "Test reason")
+    described = {g["name"] for g in payload.get("groups") or []}
+    groups = list(payload.get("groups") or []) + [
+        {"name": n, "summary": f"What changes for {n}.", "because": f"The test asks for {n}."}
+        for n in dict.fromkeys(c["group"] for c in changes) if n not in described]
+    return {**payload, "changes": changes, "groups": groups}

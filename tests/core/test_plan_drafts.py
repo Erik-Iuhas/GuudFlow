@@ -15,12 +15,13 @@ from core.plan_drafts import (
     AddDecision, AddItem, AddRequirement, AddRule, DropRequirement, DropRule, EditItem,
     EditRequirement, PlanDraftError, PlanDrafts, PlanTurn, SupersedeDecision, validate_turn)
 from core.spec import Spec, resolve_acceptance
+from tests.spec_fixtures import with_reasons
 
 REASON = "because the team already runs it"
 
 
 def _turn(*changes: dict[str, Any], reply: str = "ok") -> PlanTurn:
-    return PlanTurn.model_validate({"reply": reply, "changes": list(changes)})
+    return PlanTurn.model_validate(with_reasons({"reply": reply, "changes": list(changes)}))
 
 
 def req(ref: str = "new:1", **kw: Any) -> dict[str, Any]:
@@ -586,3 +587,65 @@ def test_add_team_change_from_the_overseer(pd: PlanDrafts) -> None:
         pd.add_team_change({"op": "add_requirement"}, by="overseer")
     with pytest.raises(PlanDraftError):
         pd.add_team_change(req(), by="overseer")
+
+
+# ── reasons (plan §12) ──────────────────────────────────────────────────────
+def test_every_change_needs_a_described_reason() -> None:
+    from core.plan_drafts import validate_reasons
+    raw = {"reply": "ok", "changes": [{"op": "drop_item", "id": "B1", "reason": "merged into B2"}]}
+    assert any("set `group`" in p for p in validate_reasons(PlanTurn.model_validate(raw)))
+    raw["changes"][0]["group"] = "Tidy"
+    assert any("not described" in p for p in validate_reasons(PlanTurn.model_validate(raw)))
+    raw["groups"] = [{"name": "Tidy", "summary": "One item fewer.", "because": "B2 covers it.",
+                      "source": "person", "quote": "merge B1 into B2 please"}]
+    turn = PlanTurn.model_validate(raw)
+    assert validate_reasons(turn) == []
+    assert validate_reasons(turn, ["Could you MERGE B1 into B2, please?"]) == []
+    bad = validate_reasons(turn, ["keep B1"])
+    assert len(bad) == 1 and "quote of 'Tidy'" in bad[0]
+
+
+def test_reasons_reach_history_and_items(pd: PlanDrafts) -> None:
+    turn = PlanTurn.model_validate({"reply": "ok", "groups": [
+        {"name": "Dash", "summary": "Every run starts with a dash.",
+         "because": "The person wants one default ability.", "source": "person",
+         "quote": "Default dash with charges"}], "changes": [
+        {"op": "add_requirement", "ref": "new:1", "text": "Every run starts with a dash.",
+         "kind": "feature", "priority": "must", "checks": ["a new run can dash"],
+         "group": "Dash"},
+        {"op": "add_item", "ref": "new:2", "title": "Dash ability", "serves": ["new:1"],
+         "group": "Dash"}]})
+    d = pd.merge_pm_turn(pd.open_draft(), turn, False)
+    assert set(d.groups) == {"Dash"} and d.why(d.changes[0])["quote"] == "Default dash with charges"
+    for c in d.changes:
+        pd.set_change(d.id, c.cid, True)
+    res = pd.approve(d.id, "erik")
+    spec = Spec(pd.db.read_spec_doc())
+    req = spec.requirement(res.created["new:1"])
+    assert req.origin and req.origin["why"]["because"] == "The person wants one default ability."
+    item = next(i for i in pd.db.read_backlog_doc()["items"] if i["id"] == res.created["new:2"])
+    assert item["history"][-1]["change"] == "created"
+    assert item["history"][-1]["why"]["name"] == "Dash"
+    # A later edit records its own reason on the requirement's history.
+    edit = PlanTurn.model_validate({"reply": "ok", "groups": [
+        {"name": "Rename", "summary": "The dash gets a clearer name.",
+         "because": "Players call it a dash."}], "changes": [
+        {"op": "set_title", "id": req.id, "title": "Default dash", "group": "Rename"}]})
+    d2 = pd.merge_pm_turn(pd.open_draft(), edit, False)
+    pd.set_change(d2.id, d2.changes[0].cid, True)
+    pd.approve(d2.id, "erik")
+    hist = Spec(pd.db.read_spec_doc()).requirement(req.id).history
+    assert hist[-1]["why"]["name"] == "Rename" and hist[-1]["draft"] == d2.id
+
+
+def test_a_direct_edit_keeps_the_persons_reason(pd: PlanDrafts) -> None:
+    from core.plan_drafts import parse_change
+    turn = _turn({"op": "add_requirement", "ref": "new:1", "text": "Users can sign in.",
+                  "kind": "feature", "priority": "must", "checks": ["login works"]})
+    d = pd.merge_pm_turn(pd.open_draft(), turn, False)
+    pd.set_change(d.id, d.changes[0].cid, True)
+    rid = pd.approve(d.id, "erik").created["new:1"]
+    pd.apply_direct(parse_change({"op": "set_title", "id": rid, "title": "Sign in"}), "human",
+                    "short names read better")
+    hist = Spec(pd.db.read_spec_doc()).requirement(rid).history
+    assert hist[-1]["why"]["quote"] == "short names read better"

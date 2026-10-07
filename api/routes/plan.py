@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from api.auth import require_bearer
 from api.routes.pm import remember_draft
@@ -54,6 +54,7 @@ class EditBody(BaseModel):
     """Body of POST /spec/edit: one change, as in a draft (`{"op": "edit_requirement", ...}`)."""
 
     change: dict[str, Any]  # Any: a `Change` union member, validated by parse_change
+    why: str | None = Field(default=None, max_length=400)  # the person's reason, kept on history
 
 
 async def _project(request: Request, project_id: str) -> tuple[Path, dict[str, Any]]:
@@ -141,7 +142,7 @@ async def edit_spec(request: Request, project_id: str, body: EditBody) -> dict[s
                             "edit the team on the Team tab")
     try:
         result = await asyncio.to_thread(PlanDrafts(data_root, project_id).apply_direct,
-                                         change, APPROVER)
+                                         change, APPROVER, body.why)
     except (PlanDraftError, SpecError, BacklogError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     await asyncio.to_thread(write_record, data_root, project_id,
