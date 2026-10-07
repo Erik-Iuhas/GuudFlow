@@ -1,3 +1,4 @@
+import { Interrupted } from "./Interrupted";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Alert, SectionTitle } from "../../components/ui/form-controls";
@@ -183,6 +184,7 @@ export function ProjectWork({
   return (
     <div className="flex flex-col gap-6" data-testid="project-work">
       {loadError && <Alert variant="error">{loadError.message}</Alert>}
+      <Interrupted projectId={projectId} />
       {runs.data && (
         <WorkHeader
           remote={runs.data.remote}

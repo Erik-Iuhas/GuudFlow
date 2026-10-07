@@ -3,11 +3,12 @@
 Schemas and pure validation only: the scheduler applies interventions elsewhere.
 See docs/OPENCODE_HARNESS_PLAN.md sections 11.1 to 11.3.
 """
+import html
 import json
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.harness.results import result_json_schema, validate_result
 from core.signals import Signal, SignalType
@@ -112,6 +113,16 @@ Intervention = Annotated[
 ]
 
 
+def _unescape_strings(value: Any) -> Any:  # Any: nested JSON
+    if isinstance(value, str):
+        return html.unescape(value)
+    if isinstance(value, list):
+        return [_unescape_strings(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _unescape_strings(v) for k, v in value.items()}
+    return value
+
+
 class OverseerResult(BaseModel):
     """The overseer's structured output: an assessment and a bounded list of actions."""
 
@@ -119,6 +130,13 @@ class OverseerResult(BaseModel):
 
     assessment: str = Field(min_length=30)
     interventions: list[Intervention] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def _unescape(cls, data: Any) -> Any:  # Any: the raw tool payload
+        """Models sometimes write HTML entities in plain text ("T4 &gt; T6"); store the
+        characters they mean, so the board and Studio show "T4 > T6"."""
+        return _unescape_strings(data)
 
 
 NEEDS_HUMAN: frozenset[str] = frozenset({"pause", "propose_team_change"})

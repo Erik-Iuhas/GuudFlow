@@ -1,3 +1,4 @@
+import { DiskBanner } from "../features/system/DiskBanner";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { dashboardApi, type DashboardData } from "../api";
@@ -96,6 +97,7 @@ export function Dashboard() {
 
   return (
     <Page title="Dashboard">
+      <DiskBanner />
       {error && (
         <Alert variant="error" className="mb-4">
           Could not refresh the dashboard: {error}

@@ -15,6 +15,10 @@ const mockGet = vi.fn();
 vi.mock("../../api", () => ({
   dashboardApi: { get: () => mockGet() },
   toolsApi: { list: vi.fn().mockResolvedValue([]) },
+  systemApi: {
+    disk: vi.fn().mockResolvedValue({ path: "/d", free_bytes: 1e12, total_bytes: 2e12, warn_below_bytes: 5e9, low: false }),
+    prune: vi.fn(),
+  },
 }));
 
 function renderDashboard() {

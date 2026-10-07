@@ -9,6 +9,7 @@ All routes need the bearer token.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -30,6 +31,7 @@ from core.project_runs import decide_run
 from core.harness.spec_brief import resolve_items
 from core.spec import Spec
 from core.spec_adherence import cosigned, needs_cosign
+from core.salvage import interrupted_runs, salvage_run
 from core.work_db import WorkDB
 
 router = APIRouter(prefix="/api/projects", tags=["project-work"],
@@ -176,6 +178,35 @@ async def edit_backlog_item(request: Request, project_id: str, item_id: str,
     except BacklogError as exc:
         raise _bad(exc, 404 if "unknown" in str(exc) else 400) from None
     return asdict(item)
+
+
+# ── interrupted sessions (FIELD_NOTES F3) ──────────────────────────────────
+@router.get("/{project_id}/interrupted")
+async def list_interrupted(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
+    """Sessions that stopped without finishing (host restart): they hold backlog items, are
+    not live and never wrote their end-of-session record."""
+    data_root = await _project(request, project_id)
+    live = set(request.app.state.run_registry.runs)
+    return {"runs": [asdict(r) for r in await asyncio.to_thread(
+        interrupted_runs, Path(data_root), project_id, live)]}
+
+
+@router.post("/{project_id}/interrupted/{run_id}/salvage")
+async def salvage_interrupted(request: Request, project_id: str,
+                              run_id: str) -> dict[str, Any]:  # Any: JSON
+    """Send what an interrupted session merged to review; unfinished cards go back to the
+    backlog. Nothing runs again."""
+    data_root = await _project(request, project_id)
+    live = set(request.app.state.run_registry.runs)
+    known = {r.run_id for r in await asyncio.to_thread(
+        interrupted_runs, Path(data_root), project_id, live)}
+    if run_id not in known:
+        raise HTTPException(status_code=409, detail=f"{run_id} is not an interrupted session")
+    try:
+        state = await asyncio.to_thread(salvage_run, Path(data_root), project_id, run_id)
+    except FileNotFoundError as exc:
+        raise _bad(exc, 409) from None
+    return {"run_id": run_id, "state": state}
 
 
 # ── runs waiting for review ─────────────────────────────────────────────────

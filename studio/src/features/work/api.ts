@@ -172,7 +172,21 @@ export const workKeys = {
   changes: (projectId: string, runId: string) => ["projects", projectId, "runs-review", runId] as const,
 };
 
+/** A session that stopped without finishing (host restart), api/routes/project_work.py. */
+export interface InterruptedRun {
+  run_id: string;
+  items: string[];
+  cards_done: number;
+  cards_total: number;
+  last_activity: string;
+}
+
 export const workApi = {
+  interrupted: (projectId: string) =>
+    send<{ runs: InterruptedRun[] }>("GET", `/api/projects/${enc(projectId)}/interrupted`).then((r) => r.runs),
+  salvage: (projectId: string, runId: string) =>
+    send<{ run_id: string; state: string | null }>(
+      "POST", `/api/projects/${enc(projectId)}/interrupted/${enc(runId)}/salvage`, {}),
   backlog: (projectId: string) =>
     send<{ items: BacklogItemWire[] }>("GET", `/api/projects/${enc(projectId)}/backlog`).then((r) => r.items),
   add: (projectId: string, item: NewItem) =>
@@ -251,5 +265,20 @@ export function useDecideRun(
   return useMutation({
     mutationFn: ({ runId, accept, note }) => workApi.decide(projectId, runId, accept, note),
     onSuccess: invalidate,
+  });
+}
+
+export function useInterrupted(projectId: string): UseQueryResult<InterruptedRun[]> {
+  return useQuery({ queryKey: ["projects", projectId, "interrupted"], queryFn: () => workApi.interrupted(projectId) });
+}
+
+/** Send an interrupted session's merged work to review (FIELD_NOTES F3). */
+export function useSalvage(projectId: string): UseMutationResult<{ run_id: string; state: string | null }, Error, string> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) => workApi.salvage(projectId, runId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["projects", projectId] });
+    },
   });
 }
