@@ -69,7 +69,7 @@ function DraftCard({ projectId, draft }: { projectId: string; draft: DesignDraft
                 <span>
                   <span className="text-sm font-semibold">{g.name}</span>
                   <span className="block text-sm">{g.summary}</span>
-                  <span className="block text-xs text-muted-foreground">Because {g.because}</span>
+                  <span className="block text-xs text-muted-foreground">Because {g.because.charAt(0).toLowerCase() + g.because.slice(1)}</span>
                 </span>
               </label>
               <ul className="mb-0 mt-2 pl-8 text-sm">

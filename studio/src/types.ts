@@ -5,6 +5,8 @@ export type ModelTier = "heavy" | "solid" | "fast";
 
 export interface AgentConfig {
   role: string;
+  /** Role contract id (core/contracts.py); none means the role type's default. */
+  contract?: string;
   description?: string;
   depends_on?: string[];
   system_prompt?: string;

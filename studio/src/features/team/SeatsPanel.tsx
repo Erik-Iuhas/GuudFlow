@@ -58,7 +58,11 @@ export function SeatsPanel({
             </>
           ) : (
             <>
-              <span className="text-muted-foreground">Empty: {pmName} decides and records why</span>
+              <span className="text-muted-foreground">
+                {(project.agents ?? []).some((a) => a.contract === "tech_lead")
+                  ? "Empty: the tech lead approves its own design and records why"
+                  : `Empty: ${pmName} decides and records why`}
+              </span>
               <Button size="sm" variant="outline" disabled={saving} onClick={() => void save({ ...seats, lead: true })}>
                 Take it
               </Button>
