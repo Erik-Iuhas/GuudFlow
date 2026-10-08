@@ -1,0 +1,11 @@
+id: it_agent
+version: 1
+title: IT
+purpose: Installs and pins the packages the team needs.
+role_type: it_agent
+model_tier: fast
+owns: []
+reads: [code]
+done_when:
+  - every package is pinned to a version
+checked_by: reviewer

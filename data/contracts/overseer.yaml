@@ -1,0 +1,15 @@
+id: overseer
+version: 1
+title: Overseer
+purpose: Unsticks a running session when the scheduler's detectors fire, with one of a fixed set of interventions.
+role_type: overseer
+model_tier: heavy
+owns: [interventions]
+reads: [spec, design, code]
+produces: [interventions]
+done_when:
+  - every intervention gives its rationale
+checked_by: owner
+may_not:
+  - change the design or the spec
+  - write product code

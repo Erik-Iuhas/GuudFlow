@@ -112,9 +112,14 @@ class TaskFlow:
               workspace: Workspace, scheduler: Callable[[], "Scheduler"],
               post: Callable[[SignalType, str, str, str | None], None],
               escalate: Callable[[str, str, str | None], None],
-              limits: BoardLimits | None = None) -> "TaskFlow | None":
-        """Task mode when the team has a planner; None otherwise."""
-        planner = next((a.role for a in agents if role_types.get(a.role) == "planner"), None)
+              limits: BoardLimits | None = None,
+              planner_role: str | None = None) -> "TaskFlow | None":
+        """Task mode when the team has a planner; None otherwise.
+
+        `planner_role` is the role whose contract owns the session plan (a tech lead); without
+        it, the first role of type planner plans."""
+        planner = planner_role if planner_role in {a.role for a in agents} else next(
+            (a.role for a in agents if role_types.get(a.role) == "planner"), None)
         if planner is None:
             return None
         deps = {a.role: set(a.depends_on) for a in agents}

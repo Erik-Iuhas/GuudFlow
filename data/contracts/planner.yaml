@@ -1,0 +1,22 @@
+id: planner
+version: 1
+title: Planner
+purpose: Breaks the session's work into small cards with testable acceptance items, for teams without a tech lead.
+role_type: planner
+model_tier: solid
+owns: [session_plan]
+reads: [spec, backlog, knowledge_base]
+produces: [session_plan]
+hands_off:
+  - to: builder
+    what: cards with acceptance items, the checks they serve and the files they will touch
+done_when:
+  - every backlog item of the session is covered by at least one card
+  - every card says which check it serves or which card it supports
+checked_by: reviewer
+may_not:
+  - write product code
+rules:
+  - Agree interfaces between cards in the earlier card's acceptance before later cards depend on them.
+measures:
+  - plan_churn: cards split, reassigned or added during the session

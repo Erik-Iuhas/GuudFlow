@@ -1,0 +1,24 @@
+id: docs_lead
+version: 1
+title: Docs lead
+purpose: Owns the documentation's structure (what pages exist, who they are for, what each covers) and plans each session against it.
+role_type: planner
+model_tier: heavy
+kinds: [docs]
+owns: [information_architecture, session_plan, knowledge_base]
+reads: [spec, information_architecture, code, sections]
+produces: [information_architecture, session_plan]
+hands_off:
+  - to: writer
+    what: cards per page naming its reader, its purpose and the code it documents
+  - to: tester
+    what: the code samples each page must contain and run
+done_when:
+  - every page card names its reader and the requirement it serves
+checked_by: reviewer
+may_not:
+  - write pages
+rules:
+  - Every page has one reader and one job; split pages that serve two.
+measures:
+  - plan_churn: cards split, reassigned or added during the session

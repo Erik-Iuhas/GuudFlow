@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 
+from core.contracts import Contract, ContractError, contracts_for_team, load_for_project, load_library, render_for_brief
 from core.crew import Member, crew_names, label as crew_label, resolve_recipient, team_section
 from core.harness.brief import (
     CONFLICT_HOWTO as _CONFLICT_HOWTO,
@@ -256,6 +257,7 @@ class OpencodeRun:
         self._roles: dict[str, _Role] = {}
         # role -> worker name (core/crew.py), set when the run starts.
         self.names: dict[str, str] = {}
+        self.contracts: dict[str, Contract] = {}
         self._http: RunningHttpServer | None = None
         self._gw_http: RunningHttpServer | None = None
         self._registry: ModelRegistry | None = runner._model_registry  # noqa: SLF001
@@ -290,12 +292,15 @@ class OpencodeRun:
         for cfg in sorted(self.agents, key=lambda c: bool(c.review_of)):
             prepared[cfg.role] = self._roles[cfg.role] = self._prepare_role(cfg)
         self._roles = {cfg.role: prepared[cfg.role] for cfg in self.agents}
+        self.contracts = self._load_contracts()
         if self.settings.task_board == "auto":
             self.flow = TaskFlow.build(
                 self.agents, {n: r.role_type for n, r in self._roles.items()},
                 self.workspace, self._scheduler,
                 post=lambda kind, role, summary, detail: self._post(kind, role, summary, detail),
-                escalate=lambda role, summary, detail: self._escalate(role, summary, detail))
+                escalate=lambda role, summary, detail: self._escalate(role, summary, detail),
+                planner_role=next((r for r, c in self.contracts.items()
+                                   if c.may_change("session_plan")), None))
         self._setup_overseer()
         self._name_the_team()
         carried = self._load_carry_forward()
@@ -365,6 +370,27 @@ class OpencodeRun:
                 unsubscribe()
             await self.shutdown()
 
+    def _load_contracts(self) -> dict[str, Contract]:
+        """role → its contract (the library with the project's overrides; plan §2)."""
+        try:
+            library = load_for_project(self._data_root(), self.runner.project.project_id)
+        except ContractError as e:
+            log.warning("contracts: project overrides ignored: %s", e)
+            library = load_library()
+        return contracts_for_team(
+            [(c.role, self._roles[c.role].role_type, c.contract or None) for c in self.agents],
+            library)
+
+    def _contract_text(self, role: str) -> str | None:
+        """The role's "Your role contract" section, with handoff targets named."""
+        contract = self.contracts.get(role)
+        if contract is None:
+            return None
+        by_contract: dict[str, list[str]] = {}
+        for r, c in self.contracts.items():
+            by_contract.setdefault(c.id, []).append(r)
+        return render_for_brief(contract, by_contract, self.names)
+
     def _name_the_team(self) -> None:
         """Give every role a worker name (the overseer too) and tell the board who is who."""
         known = getattr(self.runner, "crew", {}) or {}
@@ -372,7 +398,9 @@ class OpencodeRun:
             self.runner.project.project_id, [c.role for c in self.agents],
             explicit={c.role: known.get(c.role) or c.name for c in self.agents})
         members = [{"role": c.role, "name": self.names[c.role],
-                    "role_type": self._roles[c.role].role_type} for c in self.agents]
+                    "role_type": self._roles[c.role].role_type,
+                    "contract": self.contracts[c.role].id if c.role in self.contracts else None}
+                   for c in self.agents]
         self._post(SignalType.TEAM, "runner",
                    "the team: " + ", ".join(crew_label(m["name"], m["role"]) for m in members),
                    json.dumps({"members": members}))
@@ -1143,6 +1171,7 @@ class OpencodeRun:
             human_comments=self._take_human_comments(cfg.role),
             continuation=continuation,
             notebook=self._notebooks.get(cfg.role),
+            contract=self._contract_text(cfg.role),
             names=self.names, review_from=review_from,
             team=team_section(cfg.role, [
                 Member(c.role, self.names.get(c.role, c.role), self._roles[c.role].role_type,

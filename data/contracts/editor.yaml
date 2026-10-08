@@ -1,0 +1,24 @@
+id: editor
+version: 1
+title: Editor
+purpose: Owns the report's outline and brief, decides what each section must establish, and plans each session against the outline.
+role_type: planner
+model_tier: heavy
+kinds: [research_report]
+owns: [outline, session_plan, knowledge_base]
+reads: [spec, outline, sources, sections]
+produces: [outline, session_plan]
+hands_off:
+  - to: researcher
+    what: the questions each section needs answered, with how much evidence is enough
+  - to: writer
+    what: cards per section naming the claims it must make and the sources it may use
+done_when:
+  - every section card names the requirement it serves and the questions it answers
+checked_by: fact_checker
+may_not:
+  - write sections
+rules:
+  - Every section has one question it answers; a section that answers two is two sections.
+measures:
+  - plan_churn: cards split, reassigned or added during the session

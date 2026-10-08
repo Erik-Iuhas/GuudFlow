@@ -1,0 +1,31 @@
+id: builder
+version: 1
+title: Builder
+purpose: Implements cards against the design, with tests, and leaves a handoff for whoever comes next.
+role_type: builder
+model_tier: solid
+owns: [code]
+reads: [spec, design, knowledge_base, code]
+produces: [code, tests]
+hands_off:
+  - to: builder
+    what: a handoff per card (what changed, decisions and gotchas, tests, what the next card needs)
+  - to: reviewer
+    what: evidence for every acceptance item (the command run and what it showed)
+done_when:
+  - every acceptance item of the card is met with evidence
+  - the code matches the interfaces the card implements, or the card says why the design must change
+  - the handoff is written
+checked_by: reviewer
+escalates_when:
+  - the card needs an interface the design does not declare
+  - another role's code must change first
+may_not:
+  - change files outside the card's component without saying why
+  - change the design or the spec
+rules:
+  - Stay inside the card's files; if the work needs more, say so instead of spreading.
+  - Export only what the design declares; anything else stays private to the module.
+measures:
+  - review_rounds: rounds before a card passes
+  - reopened_cards: cards sent back after being done

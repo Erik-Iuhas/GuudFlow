@@ -77,6 +77,7 @@ class BriefInputs:
     # working rules are already in its context, so they are not repeated.
     continuation: bool = False
     notebook: str | None = None                      # the role's notes from the last session
+    contract: str | None = None                      # "Your role contract" (core/contracts.py)
 
 
 def _section(title: str, body: str) -> str:
@@ -105,6 +106,8 @@ def build_brief(inp: BriefInputs) -> str:
         if inp.team:
             parts.append(_section("Your team", inp.team))
         parts.append(_section("Your job", inp.description or f"Act as the team's {inp.role}."))
+        if inp.contract:
+            parts.append(_section("Your role contract", inp.contract))
     if inp.task:
         parts.append(_section("Your task", inp.task))
     if inp.carry_forward and not inp.continuation:
