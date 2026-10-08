@@ -111,6 +111,8 @@ class AgentConfig:
     # capability defaults and edit scope; empty means inferred from role/is_reviewer.
     # `capabilities` holds per-role overrides of the seven toggles.
     role_type: str = ""
+    # The role contract (core/contracts.py); empty means the role type's default.
+    contract: str = ""
     capabilities: dict[str, str] = field(default_factory=dict)
     # Review edge (plan §4.5): which roles a reviewer sends work back to (default:
     # its depends_on) and how many rework rounds before escalation.
@@ -733,12 +735,15 @@ class AgentRunner:
             from core.project_repo import ProjectRepo
             from core.harness.run import sandbox_from_env
             settings = self.harness_settings
-            check = await run_project_check(
-                self.git.working_dir, command,
-                sandbox=getattr(settings, "sandbox", "auto") if settings else sandbox_from_env(),
-                production=bool(getattr(settings, "production", False)) if settings else False)
-            ProjectRepo(data_root, self.project.project_id).record_check(self.run_id,
-                                                                         _asdict(check))
+            sandbox = getattr(settings, "sandbox", "auto") if settings else sandbox_from_env()
+            production = bool(getattr(settings, "production", False)) if settings else False
+            report = str((self.project.approval_gates or {}).get("test_report") or "") or "auto"
+            check = await run_project_check(self.git.working_dir, command, sandbox=sandbox,
+                                            production=production, report=report)
+            record = _asdict(check)
+            record["ledger"] = await self._ledger(data_root, check, submitted.base, command,
+                                                  sandbox, production, report)
+            ProjectRepo(data_root, self.project.project_id).record_check(self.run_id, record)
         if submitted is not None:
             from core.backlog import Backlog
             outcomes = {i.id: str(i.pending or "not_started") for i in
@@ -757,6 +762,20 @@ class AgentRunner:
                                    "files": submitted.files[:200], "backlog": outcomes,
                                    **({"check": check.status} if check else {}),
                                    **({"auto_accept": auto} if auto else {})})))
+
+    async def _ledger(self, data_root: Path, check: Any, base: str, command: str,  # Any: CheckResult
+                      sandbox: str, production: bool, report: str) -> dict[str, Any]:  # Any: JSON
+        """The run's verification ledger (role contracts plan §4.4). In test-first mode the
+        linked tests also run at the base, so a test that already passed proves nothing."""
+        from core.project_checks import run_project_check
+        from core.spec_adherence import ledger_for_run
+        before = None
+        if check.tests and getattr(self.project, "start_mode", None) == "test_first" and base:
+            earlier = await run_project_check(self.git.working_dir, command, sandbox=sandbox,
+                                              production=production, report=report, ref=base)
+            before = earlier.tests or None
+        return await asyncio.to_thread(ledger_for_run, data_root, self.project.project_id,
+                                       self.run_id, check.tests or None, before)
 
     def _auto_accept(self, data_root: Path, items_pending: list[str], cards: list[Any],
                      check_status: str | None) -> dict[str, Any] | None:  # Any: JSON

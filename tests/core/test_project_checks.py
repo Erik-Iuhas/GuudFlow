@@ -60,3 +60,31 @@ async def test_docker_check_has_no_network(tmp_path: Path) -> None:
         work, "python3 -c \"import socket; socket.create_connection(('1.1.1.1', 53), 3)\"",
         sandbox="docker")
     assert net.status == "failed"
+
+
+JUNIT = ('<testsuites><testsuite name="t.test.js" file="t.test.js">'
+         '<testcase name="adds" file="t.test.js"/>'
+         '<testcase name="keeps" file="t.test.js"><failure>no</failure></testcase>'
+         '</testsuite></testsuites>')
+
+
+async def test_host_check_reads_the_junit_report(tmp_path: Path) -> None:
+    work = _repo(tmp_path, {"report.xml": JUNIT})
+    result = await run_project_check(work, "mkdir -p out && cp report.xml out/r.xml",
+                                     sandbox="host", report="out/r.xml")
+    assert result.tests == {"t.test.js::adds": "passed", "t.test.js::keeps": "failed"}
+    assert result.report == "out/r.xml"
+    # A report path that escapes the export is ignored.
+    outside = await run_project_check(work, "true", sandbox="host", report="../../etc/passwd")
+    assert outside.tests == {} and outside.report is None
+
+
+async def test_host_check_adds_reporter_flags_for_bun(tmp_path: Path) -> None:
+    import shutil
+    if shutil.which("bun") is None:
+        pytest.skip("bun is not installed")
+    work = _repo(tmp_path, {"a.test.js": "import {test, expect} from 'bun:test';\n"
+                                         "test('adds', () => expect(1 + 1).toBe(2));\n"})
+    result = await run_project_check(work, "bun test", sandbox="host")
+    assert result.command == "bun test" and result.status == "passed"
+    assert result.tests == {"a.test.js::adds": "passed"}

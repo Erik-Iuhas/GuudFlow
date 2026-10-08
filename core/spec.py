@@ -75,6 +75,9 @@ class Check:
     method: CheckMethod | None = None   # unit | manual | visual | perf
     given: str = ""              # optional setup ("given")
     test: str | None = None      # linked test, "file::name", for unit checks
+    # How `state` was established (core/ledger.py): verified | claimed | failing |
+    # missing_test | unmet | person; None for states set before the ledger existed.
+    evidence: str | None = None
 
     def to_dict(self) -> dict[str, Any]:  # Any: JSON row
         """JSON form."""
@@ -88,7 +91,8 @@ class Check:
         return cls(id=str(row["id"]), text=text, state=row.get("state", "unknown"),
                    run_id=row.get("run_id"),
                    method=method if method in CHECK_METHODS else infer_method(text),
-                   given=str(row.get("given") or ""), test=row.get("test") or None)
+                   given=str(row.get("given") or ""), test=row.get("test") or None,
+                   evidence=row.get("evidence") or None)
 
 
 @dataclass
@@ -456,7 +460,7 @@ def drop_decision(doc: dict[str, Any], dec_id: str, *, at: float, by: str,  # An
 
 
 def set_check_states(doc: dict[str, Any], states: Mapping[str, bool], *, run_id: str,  # Any: JSON doc
-                     at: float) -> dict[str, str]:
+                     at: float, evidence: Mapping[str, str] | None = None) -> dict[str, str]:
     """Set check states from an accepted session's review verdicts (plan §1 call 5).
 
     `states` maps a check id ("R4.2") to met (True) or unmet (False). Unknown ids are skipped.
@@ -471,9 +475,13 @@ def set_check_states(doc: dict[str, Any], states: Mapping[str, bool], *, run_id:
             if check.get("id") not in states:
                 continue
             state = "met" if states[check["id"]] else "unmet"
-            if check.get("state") == state and check.get("run_id") == run_id:
+            proof = (evidence or {}).get(check["id"])
+            if check.get("state") == state and check.get("run_id") == run_id \
+                    and check.get("evidence") == proof:
                 continue
             check["state"], check["run_id"] = state, run_id
+            if proof:
+                check["evidence"] = proof
             changed[check["id"]] = state
         if changed:
             row.setdefault("history", []).append(

@@ -22,7 +22,7 @@ import logging
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 import httpx
@@ -226,8 +226,12 @@ def card_results(board: Iterable[Signal]) -> tuple[dict[str, str], dict[str, flo
 
 def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
                note: str = "", remote: RemoteConfig | None = None,
-               http: httpx.Client | None = None) -> RunDecision:
+               http: httpx.Client | None = None,
+               confirmed_checks: Sequence[str] = ()) -> RunDecision:
     """A human accepts or rejects a pending run (raises ProjectRepoError / Conflict).
+
+    `confirmed_checks` are manual or visual checks the person confirmed while accepting
+    (the verification ledger records them as "person").
 
     With a remote (plan §14.1), accepting first syncs the remote into main, then
     merges the run, then publishes as configured; both results are kept on the run.
@@ -239,7 +243,7 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
     _remember_decision(data_root, project_id, run_id, accept, note)
     if accept:
         from core.spec_adherence import record_acceptance
-        record_acceptance(data_root, project_id, run_id)
+        record_acceptance(data_root, project_id, run_id, confirmed=confirmed_checks)
         # The record goes onto main before publishing, so the published branch carries it.
         write_record_files(data_root, project_id, run_id)
         if remote is not None:

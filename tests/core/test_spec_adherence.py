@@ -140,3 +140,43 @@ def test_needs_cosign_matrix(tmp_path: Path) -> None:
     backlog.record_outcomes("run_m", [CardOutcome("Save", "done", must_item.id)])
     backlog.decide("run_m", accepted=True)
     assert needs_cosign(tmp_path, "p1", "run_m", "must") is False   # decided: nothing to sign
+
+
+def test_the_ledger_decides_states_at_acceptance(tmp_path: Path) -> None:
+    from core.spec_adherence import ledger_for_run
+    seed_spec(tmp_path)
+    with WorkDB(tmp_path / "projects" / "p1").spec_doc() as doc:
+        for r in doc["requirements"]:
+            for c in r["checks"]:
+                if c["id"] == "R1.1":
+                    c["test"], c["method"] = "tests/list.test.js::shows saved", "unit"
+                if c["id"] == "R1.2":
+                    c["method"] = "manual"
+    repo = _submit(tmp_path)
+    Backlog(tmp_path, "p1").add("Recipes", ["R1.1", "R1.2"], serves=["R1"])
+    item = Backlog(tmp_path, "p1").items()[0]
+    Backlog(tmp_path, "p1").take_for_run("run_a", [item.id])
+    write_board(tmp_path, "run_a", [review("T1", [(R11, True), (R12, True)])])
+    ledger = ledger_for_run(tmp_path, "p1", "run_a",
+                            {"tests/list.test.js::shows saved": "failed"})
+    assert ledger["R1.1"]["state"] == "failing"          # the reviewer said met; the test says no
+    assert ledger["R1.2"]["state"] == "claimed"
+    repo.record_check("run_a", {"command": "bun test", "status": "failed", "ledger": ledger})
+
+    decide_run(tmp_path, "p1", "run_a", accept=True, confirmed_checks=["R1.2"])
+
+    spec = Spec(WorkDB(tmp_path / "projects" / "p1").read_spec_doc())
+    assert (spec.check("R1.1").state, spec.check("R1.1").evidence) == ("unmet", "failing")
+    assert (spec.check("R1.2").state, spec.check("R1.2").evidence) == ("met", "person")
+    stored = repo.get("run_a").check["ledger"]  # type: ignore[union-attr,index]
+    assert stored["R1.2"]["state"] == "person"
+
+
+def test_without_a_ledger_reviewer_verdicts_are_claims(tmp_path: Path) -> None:
+    seed_spec(tmp_path)
+    _submit(tmp_path)
+    write_board(tmp_path, "run_a", [review("T1", [(R11, True), (R21, False)])])
+    decide_run(tmp_path, "p1", "run_a", accept=True)
+    spec = Spec(WorkDB(tmp_path / "projects" / "p1").read_spec_doc())
+    assert (spec.check("R1.1").state, spec.check("R1.1").evidence) == ("met", "claimed")
+    assert (spec.check("R2.1").state, spec.check("R2.1").evidence) == ("unmet", "unmet")

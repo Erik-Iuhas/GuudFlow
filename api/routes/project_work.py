@@ -75,6 +75,8 @@ class Decision(BaseModel):
     """Body of POST /runs-review/{run_id}/accept|reject."""
 
     note: str = ""
+    # Manual or visual checks the person confirmed while accepting (the ledger's "person").
+    confirmed_checks: list[str] = Field(default_factory=list, max_length=200)
 
 
 class CosignComment(BaseModel):
@@ -264,7 +266,7 @@ def _remote(project: dict[str, Any]) -> RemoteConfig | None:  # Any: project JSO
 
 
 async def _decide(request: Request, project_id: str, run_id: str, accept: bool,
-                  note: str) -> Any:  # Any: dict or JSONResponse
+                  note: str, confirmed: list[str] | None = None) -> Any:  # Any: dict or JSONResponse
     data_root = await _project(request, project_id)
     remote = _remote(await request.app.state.project_store.get(project_id) or {})
     if await _run_is_live(request, run_id):
@@ -279,7 +281,8 @@ async def _decide(request: Request, project_id: str, run_id: str, accept: bool,
     try:
         decision = decide_run(data_root, project_id, run_id, accept=accept, note=note,
                               remote=remote,
-                              http=getattr(request.app.state, "github_http", None))
+                              http=getattr(request.app.state, "github_http", None),
+                              confirmed_checks=confirmed or [])
     except ProjectRepoConflict as exc:
         return JSONResponse(status_code=409, content={
             "detail": (f"main changed since run {run_id} started and the merge conflicts. "
@@ -295,7 +298,8 @@ async def _decide(request: Request, project_id: str, run_id: str, accept: bool,
 async def accept_run(request: Request, project_id: str, run_id: str,
                      body: Decision | None = None) -> Any:  # Any: dict or JSONResponse
     """Merge the run into the project's main; its finished backlog items close."""
-    return await _decide(request, project_id, run_id, True, (body or Decision()).note)
+    body = body or Decision()
+    return await _decide(request, project_id, run_id, True, body.note, body.confirmed_checks)
 
 
 @router.post("/{project_id}/runs-review/{run_id}/reject")

@@ -1,0 +1,61 @@
+<testsuites name="bun test" tests="661" assertions="392199" failures="0" skipped="0" time="4.589816364">
+  <testsuite name="tests/maze.test.js" file="tests/maze.test.js" tests="36" assertions="1243" failures="0" skipped="0" time="0" hostname="vm">
+    <testsuite name="classic1 parsing" file="tests/maze.test.js" line="26" tests="12" assertions="1154" failures="0" skipped="0" time="0.004" hostname="vm">
+      <testcase name="exact dimensions" classname="classic1 parsing" time="0.00018" file="tests/maze.test.js" line="27" assertions="5" />
+      <testcase name="exact wall, pellet and power pellet counts" classname="classic1 parsing" time="0.002409" file="tests/maze.test.js" line="35" assertions="4" />
+      <testcase name="counts agree with an independent count of the raw characters" classname="classic1 parsing" time="0.001112" file="tests/maze.test.js" line="44" assertions="3" />
+      </testsuite>
+    <testsuite name="helpers: walls, doors, tunnel wrap" file="tests/maze.test.js" line="132" tests="4" assertions="26" failures="0" skipped="0" time="0.001" hostname="vm">
+      <testcase name="off-map is wall outside tunnel rows" classname="helpers: walls, doors, tunnel wrap" time="0.001236" file="tests/maze.test.js" line="133" assertions="5" />
+      <testcase name="tunnel row wraps horizontally" classname="helpers: walls, doors, tunnel wrap" time="0.000311" file="tests/maze.test.js" line="141" assertions="10" />
+      <testcase name="door is open only for ghosts" classname="helpers: walls, doors, tunnel wrap" time="0.000062" file="tests/maze.test.js" line="154" assertions="4" />
+      </testsuite>
+    <testsuite name="errors" file="tests/maze.test.js" line="177" tests="7" assertions="17" failures="0" skipped="0" time="0" hostname="vm">
+      <testcase name="baseline fixture parses" classname="errors" time="0.000064" file="tests/maze.test.js" line="180" assertions="4" />
+      <testcase name="ragged rows throw with the row number" classname="errors" time="0.00009" file="tests/maze.test.js" line="188" assertions="2" />
+      <testcase name="unknown characters throw with position" classname="errors" time="0.000092" file="tests/maze.test.js" line="193" assertions="2" />
+      </testsuite>
+    <testsuite name="connectivity" file="tests/maze.test.js" line="222" tests="6" assertions="17" failures="0" skipped="0" time="0.007" hostname="vm">
+      <testcase name="floodFillReachable from player start covers every open tile of classic1" classname="connectivity" time="0.001323" file="tests/maze.test.js" line="223" assertions="5" />
+      <testcase name="classic1 is connected" classname="connectivity" time="0.000639" file="tests/maze.test.js" line="232" assertions="1" />
+      <testcase name="a deliberately split fixture is not connected" classname="connectivity" time="0.000121" file="tests/maze.test.js" line="236" assertions="3" />
+      </testsuite>
+    <testsuite name="purity" file="tests/maze.test.js" line="273" tests="1" assertions="2" failures="0" skipped="0" time="0" hostname="vm">
+      <testcase name="maze.js and classic1.js have no DOM, Math.random or non-relative imports" classname="purity" time="0.000717" file="tests/maze.test.js" line="274" assertions="2" />
+    </testsuite>
+    <testsuite name="cracked tiles" file="tests/maze.test.js" line="285" tests="6" assertions="27" failures="0" skipped="0" time="0" hostname="vm">
+      <testcase name="TILE.CRACKED is 3 and parsed from &quot;c&quot;" classname="cracked tiles" time="0.000136" file="tests/maze.test.js" line="294" assertions="8" />
+      <testcase name="cracked is solid: wall for movement, neighbours, flood fill and counts" classname="cracked tiles" time="0.00018" file="tests/maze.test.js" line="306" assertions="9" />
+      <testcase name="a cracked wall seals the same paths as a plain wall" classname="cracked tiles" time="0.000094" file="tests/maze.test.js" line="320" assertions="2" />
+      </testsuite>
+  </testsuite>
+  <testsuite name="tests/rng.test.js" file="tests/rng.test.js" tests="19" assertions="110340" failures="0" skipped="0" time="0" hostname="vm">
+    <testsuite name="rng determinism" file="tests/rng.test.js" line="7" tests="4" assertions="20103" failures="0" skipped="0" time="0.005" hostname="vm">
+      <testcase name="same seed gives identical sequences of 1000 next() values" classname="rng determinism" time="0.002485" file="tests/rng.test.js" line="8" assertions="1" />
+      <testcase name="different seeds differ" classname="rng determinism" time="0.000985" file="tests/rng.test.js" line="12" assertions="2" />
+      <testcase name="matches the reference mulberry32 stream (regression pin)" classname="rng determinism" time="0.00025" file="tests/rng.test.js" line="17" assertions="100" />
+      </testsuite>
+    <testsuite name="seed coercion" file="tests/rng.test.js" line="40" tests="2" assertions="9" failures="0" skipped="0" time="0" hostname="vm">
+      <testcase name="seed is coerced to unsigned 32-bit" classname="seed coercion" time="0.000251" file="tests/rng.test.js" line="41" assertions="5" />
+      <testcase name="non-numeric seeds are safe; strings hash deterministically" classname="seed coercion" time="0.00009" file="tests/rng.test.js" line="49" assertions="4" />
+    </testsuite>
+    <testsuite name="int / pick" file="tests/rng.test.js" line="57" tests="4" assertions="90210" failures="0" skipped="0" time="0.018" hostname="vm">
+      <testcase name="int(n) is in [0, n) and never returns n" classname="int / pick" time="0.018691" file="tests/rng.test.js" line="58" assertions="90001" />
+      <testcase name="int(n) covers every value" classname="int / pick" time="0.000384" file="tests/rng.test.js" line="71" assertions="1" />
+      <testcase name="int rejects invalid n" classname="int / pick" time="0.000231" file="tests/rng.test.js" line="78" assertions="7" />
+      </testsuite>
+    <testsuite name="shuffle" file="tests/rng.test.js" line="98" tests="4" assertions="10" failures="0" skipped="0" time="0.001" hostname="vm">
+      <testcase name="same seed gives the same order; different seeds differ" classname="shuffle" time="0.000061" file="tests/rng.test.js" line="101" assertions="2" />
+      <testcase name="shuffles in place, returns the same array, keeps all elements" classname="shuffle" time="0.00012" file="tests/rng.test.js" line="106" assertions="3" />
+      <testcase name="handles empty and single-element arrays" classname="shuffle" time="0.000026" file="tests/rng.test.js" line="114" assertions="2" />
+      </testsuite>
+    <testsuite name="fork" file="tests/rng.test.js" line="127" tests="4" assertions="6" failures="0" skipped="0" time="0" hostname="vm">
+      <testcase name="is deterministic" classname="fork" time="0.00016" file="tests/rng.test.js" line="128" assertions="2" />
+      <testcase name="child stream differs from the parent's" classname="fork" time="0.000109" file="tests/rng.test.js" line="136" assertions="2" />
+      <testcase name="successive forks are independent of each other" classname="fork" time="0.000044" file="tests/rng.test.js" line="145" assertions="1" />
+      </testsuite>
+    <testsuite name="source hygiene" file="tests/rng.test.js" line="160" tests="1" assertions="2" failures="0" skipped="0" time="0" hostname="vm">
+      <testcase name="rng.js never uses the platform random source" classname="source hygiene" time="0.000207" file="tests/rng.test.js" line="161" assertions="2" />
+    </testsuite>
+  </testsuite>
+  </testsuites>

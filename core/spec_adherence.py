@@ -171,10 +171,65 @@ def adherence(board: Sequence[Mapping[str, Any]]) -> dict[str, Any]:  # Any: JSO
             "unmet_merged": merged}
 
 
+# ── the verification ledger (role contracts plan §4.4) ──────────────────────
+def run_check_ids(data_root: Path, project_id: str, run_id: str) -> list[str]:
+    """The spec checks a run served: its items' check references and its cards' `serves`."""
+    ids: list[str] = []
+    for item in run_items(data_root, project_id, run_id):
+        for line in item.acceptance:
+            cid = check_id(line) or (line.strip().upper() if _BARE_CHECK.match(line.strip())
+                                     else None)
+            if cid:
+                ids.append(cid)
+    tasks = Path(data_root) / "runs" / run_id / "tasks.jsonl"
+    if tasks.is_file():
+        last: dict[str, dict[str, Any]] = {}  # Any: JSON rows
+        for line in tasks.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get("task_id"):
+                last[str(row["task_id"])] = row
+        for row in last.values():
+            ids += [str(s).upper() for s in row.get("serves") or [] if "." in str(s)]
+            ids += [c for c in (check_id(a) for a in row.get("acceptance_criteria") or []) if c]
+    return list(dict.fromkeys(ids))
+
+
+_BARE_CHECK = re.compile(r"^R[0-9]+\.[0-9]+$", re.IGNORECASE)
+
+
+def ledger_for_run(data_root: Path, project_id: str, run_id: str,
+                   tests: Mapping[str, str] | None,
+                   before: Mapping[str, str] | None = None) -> dict[str, dict[str, Any]]:  # Any: JSON
+    """The run's ledger: each served check's state and evidence (see core/ledger.py).
+
+    `tests` are the check command's per-test results (None: no per-test report), `before` the
+    same tests at the run's base (test first)."""
+    from core.ledger import CheckInfo, build_ledger, outcomes_from
+
+    spec = Spec(WorkDB(Path(data_root) / "projects" / project_id).read_spec_doc())
+    known = {c.id: c for r in spec.requirements for c in r.checks}
+    infos = [CheckInfo(id=cid, method=known[cid].method, test=known[cid].test)
+             for cid in run_check_ids(data_root, project_id, run_id) if cid in known]
+    verdicts = check_verdicts(reviews(read_board(Path(data_root) / "runs" / run_id)))
+    ledger = build_ledger(infos, outcomes_from(tests) if tests is not None else None, verdicts,
+                          before=outcomes_from(before) if before is not None else None)
+    return {cid: entry.to_dict() for cid, entry in ledger.items()}
+
+
 # ── accept ──────────────────────────────────────────────────────────────────
-def record_acceptance(data_root: Path, project_id: str, run_id: str) -> None:
-    """A run was accepted: write its final check verdicts into the spec, and keep its rule
-    verdicts on the run state. Never raises: the merge has already happened."""
+def record_acceptance(data_root: Path, project_id: str, run_id: str,
+                      confirmed: Sequence[str] = (), by: str = "owner") -> None:
+    """A run was accepted: write its final check states into the spec, and keep its rule
+    verdicts on the run state. Never raises: the merge has already happened.
+
+    With a ledger on the run (the check command reported per test), each check's state and
+    evidence come from the ledger, so a failing test outweighs a reviewer's "met"; `confirmed`
+    are the manual or visual checks the owner ticked. Without one, the reviewers' verdicts are
+    used as before (evidence "claimed")."""
+    from core.ledger import confirm, spec_states
     from core.project_repo import ProjectRepo, ProjectRepoError
 
     run_root = Path(data_root) / "runs" / run_id
@@ -183,10 +238,28 @@ def record_acceptance(data_root: Path, project_id: str, run_id: str) -> None:
         if not board:
             return
         found = reviews(board)
-        states = check_verdicts(found)
+        repo = ProjectRepo(data_root, project_id)
+        run = repo.get(run_id)
+        stored = (run.check or {}).get("ledger") if run is not None and run.check else None
+        ledger = stored if isinstance(stored, dict) else ledger_for_run(
+            data_root, project_id, run_id, None)
+        if confirmed:
+            ledger = confirm(ledger, confirmed, by)
+        decided = spec_states(ledger)
+        verdicts = check_verdicts(found)
+        states = {**{k: v for k, v in verdicts.items() if k not in decided},
+                  **{k: met for k, (met, _) in decided.items()}}
+        evidence = {**{k: "claimed" if v else "unmet" for k, v in verdicts.items()},
+                    **{k: proof for k, (_, proof) in decided.items()}}
         if states:
             with WorkDB(Path(data_root) / "projects" / project_id).spec_doc() as doc:
-                set_check_states(doc, states, run_id=run_id, at=time.time())
+                set_check_states(doc, states, run_id=run_id, at=time.time(),
+                                 evidence=evidence)
+        if run is not None and run.check is not None:
+            try:
+                repo.record(run_id, check={**run.check, "ledger": ledger})
+            except ProjectRepoError:
+                log.warning("run %s has no state row to keep its ledger on", run_id)
         counts = rule_counts(found)
         try:
             ProjectRepo(data_root, project_id).record(run_id, rule_verdicts=counts)
