@@ -113,3 +113,15 @@ def test_person_confirmation_and_spec_states() -> None:
     assert counts(out) == {"person": 2, "failing": 1}
     assert spec_states(out) == {"R1.1": (True, "person"), "R1.2": (False, "failing"),
                                 "R9.9": (True, "person")}
+
+
+def test_a_link_to_a_describe_block_names_every_test_in_it() -> None:
+    from core.ledger import TestOutcome, match_test
+    results = [TestOutcome(file="tests/blast.test.js", name="L1: kills within 2",
+                           full="R4.8: Ghost Blast kills > L1: kills within 2", status="passed"),
+               TestOutcome(file="tests/blast.test.js", name="L2: kills within 3",
+                           full="outer > R4.8: Ghost Blast kills > L2: kills within 3", status="passed"),
+               TestOutcome(file="tests/blast.test.js", name="other",
+                           full="data > other", status="passed")]
+    found = match_test("tests/blast.test.js::R4.8: Ghost Blast kills", results)
+    assert [r.name for r in found] == ["L1: kills within 2", "L2: kills within 3"]

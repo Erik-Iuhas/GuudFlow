@@ -150,7 +150,9 @@ def _norm(path: str) -> str:
 
 
 def match_test(link: str, results: Sequence[TestOutcome]) -> list[TestOutcome]:
-    """The test cases a check's `test` link ("file::name", or just "file") names."""
+    """The test cases a check's `test` link ("file::name", or just "file") names. The name
+    may be a test's own name, its full path ("group > test") or a group, which names every test
+    in it."""
     file, _, name = link.partition("::")
     file, name = _norm(file.strip()), name.strip()
     in_file = [r for r in results if r.file and (_norm(r.file).endswith(file)
@@ -161,6 +163,9 @@ def match_test(link: str, results: Sequence[TestOutcome]) -> list[TestOutcome]:
     return [r for r in in_file
             if r.name.casefold() == wanted or r.full.casefold() == wanted
             or r.full.casefold().endswith(" > " + wanted)
+            # A describe block ("R4.8: Ghost Blast kills ...") names every test inside it.
+            or r.full.casefold().startswith(wanted + " > ")
+            or f" > {wanted} > " in r.full.casefold()
             or r.name.casefold().startswith(wanted + "[")              # pytest parametrize
             or r.full.casefold().replace(" > ", "::") == wanted]
 
