@@ -91,3 +91,9 @@ The owner had about $8 left on the key, so a third of it went here.
 - **Operator:** answered from the run, which is a Studio action. T7 is his, the overseer had already settled T5, and the suited families are speed and rush.
 - **Cause:** the brief names the current card, but a blocked card stays assigned to its worker, and nothing says it is parked. A spec gap the registry test enforces (`suited` must not be empty) reached a worker as a question rather than a decision for the tech lead.
 - **Proposed fix:** the brief lists the worker's parked cards as "parked, not yours to work on now", with who they wait on. A question about the spec goes to the tech lead as a `blocked_on: planner` note before it becomes `ask_human`. Only an owner choice reaches a person. `open`
+
+### F13. A run ended "stuck" behind unblock cards nobody would close
+- **Seen:** session 5 (`run_e58d6481ff`). Kenji blocked T3 and Lena blocked T2 on the planner, which created unblock cards T8 and T10 owned by the planner. The planner had already finished and is never spawned again. The overseer decided neither card needed to wait and moved both to `todo`, but each still depended on its open unblock card. Nothing could spawn, and the run ended `stuck` with three items unfinished. Nothing on the board said why.
+- **Operator:** continued the run (`continue_run`, a Studio action) with a goal saying manual checks are the owner's at acceptance.
+- **Fix:** reopening a card (overseer decide, rebrief, reassign, restart; human retry) settles its open unblock cards, which move to done with the reason. `fixed` (`TaskBoard.reopen`).
+- **Still open:** a card blocked on a role that has finished for the run should go straight to the overseer, not wait for the stall watchdog. A run that ends `stuck` should post why: the open cards and what each waits on.

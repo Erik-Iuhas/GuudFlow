@@ -161,6 +161,20 @@ def test_blocked_card_waits_behind_an_unblock_card() -> None:
     assert board.next_for("a").task_id == "T1"
 
 
+def test_reopening_a_blocked_card_settles_its_unblock_card() -> None:
+    # Session 5: the overseer decided T3 need not wait for a playtest, reopened it, but the
+    # unblock card (owned by a planner that had finished) stayed open and the run went stuck.
+    board, _, _ = _board(_task("T1", "a"), _task("T2", "b"))
+    board.start("a", "T1")
+    unblock = board.blocked("T1", "b", "A human playtest that level 1 is clearable.")
+    board.finish_turn("a")
+    board.reopen("T1", "overseer decision")
+    assert board.card(unblock.task_id).column == "done"
+    assert board.card("T1").column == "todo" and board.next_for("a").task_id == "T1"
+    assert board.next_for("b") is None or board.next_for("b").task_id != unblock.task_id
+    assert any("settled" in e.text for e in board.thread(unblock.task_id))
+
+
 def test_has_open_counts_reviewers() -> None:
     board, _, _ = _board(_task("T1", "a"), reviewers={"a": "rev"})
     assert board.has_open("rev") and board.has_open("a")

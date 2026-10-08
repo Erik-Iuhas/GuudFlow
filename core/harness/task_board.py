@@ -383,11 +383,23 @@ class TaskBoard:
         self._move(card, "needs_attention", reason)
 
     def reopen(self, task_id: str, reason: str, *, owner: str | None = None) -> Task:
-        """Back to todo (overseer reassign/rebrief, human retry)."""
+        """Back to todo (overseer reassign/rebrief/decide, human retry).
+
+        Reopening a card means it may go on now, so the unblock cards still open for it are
+        settled (moved to done with `reason`): otherwise the card stays behind a dependency
+        nobody will close, e.g. an unblock card owned by a planner that has finished.
+        """
         card = self.card(task_id)
         if owner is not None:
             card.assigned_to = owner
-        self._move(card, "todo", reason)
+        for dep in list(card.depends_on):
+            unblock = self.workspace.tasks.get(dep)
+            if (unblock is not None and unblock.column != "done"
+                    and task_id in (unblock.supports or [])
+                    and unblock.title.startswith(f"Unblock {task_id}:")):
+                self.note(dep, "decision", "runner", f"settled: {reason}")
+                self._move(unblock, "done", f"settled when {task_id} reopened: {reason}")
+        self._move(card, "todo", reason, blocked_on=[])
         return card
 
     def _release_unblocked(self) -> None:
