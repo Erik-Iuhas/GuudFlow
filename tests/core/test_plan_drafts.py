@@ -659,3 +659,16 @@ def test_add_role_names_a_known_contract(pd: PlanDrafts) -> None:
     assert any("contract 'chief'" in p for p in _team_problems(pd, {**ok, "contract": "chief"}))
     team, _ = apply_team_changes([], [ok])
     assert team[0]["contract"] == "tech_lead"
+
+
+def test_set_kind_is_checked_and_applies_to_the_doc(pd: PlanDrafts) -> None:
+    from core.team_changes import apply_team_changes, kind_change
+    ok = {"op": "set_kind", "kind": "game", "start_mode": "adopt", "reason": TEAM_REASON}
+    assert _team_problems(pd, ok) == []
+    assert any("kind 'novel'" in p for p in _team_problems(pd, {**ok, "kind": "novel"}))
+    assert any("start_mode 'research_first'" in p
+               for p in _team_problems(pd, {**ok, "start_mode": "research_first"}))
+    team, summary = apply_team_changes([{"role": "b"}], [ok])
+    assert team == [{"role": "b"}] and summary["edited"] == []
+    assert kind_change([ok]) == {"kind": "game", "start_mode": "adopt"}
+    assert kind_change([]) == {}

@@ -636,6 +636,7 @@ def parse_proposal_args(
     *,
     harness: str = "legacy",
     model_registry: "ModelRegistry | None" = None,
+    kind_team: list[str] | None = None,
 ) -> ParseResult:
     """Turn the LLM's `propose_team` tool-call arguments into a
     structured proposal. Defensive: missing or malformed fields are
@@ -648,7 +649,9 @@ def parse_proposal_args(
     `model_registry`, when given, is used to turn `vision` off for roles whose
     model cannot read images. With `harness="opencode"` a default `planner`
     role is added when the team has 2+ builders and no planner; the default
-    ("legacy") never adds one.
+    ("legacy") never adds one. `kind_team` (the project kind's contract ids, role contracts
+    plan §3) gives each proposed role the contract of its role type; when one of them owns the
+    session plan (a tech lead) no default planner is added.
     """
     warnings: list[str] = []
 
@@ -824,8 +827,9 @@ def parse_proposal_args(
             )
             a.is_final_reviewer = False
 
+    lead = _assign_contracts(agents, kind_team or [], warnings)
     # Planner (plan §4.6): opencode harness only, so legacy runs keep their shape.
-    if harness == "opencode":
+    if harness == "opencode" and lead is None:
         _ensure_planner(agents, rbac, model_registry, warnings)
 
     # Review edges (plan §4.5), after the planner exists so defaults skip it.
@@ -997,6 +1001,42 @@ def _clamp_review_rounds(role: str, raw: Any, warnings: list[str]) -> int:
 def _is_review_role(agent: AgentConfig) -> bool:
     """True for reviewers and the final reviewer (never counted as builders)."""
     return agent.is_reviewer or agent.is_final_reviewer or agent.role_type == "reviewer"
+
+
+def _assign_contracts(agents: list[AgentConfig], kind_team: list[str],
+                      warnings: list[str]) -> str | None:
+    """Give proposed roles the kind's contracts by role type, in the kind's team order (role
+    contracts plan §3). The role that now owns the session plan (a tech lead), if any, is
+    returned, and the other non-reviewer roles depend on it as they would on a planner.
+    Missing lead roles are warned."""
+    if not kind_team:
+        return None
+    from core.contracts import load_library
+    lib = load_library()
+    plans: AgentConfig | None = None
+    for cid in kind_team:
+        contract = lib.get(cid)
+        if contract is None or cid == "product_manager":
+            continue
+        row = next((a for a in agents if not a.contract and a.role_type == contract.role_type),
+                   None)
+        if row is None:
+            if contract.may_change("session_plan") or contract.may_change("design"):
+                warnings.append(f"the project kind expects a {contract.title} "
+                                f"(role_type {contract.role_type}, contract {cid}); "
+                                "none was proposed")
+            continue
+        row.contract = cid
+        if plans is None and contract.may_change("session_plan"):
+            plans = row
+    if plans is None:
+        return None
+    for a in agents:
+        if a is plans or _is_review_role(a) or a.role in plans.depends_on:
+            continue
+        if plans.role not in a.depends_on:
+            a.depends_on.append(plans.role)
+    return plans.role
 
 
 def _ensure_planner(

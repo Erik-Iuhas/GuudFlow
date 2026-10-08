@@ -273,6 +273,7 @@ class ProjectManager:
         parts.append(f"Current spec (approved version {spec.version}):\n"
                      + (rendered or "(empty: nothing is approved yet)"))
         parts.append(self._team_context())
+        parts.append(self._kind_context())
         parts.append("Open draft (proposed, not yet part of the spec):\n"
                      + self._draft_summary())
         parts.append("Open backlog:\n" + self._backlog_summary())
@@ -329,9 +330,39 @@ class ProjectManager:
                                         declared=str(a.get("role_type") or ""))
             after = ", ".join(a.get("depends_on") or []) or "-"
             reviews = ", ".join(a.get("review_of") or []) or "-"
-            lines.append(f"- {role} ({role_type}, {a.get('model_tier') or 'solid'}); "
-                         f"after: {after}; reviews: {reviews}")
+            from core.contracts import contract_id_for
+            lines.append(f"- {role} ({role_type}, {a.get('model_tier') or 'solid'}, contract "
+                         f"{contract_id_for(a, role_type)}); after: {after}; "
+                         f"reviews: {reviews}")
         return "Current team:\n" + "\n".join(lines)
+
+    def _team_contracts(self) -> list[str]:
+        """The contract id of each role on the team (role type default when unnamed)."""
+        from core.contracts import contract_id_for
+        from core.harness.capabilities import infer_role_type
+        out = []
+        for a in self._team():
+            role_type = infer_role_type(str(a["role"]), is_reviewer=bool(a.get("is_reviewer")),
+                                        declared=str(a.get("role_type") or ""))
+            out.append(contract_id_for(a, role_type))
+        return out
+
+    def _kind_context(self) -> str:
+        """The project kind's phases and team (role contracts plan §3), or the kinds to pick
+        from when none is set."""
+        from core.kinds import KindError, kind_of, load_kinds, render_for_pm
+        try:
+            if not self.doc.get("kind"):
+                kinds = load_kinds()
+                return ("Project kind: not set yet (treated as software_app). Kinds you can "
+                        "propose with `set_kind`:\n" + "\n".join(
+                            f"- {k.id}: {k.title}. {k.purpose} Team: "
+                            f"{', '.join(c for c in k.team if c != 'product_manager')}; "
+                            f"start modes: {', '.join(k.start_modes)}." for k in kinds.values()))
+            return render_for_pm(kind_of(self.doc), team_contracts=self._team_contracts())
+        except KindError:
+            log.warning("pm: project kinds unreadable", exc_info=True)
+            return "Project kind: (the kind library could not be read)"
 
     def _draft_summary(self) -> str:
         draft = self.drafts.current()

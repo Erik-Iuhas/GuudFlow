@@ -1,0 +1,35 @@
+id: docs
+title: Documentation for existing code
+purpose: Docs that stay true to the code; every page has an owner in the information architecture and every code sample runs.
+phases:
+  - id: discover
+    title: Scope
+    owner: product_manager
+    produces: [spec]
+    gate: the Owner approves who the docs are for and what they cover
+  - id: design
+    title: Structure
+    owner: docs_lead
+    needs: [spec]
+    produces: [information_architecture]
+    gate: the Lead seat approves the structure (the docs lead does when the seat is empty)
+  - id: build
+    title: Write
+    owner: docs_lead
+    needs: [spec, information_architecture]
+    produces: [sections, samples, session_plan]
+    gate: every page is checked against the code and every sample runs
+  - id: accept
+    title: Accept
+    owner: owner
+    needs: [verification_ledger]
+    gate: the Owner accepts the session
+  - id: learn
+    title: Learn
+    owner: product_manager
+    produces: [knowledge_base, retrospective]
+    gate: none
+team: [docs_lead, writer, reviewer, tester]
+start_modes: [spec_first, maintain, adopt]
+default_start_mode: spec_first
+uses: [sandbox, repo, test_runner]

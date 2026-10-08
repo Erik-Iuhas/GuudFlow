@@ -278,8 +278,8 @@ async def test_context_lists_the_team(tmp_path: Path) -> None:
     manager, llm = pm(tmp_path, call("a"), doc=TEAM_DOC)
     await manager.turn("hi", mode="discuss")
     ctx = user_text(llm)
-    assert "- builder (builder, heavy); after: -; reviews: -" in ctx
-    assert "- qa (reviewer, fast); after: builder; reviews: builder" in ctx
+    assert "- builder (builder, heavy, contract builder); after: -; reviews: -" in ctx
+    assert "- qa (reviewer, fast, contract reviewer); after: builder; reviews: builder" in ctx
 
 
 async def test_team_ops_are_validated_against_the_team_and_not_pre_ticked(
@@ -294,3 +294,13 @@ async def test_team_ops_are_validated_against_the_team_and_not_pre_ticked(
     assert len(llm.calls) == 2
     assert "still depends on or reviews it" in user_text(llm, 1)
     assert out.draft is not None and [c.accepted for c in out.draft.changes] == [None]
+
+
+async def test_context_names_the_kind(tmp_path: Path) -> None:
+    manager, llm = pm(tmp_path, call("a"), doc=TEAM_DOC)
+    await manager.turn("hi", mode="discuss")
+    ctx = user_text(llm)
+    assert "Project kind: not set yet" in ctx and "- research_report:" in ctx
+    manager, llm = pm(tmp_path / "b", call("a"), doc={**TEAM_DOC, "kind": "game"})
+    await manager.turn("hi", mode="discuss")
+    assert "The current team lacks: tech_lead, builder, tester" in user_text(llm)

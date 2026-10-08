@@ -144,7 +144,7 @@ def test_accept_records_an_episode_with_facts(tmp_path: Path) -> None:
     assert ep["run_id"] == "run_a" and ep["project_type"] == "game"
     assert ep["feedback_verbatim"] == "Looks right to me"
     assert ep["task_context"] == GOAL and ep["iterations_to_resolve"] == 3
-    assert ep["tags"] == ["session", "prototype_first", "game", "accepted",
+    assert ep["tags"] == ["session", "prototype_first", "game", "accepted", "kind:software_app",
                           "team:builder+planner+reviewer"]
     assert "prototype_first mode" in ep["situation"] and "2 requirements" in ep["situation"]
     assert "3 review round(s)" in ep["what_i_tried"] and "cost unknown" in ep["what_i_tried"]
@@ -195,7 +195,7 @@ def test_approved_draft_episode_and_untouched_reputation(tmp_path: Path) -> None
         ("add_requirement", True, "pm"), ("add_item", True, "pm"),
         ("add_rule", False, "pm")), approved=True)
     assert isinstance(ep, Episode) and ep.run_id == "d1"
-    assert ep.tags == ["draft", "prototype_first", "game", "approved",
+    assert ep.tags == ["draft", "prototype_first", "game", "approved", "kind:software_app",
                        "team:builder+planner+reviewer"]
     assert "proposed 3 change(s): c1:add_requirement, c2:add_item, c3:add_rule" in ep.situation
     assert ep.what_worked == "2 change(s) accepted: c1:add_requirement, c2:add_item"

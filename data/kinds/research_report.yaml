@@ -1,0 +1,35 @@
+id: research_report
+title: A research report
+purpose: A written report whose claims are each backed by a cited source; the outline plays the part a design plays for code.
+phases:
+  - id: discover
+    title: Frame
+    owner: product_manager
+    produces: [spec]
+    gate: the Owner approves the questions the report answers
+  - id: design
+    title: Outline
+    owner: editor
+    needs: [spec]
+    produces: [outline]
+    gate: the Lead seat approves the outline (the editor does when the seat is empty)
+  - id: build
+    title: Research and write
+    owner: editor
+    needs: [spec, outline]
+    produces: [sources, sections, session_plan]
+    gate: every claim is checked against a cited source
+  - id: accept
+    title: Accept
+    owner: owner
+    needs: [verification_ledger]
+    gate: the Owner accepts the session
+  - id: learn
+    title: Learn
+    owner: product_manager
+    produces: [knowledge_base, retrospective]
+    gate: none
+team: [editor, researcher, writer, fact_checker]
+start_modes: [spec_first, research_first]
+default_start_mode: research_first
+uses: [repo]

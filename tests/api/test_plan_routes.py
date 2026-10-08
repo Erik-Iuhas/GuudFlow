@@ -290,6 +290,16 @@ async def test_approve_applies_team_add_edit_and_remove(client, auth_header, app
     assert agents["reviewer"]["review_of"] == ["builder", "data_builder"]
 
 
+async def test_approve_sets_the_kind(client, auth_header, app) -> None:
+    kind = {"op": "set_kind", "kind": "game", "start_mode": "adopt", "reason": TEAM_REASON}
+    await _team_draft(client, auth_header, app, kind, ADD_ROLE)
+    r = await client.post("/api/projects/p1/plan/draft/approve", headers=auth_header)
+    assert r.status_code == 200, r.text
+    doc = (await client.get("/api/projects/p1", headers=auth_header)).json()
+    assert doc["kind"] == "game" and doc["start_mode"] == "adopt"
+    assert "data_builder" in {a["role"] for a in doc["agents"]}
+
+
 async def test_approve_adds_a_role_with_defaults(client, auth_header, app) -> None:
     await _team_draft(client, auth_header, app, ADD_ROLE)
     r = await client.post("/api/projects/p1/plan/draft/approve", headers=auth_header)

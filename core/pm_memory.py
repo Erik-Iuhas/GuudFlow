@@ -74,8 +74,14 @@ def _context(data_root: Path, project_id: str) -> dict[str, Any]:  # Any: JSON f
     doc = _project_doc(data_root, project_id)
     goal = str(doc.get("goal") or "").strip()
     seats = Seats.from_project(doc)
+    from core.kinds import KindError, kind_of
+    try:
+        project_kind = kind_of(doc).id
+    except KindError:
+        log.warning("pm memory: project kinds unreadable", exc_info=True)
+        project_kind = str(doc.get("kind") or "")
     return {"goal": goal, "project_type": classify_project(goal),
-            "start_mode": normalise_mode(doc.get("start_mode")),
+            "start_mode": normalise_mode(doc.get("start_mode")), "kind": project_kind,
             "lead": "human" if seats.lead else "empty", "reviewer": seats.reviewer,
             "roles": _roles(doc)}
 
@@ -264,6 +270,8 @@ def record_draft_outcome(data_root: Path | str, project_id: str, draft: Any,  # 
 def _tags(ctx: Mapping[str, Any], kind: str, outcome: str,  # Any: context facts
           roles: list[str]) -> list[str]:
     tags = [kind, ctx["start_mode"], ctx["project_type"], outcome]
+    if ctx.get("kind"):
+        tags.append("kind:" + str(ctx["kind"]))   # which kind and team worked (contracts §6)
     if roles:
         tags.append("team:" + "+".join(sorted(roles)))
     return list(dict.fromkeys(tags))

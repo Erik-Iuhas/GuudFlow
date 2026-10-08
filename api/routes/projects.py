@@ -76,12 +76,31 @@ async def _with_names(request: Request, project: dict, project_id: str) -> dict:
     return {**project, "agents": name_agents(project_id, agents, personas)}
 
 
+def _check_kind(project: dict) -> None:
+    """A project's `kind` (role contracts plan §3) must be in the library, and its start mode
+    one the kind allows."""
+    kind_id = project.get("kind")
+    if kind_id in (None, ""):
+        return
+    from core.kinds import load_kinds
+    kind = load_kinds().get(kind_id) if isinstance(kind_id, str) else None
+    if kind is None:
+        raise HTTPException(status_code=400,
+                            detail=f"kind must be one of: {sorted(load_kinds())}")
+    mode = project.get("start_mode")
+    if mode is not None and mode not in kind.start_modes:
+        raise HTTPException(status_code=400, detail=(
+            f"start_mode {mode!r} does not fit kind {kind.id}; use one of "
+            f"{list(kind.start_modes)}"))
+
+
 @router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_bearer)])
 async def create_project(request: Request, project: dict = Body(...)) -> dict:
     if "project_id" not in project or not project["project_id"]:
         raise HTTPException(status_code=400, detail="project_id is required")
     if "goal" not in project:
         raise HTTPException(status_code=400, detail="goal is required")
+    _check_kind(project)
     try:
         return await _store(request).create(
             await _with_names(request, project, str(project["project_id"])))
@@ -91,6 +110,7 @@ async def create_project(request: Request, project: dict = Body(...)) -> dict:
 
 @router.put("/{project_id}", dependencies=[Depends(require_bearer)])
 async def update_project(request: Request, project_id: str, project: dict = Body(...)) -> dict:
+    _check_kind(project)
     result = await _store(request).update(project_id,
                                           await _with_names(request, project, project_id))
     if result is None:

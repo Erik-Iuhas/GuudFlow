@@ -1,0 +1,35 @@
+id: library
+title: A library others build on
+purpose: Code whose public interface is the product; interfaces change only through the design and every one has tests.
+phases:
+  - id: discover
+    title: Discover
+    owner: product_manager
+    produces: [spec]
+    gate: the Owner approves the first spec draft
+  - id: design
+    title: Design
+    owner: tech_lead
+    needs: [spec]
+    produces: [design]
+    gate: the Lead seat approves the public interfaces (the tech lead does when the seat is empty)
+  - id: build
+    title: Build
+    owner: tech_lead
+    needs: [spec, design]
+    produces: [code, tests, session_plan]
+    gate: every public interface has a passing test
+  - id: accept
+    title: Accept
+    owner: owner
+    needs: [verification_ledger]
+    gate: the Owner accepts the session
+  - id: learn
+    title: Learn
+    owner: product_manager
+    produces: [knowledge_base, retrospective]
+    gate: none
+team: [tech_lead, builder, tester, reviewer]
+start_modes: [spec_first, test_first, maintain, adopt]
+default_start_mode: test_first
+uses: [sandbox, repo, test_runner]

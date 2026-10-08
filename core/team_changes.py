@@ -61,6 +61,8 @@ def apply_team_changes(agents: list[dict[str, Any]],  # Any: agent rows
                     == "reviewer"
             if role not in summary["edited"]:
                 summary["edited"].append(role)
+        elif op == "set_kind":
+            continue                     # the project's kind, not its team: see kind_change
         elif op == "remove_role":
             if row is None:
                 raise TeamChangeError(f"role {role!r} is not on the team")
@@ -73,3 +75,15 @@ def apply_team_changes(agents: list[dict[str, Any]],  # Any: agent rows
         else:
             raise TeamChangeError(f"unknown team op {op!r}")
     return team, summary
+
+
+def kind_change(changes: list[dict[str, Any]]) -> dict[str, str]:  # Any: dumped Changes
+    """The project doc fields a ticked `set_kind` sets (`kind`, maybe `start_mode`); empty when
+    the draft has none. The last one wins."""
+    out: dict[str, str] = {}
+    for ch in changes:
+        if ch.get("op") == "set_kind":
+            out = {"kind": str(ch["kind"])}
+            if ch.get("start_mode"):
+                out["start_mode"] = str(ch["start_mode"])
+    return out

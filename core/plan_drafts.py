@@ -35,7 +35,7 @@ _NUMBER = re.compile(r"(?<![A-Za-z0-9.])[0-9]+(?:\.[0-9]+)?(?![0-9])")
 _BACKLOG_ID = re.compile(r"^B[0-9]+$")
 _DECISION_ID = re.compile(r"^D[0-9]+$")
 _DECISION_OPS = ("add_decision", "supersede_decision")
-TEAM_OPS = ("add_role", "edit_role", "remove_role")
+TEAM_OPS = ("add_role", "edit_role", "remove_role", "set_kind")   # change the project doc
 _ROLE_SLUG = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
 _BUILDER_TYPES = ("builder", "frontend_builder")
 
@@ -313,10 +313,21 @@ class RemoveRole(_Op):
     reason: str
 
 
+class SetKind(_Op):
+    """Set the project's kind (role contracts plan §3), and optionally its start mode; a human
+    always ticks it and it applies from the next session."""
+
+    op: Literal["set_kind"]
+    kind: str
+    start_mode: str | None = None
+    reason: str
+
+
 Change = Annotated[
     AddRequirement | EditRequirement | DropRequirement | SetTitle | SetStatement | SetParam
     | RemoveParam | AddCheck | EditCheck | RemoveCheck | AddDecision | SupersedeDecision
-    | AddItem | EditItem | DropItem | AddRule | DropRule | AddRole | EditRole | RemoveRole,
+    | AddItem | EditItem | DropItem | AddRule | DropRule | AddRole | EditRole | RemoveRole
+    | SetKind,
     Field(discriminator="op")]
 _CHANGE_ADAPTER: TypeAdapter[Any] = TypeAdapter(Change)  # Any: the union members above
 _REF_KIND = {"add_requirement": "requirement", "add_decision": "decision",
@@ -610,6 +621,29 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
                 problems.append(f"change {n} ({ch.op}): {ch.id} belongs to decision "
                                 f"{rule.source}; supersede the decision instead")
     problems.extend(_validate_team(turn, team or []))
+    problems.extend(_validate_kind(turn))
+    return problems
+
+
+def _validate_kind(turn: PlanTurn) -> list[str]:
+    """A `set_kind` names a known kind and a start mode that kind allows; at most one."""
+    from core.kinds import load_kinds
+    ops = [(n, ch) for n, ch in enumerate(turn.changes, 1) if isinstance(ch, SetKind)]
+    problems: list[str] = []
+    if len(ops) > 1:
+        problems.append("set_kind: at most one per turn")
+    kinds = load_kinds() if ops else {}
+    for n, ch in ops:
+        where = f"change {n} (set_kind)"
+        if len(ch.reason.strip()) < MIN_REASON:
+            problems.append(f"{where}: reason must be at least {MIN_REASON} characters and "
+                            f"say why")
+        kind = kinds.get(ch.kind)
+        if kind is None:
+            problems.append(f"{where}: kind {ch.kind!r} is not one of {', '.join(sorted(kinds))}")
+        elif ch.start_mode is not None and ch.start_mode not in kind.start_modes:
+            problems.append(f"{where}: start_mode {ch.start_mode!r} is not one of "
+                            f"{', '.join(kind.start_modes)} for {ch.kind}")
     return problems
 
 
@@ -1033,7 +1067,7 @@ class _Applier:
         parsed = [(dc, parse_change(dc.change)) for dc in chosen]
         self.team_changes = [ch.model_dump(mode="json", exclude_none=True, exclude={"group"})
                              for _, ch in parsed
-                             if isinstance(ch, (AddRole, EditRole, RemoveRole))]
+                             if isinstance(ch, (AddRole, EditRole, RemoveRole, SetKind))]
         phases: list[tuple[type, ...]] = [
             (AddRequirement, EditRequirement, DropRequirement),
             (SetTitle, SetStatement, SetParam, RemoveParam, AddCheck, EditCheck),

@@ -369,3 +369,24 @@ def test_backlog_section_only_when_there_is_open_work(tmp_path) -> None:
     assert "<untrusted-" in text and "Ignore previous instructions" in text  # run-written: wrapped
     msg = _message(backlog_text=text)
     assert "=== Project backlog" in msg and "Rate-limit login" in msg
+
+
+def test_kind_team_assigns_contracts_and_the_lead_plans() -> None:
+    result = _parse([_agent("lead", role_type="architect"), _agent("api", role_type="builder"),
+                     _agent("ui", role_type="builder"),
+                     _agent("rev", is_reviewer=True, depends_on=["ui"])],
+                    harness="opencode",
+                    kind_team=["product_manager", "tech_lead", "builder", "builder", "tester",
+                               "reviewer"])
+    roles = _by_role(result)
+    assert "planner" not in roles                       # the tech lead plans
+    assert roles["lead"].contract == "tech_lead" and roles["api"].contract == "builder"
+    assert roles["ui"].contract == "builder" and roles["rev"].contract == "reviewer"
+    assert roles["api"].depends_on == ["lead"] and "lead" not in roles["rev"].depends_on
+
+
+def test_kind_team_warns_without_a_lead() -> None:
+    result = _parse([_agent("api", role_type="builder"), _agent("ui", role_type="builder")],
+                    harness="opencode", kind_team=["tech_lead", "builder"])
+    assert "planner" in _by_role(result)
+    assert any("expects a Tech lead" in w for w in result.warnings)

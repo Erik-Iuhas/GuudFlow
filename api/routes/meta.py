@@ -172,7 +172,23 @@ async def propose(
             detail=f"start_mode must be one of: {sorted(START_MODE_HINTS)}",
         )
 
-    # Greenfield (no project_id) is the normal Propose-view path: the
+    # Project kind (role contracts plan §3): its team is the template, and proposed roles get
+    # the kind's contracts.
+    from core.kinds import load_kinds, team_template
+    kind_id = body.get("kind")
+    kind = load_kinds().get(kind_id) if isinstance(kind_id, str) else None
+    if kind_id is not None and kind is None:
+        raise HTTPException(status_code=400,
+                            detail=f"kind must be one of: {sorted(load_kinds())}")
+    kind_hint = ""
+    if kind is not None:
+        kind_hint = (f"project kind {kind.id} ({kind.title}): start from this team: " + "; ".join(
+            f"{r['role']} (role_type {r['role_type']})" for r in team_template(kind))
+            + ". The project manager is not a team role. "
+            + ("The tech lead plans each session; do not add a separate planner. "
+               if kind.lead_contract else ""))
+
+
     # user is asking the meta-agent to design a team for a goal before
     # the project even exists. We still call the LLM; we just don't
     # have project inputs to read. read_meta_inputs() handles a
@@ -262,7 +278,9 @@ async def propose(
             harness=harness,
             playbook_text=playbook_text,
             backlog_text=backlog_text,
-            start_mode_hint=START_MODE_HINTS.get(start_mode or "", ""),
+            start_mode_hint="\n".join(h for h in (
+                kind_hint, START_MODE_HINTS.get(start_mode or "", "")) if h),
+            kind_team=list(kind.team) if kind is not None else None,
             model_registry=getattr(request.app.state, "model_registry", None),
         )
     except Exception as e:

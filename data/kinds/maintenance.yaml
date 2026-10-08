@@ -1,0 +1,29 @@
+id: maintenance
+title: Keeping existing software working
+purpose: Small, safe changes to software that already exists; the design changes only when a card changes an interface.
+phases:
+  - id: discover
+    title: Triage
+    owner: product_manager
+    produces: [spec]
+    gate: the Owner approves the items for the session
+  - id: build
+    title: Fix
+    owner: tech_lead
+    needs: [spec]
+    produces: [code, tests, session_plan]
+    gate: every fix has a regression test that passes
+  - id: accept
+    title: Accept
+    owner: owner
+    needs: [verification_ledger]
+    gate: the Owner accepts the session
+  - id: learn
+    title: Learn
+    owner: product_manager
+    produces: [knowledge_base, retrospective]
+    gate: none
+team: [tech_lead, builder, reviewer]
+start_modes: [maintain, adopt]
+default_start_mode: maintain
+uses: [sandbox, repo, test_runner]

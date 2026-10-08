@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-START_MODES = ("spec_first", "prototype_first", "test_first", "research_first", "maintain")
+START_MODES = ("spec_first", "prototype_first", "test_first", "research_first", "maintain",
+               "adopt")
 DEFAULT_START_MODE = "spec_first"
 
 
@@ -55,6 +56,15 @@ smallest change that meets each item, with a regression test for every fix, and 
 outside the files the item names (`files_hint`). Prefer a rule such as "minimal diff" or \
 "regression test per fix" over new requirements. Do not rewrite the spec; add to it only when \
 behaviour that must not break is worth recording.""",
+    "adopt": """\
+Start mode: adopt. The code already exists and nobody wrote down its design. The first session \
+is the tech lead's: it reads the code and records the design as it is (components, the \
+interfaces actually used, the data that crosses them, the debt it sees) and changes no product \
+code. Your first job is a spec of what the software does today: requirements with checks that \
+match its current behaviour, marked `assumed` where you infer rather than see, and the product \
+decisions the code already made. Add work items for what the owner wants next; they are planned \
+against the recovered design from the second session on. If the team has no tech lead, propose \
+one first (role_type `architect`, contract `tech_lead`).""",
 }
 
 
@@ -80,6 +90,11 @@ TEAM_HINTS: dict[str, str] = {
         "start mode maintain: project manager, one builder and a reviewer. Existing code: "
         "the smallest safe change, and a regression test per fix."
     ),
+    "adopt": (
+        "start mode adopt: an existing codebase joins. Include a tech lead (role_type "
+        "architect, contract tech_lead) who recovers the design in the first session, plus "
+        "builders, a tester and a reviewer for the sessions after it."
+    ),
 }
 
 PLANNER_TEXT: dict[str, str] = {
@@ -94,6 +109,9 @@ PLANNER_TEXT: dict[str, str] = {
                       "options, evidence and a recommendation. Write no product code.",
     "maintain": "Start mode maintain: make the smallest change that meets each item, add a "
                 "regression test per fix, and do not refactor outside the card's `files_hint`.",
+    "adopt": "Start mode adopt: until the design is recorded, recover it from the code and "
+             "plan no product changes. After that, plan cards against the recovered design and "
+             "keep each change inside the components its card names.",
 }
 
 # Extra lines every card review must answer (one `ItemVerdict` each). spec_first adds none:
@@ -104,6 +122,7 @@ REVIEWER_LINES: dict[str, tuple[str, ...]] = {
     "test_first": ("mode: the tests were written before the code and now pass",),
     "research_first": ("mode: sources are cited and the options are compared",),
     "maintain": ("mode: a regression test was added and the diff is limited to the item",),
+    "adopt": ("mode: the change stays inside the design components the card names",),
 }
 
 

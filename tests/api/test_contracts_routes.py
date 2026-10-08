@@ -24,3 +24,25 @@ async def test_library_and_project_team(client, auth_header, data_root) -> None:
     builder = next(c for c in body["contracts"] if c["id"] == "builder")
     assert builder["source"] == "project" and builder["rules"][-1] == "Use integer maths."
     assert (await client.get("/api/projects/nope/contracts", headers=auth_header)).status_code == 404
+
+
+async def test_kinds_and_phases(client, auth_header, data_root) -> None:
+    body = (await client.get("/api/kinds", headers=auth_header)).json()
+    game = next(k for k in body["kinds"] if k["id"] == "game")
+    assert game["lead_contract"] == "tech_lead" and game["team_template"][0]["role"] == "tech_lead"
+    bad = await client.post("/api/projects", headers=auth_header,
+                            json={"project_id": "p2", "goal": "g", "kind": "novel"})
+    assert bad.status_code == 400
+    bad = await client.post("/api/projects", headers=auth_header, json={
+        "project_id": "p2", "goal": "g", "kind": "library", "start_mode": "prototype_first"})
+    assert bad.status_code == 400 and "does not fit" in bad.json()["detail"]
+    r = await client.post("/api/projects", headers=auth_header, json={
+        "project_id": "p2", "goal": "g", "kind": "game", "start_mode": "adopt",
+        "agents": [{"role": "lead", "role_type": "architect", "contract": "tech_lead"},
+                   {"role": "b", "role_type": "builder"}]})
+    assert r.status_code in (200, 201)
+    strip = (await client.get("/api/projects/p2/phases", headers=auth_header)).json()
+    assert strip["kind"] == "game" and strip["current"] == "design"
+    assert [p["state"] for p in strip["phases"]][:2] == ["skipped", "current"]
+    assert strip["items"] == {}
+    assert (await client.get("/api/projects/nope/phases", headers=auth_header)).status_code == 404

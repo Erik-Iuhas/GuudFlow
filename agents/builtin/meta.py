@@ -210,6 +210,7 @@ class MetaAgent(BaseAgent):
         backlog_text: str = "",
         start_mode_hint: str = "",
         model_registry: "ModelRegistry | None" = None,
+        kind_team: list[str] | None = None,
     ) -> TeamProposal:
         """Generate a team proposal for `goal` using inputs in
         `project_dir/inputs/`.
@@ -290,7 +291,7 @@ class MetaAgent(BaseAgent):
 
         result = parse_proposal_args(
             first.arguments, archetypes, roster,
-            harness=harness, model_registry=model_registry,
+            harness=harness, model_registry=model_registry, kind_team=kind_team,
         )
         if not result.agents:
             return self._wrap_fallback(

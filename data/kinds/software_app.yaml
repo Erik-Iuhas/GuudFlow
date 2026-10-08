@@ -1,0 +1,35 @@
+id: software_app
+title: Software you keep building
+purpose: An application developed over many sessions; the design is kept up to date and every session builds against it.
+phases:
+  - id: discover
+    title: Discover
+    owner: product_manager
+    produces: [spec]
+    gate: the Owner approves the first spec draft
+  - id: design
+    title: Design
+    owner: tech_lead
+    needs: [spec]
+    produces: [design]
+    gate: the Lead seat approves the design (the tech lead does when the seat is empty)
+  - id: build
+    title: Build
+    owner: tech_lead
+    needs: [spec, design]
+    produces: [code, tests, session_plan]
+    gate: every served check is verified, or claimed with evidence
+  - id: accept
+    title: Accept
+    owner: owner
+    needs: [verification_ledger]
+    gate: the Owner accepts the session
+  - id: learn
+    title: Learn
+    owner: product_manager
+    produces: [knowledge_base, retrospective]
+    gate: none
+team: [tech_lead, builder, builder, tester, reviewer]
+start_modes: [spec_first, prototype_first, test_first, research_first, maintain, adopt]
+default_start_mode: spec_first
+uses: [sandbox, repo, test_runner]
