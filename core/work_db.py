@@ -47,7 +47,18 @@ CREATE TABLE IF NOT EXISTS plan_messages (
 CREATE TABLE IF NOT EXISTS drafts (
     id TEXT PRIMARY KEY, base_version INTEGER NOT NULL, status TEXT NOT NULL,
     data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS design_items (
+    kind TEXT NOT NULL, id TEXT PRIMARY KEY, num INTEGER NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS design_drafts (
+    id TEXT PRIMARY KEY, status TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS knowledge_notes (
+    id TEXT PRIMARY KEY, num INTEGER NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL);
 """
+# The design (role contracts plan §4.2): key in the document → kind in design_items.
+DESIGN_KINDS = (("components", "component"), ("interfaces", "interface"),
+                ("datatypes", "datatype"), ("flows", "flow"), ("decisions", "tech_decision"),
+                ("debt", "debt"))
+DESIGN_COUNTERS = ("C", "I", "T", "F", "TD", "DB")
 _SPEC_KINDS = (("requirements", "requirement"), ("decisions", "decision"), ("rules", "rule"))
 _COUNTERS = ("R", "D", "rule")
 
@@ -240,6 +251,98 @@ class WorkDB:
             self._save_backlog(conn, txn.backlog)
             self._save_spec(conn, txn.spec)
             self._save_drafts(conn, txn.drafts)
+
+    # ── design (role contracts plan §4.2) ───────────────────────────────────
+    def read_design_doc(self) -> dict[str, Any]:  # Any: JSON document
+        """The design as {"version", "next": {C, I, T, F, TD, DB}, "components", "interfaces",
+        "datatypes", "flows", "decisions", "debt"} (no lock)."""
+        conn = self._connect()
+        try:
+            return self._design(conn)
+        finally:
+            conn.close()
+
+    @contextmanager
+    def design_doc(self) -> Iterator[dict[str, Any]]:  # Any: JSON document
+        """Read-modify-write the design in one transaction."""
+        with self._write() as conn:
+            doc = self._design(conn)
+            yield doc
+            self._save_design(conn, doc)
+
+    @staticmethod
+    def _design(conn: sqlite3.Connection) -> dict[str, Any]:  # Any: JSON document
+        meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+        doc: dict[str, Any] = {
+            "version": int(meta.get("design_version", 0)),
+            "next": {c: int(meta.get(f"design_next_{c}", 1)) for c in DESIGN_COUNTERS}}
+        for key, kind in DESIGN_KINDS:
+            rows = conn.execute("SELECT data FROM design_items WHERE kind=? ORDER BY num",
+                                (kind,)).fetchall()
+            doc[key] = [json.loads(r[0]) for r in rows]
+        return doc
+
+    @staticmethod
+    def _save_design(conn: sqlite3.Connection, doc: dict[str, Any]) -> None:  # Any: JSON
+        for key, kind in DESIGN_KINDS:
+            for row in doc.get(key, []):
+                conn.execute(
+                    "INSERT INTO design_items(kind, id, num, data) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                    (kind, row["id"], _spec_num(str(row["id"])), json.dumps(row)))
+        _set_meta(conn, "design_version", str(int(doc.get("version", 0))))
+        for c in DESIGN_COUNTERS:
+            _set_meta(conn, f"design_next_{c}", str(int(doc.get("next", {}).get(c, 1))))
+
+    def read_design_drafts(self) -> list[dict[str, Any]]:  # Any: JSON rows
+        """Every design draft, oldest first (no lock)."""
+        conn = self._connect()
+        try:
+            return self._design_drafts(conn)
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _design_drafts(conn: sqlite3.Connection) -> list[dict[str, Any]]:  # Any: JSON rows
+        rows = conn.execute("SELECT data FROM design_drafts").fetchall()
+        return sorted((json.loads(r[0]) for r in rows), key=lambda d: _spec_num(str(d["id"])))
+
+    @contextmanager
+    def design_txn(self) -> Iterator[tuple[dict[str, Any], list[dict[str, Any]]]]:  # Any: JSON
+        """The design and its drafts in one transaction (approving a design draft)."""
+        with self._write() as conn:
+            doc, drafts = self._design(conn), self._design_drafts(conn)
+            yield doc, drafts
+            self._save_design(conn, doc)
+            for row in drafts:
+                conn.execute("INSERT INTO design_drafts(id, status, data) VALUES (?, ?, ?) "
+                             "ON CONFLICT(id) DO UPDATE SET status=excluded.status, "
+                             "data=excluded.data",
+                             (row["id"], str(row.get("status", "open")), json.dumps(row)))
+
+    # ── knowledge base notes (role contracts plan §4.3) ─────────────────────
+    def read_knowledge(self) -> list[dict[str, Any]]:  # Any: JSON rows
+        """Every knowledge-base note, oldest first (no lock)."""
+        conn = self._connect()
+        try:
+            rows = conn.execute("SELECT data FROM knowledge_notes ORDER BY num").fetchall()
+            return [json.loads(r[0]) for r in rows]
+        finally:
+            conn.close()
+
+    @contextmanager
+    def knowledge_doc(self) -> Iterator[list[dict[str, Any]]]:  # Any: JSON rows
+        """Read-modify-write the knowledge notes in one transaction."""
+        with self._write() as conn:
+            rows = [json.loads(r[0]) for r in
+                    conn.execute("SELECT data FROM knowledge_notes ORDER BY num").fetchall()]
+            yield rows
+            for row in rows:
+                conn.execute("INSERT INTO knowledge_notes(id, num, status, data) "
+                             "VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
+                             "status=excluded.status, data=excluded.data",
+                             (row["id"], _spec_num(str(row["id"])),
+                              str(row.get("status", "proposed")), json.dumps(row)))
 
     # ── plan messages ───────────────────────────────────────────────────────
     def add_plan_message(self, author: str, text: str, draft_id: str | None = None,
