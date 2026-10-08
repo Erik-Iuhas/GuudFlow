@@ -63,7 +63,10 @@ commits and quips use the name, and a `TEAM` signal at run start tells Studio wh
   ledger (`core/ledger.py`) says which checks a test proved. The knowledge base
   (`core/knowledge.py`) holds facts generated from `main` and notes a person approves. Project
   kinds (`core/kinds.py`, `data/kinds/*.yaml`) set phases and the starting team; the `adopt` start
-  mode recovers the design of existing code first. Contract measures and rule proposals
+  mode recovers the design of existing code first. An older project moves over in place: kind + `adopt`, the
+  existing planner edited into the tech lead (`core/team_changes.team_problems` refuses a team
+  where a builder no card reaches, two planners, or a role naming a missing one), and the
+  recovery plan's `check_links` tie existing tests to spec checks (ROLE_CONTRACTS_PLAN §10.1). Contract measures and rule proposals
   (`core/contract_measures.py`) run when a session is accepted; a person ticks every rule.
 - **MCP.** Third-party MCP servers are proxied on the host (`core/mcp_registry.py`,
   `core/harness/mcp_proxy.py`; `docs/MCP_PLAN.md`).

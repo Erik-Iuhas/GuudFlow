@@ -313,3 +313,14 @@ def test_plan_must_cover_the_runs_backlog_items() -> None:
     ok = PlanResult.model_validate({"tasks": [plan.tasks[0].model_dump(),
                                               plan.tasks[1].model_dump()]})
     assert check_plan(ok, ["dev"], backlog_ids=["B1"]) == []
+
+
+def test_check_links_must_name_known_checks_and_test_files() -> None:
+    from core.harness.tasks import CheckLink, check_link_problems
+    links = [CheckLink(check="R1.1", test="tests/a.test.js::works"),
+             CheckLink(check="R9.9", test="tests/a.test.js"),
+             CheckLink(check="R1.2", test="tests/nope.test.js")]
+    problems = check_link_problems(links, ["R1", "R1.1", "R1.2"], ["tests/a.test.js"])
+    assert problems == ["check_links: R9.9 is not a check in the spec",
+                        "check_links: tests/nope.test.js names no test file in the repo"]
+    assert check_link_problems(links[:1], ["R1.1"], None) == []

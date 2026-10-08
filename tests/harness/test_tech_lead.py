@@ -181,3 +181,25 @@ def test_knowledge_reaches_lead_and_cards(tmp_path: Path) -> None:
     assert card_turn is not None
     text = _sections(card_turn)["Project knowledge"]
     assert "dash.js` (40 lines)" in text and "refills on every power pellet" in text
+
+
+def test_adopt_links_existing_tests_to_checks(tmp_path: Path) -> None:
+    from core.harness.spec_brief import SpecBrief
+    from core.spec_adherence import run_check_links
+    from tests.spec_fixtures import seed_spec
+    seed_spec(tmp_path)
+    flow = _flow(tmp_path, adopt=True)
+    flow.spec = SpecBrief.load(tmp_path, "p1", "adopt")
+    flow.facts = {"tests": ["tests/list.test.js"], "modules": [], "commands": []}
+    turn = flow.begin_turn("lead")
+    assert turn is not None
+    unlinked = _sections(turn)["Checks with no test yet"]
+    assert "R1.1" in unlinked and "check_links" in unlinked
+    bad = PlanResult(design=DesignTurn.model_validate({"groups": [WHY], "changes": [LOGIC]}),
+                     check_links=[{"check": "R1.1", "test": "tests/ghost.test.js"}])
+    assert any("names no test file" in p for p in turn.check(bad))
+    good = PlanResult(design=DesignTurn.model_validate({"groups": [WHY], "changes": [LOGIC]}),
+                      check_links=[{"check": "R1.1", "test": "tests/list.test.js::shows saved"}])
+    assert turn.check(good) == []
+    flow.plan_accepted(good)
+    assert run_check_links(tmp_path, "r") == {"R1.1": "tests/list.test.js::shows saved"}

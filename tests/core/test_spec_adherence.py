@@ -180,3 +180,25 @@ def test_without_a_ledger_reviewer_verdicts_are_claims(tmp_path: Path) -> None:
     spec = Spec(WorkDB(tmp_path / "projects" / "p1").read_spec_doc())
     assert (spec.check("R1.1").state, spec.check("R1.1").evidence) == ("met", "claimed")
     assert (spec.check("R2.1").state, spec.check("R2.1").evidence) == ("unmet", "unmet")
+
+
+def test_existing_tests_linked_at_adopt_are_proved_and_kept(tmp_path: Path) -> None:
+    """Adopt: the tech lead links an old test to R2.1; the session's check run proves it and
+    accepting the session records the state and the link."""
+    from core.spec_adherence import ledger_for_run, run_check_ids, store_check_links
+    seed_spec(tmp_path)
+    repo = _submit(tmp_path)
+    write_board(tmp_path, "run_a", [])
+    store_check_links(tmp_path, "run_a", {"R2.1": "tests/tags.test.js::filters by tag"})
+    assert "R2.1" in run_check_ids(tmp_path, "p1", "run_a")
+    ledger = ledger_for_run(tmp_path, "p1", "run_a",
+                            {"tests/tags.test.js::filters by tag": "passed"})
+    assert ledger["R2.1"]["state"] == "verified"
+    repo.record_check("run_a", {"command": "bun test", "status": "passed", "ledger": ledger})
+    write_board(tmp_path, "run_a", [review("T1", [(R11, True)])])
+
+    decide_run(tmp_path, "p1", "run_a", accept=True)
+
+    check = Spec(WorkDB(tmp_path / "projects" / "p1").read_spec_doc()).check("R2.1")
+    assert (check.state, check.evidence) == ("met", "verified")
+    assert check.test == "tests/tags.test.js::filters by tag" and check.method == "unit"

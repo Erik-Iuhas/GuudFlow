@@ -341,3 +341,16 @@ project to test design before code.
 Not built: `escaped_issues` and `spec_churn` measures (they need findings recorded at acceptance),
 Mermaid rendering in Studio (flows show their source), and the migration of
 `docs/worker-archetypes.yaml` into contracts (§2.4).
+
+
+### 10.1 Moving an older project over (2026-10-08)
+
+Projects created before kinds (pacrogue) have no kind, a `planner` role and no design. Found while
+preparing pacrogue session 4; what now covers it:
+
+| Problem | Now |
+|---|---|
+| Swapping the planner for a new `tech_lead` role left the builders depending on `planner`; replacing it with `add_role` left two planning roles. Either way no card reached the builders. | `core/team_changes.team_problems()`: a role naming one not on the team, two roles whose contract owns the session plan, a builder not after the planner. A save refuses the first and returns the others as `team_warnings`; a draft's team changes may not introduce any; a run with any stops before it spends anything (`FAILED`). |
+| Jack proposed `add_role` to reach the kind's team. | Jack is told the project's accepted sessions and whether a design exists; an older project gets kind + `start_mode: adopt`, and the existing planner is changed with `edit_role` (`architect` / `tech_lead`, same name). |
+| No way in Studio to change kind, start mode, role type or contract on an existing project. | Team tab: Project kind card (kind, start mode, team warnings); worker panel: Role type and Contract. |
+| Tests written before the ledger proved nothing on record. | The recovery turn lists unit checks with no test; the tech lead links existing tests in `PlanResult.check_links` (checked against the spec and the repo's test files). The links join the session's ledger, the check run proves them, and accepting the session records the state and the link on the check. |

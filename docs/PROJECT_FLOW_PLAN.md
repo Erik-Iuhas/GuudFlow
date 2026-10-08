@@ -696,6 +696,15 @@ That is the owner's call; running session 4 on the new spec shape would also tes
   sessions. It contains no keys. To restore, extract it into a data root and point
   `GUUDFLOW_DATA_DIR` there. The API key and token were never stored in it, so set them again.
 
+- **Starting session 4 (2026-10-08).** In Studio: on the Team tab set the kind to Game and the
+  start mode to Adopt, and in the planner's worker panel set Role type `architect` and Contract
+  Tech lead (or ask Jack, who now proposes exactly this). Approve draft-4 (it still applies
+  cleanly: R12, R13, D7, D8, rule-10, B11, B12), set $15 and 75 minutes, and start the session on
+  B11 and B12. The tech lead recovers the design, links existing tests to checks and plans the
+  cards in one turn; for recovery alone first, start a session with no items. Checked on a copy
+  of the snapshot: facts build (26 modules, 25 test files), `bun test` passes 661 on `main`,
+  the team has no warnings after the in-place change.
+
 ### 11.10 Implementation status (2026-10-07)
 W1–W9 are implemented, with tests. Where the build differs from the text above:
 - **Handoff is optional in the schema.** A done result without one still validates; GuudFlow then

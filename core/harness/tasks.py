@@ -71,6 +71,15 @@ class PlannedTask(BaseModel):
         return value
 
 
+class CheckLink(BaseModel):
+    """An existing test that proves a spec check (adopt: tests written before GuudFlow)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    check: str = Field(pattern=r"^R[0-9]+\.[0-9]+$")
+    test: str = Field(min_length=3, max_length=300)     # "tests/x.test.js" or "file::name"
+
+
 class PlanResult(BaseModel):
     """The planner's structured result: the task list for the run.
 
@@ -88,6 +97,23 @@ class PlanResult(BaseModel):
     # Notes for the project knowledge base (role contracts plan §4.3), typically promoted from
     # the last session's notebooks.
     knowledge: list[KnowledgeNote] = Field(default_factory=list, max_length=20)
+    # Adopt (role contracts plan §8): existing tests that prove existing checks. The session's
+    # check run proves them; accepting the session records the link and the state.
+    check_links: list[CheckLink] = Field(default_factory=list, max_length=200)
+
+
+def check_link_problems(links: Sequence[CheckLink], check_ids: Collection[str],
+                        test_files: Collection[str] | None) -> list[str]:
+    """Each link names a known check and (when the test files are known) an existing file."""
+    problems: list[str] = []
+    files = [f.replace("\\", "/").lstrip("./") for f in test_files] if test_files else None
+    for link in links:
+        if link.check not in check_ids:
+            problems.append(f"check_links: {link.check} is not a check in the spec")
+        path = link.test.partition("::")[0].strip().replace("\\", "/").lstrip("./")
+        if files is not None and not any(f == path or f.endswith("/" + path) for f in files):
+            problems.append(f"check_links: {link.test} names no test file in the repo")
+    return problems
 
 
 def _find_cycle(graph: dict[str, list[str]]) -> list[str] | None:

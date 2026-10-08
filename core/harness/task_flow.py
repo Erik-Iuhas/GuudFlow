@@ -32,7 +32,7 @@ from core.harness.result_inbox import ResultCheck
 from core.harness.results import AgentResult, ReviewResult
 from core.harness.spec_brief import SpecBrief, missing_check_lines
 from core.harness.task_board import BoardLimits, TaskBoard
-from core.harness.tasks import PlanResult, check_plan, check_task_result
+from core.harness.tasks import PlanResult, check_link_problems, check_plan, check_task_result
 from core.harness import visual_review
 from core.harness.visual_review import PrecheckResult
 from core.signals import Signal, SignalType
@@ -228,12 +228,20 @@ class TaskFlow:
                 sections = (("This run's backlog items", backlog_text(self.backlog)),) + sections
             item_serves = self._item_serves()
             designer = self.designer
+            if recovering and self.spec is not None:
+                unlinked = self._unlinked_checks()
+                if unlinked:
+                    sections = sections + (("Checks with no test yet", unlinked),)
+            test_files = (list((self.facts or {}).get("tests") or [])
+                          if self.facts is not None else None)
             return TurnPlan(
                 model=PlanResult,
-                check=lambda r: (check_plan(r, owners, items, spec_ids=spec_ids,
-                                            item_serves=item_serves, design=design,
-                                            require_tasks=not recovering,
-                                            require_design_links=designer)
+                check=lambda r: ((check_plan(r, owners, items, spec_ids=spec_ids,
+                                             item_serves=item_serves, design=design,
+                                             require_tasks=not recovering,
+                                             require_design_links=designer)
+                                  + check_link_problems(r.check_links, spec_ids or [],
+                                                        test_files))
                                  if isinstance(r, PlanResult) else []),
                 extra_sections=sections)
         if role not in self.card_roles:
@@ -437,6 +445,7 @@ class TaskFlow:
         created = self._apply_design(plan)
         self._spec_notes(plan)
         self._knowledge_notes(plan)
+        self._store_check_links(plan)
         if created:
             plan = plan.model_copy(update={"tasks": [
                 t.model_copy(update={"implements": [created.get(i, i) for i in t.implements]})
@@ -497,6 +506,33 @@ class TaskFlow:
         self.post(SignalType.THINKING, self.planner,
                   f"{len(plan.spec_notes)} feasibility note(s) for the product manager",
                   json.dumps({"spec_notes": list(plan.spec_notes)}))
+
+    def _unlinked_checks(self) -> str:
+        """Unit checks of active requirements that have no linked test (for adopt)."""
+        assert self.spec is not None
+        lines = [f"- {c.id}: {c.text}" for r in self.spec.spec.requirements
+                 if r.status == "active" for c in r.checks
+                 if not c.test and c.method in (None, "unit")]
+        if not lines:
+            return ""
+        shown = lines[:80]
+        more = len(lines) - len(shown)
+        return ("\n".join(shown) + (f"\n- … and {more} more" if more else "")
+                + "\n\nWhere an existing test already proves one of these, add it to "
+                "`check_links` (`check`, `test` as \"file\" or \"file::test name\"). The "
+                "session's check run then proves it and accepting the session records it. "
+                "Link only tests you have read; leave a check out when no test covers it.")
+
+    def _store_check_links(self, plan: PlanResult) -> None:
+        """Keep the plan's check links with the run (read when its ledger is built)."""
+        if not plan.check_links or self.data_root is None or not self.run_id:
+            return
+        from core.spec_adherence import store_check_links
+        links = {link.check: link.test for link in plan.check_links}
+        store_check_links(self.data_root, self.run_id, links)
+        self.post(SignalType.THINKING, self.planner,
+                  f"{len(links)} existing test(s) linked to spec checks",
+                  json.dumps({"check_links": links}))
 
     def _knowledge_notes(self, plan: PlanResult) -> None:
         """The plan's knowledge notes: approved at once when no human holds the Lead seat."""
@@ -704,8 +740,9 @@ def design_instructions(recovering: bool) -> str:
             "with two owners, a file everything goes through, code left from dropped ideas "
             "(`add_debt`, with paths).\n"
             "Every change names its reason in `design.groups` (summary, because, evidence: the "
-            "files it rests on). Plan no product cards this session unless a backlog item "
-            "needs one; an empty `tasks` list is fine.")
+            "files it rests on). Link existing tests to the spec checks they prove in "
+            "`check_links` (see \"Checks with no test yet\"). Plan no product cards this "
+            "session unless a backlog item needs one; an empty `tasks` list is fine.")
     return (
         "You own the design. Before planning cards:\n"
         "1. Compare the design with the code. Where they differ, change one of them on purpose: "

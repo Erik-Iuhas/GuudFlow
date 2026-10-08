@@ -172,6 +172,27 @@ def adherence(board: Sequence[Mapping[str, Any]]) -> dict[str, Any]:  # Any: JSO
 
 
 # ── the verification ledger (role contracts plan §4.4) ──────────────────────
+CHECK_LINKS_FILE = "check_links.json"
+
+
+def store_check_links(data_root: Path, run_id: str, links: Mapping[str, str]) -> None:
+    """Keep a run's check → existing test links (adopt), merged with any already stored."""
+    path = Path(data_root) / "runs" / run_id / CHECK_LINKS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    merged = {**run_check_links(data_root, run_id), **dict(links)}
+    path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+
+
+def run_check_links(data_root: Path, run_id: str) -> dict[str, str]:
+    """The run's check → existing test links (empty when it has none)."""
+    path = Path(data_root) / "runs" / run_id / CHECK_LINKS_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, ValueError):
+        return {}
+    return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+
+
 def run_check_ids(data_root: Path, project_id: str, run_id: str) -> list[str]:
     """The spec checks a run served: its items' check references and its cards' `serves`."""
     ids: list[str] = []
@@ -194,6 +215,7 @@ def run_check_ids(data_root: Path, project_id: str, run_id: str) -> list[str]:
         for row in last.values():
             ids += [str(s).upper() for s in row.get("serves") or [] if "." in str(s)]
             ids += [c for c in (check_id(a) for a in row.get("acceptance_criteria") or []) if c]
+    ids += list(run_check_links(data_root, run_id))
     return list(dict.fromkeys(ids))
 
 
@@ -211,7 +233,9 @@ def ledger_for_run(data_root: Path, project_id: str, run_id: str,
 
     spec = Spec(WorkDB(Path(data_root) / "projects" / project_id).read_spec_doc())
     known = {c.id: c for r in spec.requirements for c in r.checks}
-    infos = [CheckInfo(id=cid, method=known[cid].method, test=known[cid].test)
+    links = run_check_links(data_root, run_id)
+    infos = [CheckInfo(id=cid, method=known[cid].method or ("unit" if cid in links else None),
+                       test=known[cid].test or links.get(cid))
              for cid in run_check_ids(data_root, project_id, run_id) if cid in known]
     verdicts = check_verdicts(reviews(read_board(Path(data_root) / "runs" / run_id)))
     ledger = build_ledger(infos, outcomes_from(tests) if tests is not None else None, verdicts,
@@ -251,10 +275,21 @@ def record_acceptance(data_root: Path, project_id: str, run_id: str,
                   **{k: met for k, (met, _) in decided.items()}}
         evidence = {**{k: "claimed" if v else "unmet" for k, v in verdicts.items()},
                     **{k: proof for k, (_, proof) in decided.items()}}
-        if states:
+        links = run_check_links(data_root, run_id)
+        proven = {cid: links[cid] for cid, entry in ledger.items()
+                  if cid in links and isinstance(entry, dict) and entry.get("state") == "verified"}
+        if states or proven:
             with WorkDB(Path(data_root) / "projects" / project_id).spec_doc() as doc:
-                set_check_states(doc, states, run_id=run_id, at=time.time(),
-                                 evidence=evidence)
+                if states:
+                    set_check_states(doc, states, run_id=run_id, at=time.time(),
+                                     evidence=evidence)
+                # An existing test the session proved becomes the check's linked test, so later
+                # sessions keep checking it (accepting is the person's approval).
+                for req in doc.get("requirements", []):
+                    for check in req.get("checks", []):
+                        if check.get("id") in proven and not check.get("test"):
+                            check["test"] = proven[check["id"]]
+                            check["method"] = check.get("method") or "unit"
         if run is not None and run.check is not None:
             try:
                 repo.record(run_id, check={**run.check, "ledger": ledger})
