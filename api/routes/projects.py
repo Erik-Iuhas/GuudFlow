@@ -94,6 +94,25 @@ def _check_kind(project: dict) -> None:
             f"{list(kind.start_modes)}"))
 
 
+def _check_team(project: dict) -> None:
+    """Every role a team row waits on (`depends_on`) or reviews (`review_of`) must be on the
+    team. Renaming or replacing a role (a planner swapped for a tech lead) otherwise leaves the
+    roles below it waiting on nobody, and they never get work."""
+    agents = project.get("agents")
+    if not isinstance(agents, list):
+        return
+    roles = {a.get("role") for a in agents if isinstance(a, dict)}
+    for a in agents:
+        if not isinstance(a, dict):
+            continue
+        for key in ("depends_on", "review_of"):
+            missing = [r for r in (a.get(key) or []) if r not in roles]
+            if missing:
+                raise HTTPException(status_code=400, detail=(
+                    f"role {a.get('role')!r}: {key} names {', '.join(map(repr, missing))}, "
+                    f"which is not on the team"))
+
+
 @router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_bearer)])
 async def create_project(request: Request, project: dict = Body(...)) -> dict:
     if "project_id" not in project or not project["project_id"]:
@@ -101,6 +120,7 @@ async def create_project(request: Request, project: dict = Body(...)) -> dict:
     if "goal" not in project:
         raise HTTPException(status_code=400, detail="goal is required")
     _check_kind(project)
+    _check_team(project)
     try:
         return await _store(request).create(
             await _with_names(request, project, str(project["project_id"])))
@@ -111,6 +131,7 @@ async def create_project(request: Request, project: dict = Body(...)) -> dict:
 @router.put("/{project_id}", dependencies=[Depends(require_bearer)])
 async def update_project(request: Request, project_id: str, project: dict = Body(...)) -> dict:
     _check_kind(project)
+    _check_team(project)
     result = await _store(request).update(project_id,
                                           await _with_names(request, project, project_id))
     if result is None:

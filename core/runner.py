@@ -570,6 +570,21 @@ class AgentRunner:
                     r for r in non_final_roles if r != cfg.role and r not in blockers
                 ]
 
+        roles = {c.role for c in self.project.agents}
+        dangling = sorted({f"{c.role} → {d}" for c in self.project.agents
+                           for d in [*(c.depends_on or []), *(c.review_of or [])]
+                           if d not in roles})
+        if dangling:
+            # A role waiting on one that is not on the team would never get work.
+            self.workspace.post_signal(Signal(
+                type=SignalType.FAILED,
+                summary=f"team names roles that are not on it: {', '.join(dangling)}",
+                detail=("Run cannot start: edit depends_on / review_of so every role they "
+                        "name is on the team (e.g. after replacing a planner)."),
+                from_agent="scheduler",
+            ))
+            raise RuntimeError(f"team names roles that are not on it: {', '.join(dangling)}")
+
         cycle = _detect_dependency_cycle(self.project.agents)
         if cycle:
             chain = " → ".join(cycle + [cycle[0]])

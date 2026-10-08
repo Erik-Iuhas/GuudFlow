@@ -272,3 +272,16 @@ async def test_saving_a_project_names_every_worker(client, auth_header, write_pe
     again = await client.put("/api/projects/crew", json={**body, "agents": [
         {"role": "planner"}, {"role": "builder", "name": "Sarah"}]}, headers=auth_header)
     assert {a["role"]: a["name"] for a in again.json()["agents"]}["planner"] == names["planner"]
+
+
+async def test_a_team_must_not_wait_on_a_missing_role(client, auth_header):
+    body = {"project_id": "swap", "goal": "g", "agents": [
+        {"role": "tech_lead", "role_type": "architect"},
+        {"role": "builder", "depends_on": ["planner"]}]}
+    r = await client.post("/api/projects", json=body, headers=auth_header)
+    assert r.status_code == 400 and "'planner'" in r.json()["detail"]
+    body["agents"][1]["depends_on"] = ["tech_lead"]
+    assert (await client.post("/api/projects", json=body, headers=auth_header)).status_code == 201
+    body["agents"][1]["review_of"] = ["ghost"]
+    r = await client.put("/api/projects/swap", json=body, headers=auth_header)
+    assert r.status_code == 400 and "review_of" in r.json()["detail"]

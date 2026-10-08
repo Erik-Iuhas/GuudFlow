@@ -60,3 +60,17 @@ def test_no_cycle_builds_normally(tmp_path: Path):
     runner = _make_runner(agents, tmp_path)
     runner._prepare_team()   # must not raise
     assert True
+
+
+def test_a_role_waiting_on_a_missing_role_stops_the_run(tmp_path: Path):
+    """A planner replaced by a tech lead must not leave builders waiting on 'planner'."""
+    agents = [
+        AgentConfig(role="tech_lead"),
+        AgentConfig(role="builder", depends_on=["planner"]),
+        AgentConfig(role="reviewer", depends_on=["builder"], review_of=["builder"]),
+    ]
+    runner = _make_runner(agents, tmp_path)
+    with pytest.raises(RuntimeError, match="not on it: builder → planner"):
+        runner._prepare_team()
+    failed = [s for s in runner.workspace.board if s.type == SignalType.FAILED]
+    assert failed and "builder → planner" in failed[0].summary
