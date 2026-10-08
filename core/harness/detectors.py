@@ -139,11 +139,18 @@ def same_review_issue(view: RunView, cfg: DetectorConfig) -> list[Stall]:
 
 
 def blocked_chain(view: RunView, cfg: DetectorConfig) -> list[Stall]:
-    """Blocked cards form a chain of more than `max_chain` roles, or a cycle."""
+    """Blocked cards form a chain of more than `max_chain` roles, or a cycle, or a card is
+    blocked while no role is running (whoever it waits on has finished, so nobody will act
+    and the run would end stuck)."""
     waits: dict[str, str] = {}
     for card in view.cards:
         if card.column == "blocked" and card.blocked_on:
             waits.setdefault(card.assigned_to, card.blocked_on[0])
+    if waits and not view.running:
+        start = sorted(waits)[0]
+        return [Stall("blocked_chain", start, "blocked with nothing running: " + "; ".join(
+            f"{c.task_id} ({c.assigned_to}) waits on {c.blocked_on[0]}" for c in view.cards
+            if c.column == "blocked" and c.blocked_on))]
     out = []
     for start in sorted(waits):
         chain = [start]
