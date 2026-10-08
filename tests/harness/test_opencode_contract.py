@@ -145,3 +145,24 @@ async def test_project_config_in_workdir_is_ignored(opencode_env: OpencodeEnv) -
         agents = (await http.get(f"{env.server.base_url}/agent",
                                  params={"directory": str(env.workdir)})).json()
     assert "evil" not in {a["name"] for a in agents}
+
+
+@requires_opencode
+async def test_a_stopped_server_leaves_nothing_in_tmp(tmp_path: Path) -> None:
+    """opencode unpacks a native library into TMPDIR on start; the server's own TMPDIR is
+    removed on stop instead of piling up in /tmp."""
+    import tempfile
+
+    from core.harness.server import OpencodeServer
+    from tests.harness.conftest import init_repo
+    shared = Path(tempfile.gettempdir())
+    before = {p.name for p in shared.iterdir() if p.name.endswith(".so")}
+    server = OpencodeServer(config={"$schema": "https://opencode.ai/config.json",
+                                    "autoupdate": False, "share": "disabled"},
+                            home=tmp_path / "home", workdir=init_repo(tmp_path / "work"))
+    await server.start()
+    assert (tmp_path / "home" / ".tmp").is_dir()
+    await server.stop()
+    assert not (tmp_path / "home" / ".tmp").exists()
+    after = {p.name for p in shared.iterdir() if p.name.endswith(".so")}
+    assert after <= before

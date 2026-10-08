@@ -142,6 +142,7 @@ class OpencodeServer:
     startup_timeout: float = 60.0
     _proc: asyncio.subprocess.Process | None = field(default=None, init=False, repr=False)
     _log_path: Path | None = field(default=None, init=False, repr=False)
+    _tmp: Path | None = field(default=None, init=False, repr=False)
 
     @property
     def base_url(self) -> str:
@@ -160,6 +161,11 @@ class OpencodeServer:
         if not self.port:
             self.port = free_port()
         env = locked_env(self.home, self.config, self.password, self.extra_env)
+        # opencode (a bun binary) unpacks a ~5 MB native library into TMPDIR on every start
+        # and never removes it; a private TMPDIR is deleted on stop instead of filling /tmp.
+        self._tmp = self.home / ".tmp"
+        self._tmp.mkdir(parents=True, exist_ok=True)
+        env.setdefault("TMPDIR", str(self._tmp))
         self._log_path = self.home / "opencode-serve.log"
         log = self._log_path.open("wb")
         try:
@@ -197,14 +203,18 @@ class OpencodeServer:
     async def stop(self) -> None:
         """Terminate the server (SIGTERM, then SIGKILL after 5s)."""
         proc, self._proc = self._proc, None
-        if proc is None or proc.returncode is not None:
-            return
-        proc.terminate()
         try:
-            await asyncio.wait_for(proc.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            if proc is None or proc.returncode is not None:
+                return
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+        finally:
+            if self._tmp is not None:
+                shutil.rmtree(self._tmp, ignore_errors=True)
 
     async def __aenter__(self) -> "OpencodeServer":
         return await self.start()
