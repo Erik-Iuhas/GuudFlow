@@ -169,3 +169,36 @@ All four end `complete` with zero `HUMAN_NEEDED` and zero `stuck`.
 Steps 1–4 remove every operator action from session 5. Step 5 removes the two questions a worker
 should never have asked, and steps 6 and 7 keep it that way. Every change under `core/harness/`
 also runs the escape suite (CLAUDE.md).
+
+## Status
+
+- **§2 done.** Each acceptance line is classed by its spec check's method or its wording
+  (`tasks.is_owner_check`). The brief lists *must meet* and *The owner checks these at
+  acceptance* separately. A `done` result answers only the must-meet lines. A `blocked` result
+  that names an owner check, a screenshot or a manual verdict is refused in the turn
+  (`check_not_blocked_on_owner`). The `owner_checks` hand-off goes to `owner_checks.json`.
+  Reviewers judge only the must-meet lines. Studio's review card lists the owner checks with
+  *Try:* and tick boxes that record `R#.#` ids as confirmed. The plan-check warning for manual
+  lines on cards is not done (the split makes it harmless).
+- **§3 done, simpler.** No new routing: the `blocked_chain` detector fires when a card waits
+  on a role that has finished for the run (unblock cards excluded), even while others work,
+  and the overseer's `decide` reopens the card, which settles the unblock card.
+- **§4 done.** `core/harness/run_stop.py` writes `stopped.json` and posts `RUN_STOPPED` with
+  each open card's wait. Studio shows it on the review card; *Continue this run* now carries
+  only unfinished items. A forced overseer wake before `stuck` is covered by the detector
+  above, not by a scheduler change.
+- **§5 done.** `Backlog.transfer` keeps `pending: done`, `record_outcomes` leaves those items
+  alone, and the planner's coverage and brief skip them ("DONE in the run this one continues").
+  They close when the continuation is accepted.
+- **§6 done, partly.** A *Shell commands* section is rendered from the compiled capabilities.
+  The brief lists the worker's other cards (parked, queued, in review). The how-to-work text
+  says what never justifies a block, and that spec questions block on the tech lead. opencode
+  writes the refusal text itself, so it can't be rewritten to name the refused segment; the
+  brief's rule ("run the allowed part alone") replaces that.
+- **§7:** J4 (a worked example per problem code in repair calls), J6 (problem codes as
+  tagged episodes in Jack's memory) and the planning-spend line in the Plan tab are done.
+  J5 (*Accept the suggestion*) is open.
+- **§8 partly done:** the retrospective's per-role `friction` (blocked, asked a person,
+  refused, model) and three new playbook metrics. The shorter brief for small models is open.
+- **§9 done:** `tests/harness/test_session5_replay.py` (owner check, block on the finished
+  tech lead, stop report and continuation), plus `tests/harness/test_flow_hardening.py`.

@@ -87,6 +87,11 @@ other words (Mistral `none`/`high`, Groq Qwen `none`/`default`). Every level is 
 in a draft, or by a person) runs that turn at it. Host-side calls send effort too: the PM the
 project's `pm_effort` gate (else its model's default), quips always `low` on the fast tier.
 
+**Flow hardening (`docs/FLOW_HARDENING_PLAN.md`).** Manual checks are the owner's: a card's
+manual lines are listed apart, never block a card, and reach Studio's review card as
+`owner_checks.json`. A card blocked on a finished role wakes the overseer, a run that stops early
+writes `stopped.json` / `RUN_STOPPED`, and a continued run carries only unfinished items.
+
 **Opencode harness.** Agent work is done by [opencode](https://github.com/anomalyco/opencode)
 running headless, one sandboxed server per role. GuudFlow stays the manager: scheduler,
 task board, personas and memory, permissions, credentials, merges and Studio. The design is
