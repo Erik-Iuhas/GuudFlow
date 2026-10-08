@@ -132,6 +132,7 @@ export interface ChangeWire {
   kind?: string;
   priority?: string | number;
   size?: string;
+  effort?: string;
   checks?: (string | CheckSpecWire)[];
   acceptance?: string[];
   serves?: string[];

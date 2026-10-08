@@ -60,6 +60,8 @@ class TurnPlan:
     card_id: str | None = None
     extra_sections: tuple[tuple[str, str], ...] = ()
     skip: bool = False          # nothing to do after all (raced): end the turn quietly
+    # The card's item effort (set by the project manager by difficulty); None: the role's own.
+    effort: str | None = None
 
 
 def check_review_items(result: ReviewResult, task_id: str, acceptance: Sequence[str]) -> list[str]:
@@ -248,7 +250,7 @@ class TaskFlow:
             criteria += [line for line in extra if line not in criteria]
             visual = self._visual_review_text(role, card.task_id)
             return TurnPlan(
-                model=ReviewResult, card_id=card.task_id,
+                model=ReviewResult, card_id=card.task_id, effort=self._item_effort(card),
                 extra_sections=spec_section + design_section
                 + self._handoff_section(role, card.task_id, reviewer=True),
                 task_text=self.board.brief_for(card.task_id, reviewer=True) + visual
@@ -265,12 +267,17 @@ class TaskFlow:
         self_check = ("\n\n" + visual_review.self_check_text(card)
                       if card.kind == "visual" and self.tool_dir_for is not None else "")
         return TurnPlan(
-            model=AgentResult, card_id=card.task_id,
+            model=AgentResult, card_id=card.task_id, effort=self._item_effort(card),
             extra_sections=self._card_spec(role, card)[0] + self._card_design(card)[0]
             + self._card_knowledge(card) + self._handoff_section(role, card.task_id),
             task_text=self.board.brief_for(card.task_id) + self_check,
             check=lambda r, tid=card.task_id: (_check_done(r, tid, criteria)
                                                if isinstance(r, AgentResult) else []))
+
+    def _item_effort(self, card: "Task") -> str | None:
+        """The effort the card's backlog item asks for, if any."""
+        item = next((i for i in self.backlog if i.id == card.backlog_id), None)
+        return (getattr(item, "effort", "") or None) if item is not None else None
 
     def _card_spec(self, role: str, card: "Task", *, reviewer: bool = False
                    ) -> tuple[tuple[tuple[str, str], ...], list[str]]:

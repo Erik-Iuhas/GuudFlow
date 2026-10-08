@@ -159,6 +159,7 @@ export function ProjectWork({
             onMove={(itemId, priority) => patch.mutate({ itemId, patch: { priority } })}
             onDrop={(itemId) => patch.mutate({ itemId, patch: { status: "dropped" } })}
             onReopen={(itemId) => patch.mutate({ itemId, patch: { status: "open" } })}
+            onEffort={(itemId, effort) => patch.mutate({ itemId, patch: { effort } })}
             onAdd={(item) => add.mutate(item)}
             onStart={() => onStartRun({ backlog_items: chosen })}
             adding={add.isPending}

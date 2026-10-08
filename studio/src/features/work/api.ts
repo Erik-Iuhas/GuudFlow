@@ -6,9 +6,9 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { getToken } from "../../api";
+import type { EffortLevel } from "../models/api";
 
 // The project as ongoing work (plan §13): its backlog and the runs waiting for review.
-
 export type ItemStatus = "open" | "in_run" | "done" | "dropped";
 export type ItemOutcome = "done" | "partial" | "not_started";
 
@@ -19,6 +19,8 @@ export interface BacklogItemWire {
   kind: string;
   size: string;
   priority: number;
+  /** How hard agents think on this item ("" or missing: the role's own effort). */
+  effort?: "" | EffortLevel;
   status: ItemStatus;
   notes: string;
   files_hint: string[];
@@ -139,11 +141,12 @@ export interface NewItem {
   kind: string;
   size: string;
   priority?: number;
+  effort?: "" | EffortLevel;
   depends_on?: string[];
   serves?: string[];
 }
 
-export type ItemPatch = Partial<Pick<BacklogItemWire, "title" | "acceptance" | "kind" | "size" | "priority" | "notes">> & {
+export type ItemPatch = Partial<Pick<BacklogItemWire, "title" | "acceptance" | "kind" | "size" | "priority" | "notes" | "effort">> & {
   status?: "open" | "dropped";
 };
 

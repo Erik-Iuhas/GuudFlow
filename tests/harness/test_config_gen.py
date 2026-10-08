@@ -282,3 +282,57 @@ def test_effort_is_sent_in_the_providers_own_words() -> None:
                                            base_url="https://x/v1", effort=level))
     assert entry["models"]["mistral-small-latest"]["options"] == {"reasoningEffort": "none"}
     assert small.effort_value(small.pick_effort("max")) == "high"
+
+
+@requires_opencode
+async def test_real_opencode_takes_a_per_turn_effort_variant(tmp_path: Path, fake_llm: FakeLLM) -> None:
+    from core.harness.opencode_client import OpencodeClient, text_part
+    from tests.harness.fake_llm import Text
+
+    fake_llm.script(Text("one"), Text("two"))
+    model = ModelInfo(id="fake-model", provider="fake", tier="fast", max_output_tokens=8000,
+                      effort_levels=("low", "high"), effort_values={"low": "none"})
+    binding = ProviderBinding("fake", model, "openai_compatible", base_url=fake_llm.base_url,
+                              api_key="fake-key", effort="high")
+    agent = agent_entry(_compiled("builder"), model_ref=binding.model_ref, prompt="You build.")
+    config = build_config(role="builder", agent=agent, binding=binding)
+    workdir = init_repo(tmp_path / "work")
+    server = OpencodeServer(config=config, home=tmp_path / "home", workdir=workdir)
+    await server.start()
+    try:
+        client = OpencodeClient(server.base_url, str(workdir), password=server.password,
+                                timeout=60.0)
+        first = await client.create_session()
+        await client.prompt(first["id"], [text_part("hi")], agent="builder")
+        second = await client.create_session()
+        await client.prompt(second["id"], [text_part("easy one")], agent="builder", variant="low")
+        await client.aclose()
+    finally:
+        await server.stop()
+    efforts = [r["reasoning_effort"] for r in fake_llm.tool_requests()]
+    assert efforts[0] == "high" and efforts[-1] == "none", efforts
+
+
+def test_every_effort_level_is_a_variant() -> None:
+    m = ModelInfo(id="m1", provider="mistral", tier="fast", effort_levels=("low", "high"),
+                  effort_values={"low": "none"})
+    entry = provider_entry(ProviderBinding("mistral", m, "openai_compatible", base_url="https://x/v1"))
+    assert entry["models"]["m1"]["variants"] == {"low": {"reasoningEffort": "none"},
+                                                 "high": {"reasoningEffort": "high"}}
+    plain = ModelInfo(id="m2", provider="anthropic", tier="fast")
+    assert "variants" not in provider_entry(ProviderBinding("anthropic", plain, "anthropic"))[
+        "models"]["m2"]
+
+
+def test_a_cards_item_effort_becomes_the_turn_variant() -> None:
+    from types import SimpleNamespace
+
+    from core.harness.run import OpencodeRun
+    from core.harness.task_flow import TurnPlan
+    from core.harness.results import AgentResult
+
+    model = ModelInfo(id="m", provider="anthropic", tier="solid", effort_levels=("low", "high"))
+    role = SimpleNamespace(binding=SimpleNamespace(model=model))
+    assert OpencodeRun._turn_variant(role, TurnPlan(model=AgentResult, effort="xhigh")) == "high"
+    assert OpencodeRun._turn_variant(role, TurnPlan(model=AgentResult)) is None
+    assert OpencodeRun._turn_variant(role, None) is None

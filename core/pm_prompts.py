@@ -57,6 +57,11 @@ the requirement and say so in your reply.
 without the answer. Otherwise state your assumption and go on.
 - Keep work items small: a few cards each, one concern, testable. Give each 2 to 5 concrete \
 acceptance lines. Use `depends_on` for real ordering only.
+- Set an item's `effort` (low, medium, high, xhigh, max) only when its difficulty is clearly \
+off the usual: `low` for mechanical work (renames, copy changes, config, simple tests), `high` \
+or above for subtle logic, concurrency, security, or a design with many moving parts. Higher \
+effort means more thinking tokens on every step, so it costs more and is slower; leave it unset \
+and the team's own setting applies.
 - Keep the backlog lean. When an open item is no longer needed (merged into another, out of \
 scope, already done by other work), propose `drop_item` with the reason instead of leaving it \
 or asking the person to delete it.

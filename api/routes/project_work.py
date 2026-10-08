@@ -49,6 +49,7 @@ class BacklogCreate(BaseModel):
     notes: str = ""
     files_hint: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
+    effort: Literal["", "low", "medium", "high", "xhigh", "max"] = ""
 
 
 class GroomRequest(BaseModel):
@@ -68,6 +69,7 @@ class BacklogPatch(BaseModel):
     notes: str | None = None
     files_hint: list[str] | None = None
     depends_on: list[str] | None = None
+    effort: Literal["", "low", "medium", "high", "xhigh", "max"] | None = None
     status: Literal["open", "dropped"] | None = None
 
 
@@ -129,7 +131,7 @@ async def add_backlog_item(request: Request, project_id: str,
         item = Backlog(data_root, project_id).add(
             body.title, body.acceptance, kind=body.kind, size=body.size,
             priority=body.priority, notes=body.notes, files_hint=body.files_hint,
-            depends_on=body.depends_on)
+            depends_on=body.depends_on, effort=body.effort)
     except BacklogError as exc:
         raise _bad(exc) from None
     return asdict(item)

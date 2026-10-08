@@ -775,6 +775,14 @@ class OpencodeRun:
                                api_key=registry.api_key(model.provider),
                                working_context=self._working_context(model.working_context))
 
+    @staticmethod
+    def _turn_variant(role: _Role, plan: TurnPlan | None) -> str | None:
+        """The effort variant for a card whose item asks for one, fitted to the role's model;
+        None keeps the role's own effort (the server's default options)."""
+        if plan is None or not plan.effort:
+            return None
+        return role.binding.model.pick_effort(plan.effort)
+
     def _effort(self, cfg: "AgentConfig", model: ModelInfo) -> str | None:
         """The role's effort level, else the project's `effort` gate, else the model's default,
         fitted to the levels the model accepts (None: the provider decides)."""
@@ -956,8 +964,10 @@ class OpencodeRun:
         model: type[BaseModel] = (plan.model if plan is not None else
                                   ReviewResult if role.role_type == "reviewer" else AgentResult)
         self.inbox.expect(self.run_id, role_name, model, plan.check if plan else None)
+        variant = self._turn_variant(role, plan)
         self._post(SignalType.STARTED, role_name,
-                   f"{role_name} started" + (f" on {plan.card_id}" if plan and plan.card_id else ""))
+                   f"{role_name} started" + (f" on {plan.card_id}" if plan and plan.card_id else "")
+                   + (f" at {variant} effort" if variant else ""))
         self._post_capabilities(role)
 
         self.images.new_turn(role_name)
@@ -995,7 +1005,8 @@ class OpencodeRun:
                                      agent=role_name, on_event=on_event,
                                      on_permission=on_permission,
                                      timeout=self.settings.turn_timeout,
-                                     stall=self.settings.turn_stall_timeout)
+                                     stall=self.settings.turn_stall_timeout,
+                                     variant=self._turn_variant(role, plan))
             kept = await self._turn_body(role, client, session_id, stats, plan,
                                          on_event, on_permission)
             role.last_context = stats.last_context
@@ -1022,7 +1033,8 @@ class OpencodeRun:
             text = wrap_up_brief(stats.errors[-1]) if stats.timed_out else retry_brief(last_error)
             more = await drive_turn(client, session["id"], text, agent=role_name,
                                     on_event=on_event, on_permission=on_permission,
-                                    timeout=self.settings.followup_timeout)
+                                    timeout=self.settings.followup_timeout,
+                                    variant=self._turn_variant(role, plan))
             _merge_stats(stats, more)
             result = self.inbox.take(self.run_id, role_name)
 
@@ -1031,7 +1043,8 @@ class OpencodeRun:
             more = await drive_turn(client, session["id"], conflict_brief(files),
                                     agent=role_name, on_event=on_event,
                                     on_permission=on_permission,
-                                    timeout=self.settings.followup_timeout)
+                                    timeout=self.settings.followup_timeout,
+                                    variant=self._turn_variant(role, plan))
             _merge_stats(stats, more)
             return self.inbox.take(self.run_id, role_name)
 

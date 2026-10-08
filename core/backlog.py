@@ -29,6 +29,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from core.llm.registry import EFFORT_LEVELS
 from core.work_db import WorkDB
 
 ItemStatus = Literal["open", "in_run", "done", "dropped"]
@@ -39,7 +40,7 @@ _ID = re.compile(r"^B[0-9]+$")
 _REQ_ID = re.compile(r"^R[0-9]+$")
 _STATUS_ORDER = {"in_run": 0, "open": 1, "done": 2, "dropped": 3}
 _EDITABLE = frozenset({"title", "acceptance", "kind", "size", "priority", "notes", "files_hint",
-                       "depends_on", "serves"})
+                       "depends_on", "serves", "effort"})
 
 
 class BacklogError(ValueError):
@@ -56,6 +57,9 @@ class BacklogItem:
     kind: str = "code"
     size: str = "M"
     priority: int = 0
+    # How hard the agents on this item should think ("low" … "max"; "" = the role's effort).
+    # Set by the project manager by difficulty: a level spends that much more on thinking.
+    effort: str = ""
     status: ItemStatus = "open"
     notes: str = ""
     files_hint: list[str] = field(default_factory=list)
@@ -76,7 +80,8 @@ class BacklogItem:
         building prompts wrap those, and `last_summary()`, as untrusted.
         """
         after = f", after {', '.join(self.depends_on)}" if self.depends_on else ""
-        lines = [f"- **{self.id}** {self.title} ({self.kind}, size {self.size}{after})"]
+        effort = f", effort {self.effort}" if self.effort else ""
+        lines = [f"- **{self.id}** {self.title} ({self.kind}, size {self.size}{effort}{after})"]
         lines += [f"    - [ ] {a}" for a in self.acceptance]
         if self.notes:
             lines.append(f"    - notes: {self.notes}")
@@ -162,12 +167,13 @@ class Backlog:
     def add(self, title: str, acceptance: Sequence[str] = (), *, kind: str = "code",
             size: str = "M", priority: int = 0, notes: str = "",
             files_hint: Sequence[str] = (), depends_on: Sequence[str] = (),
-            source: str = "human", serves: Sequence[str] = ()) -> BacklogItem:
+            source: str = "human", serves: Sequence[str] = (),
+            effort: str = "") -> BacklogItem:
         """Add an open item."""
         with self.db.backlog_doc() as doc:
             return add_to_doc(doc, title, acceptance, kind=kind, size=size, priority=priority,
                               notes=notes, files_hint=files_hint, depends_on=depends_on,
-                              source=source, serves=serves)
+                              source=source, serves=serves, effort=effort)
 
     def update(self, item_id: str, **changes: Any) -> BacklogItem:  # Any: validated below
         """Edit fields of an item (any status but `done`)."""
@@ -349,6 +355,11 @@ class Backlog:
                 if value not in SIZES:
                     raise BacklogError("size must be S, M or L")
                 out[key] = value
+            elif key == "effort":
+                if value not in ("", *EFFORT_LEVELS):
+                    raise BacklogError(f"effort must be one of {', '.join(EFFORT_LEVELS)} "
+                                       f"(or empty for the role's own)")
+                out[key] = value
             elif key == "priority":
                 if not isinstance(value, int) or isinstance(value, bool):
                     raise BacklogError("priority must be an integer")
@@ -371,12 +382,14 @@ class Backlog:
 def add_to_doc(doc: dict[str, Any], title: str, acceptance: Sequence[str] = (), *,
                kind: str = "code", size: str = "M", priority: int = 0, notes: str = "",
                files_hint: Sequence[str] = (), depends_on: Sequence[str] = (),
-               source: str = "human", serves: Sequence[str] = ()) -> BacklogItem:
+               source: str = "human", serves: Sequence[str] = (),
+               effort: str = "") -> BacklogItem:
     """Add an open item to an already-open backlog document (inside the caller's transaction)."""
     fields = Backlog._validated({"title": title, "acceptance": list(acceptance), "kind": kind,
                                  "size": size, "priority": priority, "notes": notes,
                                  "files_hint": list(files_hint),
-                                 "depends_on": list(depends_on), "serves": list(serves)})
+                                 "depends_on": list(depends_on), "serves": list(serves),
+                                 "effort": effort})
     now = time.time()
     item_id = f"B{int(doc.get('next', 1))}"
     _check_deps(doc, item_id, fields["depends_on"])

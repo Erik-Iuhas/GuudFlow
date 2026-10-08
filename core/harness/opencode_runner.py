@@ -100,13 +100,15 @@ async def drive_turn(
     on_permission: PermissionHook = reject_all,
     timeout: float | None = 1200.0,
     stall: float | None = None,
+    variant: str | None = None,
 ) -> TurnStats:
     """Send `text` to the session and return once the session is idle again.
 
     `stall`: abort when no event arrives for this many seconds (plan §11.6: a busy turn
     keeps going however long it takes; a hung one stops). `timeout`: an optional absolute
     cap. Either way the session is aborted and `stats.timed_out` is set; the caller
-    decides what that means for the role.
+    decides what that means for the role. `variant` picks one of the model's effort variants
+    for this prompt only.
     """
     stats = TurnStats(session_id=session_id)
     tracker = _UsageTracker()
@@ -117,7 +119,7 @@ async def drive_turn(
         except (StopAsyncIteration, asyncio.TimeoutError) as exc:
             raise OpencodeError("event stream did not connect") from exc
         _observe(first, tracker, on_event)
-        await client.prompt_async(session_id, [text_part(text)], agent=agent)
+        await client.prompt_async(session_id, [text_part(text)], agent=agent, variant=variant)
         try:
             await asyncio.wait_for(
                 _consume(client, events, session_id, tracker, stats, on_event, on_permission,

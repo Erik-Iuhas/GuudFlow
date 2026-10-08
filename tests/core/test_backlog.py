@@ -141,3 +141,13 @@ def test_cost_per_item_adds_up_across_runs(tmp_path: Path) -> None:
                                 CardOutcome("Login tests", "todo", item.id, cost_usd=cost / 2)])
         b.decide(run, accepted=False)
     assert b.get(item.id).total_cost() == 0.65
+
+
+def test_item_effort_is_checked_and_shown(tmp_path) -> None:
+    from core.backlog import Backlog, BacklogError
+    backlog = Backlog(tmp_path, "p")
+    item = backlog.add("Rename the config keys", ["keys renamed"], effort="low")
+    assert item.effort == "low" and "effort low" in item.brief_text()
+    assert backlog.add("Plain item").effort == ""
+    with pytest.raises(BacklogError, match="effort"):
+        backlog.add("Bad", effort="turbo")

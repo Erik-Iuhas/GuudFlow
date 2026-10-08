@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { EFFORT_LEVELS, type EffortLevel } from "../models/api";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input, Label, Select, Textarea } from "../../components/ui/form-controls";
@@ -16,6 +17,8 @@ export interface BacklogListProps {
   onMove: (itemId: string, priority: number) => void;
   onDrop: (itemId: string) => void;
   onReopen: (itemId: string) => void;
+  /** Change an open item's effort ("" = the role's own). */
+  onEffort?: (itemId: string, effort: "" | EffortLevel) => void;
   onAdd: (item: NewItem) => void;
   onStart: () => void;
   adding?: boolean;
@@ -29,7 +32,7 @@ export interface BacklogListProps {
  * priority order; a run takes the selected ones and the rest stay for later.
  */
 export function BacklogList({
-  items, selected, onToggle, onMove, onDrop, onReopen, onAdd, onStart, adding, starting, phaseLabel,
+  items, selected, onToggle, onMove, onDrop, onReopen, onEffort, onAdd, onStart, adding, starting, phaseLabel,
 }: BacklogListProps) {
   const groups = groupBacklog(items);
   return (
@@ -78,6 +81,15 @@ export function BacklogList({
                   }
                 >
                   {phaseLabel?.(item.id) && <Badge variant="outline">{phaseLabel(item.id)}</Badge>}
+                  {onEffort && (
+                    <Select aria-label={`Effort for ${item.id}`} value={item.effort ?? ""}
+                      title="How hard agents think on this item; higher costs more"
+                      className="h-7 w-28 py-0 text-xs"
+                      onChange={(e) => onEffort(item.id, e.target.value as "" | EffortLevel)}>
+                      <option value="">team effort</option>
+                      {EFFORT_LEVELS.map((l) => <option key={l} value={l}>{l} effort</option>)}
+                    </Select>
+                  )}
                   <Button variant="ghost" size="sm" className={ARROW} aria-label={`Move ${item.id} up`} disabled={up === null}
                     onClick={() => up !== null && onMove(item.id, up)}>↑</Button>
                   <Button variant="ghost" size="sm" className={ARROW} aria-label={`Move ${item.id} down`}
@@ -132,6 +144,7 @@ function ItemRow({
           <span className={muted ? "text-muted-foreground" : "font-medium"}>{item.title}</span>
           <Badge variant="outline">{item.kind}</Badge>
           <Badge variant="outline">size {item.size}</Badge>
+          {item.effort && <Badge variant="outline" data-testid={`effort-${item.id}`}>{item.effort} effort</Badge>}
           {item.depends_on.length > 0 && (
             <span className="text-xs text-muted-foreground">after {item.depends_on.join(", ")}</span>
           )}
@@ -200,6 +213,7 @@ function AddItemForm({ onAdd, adding }: { onAdd: (item: NewItem) => void; adding
   const [acceptance, setAcceptance] = useState("");
   const [kind, setKind] = useState("code");
   const [size, setSize] = useState("M");
+  const [effort, setEffort] = useState<"" | EffortLevel>("");
   const [after, setAfter] = useState("");
 
   function submit(e: FormEvent) {
@@ -207,6 +221,7 @@ function AddItemForm({ onAdd, adding }: { onAdd: (item: NewItem) => void; adding
     if (title.trim().length < 3) return;
     const dependsOn = parseItemIds(after);
     onAdd({ title: title.trim(), acceptance: parseAcceptance(acceptance), kind, size,
+      ...(effort ? { effort } : {}),
       ...(dependsOn.length ? { depends_on: dependsOn } : {}) });
     setTitle("");
     setAcceptance("");
@@ -237,6 +252,13 @@ function AddItemForm({ onAdd, adding }: { onAdd: (item: NewItem) => void; adding
           <Label htmlFor="backlog-size">Size</Label>
           <Select id="backlog-size" value={size} onChange={(e) => setSize(e.target.value)} className="w-24">
             {["S", "M", "L"].map((s) => <option key={s} value={s}>{s}</option>)}
+          </Select>
+        </div>
+        <div>
+          <Label htmlFor="backlog-effort">Effort</Label>
+          <Select id="backlog-effort" value={effort} onChange={(e) => setEffort(e.target.value as "" | EffortLevel)} className="w-32">
+            <option value="">team effort</option>
+            {EFFORT_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
           </Select>
         </div>
         <div>

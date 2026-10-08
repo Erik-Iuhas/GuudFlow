@@ -44,6 +44,8 @@ ReqKind = Literal["feature", "constraint", "quality", "non_goal"]
 ReqPriority = Literal["must", "should", "could", "wont"]
 ItemKind = Literal["code", "test", "docs", "research", "visual"]
 ItemSize = Literal["S", "M", "L"]
+# How hard agents should think on an item (core/llm/registry.py EFFORT_LEVELS).
+ItemEffort = Literal["low", "medium", "high", "xhigh", "max"]
 ModelTier = Literal["heavy", "solid", "fast"]
 
 
@@ -222,6 +224,7 @@ class AddItem(_Op):
     serves: list[str] = Field(default_factory=list)
     kind: ItemKind = "code"
     size: ItemSize = "M"
+    effort: ItemEffort | None = None
     depends_on: list[str] = Field(default_factory=list)   # B ids or refs
 
 
@@ -234,6 +237,7 @@ class EditItem(_Op):
     acceptance: list[str] | None = None
     kind: ItemKind | None = None
     size: ItemSize | None = None
+    effort: ItemEffort | None = None
     priority: int | None = None
     notes: str | None = None
     files_hint: list[str] | None = None
@@ -1351,7 +1355,7 @@ class _Applier:
                 seen.add(line.casefold())
                 lines.append(line)
         item = add_to_doc(self.txn.backlog, ch.title, lines, kind=ch.kind, size=ch.size,
-                          source=self._who(dc), serves=serves)
+                          source=self._who(dc), serves=serves, effort=ch.effort or "")
         self.ids[ch.ref] = item.id
         self.created[ch.ref] = item.id
         self._item_history(item.id, "created")

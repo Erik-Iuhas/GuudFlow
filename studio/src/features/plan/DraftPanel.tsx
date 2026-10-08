@@ -125,7 +125,7 @@ function Details({ v }: { v: ChangeView }) {
   if (c.priority !== undefined && c.priority !== null) bits.push(String(c.priority));
   const serves = c.serves?.length ? `serves ${c.serves.join(", ")}` : "";
   const after = c.depends_on?.length ? `after ${c.depends_on.map(refLabel).join(", ")}` : "";
-  const itemBits = v.section === "Work items" ? [serves, c.size ? `size ${c.size}` : "", after].filter(Boolean) : [];
+  const itemBits = v.section === "Work items" ? [serves, c.size ? `size ${c.size}` : "", c.effort ? `${c.effort} effort` : "", after].filter(Boolean) : [];
   return (
     <>
       {c.op === "add_requirement" && c.title && c.text && <p className="mt-1 text-sm">{c.text}</p>}

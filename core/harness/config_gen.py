@@ -80,10 +80,15 @@ def provider_entry(binding: ProviderBinding) -> dict[str, Any]:
                   "input": binding.working_context or model.working_context,
                   "output": model.max_output_tokens},
     }
+    option = _EFFORT_OPTION_BY_CLIENT[binding.client]
     if binding.effort:
         # Model options reach the provider as provider options on every request.
-        model_entry["options"] = {
-            _EFFORT_OPTION_BY_CLIENT[binding.client]: model.effort_value(binding.effort)}
+        model_entry["options"] = {option: model.effort_value(binding.effort)}
+    if model.effort_levels:
+        # One variant per level, so a single turn can ask for another effort (a card whose
+        # item the project manager marked harder or easier) with the prompt's `variant`.
+        model_entry["variants"] = {lv: {option: model.effort_value(lv)}
+                                   for lv in model.effort_levels}
     return {
         "npm": _NPM_BY_CLIENT[binding.client],
         "options": {k: v for k, v in options.items() if v is not None},

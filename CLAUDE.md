@@ -79,7 +79,10 @@ compacts near it) and may list effort levels (`low`…`max`, `core/llm/registry.
 levels and sent as the provider's own option (`effort` for Anthropic, `reasoningEffort` for
 OpenAI-compatible APIs, i.e. top-level `reasoning_effort`) through opencode's model `options`
 (`core/harness/config_gen.py`); a model's `effort_values` renames a level where the provider uses
-other words (Mistral `none`/`high`, Groq Qwen `none`/`default`).
+other words (Mistral `none`/`high`, Groq Qwen `none`/`default`). Every level is also an opencode model
+`variant`, so a card whose backlog item has an `effort` (set by the project manager by difficulty
+in a draft, or by a person) runs that turn at it. Host-side calls send effort too: the PM the
+project's `pm_effort` gate (else its model's default), quips always `low` on the fast tier.
 
 **Opencode harness.** Agent work is done by [opencode](https://github.com/anomalyco/opencode)
 running headless, one sandboxed server per role. GuudFlow stays the manager: scheduler,

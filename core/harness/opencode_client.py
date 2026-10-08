@@ -92,6 +92,7 @@ def _prompt_body(
     system: str | None,
     tools: dict[str, bool] | None,
     format: dict[str, Any] | None,
+    variant: str | None = None,
 ) -> dict[str, Any]:
     return _drop_none(
         {
@@ -105,6 +106,7 @@ def _prompt_body(
             "system": system,
             "tools": tools,
             "format": format,
+            "variant": variant,
         }
     )
 
@@ -207,9 +209,10 @@ class OpencodeClient:
         system: str | None = None,
         tools: dict[str, bool] | None = None,
         format: dict[str, Any] | None = None,
+        variant: str | None = None,
     ) -> TurnOutcome:
         """Send a prompt and wait for the turn to finish."""
-        body = _prompt_body(parts, agent, model, system, tools, format)
+        body = _prompt_body(parts, agent, model, system, tools, format, variant)
         resp: dict[str, Any] = await self._json("POST", f"/session/{session_id}/message", body=body)
         return TurnOutcome.from_response(resp)
 
@@ -223,9 +226,11 @@ class OpencodeClient:
         system: str | None = None,
         tools: dict[str, bool] | None = None,
         format: dict[str, Any] | None = None,
+        variant: str | None = None,
     ) -> None:
-        """Send a prompt without waiting for the turn; any 2xx is success."""
-        body = _prompt_body(parts, agent, model, system, tools, format)
+        """Send a prompt without waiting for the turn; any 2xx is success. `variant` picks one
+        of the model's configured variants (an effort level) for this turn only."""
+        body = _prompt_body(parts, agent, model, system, tools, format, variant)
         await self._request("POST", f"/session/{session_id}/prompt_async", body=body)
 
     async def messages(self, session_id: str) -> list[dict[str, Any]]:

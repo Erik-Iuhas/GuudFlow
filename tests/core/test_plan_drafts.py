@@ -672,3 +672,15 @@ def test_set_kind_is_checked_and_applies_to_the_doc(pd: PlanDrafts) -> None:
     assert team == [{"role": "b"}] and summary["edited"] == []
     assert kind_change([ok]) == {"kind": "game", "start_mode": "adopt"}
     assert kind_change([]) == {}
+
+
+def test_pm_sets_item_effort_by_difficulty(pd: PlanDrafts) -> None:
+    def b1() -> dict[str, Any]:
+        return next(r for r in pd.db.read_backlog_doc()["items"] if r["id"] == "B1")
+
+    _approve_all(pd, _turn(item(effort="high")))
+    assert b1()["effort"] == "high"
+    _approve_all(pd, _turn({"op": "edit_item", "id": "B1", "effort": "low"}))
+    assert b1()["effort"] == "low"
+    with pytest.raises(ValueError):
+        _turn(item(effort="turbo"))
