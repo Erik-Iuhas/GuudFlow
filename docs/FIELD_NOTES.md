@@ -66,7 +66,16 @@ it on its own (budget re-briefs and a priority order). What still needed the ope
 - **Overseer wake reason not on the board:** the overseer started with no signal saying which detector woke it (here `burn_without_output`). Post the detector and its numbers as a signal so Studio can show why. `fixed` (`OVERSEER_WAKE`)
 - **Serial plans leave workers idle:** the planner chained most cards (T3 → T4 → T5 → T7 → T8), so the renderer waited about 8 minutes twice. Worth a planner hint: prefer cards that can start on agreed interfaces. `fixed` (planner hint)
 
-## Session 5 planning (pacrogue)
+## Session 5 (pacrogue): lives, an easier level 1, Magnet and OVERDRIVE
+
+Builders on Haiku 5.5; tech lead and reviewer on Sonnet 5.5. Three runs, each continuing the one
+before, because the first two ended `stuck` (F13): `run_e58d6481ff` $2.04, `run_2f30d76622` $1.06,
+`run_d34e8e25dd` $1.02 (complete). That is $4.12 for 7 backlog items and 835 bun tests passing.
+Jack's planning cost about $3.20 on top (F10). Haiku builders kept blocking cards on manual browser
+checks even when the goal said not to (F11, F12). With the overseer and reopen fixes in, the last
+run cleared one such block on its own.
+
+### Planning
 
 Drafting the session-5 plan took five calls to Jack where one should have done. About $3.60 went
 to Jack, and roughly $3 of it was waste. The two turns that failed were never recorded (about
