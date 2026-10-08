@@ -252,12 +252,33 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
                         published=asdict(published))
         run = repo.get(run_id) or run
         keep_notebooks(data_root, project_id, run_id)
+        _refresh_knowledge(data_root, project_id, run_id, list(run.files))
         carry = Path(data_root) / "runs" / run_id / "carry_forward.json"
         target = Path(data_root) / "projects" / project_id / "context" / LAST_ACCEPTED_JSON
         if carry.is_file():
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(carry, target)
     return RunDecision(run=run, items=items)
+
+
+def _refresh_knowledge(data_root: Path, project_id: str, run_id: str,
+                       changed: list[str]) -> None:
+    """After an accept: rebuild the knowledge facts from main and mark notes about the changed
+    files stale (role contracts plan §4.3). Never raises: the merge has already happened."""
+    try:
+        from core.knowledge import build_facts, mark_stale
+        mark_stale(data_root, project_id, changed, run_id)
+        build_facts(data_root, project_id, check_command=_check_command(data_root, project_id))
+    except Exception:  # noqa: BLE001 — see docstring
+        log.exception("refreshing the knowledge base after %s failed", run_id)
+
+
+def _check_command(data_root: Path, project_id: str) -> str:
+    """The project's check command from projects.json ("" when unset)."""
+    from core.json_store import read_json
+    doc = (read_json(Path(data_root) / "projects.json", {}) or {}).get(project_id) or {}
+    return str(((doc.get("approval_gates") or {}) if isinstance(doc, dict) else {})
+               .get("check_command") or "")
 
 
 def _remember_decision(data_root: Path, project_id: str, run_id: str, accept: bool,

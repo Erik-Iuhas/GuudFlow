@@ -282,6 +282,7 @@ class AddRole(_Op):
     max_review_rounds: int | None = Field(default=None, ge=1, le=6)
     name: str | None = None
     capabilities: dict[str, str] | None = None
+    contract: str | None = None          # role contract id (core/contracts.py)
     reason: str
 
 
@@ -300,6 +301,7 @@ class EditRole(_Op):
     max_review_rounds: int | None = Field(default=None, ge=1, le=6)
     name: str | None = None
     capabilities: dict[str, str] | None = None
+    contract: str | None = None
     reason: str
 
 
@@ -644,6 +646,7 @@ def _validate_team(turn: PlanTurn, team: list[dict[str, Any]]) -> list[str]:  # 
             if ch.role_type not in ROLE_TYPES:
                 problems.append(f"{where}: role_type {ch.role_type!r} is not one of "
                                 f"{', '.join(ROLE_TYPES)}")
+            problems += _contract_problems(where, ch.contract)
         elif isinstance(ch, EditRole):
             if ch.role not in existing and ch.role not in added:
                 problems.append(f"{where}: unknown role {ch.role}")
@@ -653,6 +656,7 @@ def _validate_team(turn: PlanTurn, team: list[dict[str, Any]]) -> list[str]:  # 
             if ch.role_type is not None and ch.role_type not in ROLE_TYPES:
                 problems.append(f"{where}: role_type {ch.role_type!r} is not one of "
                                 f"{', '.join(ROLE_TYPES)}")
+            problems += _contract_problems(where, ch.contract)
             if ch.role in final:
                 for key in ("role_type", "depends_on", "review_of"):
                     value = getattr(ch, key)
@@ -692,6 +696,17 @@ def _validate_team(turn: PlanTurn, team: list[dict[str, Any]]) -> list[str]:  # 
     if not any(row["role_type"] in _BUILDER_TYPES for row in final.values()):
         problems.append("the team must keep at least one builder or frontend_builder role")
     return problems
+
+
+def _contract_problems(where: str, contract: str | None) -> list[str]:
+    """A named contract must exist in the library."""
+    if contract is None:
+        return []
+    from core.contracts import load_library
+    known = load_library()
+    if contract not in known:
+        return [f"{where}: contract {contract!r} is not one of {', '.join(sorted(known))}"]
+    return []
 
 
 def _has_cycle(graph: dict[str, list[str]]) -> bool:

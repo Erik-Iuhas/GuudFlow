@@ -171,7 +171,8 @@ class ProjectManager:
     # ── the model call ──────────────────────────────────────────────────────
     async def _ask(self, phase: Phase, context: str, sources: list[str] | None = None
                    ) -> tuple[PlanTurn, list[LLMResponse]]:
-        system = pm_system_prompt(seats=self.seats, start_mode=self.start_mode, phase=phase)
+        system = pm_system_prompt(seats=self.seats, start_mode=self.start_mode, phase=phase,
+                                  has_tech_lead=self._has_tech_lead())
         if self._persona is not None:
             system = persona_layers(self._persona) + "\n\n" + system
         spec = Spec(self.drafts.db.read_spec_doc())
@@ -297,6 +298,16 @@ class ProjectManager:
         if text is not None and text.strip():
             parts.append(f"The human says now:\n{text.strip()}")
         return "\n\n".join(parts)
+
+    def _has_tech_lead(self) -> bool:
+        """Does a role on the team own the design (role contracts plan §2.2)?"""
+        from core.contracts import ContractError, load_for_project, team_owner
+        try:
+            lib = load_for_project(self.data_root, self.project_id)
+        except ContractError:
+            log.warning("pm: project contracts unreadable", exc_info=True)
+            return False
+        return team_owner(self._team(), "design", lib) is not None
 
     def _team(self) -> list[dict[str, Any]]:  # Any: agent rows
         """The project's current agents (empty when the doc has none)."""

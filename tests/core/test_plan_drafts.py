@@ -649,3 +649,13 @@ def test_a_direct_edit_keeps_the_persons_reason(pd: PlanDrafts) -> None:
                     "short names read better")
     hist = Spec(pd.db.read_spec_doc()).requirement(rid).history
     assert hist[-1]["why"]["quote"] == "short names read better"
+
+
+def test_add_role_names_a_known_contract(pd: PlanDrafts) -> None:
+    from core.team_changes import apply_team_changes
+    ok = {"op": "add_role", "role": "lead", "role_type": "architect", "model_tier": "heavy",
+          "description": "Owns the design.", "contract": "tech_lead", "reason": TEAM_REASON}
+    assert _team_problems(pd, ok) == []
+    assert any("contract 'chief'" in p for p in _team_problems(pd, {**ok, "contract": "chief"}))
+    team, _ = apply_team_changes([], [ok])
+    assert team[0]["contract"] == "tech_lead"

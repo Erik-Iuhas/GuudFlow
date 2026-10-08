@@ -13,7 +13,7 @@ from core.harness.capabilities import infer_role_type
 
 DEFAULT_REVIEW_ROUNDS = 2
 _EDITABLE = ("role_type", "description", "model_tier", "depends_on", "review_of",
-             "max_review_rounds", "name", "capabilities")
+             "max_review_rounds", "name", "capabilities", "contract")
 
 
 class TeamChangeError(ValueError):
@@ -47,7 +47,8 @@ def apply_team_changes(agents: list[dict[str, Any]],  # Any: agent rows
                 "review_of": list(ch.get("review_of") or []),
                 "max_review_rounds": ch.get("max_review_rounds") or DEFAULT_REVIEW_ROUNDS,
                 "capabilities": dict(ch.get("capabilities") or {}),
-                **({"name": ch["name"]} if ch.get("name") else {})})
+                **({"name": ch["name"]} if ch.get("name") else {}),
+                **({"contract": ch["contract"]} if ch.get("contract") else {})})
             summary["added"].append(role)
         elif op == "edit_role":
             if row is None:

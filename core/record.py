@@ -7,7 +7,8 @@ accept path may commit (plan P8).
 
     trace(data_root, project_id, "R3")      -> list[RecordEvent], oldest first
     export(data_root, project_id, include={"spec", "decisions"}, fmt="md")
-    spec_files(data_root, project_id)       -> {"SPEC.md": ..., "docs/decisions/0004-x.md": ...}
+    spec_files(data_root, project_id)       -> {"SPEC.md": ..., "docs/decisions/0004-x.md": ...,
+                                                "DESIGN.md" (when the project has a design)}
 
 Review verdicts: a requirement's checks keep the state and the session that set it
 (`Check.state`, `Check.run_id`), so those show as `review` events. The per-card review
@@ -659,4 +660,8 @@ def spec_files(data_root: Path, project_id: str) -> dict[str, str]:
     files = {"SPEC.md": "\n".join(lines).rstrip() + "\n"}
     for dec in d.spec.decisions:
         files[_adr_path(dec)] = _adr(d, dec)
+    from core.design import Design, render_markdown
+    design = Design.load(data_root, project_id)
+    if not design.empty:
+        files["DESIGN.md"] = render_markdown(design)     # role contracts plan §4.2
     return files

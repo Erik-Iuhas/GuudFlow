@@ -85,3 +85,22 @@ def test_prompt_tells_the_manager_when_to_change_the_team() -> None:
     assert "add_role" in text and "edit_role" in text and "remove_role" in text
     assert "as small as the work allows" in text
     assert "at least 20 characters" in text and "next session" in text
+
+
+def test_tech_lead_on_the_team_takes_technical_decisions() -> None:
+    from core.pm_prompts import Seats, pm_system_prompt
+    with_lead = pm_system_prompt(seats=Seats(), start_mode="spec_first", phase="plan",
+                                 has_tech_lead=True)
+    assert "owns the design and the technical decisions" in with_lead
+    assert "you are also the technical lead" not in with_lead
+    without = pm_system_prompt(seats=Seats(), start_mode="spec_first", phase="plan")
+    assert "you are also the technical lead" in without and "contract `tech_lead`" in without
+
+
+def test_team_owner_finds_the_design_owner() -> None:
+    from core.contracts import team_owner
+    rows = [{"role": "planner", "role_type": "planner"},
+            {"role": "lead", "role_type": "architect", "contract": "tech_lead"}]
+    assert team_owner(rows, "design") == "lead"
+    assert team_owner(rows[:1], "design") is None
+    assert team_owner(rows, "session_plan") in ("planner", "lead")

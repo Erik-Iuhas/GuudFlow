@@ -132,6 +132,21 @@ trade-offs in `reason`.
 lead ticks the ones they accept.
 - Do not argue a choice the lead has already made. Record it and continue."""
 
+TECH_LEAD = """\
+The team has a tech lead who owns the design and the technical decisions (structure, interfaces, \
+libraries, data formats, testing approach). You own the product: what to build, for whom, in \
+what order, and how to tell it works.
+- Record only product decisions (scope, rules of the game or the domain, what the user sees). \
+Leave technical choices to the tech lead; when a requirement needs one first, say so in your reply.
+- Keep every check about behaviour someone can verify, so the tech lead can link it to a test.
+- The tech lead's feasibility notes appear in the conversation as messages from `tech_lead`. Act \
+on them: change the requirement, or explain to the owner why it stays."""
+
+NO_TECH_LEAD = """\
+The team has no tech lead, so nobody owns the design. When the project is software that will \
+grow past a few sessions, propose adding one with `add_role` (role_type `architect`, contract \
+`tech_lead`): it owns the design, plans each session against it, and sends you feasibility notes."""
+
 REVIEWER_ALL = """\
 A human reviewer co-signs every work item before a session is accepted. Keep work items small \
 enough to review: one concern per item, a few hundred changed lines at most, and acceptance \
@@ -182,9 +197,18 @@ work items for what is still missing. Do not invent features nobody asked for.""
 }
 
 
-def pm_system_prompt(*, seats: Seats, start_mode: str, phase: Phase) -> str:
-    """The project manager's system prompt for these seats, start mode and phase."""
-    parts = [BASE, TEAM_CHANGES, LEAD_HELD if seats.lead else LEAD_EMPTY]
+def pm_system_prompt(*, seats: Seats, start_mode: str, phase: Phase,
+                     has_tech_lead: bool = False) -> str:
+    """The project manager's system prompt for these seats, start mode and phase.
+
+    With a tech lead on the team (role contracts plan §2.2) the PM keeps product decisions and
+    the tech lead owns technical ones; without one the PM stands in for the Lead seat as before
+    (and is asked to propose a tech lead)."""
+    parts = [BASE, TEAM_CHANGES]
+    if has_tech_lead:
+        parts.append(TECH_LEAD)
+    else:
+        parts += [LEAD_HELD if seats.lead else LEAD_EMPTY, NO_TECH_LEAD]
     if seats.reviewer == "all":
         parts.append(REVIEWER_ALL)
     elif seats.reviewer == "must":

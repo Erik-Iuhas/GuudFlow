@@ -278,6 +278,12 @@ async def _decide(request: Request, project_id: str, run_id: str, accept: bool,
                 and needs_cosign(data_root, project_id, run_id,
                                  Seats.from_project(project).reviewer)):
             raise HTTPException(status_code=409, detail="co-sign the code first")
+        from core.design import DesignDrafts
+        waiting = [d["id"] for d in DesignDrafts(data_root, project_id).open()
+                   if d.get("run_id") == run_id]
+        if waiting:
+            raise HTTPException(status_code=409, detail=(
+                f"decide the tech lead's design draft first ({', '.join(waiting)})"))
     try:
         decision = decide_run(data_root, project_id, run_id, accept=accept, note=note,
                               remote=remote,

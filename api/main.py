@@ -60,6 +60,7 @@ from api.routes import runs as runs_router
 from api.routes import dashboard as dashboard_router
 from api.routes import system as system_router
 from api.routes import contracts as contracts_router
+from api.routes import design as design_router
 from api.routes import example_projects as example_projects_router
 from api.routes import models as models_router
 from api.routes import mcp as mcp_router
@@ -319,6 +320,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router.router)
     app.include_router(system_router.router)
     app.include_router(contracts_router.router)
+    app.include_router(design_router.router)
     app.include_router(example_projects_router.router)
     app.include_router(models_router.router)
     app.include_router(model_config_router.router)

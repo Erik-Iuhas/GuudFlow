@@ -186,3 +186,27 @@ async def test_remote_sync_endpoint_and_summary(client, auth_header, tmp_path, m
     await _project(client, auth_header, "p3")
     none = await client.post("/api/projects/p3/remote/sync", headers=auth_header)
     assert none.status_code == 400
+
+
+async def test_accept_waits_for_the_runs_design_draft(client, auth_header, data_root: Path) -> None:
+    from core.design import DesignDrafts, DesignTurn
+    await _project(client, auth_header)
+    repo = ProjectRepo(data_root, "p1")
+    base = repo.ensure(None)
+    work = data_root / "tmp" / "run_a"
+    repo.clone_into(work)
+    _commit(work, "a.py", "x\n")
+    repo.submit("run_a", work, base)
+    drafts = DesignDrafts(data_root, "p1")
+    out = drafts.propose(DesignTurn.model_validate({
+        "groups": [{"name": "Core", "summary": "The core component.",
+                    "because": "Cards need an owner."}],
+        "changes": [{"op": "add_component", "ref": "new:1", "name": "Core", "group": "Core",
+                     "paths": ["src/**"], "responsibility": "Everything the game does."}]}),
+        by="tech_lead", auto_apply=False, run_id="run_a")
+    r = await client.post("/api/projects/p1/runs-review/run_a/accept", headers=auth_header)
+    assert r.status_code == 409 and out.draft_id in r.json()["detail"]
+    drafts.approve(out.draft_id, "erik")
+    r = await client.post("/api/projects/p1/runs-review/run_a/accept", headers=auth_header,
+                          json={"confirmed_checks": []})
+    assert r.status_code == 200
