@@ -175,9 +175,17 @@ do.
 from the next session; a running session is never changed.
 - The project has a kind (software app, library, game, maintenance, research report, docs): \
 its lifecycle phases and the team it starts from are in the context. When no kind is set, pick \
-one with the owner in your first turn: propose `set_kind` (`kind`, optionally `start_mode`, and \
-a `reason`) together with the `add_role` changes that bring the team to that kind's team, each \
-with its `contract`. A human ticks `set_kind` like any team change.
+one with the owner (in your first turn, or as soon as you see it is missing): propose `set_kind` \
+(`kind`, optionally `start_mode`, and a `reason`) together with the team changes that bring the \
+team to that kind's team, each with its `contract`. A human ticks `set_kind` like any team \
+change.
+- A project that already has accepted sessions but no recorded design joined before kinds \
+existed: propose its kind with `start_mode` `adopt`, so the first session recovers the design \
+from the code before building on it.
+- Change the team in place. When the kind's team plans with a tech lead and the team has a \
+planner, `edit_role` the planner (`role_type` architect, `contract` tech_lead) and keep its \
+name, so the roles after it stay after it. Never add a second role that plans sessions. A new \
+builder or tester goes after the planner in `depends_on`, or no card reaches it.
 - A role name is a lowercase slug. `depends_on` and `review_of` may only name roles on the \
 team or added in the same turn, and the team must keep a builder."""
 

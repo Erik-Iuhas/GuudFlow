@@ -362,8 +362,9 @@ class ProjectManager:
         try:
             if not self.doc.get("kind"):
                 kinds = load_kinds()
-                return ("Project kind: not set yet (treated as software_app). Kinds you can "
-                        "propose with `set_kind`:\n" + "\n".join(
+                return ("Project kind: not set yet (treated as software_app). "
+                        + self._history_note() + "Kinds you can propose with `set_kind`:\n"
+                        + "\n".join(
                             f"- {k.id}: {k.title}. {k.purpose} Team: "
                             f"{', '.join(c for c in k.team if c != 'product_manager')}; "
                             f"start modes: {', '.join(k.start_modes)}." for k in kinds.values()))
@@ -371,6 +372,23 @@ class ProjectManager:
         except KindError:
             log.warning("pm: project kinds unreadable", exc_info=True)
             return "Project kind: (the kind library could not be read)"
+
+    def _history_note(self) -> str:
+        """What the project already has, so an older project is moved over with `adopt`."""
+        from core.design import Design
+        from core.project_repo import ProjectRepo
+        try:
+            accepted = sum(1 for r in ProjectRepo(self.data_root, self.project_id).runs()
+                           if r.state == "accepted")
+            has_design = not Design.load(self.data_root, self.project_id).empty
+        except Exception:  # noqa: BLE001 — history is context, never a failure
+            log.warning("pm: project history unreadable", exc_info=True)
+            return ""
+        if not accepted:
+            return ""
+        return (f"It already has {accepted} accepted session(s) and "
+                + ("a recorded design. " if has_design else
+                   "no recorded design, so propose `start_mode` adopt with its kind. "))
 
     def _draft_summary(self) -> str:
         draft = self.drafts.current()

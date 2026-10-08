@@ -311,3 +311,14 @@ async def test_pm_sends_its_effort_on_every_call(tmp_path: Path) -> None:
     manager = ProjectManager(llm, tmp_path, "p", DOC, model="m", effort="high")
     await manager.turn("Build a recipe box", mode="update")
     assert llm.calls[0]["effort"] == "high" and llm.calls[0]["model"] == "m"
+
+
+def test_an_older_project_is_told_to_adopt(tmp_path: Path, monkeypatch: Any) -> None:
+    from types import SimpleNamespace
+
+    from core.project_repo import ProjectRepo
+    manager = ProjectManager(MockLLMClient([]), tmp_path, "p", DOC)
+    assert "accepted session" not in manager._kind_context()
+    monkeypatch.setattr(ProjectRepo, "runs", lambda self: [SimpleNamespace(state="accepted")] * 3)
+    text = manager._kind_context()
+    assert "3 accepted session(s)" in text and "adopt" in text
