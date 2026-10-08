@@ -15,6 +15,9 @@
 FROM buildpack-deps:bookworm-scm
 
 COPY opencode /usr/local/bin/opencode
+# ripgrep for opencode's grep and glob tools (copied from the host when it has one; opencode
+# would otherwise try to download it, and sandboxes have no egress).
+COPY extras/ /usr/local/bin/
 
 RUN chmod 0755 /usr/local/bin/opencode \
  && printf '#!/bin/sh\nexec env BUN_BE_BUN=1 /usr/local/bin/opencode "$@"\n' > /usr/local/bin/bun \

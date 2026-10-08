@@ -388,3 +388,17 @@ async def test_start_failure_removes_container_and_reports_logs(
     with pytest.raises(SandboxError, match="exited|not healthy|no IP"):
         await mgr.start(spec, timeout=10.0)
     assert not mgr.client.containers.list(all=True, filters={"label": f"{LABEL_RUN}={run_id}"})
+
+
+def test_ripgrep_for_the_image_comes_from_the_env_or_path(tmp_path, monkeypatch) -> None:
+    from worker.sandbox_manager import RIPGREP_ENV, ripgrep_binary
+    rg = tmp_path / "rg"
+    rg.write_text("#!/bin/sh\n")
+    monkeypatch.setenv(RIPGREP_ENV, str(rg))
+    assert ripgrep_binary() == rg
+    monkeypatch.setenv(RIPGREP_ENV, str(tmp_path / "missing"))
+    assert ripgrep_binary() is None
+    monkeypatch.delenv(RIPGREP_ENV)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    rg.chmod(0o755)
+    assert ripgrep_binary() == rg

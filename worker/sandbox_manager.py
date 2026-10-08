@@ -140,6 +140,22 @@ def _container_name(run_id: str, role: str) -> str:
     return name
 
 
+RIPGREP_ENV = "GUUDFLOW_RIPGREP"
+
+
+def ripgrep_binary() -> Path | None:
+    """The ripgrep binary copied into the sandbox image: $GUUDFLOW_RIPGREP, else `rg` on PATH.
+
+    A static (musl) build is safest; a dynamic one needs only libc, libgcc and libpcre2-8,
+    which the Debian base image has."""
+    wanted = os.environ.get(RIPGREP_ENV)
+    if wanted:
+        path = Path(wanted)
+        return path if path.is_file() else None
+    found = shutil.which("rg")
+    return Path(found) if found else None
+
+
 class SandboxManager:
     """Creates and destroys hardened opencode sandboxes and their per-run networks."""
 
@@ -254,9 +270,21 @@ class SandboxManager:
         except OpencodeNotInstalled as exc:
             raise SandboxError(str(exc)) from exc
         with tempfile.TemporaryDirectory(prefix="gf-sandbox-ctx-") as ctx:
-            # Context = Dockerfile + the pinned native binary only; the build needs no network.
+            # Context = Dockerfile + the pinned native binary (+ ripgrep); the build needs no
+            # network.
             shutil.copyfile(_DOCKERFILE, Path(ctx) / "Dockerfile")
             shutil.copyfile(binary, Path(ctx) / "opencode")
+            extras = Path(ctx) / "extras"
+            extras.mkdir()
+            rg = ripgrep_binary()
+            if rg is not None:
+                # opencode's grep and glob tools run ripgrep and would download it at first use,
+                # which a sandbox cannot (no egress), so every grep failed.
+                shutil.copyfile(rg, extras / "rg")
+                (extras / "rg").chmod(0o755)
+            else:
+                _logger.warning("no ripgrep on the host (set %s): agents' grep tool will fail "
+                                "in sandboxes", RIPGREP_ENV)
             _logger.info("building sandbox image %s", self.image)
             try:
                 self.client.images.build(path=ctx, tag=self.image, rm=True, forcerm=True)
