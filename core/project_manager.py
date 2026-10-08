@@ -33,6 +33,7 @@ from core.plan_drafts import (
     PlanDrafts,
     PlanTurn,
     Problem,
+    change_target,
     classify_problem,
     draft_refs,
     resolve_predicted_ids,
@@ -49,6 +50,8 @@ TOOL_NAME = "submit_plan_turn"
 MAX_TOKENS = 32000
 HISTORY_MESSAGES = 20
 PM_COSTS_FILE = "pm_costs.jsonl"
+REPAIR_ROUNDS = 2          # repair calls after a turn that left changes out
+REPAIR_CHANGE_CAP = 600    # characters of a left-out change shown back in a repair call
 SESSIONS_SHOWN = 3
 BACKLOG_SHOWN = 60
 FILES_SHOWN = 200
@@ -103,14 +106,42 @@ TurnStatus = Literal["complete", "partial", "failed"]
 
 @dataclass
 class AskResult:
-    """What the model calls of one turn produced (`turn` is None when nothing was usable)."""
+    """What the model calls of one ask produced (`turn` is None when nothing was usable)."""
 
     turn: PlanTurn | None
     responses: list[LLMResponse]
-    status: TurnStatus
-    problems: list[str]
     warnings: dict[int, list[str]]
     notes: list[str]
+    left_out: list[Problem]
+    failure: list[str] = field(default_factory=list)  # why nothing was usable
+
+
+def _cached_content(context: str, tail: str) -> list[dict[str, Any]]:  # Any: content blocks
+    """The user message as text blocks, with a cache breakpoint after the part that does not
+    change within a turn (everything before the open draft), so repair calls and retries
+    re-read it from the prompt cache."""
+    head, sep, rest = context.partition(_AFTER_SPEC)
+    blocks: list[dict[str, Any]] = [{"type": "text", "text": head,  # Any: content block
+                                     "cache_control": {"type": "ephemeral"}}]
+    body = (sep + rest if sep else "") + tail
+    if body:
+        blocks.append({"type": "text", "text": body})
+    return blocks
+
+
+def _repair_text(round_no: int, left_out: list[Problem]) -> str:
+    """The request for corrected versions of only the changes that were left out."""
+    lines = [f"\n\nRepair round {round_no}. Your other changes are already in the open draft "
+             "above; do not send them again. These changes were left out:"]
+    for p in left_out:
+        lines.append(f"- {p.message}")
+        if p.change_json:
+            lines.append(f"  it was: {p.change_json}")
+    lines.append(f"Call {TOOL_NAME} with ONLY corrected versions of these changes. Reuse their "
+                 "refs; a ref in the open draft may be served or depended on. Describe their "
+                 "reason in `groups` unless the open draft already lists it. If one cannot be "
+                 "fixed, leave it out and say why in `reply` in one or two sentences.")
+    return "\n".join(lines)
 
 
 def _fix_groups(turn: PlanTurn, problems: list[Problem]) -> PlanTurn:
@@ -176,40 +207,82 @@ class ProjectManager:
 
         `text` is the human's message (stored first); `extra_context` is untrusted material
         (wrapped in delimiters); `instruction` is a trusted nudge from GuudFlow itself.
+
+        In `update` mode the valid changes go into the draft at once. Changes left out get up
+        to `REPAIR_ROUNDS` repair calls that ask for corrected versions of only those changes,
+        with the rest of the turn already in the draft; a problem that comes back unchanged on
+        the same change ends the repair (docs/PM_SELF_REPAIR_PLAN.md §3, §6).
         """
         new: list[dict[str, Any]] = []  # Any: JSON rows
         if text is not None and text.strip():
             new.append(await asyncio.to_thread(self.drafts.add_message, "human", text.strip(),
                                                None, mode))
-        context = await asyncio.to_thread(self._context, text, instruction, extra_context)
-        context = _insert_memory(context, await self._memory_context(text))
+        memory = await self._memory_context(text)
+
+        async def build() -> str:
+            ctx = await asyncio.to_thread(self._context, text, instruction, extra_context)
+            return _insert_memory(ctx, memory)
+
         sources = [str(m["text"]) for m in await asyncio.to_thread(self.drafts.messages, 500)
                    if m.get("author") == "human"] + ([extra_context] if extra_context else [])
-        asked = await self._ask(phase, context, sources)
+        asked = await self._ask(phase, await build(), sources)
         turn = asked.turn
-        draft: Draft | None
+        responses = list(asked.responses)
+        notes = list(asked.notes)
+        draft: Draft | None = await asyncio.to_thread(self.drafts.current)
         if turn is not None and mode == "update" and turn.changes:
             draft = await asyncio.to_thread(self._merge, turn, asked.warnings)
-        else:
-            draft = await asyncio.to_thread(self.drafts.current)
-        cost, tokens = self._usage(asked.responses)
+        left_out = list(asked.left_out) if mode == "update" else []
+        repairs: list[str] = []
+        dropped: list[Problem] = []
+        seen = {(p.code, p.target) for p in left_out}
+        for round_no in range(1, REPAIR_ROUNDS + 1):
+            if turn is None or not left_out:
+                break
+            fix = await self._ask(phase, await build(), sources,
+                                  repair=_repair_text(round_no, left_out), attempts=1)
+            responses += fix.responses
+            notes += fix.notes
+            if fix.turn is None:
+                break
+            if fix.turn.reply.strip():
+                repairs.append(fix.turn.reply.strip())
+            if not fix.turn.changes and not fix.left_out:
+                dropped, left_out = left_out, []
+                break
+            if fix.turn.changes:
+                draft = await asyncio.to_thread(self._merge, fix.turn, fix.warnings)
+            left_out = list(fix.left_out)
+            keys = {(p.code, p.target) for p in left_out}
+            if keys <= seen:
+                break
+            seen |= keys
+        problems = [p.message for p in left_out]
+        status: TurnStatus = ("failed" if turn is None
+                              else "partial" if problems else "complete")
+        cost, tokens = self._usage(responses)
         if turn is None:
             reply = ("I could not finish this turn, and nothing was added to the draft. "
-                     "What went wrong:\n" + "\n".join(f"- {p}" for p in asked.problems))
+                     "What went wrong:\n" + "\n".join(f"- {p}" for p in asked.failure))
+            problems = list(asked.failure)
         else:
             reply = turn.reply.strip()
             if turn.questions:
                 reply += "\n\n" + "\n".join(f"Question: {q.strip()}" for q in turn.questions)
-            if asked.problems and mode == "update":
+            if repairs:
+                reply += "\n\nRepairs: " + " ".join(repairs)
+            if dropped:
+                reply += ("\n\nLeft out on purpose:\n"
+                          + "\n".join(f"- {p.message}" for p in dropped))
+            if problems:
                 reply += ("\n\nLeft out of the draft until fixed:\n"
-                          + "\n".join(f"- {p}" for p in asked.problems))
+                          + "\n".join(f"- {p}" for p in problems))
         new.append(await asyncio.to_thread(
             self.drafts.add_message, "pm", reply, draft.id if draft else None, mode,
-            cost, tokens, asked.status, asked.problems))
+            cost, tokens, status, problems))
         return TurnOutcome(messages=new, draft=draft, reply=turn.reply if turn else reply,
                            questions=list(turn.questions) if turn else [],
-                           status=asked.status, problems=list(asked.problems),
-                           notes=list(asked.notes))
+                           status=status, problems=problems, notes=notes)
 
     async def start(self) -> TurnOutcome:
         """The first draft: no human text, the PM drafts spec, decisions and items."""
@@ -233,14 +306,15 @@ class ProjectManager:
                          "or found."))
 
     # ── the model call ──────────────────────────────────────────────────────
-    async def _ask(self, phase: Phase, context: str, sources: list[str] | None = None
-                   ) -> AskResult:
-        """Ask for a turn; at most two calls, and whatever is valid is kept.
+    async def _ask(self, phase: Phase, context: str, sources: list[str] | None = None, *,
+                   repair: str | None = None, attempts: int = 2) -> AskResult:
+        """Ask for a turn (or, with `repair`, for fixes); whatever is valid is kept.
 
-        A cut-off, a missing tool call or a payload that does not parse gets one retry. A turn
-        with blocking problems gets one retry that lists them; after that the attempt with the
-        fewest blocking problems is split (`split_turn`): its valid changes go into the draft
-        and the rest are reported. Every call is recorded in `pm_costs.jsonl`.
+        A cut-off, a missing tool call or a payload that does not parse gets a retry while
+        `attempts` last. A turn that parses is split (`split_turn`): its valid changes are
+        returned for the draft and the blocked ones come back as `left_out` for the caller's
+        repair rounds (no full retry). Every call is
+        recorded in `pm_costs.jsonl`.
         """
         system = pm_system_prompt(seats=self.seats, start_mode=self.start_mode, phase=phase,
                                   has_tech_lead=self._has_tech_lead())
@@ -255,65 +329,72 @@ class ProjectManager:
         responses: list[LLMResponse] = []
         problems: list[str] = []
         best: tuple[PlanTurn, list[Problem], list[str]] | None = None
-        content = context
-        for attempt in (1, 2):
+        kind = "repair" if repair else "turn"
+        # Every retry here is for an answer with nothing usable in it.
+        for attempt in range(1, attempts + 1):
+            tail = repair or ""
             if problems:
-                content = (context + "\n\nYour previous answer was rejected for these "
-                           "problems:\n" + "\n".join(f"- {p}" for p in problems)
-                           + f"\nCall {TOOL_NAME} again with a corrected answer.")
+                tail += ("\n\nYour previous answer was rejected for these problems:\n"
+                         + "\n".join(f"- {p}" for p in problems)
+                         + f"\nCall {TOOL_NAME} again with a corrected answer.")
             kwargs: dict[str, Any] = {} if self.model is None else {"model": self.model}
             if self.effort:
                 kwargs["effort"] = self.effort
             response = await self.llm.complete(
-                system=system, messages=[LLMMessage(role="user", content=content)],
-                tools=[turn_tool()], max_tokens=MAX_TOKENS, **kwargs)
+                system=system, messages=[LLMMessage(role="user",
+                                                    content=_cached_content(context, tail))],
+                tools=[turn_tool()], max_tokens=MAX_TOKENS, cache_system=True, **kwargs)
             responses.append(response)
             if response.stop_reason == "max_tokens":
                 # A cut-off tool call parses as a shorter, valid-looking payload (the changes
                 # are lost and only the reply survives), so it is never accepted.
                 problems = ["your answer was cut off at the output limit: keep `reply` under "
                             "200 words and propose fewer, smaller changes"]
-                self._record_call(phase, attempt, response, "cut_off")
-                log.warning("pm: attempt %d hit the output limit", attempt)
+                self._record_call(phase, kind, attempt, response, "cut_off")
+                log.warning("pm: %s attempt %d hit the output limit", kind, attempt)
                 continue
             call = next((c for c in response.tool_calls if c.name == TOOL_NAME), None)
             if call is None:
                 problems = [f"you did not call {TOOL_NAME}"]
-                self._record_call(phase, attempt, response, "no_call")
-                log.warning("pm: attempt %d made no %s call", attempt, TOOL_NAME)
+                self._record_call(phase, kind, attempt, response, "no_call")
+                log.warning("pm: %s attempt %d made no %s call", kind, attempt, TOOL_NAME)
                 continue
             turn, error = validate_result(PlanTurn, call.arguments)
             if turn is None:
                 problems = (error or "invalid payload").splitlines()
-                self._record_call(phase, attempt, response, "invalid")
-                log.warning("pm: attempt %d invalid: %s", attempt, "; ".join(problems)[:500])
+                self._record_call(phase, kind, attempt, response, "invalid")
+                log.warning("pm: %s attempt %d invalid: %s", kind, attempt,
+                            "; ".join(problems)[:500])
                 continue
             notes = resolve_predicted_ids(turn, spec_doc, backlog_doc, current)
             found = [classify_problem(p) for p in validate_turn(
                 turn, spec, backlog_doc, self._team(), sources, known_groups, refs)]
             turn = _fix_groups(turn, found)
             blocking = [p for p in found if p.severity == "block"]
-            if best is None or len(blocking) <= len([p for p in best[1]
-                                                     if p.severity == "block"]):
-                best = (turn, found, notes)
-            self._record_call(phase, attempt, response, "rejected" if blocking else "ok")
-            if not blocking:
-                break
-            problems = [p.message for p in blocking]
-            log.warning("pm: attempt %d rejected: %s", attempt, "; ".join(problems)[:500])
+            best = (turn, found, notes)
+            self._record_call(phase, kind, attempt, response, "rejected" if blocking else "ok")
+            if blocking:
+                # No full retry: the valid changes are kept and the caller asks for repairs
+                # of only the blocked ones, which costs a fraction of a new turn.
+                log.warning("pm: %s attempt %d left out: %s", kind, attempt,
+                            "; ".join(p.message for p in blocking)[:500])
+            break
         if best is None:
-            return AskResult(None, responses, "failed", problems, {}, [])
+            return AskResult(None, responses, {}, [], [], failure=problems)
         turn, found, notes = best
         kept, warnings, left_out = split_turn(turn, found)
-        status: TurnStatus = "partial" if left_out else "complete"
-        return AskResult(kept, responses, status, [p.message for p in left_out], warnings,
-                         notes)
+        for p in left_out:
+            if p.change:
+                p.target = change_target(turn.changes[p.change - 1].model_dump(mode="json"))
+                p.change_json = json.dumps(turn.changes[p.change - 1].model_dump(
+                    mode="json", exclude_none=True), ensure_ascii=False)[:REPAIR_CHANGE_CAP]
+        return AskResult(kept, responses, warnings, notes, left_out)
 
-    def _record_call(self, phase: str, attempt: int, response: LLMResponse,
+    def _record_call(self, phase: str, kind: str, attempt: int, response: LLMResponse,
                      outcome: str) -> None:
         """Append one call to the project's `pm_costs.jsonl`, whatever came of it."""
         cost, tokens = self._usage([response])
-        row = {"at": time.time(), "phase": phase, "attempt": attempt,
+        row = {"at": time.time(), "phase": phase, "kind": kind, "attempt": attempt,
                "model": response.model or self.model, "effort": self.effort,
                "input_tokens": response.input_tokens, "output_tokens": response.output_tokens,
                "cache_read_tokens": response.cache_read_tokens,

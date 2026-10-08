@@ -42,7 +42,8 @@ def pm(tmp_path: Path, *turns: MockTurn, doc: dict[str, Any] | None = None
 
 
 def user_text(llm: MockLLMClient, n: int = 0) -> str:
-    return llm.calls[n]["messages"][0].content
+    content = llm.calls[n]["messages"][0].content
+    return content if isinstance(content, str) else "".join(b["text"] for b in content)
 
 
 def test_tool_schema_is_inlined() -> None:
@@ -96,9 +97,11 @@ async def test_one_retry_on_invalid_output(tmp_path: Path) -> None:
     bad = call("bad", [{**dec(), "serves": ["R99"]}])
     manager, llm = pm(tmp_path, bad, call("Fixed.", [dec()]))
     out = await manager.turn("decide", mode="update")
-    assert out.reply == "Fixed." and len(llm.calls) == 2 and out.status == "complete"
-    retry = user_text(llm, 1)
-    assert "rejected" in retry and "R99" in retry and retry.startswith(user_text(llm, 0))
+    assert len(llm.calls) == 2 and out.status == "complete" and out.draft is not None
+    assert [c.op for c in out.draft.changes] == ["add_decision"]
+    repair = user_text(llm, 1)
+    assert "Repair round 1" in repair and "R99" in repair and "it was:" in repair
+    assert out.messages[-1]["text"].endswith("Repairs: Fixed.")
 
 
 async def test_a_style_problem_is_a_warning_not_a_retry(tmp_path: Path) -> None:
@@ -347,6 +350,7 @@ async def test_team_ops_are_validated_against_the_team_and_not_pre_ticked(
     assert len(llm.calls) == 2
     assert "still depends on or reviews it" in user_text(llm, 1)
     assert out.draft is not None and [c.accepted for c in out.draft.changes] == [None]
+    assert [c.op for c in out.draft.changes] == ["add_role"]
 
 
 async def test_context_names_the_kind(tmp_path: Path) -> None:
@@ -375,3 +379,23 @@ def test_an_older_project_is_told_to_adopt(tmp_path: Path, monkeypatch: Any) -> 
     monkeypatch.setattr(ProjectRepo, "runs", lambda self: [SimpleNamespace(state="accepted")] * 3)
     text = manager._kind_context()
     assert "3 accepted session(s)" in text and "adopt" in text
+
+
+async def test_a_repair_may_drop_what_it_cannot_fix(tmp_path: Path) -> None:
+    manager, llm = pm(tmp_path, call("plan", [req(), {**dec(), "serves": ["R99"]}]),
+                      call("R99 does not exist; dropping that decision."))
+    out = await manager.turn("plan", mode="update")
+    assert out.status == "complete" and out.problems == [] and len(llm.calls) == 2
+    text = out.messages[-1]["text"]
+    assert "Left out on purpose" in text and "R99" in text and "dropping that decision" in text
+    kinds = [json.loads(c)["kind"] for c in
+             (tmp_path / "projects" / "p" / "pm_costs.jsonl").read_text().splitlines()]
+    assert kinds == ["turn", "repair"]
+
+
+async def test_the_stable_part_of_the_context_is_cached(tmp_path: Path) -> None:
+    manager, llm = pm(tmp_path, call("ok"))
+    await manager.turn("hi", mode="discuss")
+    blocks = llm.calls[0]["messages"][0].content
+    assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+    assert "Open draft" not in blocks[0]["text"] and blocks[1]["text"].startswith("Open draft")

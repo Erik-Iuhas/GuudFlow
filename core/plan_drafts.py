@@ -836,6 +836,8 @@ class Problem:
     code: str
     severity: Literal["block", "warn"]
     change: int | None = None   # 1-based index into the turn's changes; None: the turn itself
+    target: tuple[str, ...] | None = None  # what the change acts on (`change_target`)
+    change_json: str = ""       # the left-out change, shown back to the model for repair
 
 
 # validate_turn words each problem for the model; this table gives each wording its code.
@@ -919,10 +921,15 @@ def split_turn(turn: PlanTurn, problems: Sequence[Problem]
     """Keep what can go into the draft: `(kept turn, warnings by kept index, left out)`.
 
     A change with a blocking problem is left out, and so is any change that serves or depends
-    on a ref only a left-out change defined (repeated until nothing more drops). Warnings stay
+    on a ref only a left-out change defined (repeated until nothing more drops). A blocking
+    problem with no change number is about the team, so every role op is left out. Warnings stay
     with their change. Indexes in the result are 0-based positions in the kept turn.
     """
     dropped = {p.change for p in problems if p.severity == "block" and p.change}
+    if any(p.severity == "block" and not p.change for p in problems):
+        # Problems with no change number are about the team the role ops would produce.
+        dropped |= {n for n, ch in enumerate(turn.changes, 1)
+                    if ch.op in ("add_role", "edit_role", "remove_role")}
     while True:
         gone = {getattr(turn.changes[n - 1], "ref", None) for n in dropped} - {None}
         more = {n for n, ch in enumerate(turn.changes, 1) if n not in dropped and any(
@@ -931,6 +938,11 @@ def split_turn(turn: PlanTurn, problems: Sequence[Problem]
             break
         dropped |= more
     left_out = [p for p in problems if p.severity == "block"]
+    for p in left_out:
+        if not p.change:  # point a team-wide problem at the role op it is about, if one is named
+            m = re.match(r"(add_role|edit_role|remove_role) ([a-z0-9_]+):", p.message)
+            p.change = next((n for n, ch in enumerate(turn.changes, 1) if m and ch.op == m.group(1)
+                             and getattr(ch, "role", None) == m.group(2)), None)
     for n in sorted(dropped - {p.change for p in left_out}):
         ch = turn.changes[n - 1]
         left_out.append(Problem(f"change {n} ({ch.op}): left out because a change it needs "
@@ -1049,6 +1061,9 @@ def _target(change: dict[str, Any]) -> tuple[str, ...] | None:  # Any: Change ro
     if title:
         return (op, str(title).strip().lower())
     return None
+
+
+change_target = _target
 
 
 class PlanDrafts:

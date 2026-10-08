@@ -28,6 +28,12 @@ DOC = {"goal": GOAL, "start_mode": "prototype_first",
        "agents": [{"role": "planner"}, {"role": "builder"}, {"role": "reviewer"}],
        "seats": {"lead": False, "reviewer": "off"}}
 
+def _text(content: object) -> str:
+    """A user message's text (the project manager sends text blocks)."""
+    return content if isinstance(content, str) else "".join(
+        b["text"] for b in content)  # type: ignore[union-attr]
+
+
 
 def _projects(data_root: Path, doc: dict[str, Any] | None = None) -> None:
     (data_root / "projects.json").write_text(json.dumps({"p1": doc or DOC}), encoding="utf-8")
@@ -118,12 +124,12 @@ async def test_prompt_has_jack_and_memory_only_with_memory(tmp_path: Path) -> No
     await manager.turn("Plan the browser game", mode="discuss")
     system = llm.calls[0]["system"]
     assert system.startswith("You are Jack, a project manager.")
-    assert MEMORY_HEADING not in llm.calls[0]["messages"][0].content
+    assert MEMORY_HEADING not in _text(llm.calls[0]["messages"][0].content)
 
     _projects(tmp_path)
     record_session_outcome(tmp_path, "p1", "run_x", True, "great")
     await manager.turn("Plan the browser game again", mode="discuss")
-    context = llm.calls[1]["messages"][0].content
+    context = _text(llm.calls[1]["messages"][0].content)
     assert MEMORY_HEADING in context and "win" in context
     assert context.index("Current spec") < context.index(MEMORY_HEADING) < context.index(
         "Open draft")

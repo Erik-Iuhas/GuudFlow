@@ -22,6 +22,12 @@ R12 = "R1.2: an empty title is refused"
 R21 = "R2.1: a tag filters the list"
 RL1 = f"rule-1: {RULE1}"
 
+def _text(content: object) -> str:
+    """A user message's text (the project manager sends text blocks)."""
+    return content if isinstance(content, str) else "".join(
+        b["text"] for b in content)  # type: ignore[union-attr]
+
+
 
 async def _project(client, auth_header, pid: str = "p1", **doc: Any) -> None:
     r = await client.post("/api/projects", json={"project_id": pid, "goal": "A recipe box",
@@ -229,7 +235,7 @@ async def test_after_session_builds_a_report_and_asks_the_pm(client, auth_header
     assert r.status_code == 200, r.text
     body = r.json()
     assert [m["author"] for m in body["messages"]] == ["pm"] and body["draft"] is None
-    system, content = llm.calls[0]["system"], llm.calls[0]["messages"][0].content
+    system, content = llm.calls[0]["system"], _text(llm.calls[0]["messages"][0].content)
     assert "Phase: after a session" in system
     assert "Report of session run_a" in content
     assert "Summary: run run_a is pending" in content
