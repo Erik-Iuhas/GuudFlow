@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MermaidDiagram } from "../../components/MermaidDiagram";
 import { Alert, EmptyState, SectionTitle, Table, Td, Th } from "../../components/ui/form-controls";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -162,12 +163,14 @@ function DesignBody({ design }: { design: DesignWire }) {
         <div>
           <SectionTitle>Flows</SectionTitle>
           {active(design.flows).map((f) => (
-            <details key={f.id} className="mb-2 rounded-md border border-border p-2">
+            <details key={f.id} open className="mb-2 rounded-md border border-border p-2">
               <summary className="cursor-pointer text-sm">
                 <span className="font-mono text-xs">{f.id}</span> {f.title}
-                <span className="ml-2 text-xs text-muted-foreground">{f.kind} diagram (Mermaid)</span>
+                <span className="ml-2 text-xs text-muted-foreground">{f.kind} diagram</span>
               </summary>
-              <pre className="mt-2 overflow-x-auto text-xs">{f.diagram}</pre>
+              <div className="mt-2">
+                <MermaidDiagram source={f.diagram} label={`${f.id} ${f.title}`} />
+              </div>
             </details>
           ))}
         </div>
