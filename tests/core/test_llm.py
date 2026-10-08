@@ -57,3 +57,27 @@ async def test_mock_explicit_stop_reason():
     client = MockLLMClient([MockTurn(text="", stop_reason="max_tokens")])
     res = await client.complete(system="s", messages=[])
     assert res.stop_reason == "max_tokens"
+
+
+async def test_anthropic_client_sends_effort_in_output_config() -> None:
+    from types import SimpleNamespace
+
+    from core.llm.anthropic import AnthropicClient
+    sent: list[dict] = []
+
+    class Messages:
+        async def create(self, **kwargs):
+            sent.append(kwargs)
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")],
+                                   stop_reason="end_turn", model="m",
+                                   usage=SimpleNamespace(input_tokens=1, output_tokens=1,
+                                                         cache_read_input_tokens=0,
+                                                         cache_creation_input_tokens=0))
+
+    client = AnthropicClient(api_key="k")
+    client._client = SimpleNamespace(messages=Messages())
+    from core.llm import LLMMessage
+    await client.complete(system="", messages=[LLMMessage(role="user", content="hi")], effort="high")
+    await client.complete(system="", messages=[LLMMessage(role="user", content="hi")])
+    assert sent[0]["extra_body"] == {"output_config": {"effort": "high"}}
+    assert "extra_body" not in sent[1]

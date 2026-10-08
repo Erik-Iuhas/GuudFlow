@@ -842,7 +842,18 @@ class JobRunner:
         # turns on quip generation.
         if self.quip_registry is not None:
             quip_log_path = run_root / "quip_log.json"
-            quip_engine = QuipEngine(llm=llm or AnthropicClient(), log_path=quip_log_path)
+            # Quips always use the fast tier (CLAUDE.md), at low effort where the model has it.
+            quip_model = None
+            quip_llm = llm
+            if llm is None:
+                try:
+                    quip_registry = ModelRegistry.for_data_root(self.data_root)
+                    quip_model = quip_registry.resolve("fast")
+                    quip_llm = quip_registry.get_client(quip_model)
+                except Exception:  # noqa: BLE001 — no fast model: fall back to the default client
+                    _logger.warning("no fast-tier model for quips; using the default client")
+            quip_engine = QuipEngine(llm=quip_llm or AnthropicClient(), log_path=quip_log_path,
+                                     model=quip_model)
             runner.quip_engine = quip_engine
             try:
                 await self.quip_registry.register(job.run_id, quip_engine)

@@ -38,6 +38,7 @@ class AnthropicClient:
         max_tokens: int = 8192,
         model: str = "claude-sonnet-4-6",
         cache_system: bool = False,
+        effort: str | None = None,
     ) -> LLMResponse:
         if self._client is None:
             import httpx
@@ -68,6 +69,9 @@ class AnthropicClient:
         }
         if tools:
             kwargs["tools"] = tools
+        if effort:
+            # The pinned SDK predates `output_config`; extra_body sends it as is.
+            kwargs["extra_body"] = {"output_config": {"effort": effort}}
 
         try:
             resp = await self._client.messages.create(**kwargs)

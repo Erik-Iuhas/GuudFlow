@@ -59,6 +59,11 @@ class ModelInfo:
     # Groq's Qwen "none"/"default"); a level not listed is sent as is.
     effort_values: dict[str, str] = field(default_factory=dict)
 
+    def effort_param(self, want: str | None) -> str | None:
+        """The provider's word to send for a wanted level (or the model's default), or None
+        when nothing should be sent."""
+        return self.effort_value(self.pick_effort(want))
+
     def effort_value(self, level: str | None) -> str | None:
         """What to send the provider for `level` (a level from `pick_effort`)."""
         return self.effort_values.get(level, level) if level else None

@@ -244,3 +244,16 @@ async def test_quip_pump_turns_live_signals_into_quips() -> None:
     pump.close()
     await asyncio.wait_for(task, 5)
     assert calls == [("builder", "started"), ("reviewer", "APPROVED"), ("builder", "complete")]
+
+
+async def test_quip_uses_the_registry_fast_model_at_low_effort(tmp_path: Path, workspace: Workspace):
+    from core.llm.registry import ModelInfo
+    fast = ModelInfo(id="claude-haiku-5-5", provider="anthropic", tier="fast",
+                     effort_levels=("low", "medium", "high"), default_effort="medium")
+    llm = MockLLMClient([MockTurn(text="zip")])
+    engine = QuipEngine(llm=llm, log_path=tmp_path / "q.json", model=fast)
+    await engine.on_run_complete(workspace, SchedulerResult(SchedulerStatus.COMPLETE, [], [], {}))
+    assert llm.calls[0]["model"] == "claude-haiku-5-5" and llm.calls[0]["effort"] == "low"
+    # A model with no effort control gets none.
+    plain = ModelInfo(id="claude-haiku-4-5", provider="anthropic", tier="fast")
+    assert QuipEngine(llm=llm, log_path=tmp_path / "r.json", model=plain).effort is None

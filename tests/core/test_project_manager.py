@@ -304,3 +304,10 @@ async def test_context_names_the_kind(tmp_path: Path) -> None:
     manager, llm = pm(tmp_path / "b", call("a"), doc={**TEAM_DOC, "kind": "game"})
     await manager.turn("hi", mode="discuss")
     assert "The current team lacks: tech_lead, builder, tester" in user_text(llm)
+
+
+async def test_pm_sends_its_effort_on_every_call(tmp_path: Path) -> None:
+    llm = MockLLMClient([call("Added R1.", [req()])])
+    manager = ProjectManager(llm, tmp_path, "p", DOC, model="m", effort="high")
+    await manager.turn("Build a recipe box", mode="update")
+    assert llm.calls[0]["effort"] == "high" and llm.calls[0]["model"] == "m"

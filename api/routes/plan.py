@@ -80,17 +80,20 @@ def _draft_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=code, detail=text)
 
 
-def _pm_model(request: Request, data_root: Path, tier: str) -> str | None:
-    """The model id the tier resolves to (None when a test injected the LLM)."""
+def _pm_model(request: Request, data_root: Path, tier: str,
+              effort: str | None = None) -> tuple[str | None, str | None]:
+    """The model id the tier resolves to and the effort word to send it (the project's
+    `pm_effort`, else the model's default); (None, None) when a test injected the LLM."""
     if getattr(request.app.state, "meta_llm", None) is not None:
-        return None
+        return None, None
     from core.llm.registry import ModelRegistry
     try:
         registry = (getattr(request.app.state, "model_registry", None)
                     or ModelRegistry.for_data_root(data_root))
-        return registry.resolve(tier).id
+        model = registry.resolve(tier)
+        return model.id, model.effort_param(effort)
     except Exception:  # noqa: BLE001 — fall back to the client's default model
-        return None
+        return None, None
 
 
 async def _manager(request: Request, project_id: str,
@@ -100,7 +103,9 @@ async def _manager(request: Request, project_id: str,
     data_root, doc = await _project(request, project_id)
     tier = meta_model or "heavy"
     llm = _build_meta_llm(request, meta_model=tier)
-    return ProjectManager(llm, data_root, project_id, doc, model=_pm_model(request, data_root, tier))
+    gates = (doc or {}).get("approval_gates") or {}
+    model_id, effort = _pm_model(request, data_root, tier, gates.get("pm_effort") or None)
+    return ProjectManager(llm, data_root, project_id, doc, model=model_id, effort=effort)
 
 
 async def _run_turn(request: Request, project_id: str, meta_model: str | None,

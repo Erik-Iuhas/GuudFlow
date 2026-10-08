@@ -49,7 +49,11 @@ class LLMClient(Protocol):
         max_tokens: int = 8192,
         model: str = "claude-sonnet-4-6",
         cache_system: bool = False,
-    ) -> LLMResponse: ...
+        effort: str | None = None,
+    ) -> LLMResponse:
+        """One model call. `effort` is the provider's own effort word (from
+        `ModelInfo.effort_param`); None sends none and the provider decides."""
+        ...
 
 
 # ── Mock client ────────────────────────────────────────────────────────────────
@@ -88,6 +92,7 @@ class MockLLMClient:
         max_tokens: int = 8192,
         model: str = "claude-sonnet-4-6",
         cache_system: bool = False,
+        effort: str | None = None,
     ) -> LLMResponse:
         self.calls.append({
             "system": system,
@@ -95,6 +100,7 @@ class MockLLMClient:
             "tools": tools,
             "max_tokens": max_tokens,
             "model": model,
+            "effort": effort,
         })
         if not self._queue:
             raise AssertionError(

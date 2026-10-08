@@ -497,3 +497,23 @@ def test_openai_compatible_factory():
     assert client._base_url == "http://localhost:1234/v1"
     assert client._api_key == "lm-studio"
     assert client._extra_headers == {"X-Source": "guudflow"}
+
+
+async def test_effort_is_sent_as_reasoning_effort() -> None:
+    import httpx
+
+    from core.llm.openai import OpenAIClient
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"},
+                                                      "finish_reason": "stop"}],
+                                         "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = OpenAIClient(base_url="https://x/v1", api_key="k", http_client=http)
+        await client.complete(system="", messages=[LLMMessage(role="user", content="hi")],
+                              effort="none")
+        await client.complete(system="", messages=[LLMMessage(role="user", content="hi")])
+    assert seen[0]["reasoning_effort"] == "none" and "reasoning_effort" not in seen[1]

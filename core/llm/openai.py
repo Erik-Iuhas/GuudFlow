@@ -60,6 +60,7 @@ class OpenAIClient:
         max_tokens: int = 4096,
         model: str = "gpt-4o-mini",
         cache_system: bool = False,  # no-op: OpenAI auto-prefix-caches
+        effort: str | None = None,
     ) -> LLMResponse:
         if self._client is None:
             import httpx
@@ -78,6 +79,8 @@ class OpenAIClient:
         }
         if tools:
             body["tools"] = [_to_openai_tool(t) for t in tools]
+        if effort:
+            body["reasoning_effort"] = effort
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self._api_key:

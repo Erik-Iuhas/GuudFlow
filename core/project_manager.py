@@ -102,12 +102,14 @@ class ProjectManager:
 
     def __init__(self, llm: LLMClient, data_root: Path, project_id: str,
                  project_doc: Mapping[str, Any] | None,  # Any: project JSON
-                 *, model: str | None = None) -> None:
+                 *, model: str | None = None, effort: str | None = None) -> None:
         self.llm = llm
         self.data_root = Path(data_root)
         self.project_id = project_id
         self.doc: Mapping[str, Any] = project_doc or {}
         self.model = model
+        # The provider's effort word for every PM call (None: the provider's default).
+        self.effort = effort
         self.seats = Seats.from_project(self.doc)
         self.start_mode = normalise_mode(self.doc.get("start_mode"))
         self.drafts = PlanDrafts(self.data_root, project_id)
@@ -186,6 +188,8 @@ class ProjectManager:
                            "problems:\n" + "\n".join(f"- {p}" for p in problems)
                            + f"\nCall {TOOL_NAME} again with a corrected answer.")
             kwargs: dict[str, Any] = {} if self.model is None else {"model": self.model}
+            if self.effort:
+                kwargs["effort"] = self.effort
             response = await self.llm.complete(
                 system=system, messages=[LLMMessage(role="user", content=content)],
                 tools=[turn_tool()], max_tokens=MAX_TOKENS, **kwargs)

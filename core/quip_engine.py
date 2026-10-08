@@ -22,6 +22,7 @@ import logging
 from typing import Any, Callable
 
 from core.llm import LLMClient, LLMMessage
+from core.llm.registry import ModelInfo
 from core.quip_office import BANNED_OPENERS, office_state
 from core.scheduler import SchedulerResult
 from core.workspace import Workspace
@@ -62,9 +63,16 @@ class QuipEngine:
 
     FAST_TIER_MODEL = "claude-haiku-4-5-20251001"
     MAX_TOKENS = 80  # quips are short by design
+    # A one-line joke needs no deliberation; the lowest effort keeps quips cheap and quick.
+    EFFORT = "low"
 
-    def __init__(self, llm: LLMClient, log_path: Path | str):
+    def __init__(self, llm: LLMClient, log_path: Path | str,
+                 model: ModelInfo | None = None):
+        """`model` is the fast tier's model from the registry; None keeps FAST_TIER_MODEL and
+        sends no effort (a test or a host with no registry)."""
         self.llm = llm
+        self.model_id = model.id if model is not None else self.FAST_TIER_MODEL
+        self.effort = model.effort_param(self.EFFORT) if model is not None else None
         self.log_path = Path(log_path)
         self._voices: list[AgentVoice] = []
         self._quips: list[Quip] = []
@@ -343,12 +351,14 @@ class QuipEngine:
                + "\n".join(f"- {t}" for t in mine) if mine else "")
         )
         try:
+            extra: dict[str, str] = {"effort": self.effort} if self.effort else {}
             response = await self.llm.complete(
                 system=system,
                 messages=[LLMMessage(role="user", content=context)],
                 tools=None,
                 max_tokens=self.MAX_TOKENS,
-                model=self.FAST_TIER_MODEL,
+                model=self.model_id,
+                **extra,
             )
             text = response.text.strip() or "(no comment)"
         except Exception as e:
