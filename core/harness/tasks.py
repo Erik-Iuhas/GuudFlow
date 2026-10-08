@@ -149,6 +149,35 @@ def _find_cycle(graph: dict[str, list[str]]) -> list[str] | None:
 _CHECK_LINE = re.compile(r"^\s*(R[0-9]+\.[0-9]+)\s*:", re.IGNORECASE)
 
 
+# An acceptance line only the owner can settle, by its wording: a playtest, a look by hand.
+_OWNER_CUE = re.compile(
+    r"^(?:manual(?:ly)?\b|human\b|a human\b|a person\b|the owner\b|owner\b|play-?test\b|"
+    r"by hand\b|live browser\b|browser check\b|in (?:a|the) (?:real |live )?browser\b)",
+    re.IGNORECASE)
+
+
+def is_owner_check(line: str, methods: Mapping[str, str] | None = None) -> bool:
+    """True when an acceptance line is checked by the owner at acceptance, not by the worker.
+
+    A spec check (`R#.#: ...`) counts when its method is `manual`; any other line when its
+    wording says so ("Manual: ...", "Human playtest: ...", "Browser check: ...").
+    """
+    found = _CHECK_LINE.match(line)
+    body = line[found.end():].strip() if found else line.strip()
+    method = (methods or {}).get(found.group(1).upper()) if found else None
+    if method is not None:
+        return method == "manual"
+    from core.spec import infer_method
+    return infer_method(body) == "manual" or bool(_OWNER_CUE.match(body))
+
+
+def split_owner_checks(lines: Sequence[str], methods: Mapping[str, str] | None = None
+                       ) -> tuple[list[str], list[str]]:
+    """(lines the worker must meet, lines the owner checks at acceptance)."""
+    must = [line for line in lines if not is_owner_check(line, methods)]
+    return must, [line for line in lines if line not in must]
+
+
 def card_serves(acceptance: Sequence[str], serves: Sequence[str],
                 item_serves: Sequence[str] = ()) -> list[str]:
     """What a card serves: its own `serves`, the checks its `R#.#:` acceptance lines carry and,
@@ -291,15 +320,19 @@ def _item_matches(item: str, wanted: str) -> bool:
     return len(shorter) >= _MIN_PREFIX_LEN and longer.startswith(shorter)
 
 
-def check_task_result(result: AgentResult, task_id: str, acceptance: Sequence[str]) -> list[str]:
+def check_task_result(result: AgentResult, task_id: str, acceptance: Sequence[str],
+                      owner_checks: Sequence[str] = ()) -> list[str]:
     """Check a builder's result against the card it was given; one problem per line.
 
     ``task_id`` must match, and a ``done`` result must report every acceptance
-    item as met (matched by exact text or case-insensitive prefix).
+    item as met (matched by exact text or case-insensitive prefix). ``acceptance`` is what the
+    worker must meet; ``owner_checks`` are the card's lines the owner checks at acceptance,
+    which never need an entry and never justify ``blocked``.
     """
     problems: list[str] = []
     if result.task_id != task_id:
         problems.append(f"task_id: expected '{task_id}', got '{result.task_id}'")
+    problems += check_not_blocked_on_owner(result, acceptance, owner_checks)
     if result.status == "done":
         for wanted in acceptance:
             match = next((c for c in result.acceptance if _item_matches(c.item, wanted)), None)
@@ -308,6 +341,33 @@ def check_task_result(result: AgentResult, task_id: str, acceptance: Sequence[st
             elif not match.met:
                 problems.append(f"acceptance: item '{wanted}' is reported unmet but status is 'done'")
     return problems
+
+
+# What a worker asks for when it is really waiting on the owner, not on a teammate.
+_OWNER_NEED = re.compile(
+    r"\b(?:manual(?:ly)?|playtest|play-?test|human|by hand|the owner|a person|screenshot|"
+    r"reference image|reference screenshot|browser (?:check|verdict|run)|in (?:a|the) browser|"
+    r"live browser|pixel verdict|eyeball)\b", re.IGNORECASE)
+
+OWNER_BLOCK_MESSAGE = (
+    "status: do not block on owner checks. The owner checks these at acceptance: {lines}. "
+    "Meet every other item, then submit status \"done\" and put what the owner should try "
+    "in `owner_checks` (item -> how to check it). A missing reference image or screenshot is "
+    "not a blocker either: match the description as well as you can and say so in evidence.")
+
+
+def check_not_blocked_on_owner(result: AgentResult, acceptance: Sequence[str],
+                               owner_checks: Sequence[str]) -> list[str]:
+    """A `blocked` result whose need is an owner check (or a manual or visual verdict)."""
+    if result.status != "blocked" or result.blocked_on is None:
+        return []
+    unmet = [c.item for c in result.acceptance if not c.met]
+    must_unmet = [i for i in unmet if not any(_item_matches(i, o) for o in owner_checks)]
+    only_owner = bool(unmet) and not must_unmet
+    if only_owner or _OWNER_NEED.search(result.blocked_on.need):
+        lines = "; ".join(owner_checks) or "manual, browser and screenshot verdicts"
+        return [OWNER_BLOCK_MESSAGE.format(lines=lines)]
+    return []
 
 
 ThreadKind = Literal[

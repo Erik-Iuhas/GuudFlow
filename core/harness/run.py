@@ -51,6 +51,7 @@ from core.harness.capabilities import (
     Capabilities,
     CompiledCapabilities,
     compile_capabilities,
+    shell_summary,
     defaults_for,
     gate_vision,
     infer_role_type,
@@ -83,7 +84,7 @@ from core.harness.overseer import OverseerCaps, OverseerResult, ProposeTeamChang
 from core.harness.overseer_flow import OverseerFlow
 from core.harness.retrospective import load_prior_carry_forward
 from core.harness.visual_review import ImageBudget, capped
-from core.harness.tasks import PlanResult
+from core.harness.tasks import PlanResult, is_owner_check
 from core.harness.tool_context import RunToolContext
 from core.llm.registry import ModelInfo, ModelRegistry
 from core.scheduler import AgentSpec, Scheduler, SchedulerResult
@@ -322,6 +323,8 @@ class OpencodeRun:
                                        getattr(self.runner.project, "start_mode", None))
             if flow.spec is not None:
                 flow.backlog = self.backlog = flow.spec.resolve(self.backlog)
+                methods = flow.spec.check_methods()
+                flow.board.owner_check = lambda line, m=methods: is_owner_check(line, m)
             # The design and who owns it (role contracts plan §2.2, §4.2).
             self._setup_design(flow)
             flow.tool_dir_for = self.clones.tool_dir
@@ -1268,6 +1271,11 @@ class OpencodeRun:
                                 else self._roles[role].cfg.description)
         if desk:
             sections.append(("Your desk notes", desk))
+        compiled = getattr(self._roles.get(role), "compiled", None)
+        shell = (shell_summary(compiled.permission)
+                 if compiled is not None and not self._is_overseer(role) else None)
+        if shell:
+            sections.append(("Shell commands", shell))
         return tuple(sections)
 
     def _inputs_listing(self) -> str:

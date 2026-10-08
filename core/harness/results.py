@@ -104,6 +104,8 @@ class AgentResult(BaseModel):
     blocked_on: BlockedOn | None = None
     notes_for: dict[str, str] = {}
     handoff: Handoff | None = None
+    # Owner checks on the card (playtests, looks by hand): item -> what the owner should try.
+    owner_checks: dict[str, str] = {}
 
     @model_validator(mode="after")
     def _check_blocked_on(self) -> "AgentResult":

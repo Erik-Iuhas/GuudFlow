@@ -89,6 +89,11 @@ class SpecBrief:
         found = {r.id: r for r in self.spec.requirements if r.status == "active"}
         return [found[i] for i in wanted if i in found]
 
+    def check_methods(self) -> dict[str, str]:
+        """How each active check is verified (`R3.2` -> unit | manual | visual | perf)."""
+        return {c.id: c.method for r in self.spec.requirements if r.status == "active"
+                for c in r.checks if c.method}
+
     def ids(self) -> list[str]:
         """Active requirement ids and their check ids (what a card may say it serves)."""
         out: list[str] = []

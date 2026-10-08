@@ -231,12 +231,22 @@ async def list_project_runs(request: Request, project_id: str) -> dict[str, Any]
     seat = Seats.from_project(project).reviewer
     return {"main": main,
             "runs": [{**asdict(r), "needs_cosign": r.state == "pending"
-                      and needs_cosign(data_root, project_id, r.run_id, seat)}
+                      and needs_cosign(data_root, project_id, r.run_id, seat),
+                      **_handover(data_root, r.run_id)}
                      for r in repo.runs()],
             "autopilot": pilot_status,
             "remote": None if remote is None else {
                 "url": remote.url, "branch": remote.branch, "publish": remote.publish,
                 "token": bool(remote.token())}}
+
+
+def _handover(data_root: Path, run_id: str) -> dict[str, Any]:  # Any: JSON
+    """What the run leaves for the person deciding it: the owner checks its cards named
+    (flow hardening §2) and, when it stopped early, why (§4)."""
+    from core.harness.task_flow import read_owner_checks
+    from core.harness.run_stop import read_stop
+    run_root = Path(data_root) / "runs" / run_id
+    return {"owner_checks": read_owner_checks(run_root), "stopped": read_stop(run_root)}
 
 
 @router.post("/{project_id}/remote/sync")

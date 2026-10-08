@@ -215,12 +215,18 @@ class Backlog:
         return taken
 
     def transfer(self, from_run: str, to_run: str) -> list[BacklogItem]:
-        """A run continues another: the items the earlier run held move to the new one."""
+        """A run continues another: the items the earlier run held move to the new one.
+
+        Items the earlier run finished keep `pending` "done"; the rest start over.
+        """
         moved: list[BacklogItem] = []
         with self.db.backlog_doc() as doc:
             for row in doc.get("items", []):
                 if row.get("run_id") == from_run and row.get("status") == "in_run":
-                    row.update(run_id=to_run, pending=None, updated_at=time.time())
+                    # A finished item keeps its outcome: the new run plans no card for it
+                    # and it closes when the chain is accepted (flow hardening §5).
+                    keep = "done" if row.get("pending") == "done" else None
+                    row.update(run_id=to_run, pending=keep, updated_at=time.time())
                     row.setdefault("history", []).append(
                         {"run_id": from_run, "decision": f"continued by {to_run}",
                          "at": time.time()})
@@ -248,6 +254,8 @@ class Backlog:
                 if row.get("run_id") != run_id or row.get("status") != "in_run":
                     continue
                 mine = [c for c in cards if c.backlog_id == row["id"]]
+                if not mine and row.get("pending") == "done":
+                    continue    # finished in the run this one continued
                 done = sum(c.column == "done" for c in mine)
                 outcome: Outcome = ("done" if mine and done == len(mine)
                                     else "partial" if done else "not_started")

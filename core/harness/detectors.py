@@ -152,6 +152,21 @@ def blocked_chain(view: RunView, cfg: DetectorConfig) -> list[Stall]:
             f"{c.task_id} ({c.assigned_to}) waits on {c.blocked_on[0]}" for c in view.cards
             if c.column == "blocked" and c.blocked_on))]
     out = []
+    # Waiting on a role that has finished for the run (the tech lead after planning) and has
+    # no open card of its own: nobody will act, so the overseer decides now.
+    # Unblock cards don't count: the one made for a blocked card is exactly what nobody runs.
+    blocked_ids = {c.task_id for c in view.cards if c.column == "blocked"}
+    open_owners = {c.assigned_to for c in view.cards if c.column in ("todo", "in_progress")
+                   and not blocked_ids & set(c.supports or [])}
+    for card in view.cards:
+        if card.column != "blocked" or not card.blocked_on:
+            continue
+        on = card.blocked_on[0]
+        if (view.role_states.get(on) == "complete" and on not in view.running
+                and on not in open_owners):
+            out.append(Stall("blocked_chain", card.assigned_to,
+                             f"{card.task_id} ({card.assigned_to}) waits on {on}, which has "
+                             f"finished for this run"))
     for start in sorted(waits):
         chain = [start]
         nxt = waits.get(start)

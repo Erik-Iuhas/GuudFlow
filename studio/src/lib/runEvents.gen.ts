@@ -58,6 +58,7 @@ export type SignalType =
   | "TASK_MOVED"
   | "TASK_THREAD"
   | "RUN_SUBMITTED"
+  | "RUN_STOPPED"
   | "RUN_LIMITS_CHANGED"
   | "TIME_LIMIT_REACHED"
   | "OVERSEER_WAKE"
@@ -211,6 +212,13 @@ export interface RunSubmittedDetail {
   auto_accept?: { accepted: boolean; reason: string };
 }
 
+export interface RunStoppedDetail {
+  status: string;
+  summary: string;
+  open_items: string[];
+  open_cards: { task_id: string; title: string; owner: string; column: string; backlog_id: string | null; waits_on: string }[];
+}
+
 export interface ScreenshotReadyDetail {
   role?: string;
   path: string;
@@ -236,6 +244,7 @@ export interface DetailByType {
   MCP_CALL: McpCallDetail;
   ARTIFACT: ArtifactDetail;
   RUN_SUBMITTED: RunSubmittedDetail;
+  RUN_STOPPED: RunStoppedDetail;
   SCREENSHOT_READY: ScreenshotReadyDetail;
 }
 
@@ -260,5 +269,6 @@ export const JSON_DETAIL_TYPES: ReadonlySet<SignalType> = new Set([
   "MCP_CALL",
   "ARTIFACT",
   "RUN_SUBMITTED",
+  "RUN_STOPPED",
   "SCREENSHOT_READY",
 ]);

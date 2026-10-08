@@ -164,6 +164,10 @@ def _how_to_work(is_reviewer: bool) -> str:
                   "`status` done (with a specific summary and the files you changed), blocked "
                   "(with `blocked_on`: which role must act and exactly what you need) or failed "
                   "(with why). If the call is rejected, fix the listed problems and call it again. "
+                  "Block only on a teammate who must change something you cannot: never on a "
+                  "check the owner does at acceptance, a missing screenshot or reference, or a "
+                  "refused command. A question about the spec or the design is not a question "
+                  "for a person: block on the tech lead, and the overseer answers it. "
                   + HANDOFF_INSTRUCTIONS)
     return (f"{doing}\n\nYou cannot talk to other agents directly and nobody will answer "
             f"questions mid-turn: decide sensibly, note assumptions in your summary, and use "

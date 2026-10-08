@@ -34,7 +34,14 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from core.harness.results import AgentResult, ReviewResult
-from core.harness.tasks import PlanResult, ThreadEntry, ThreadKind, card_serves, render_thread
+from core.harness.tasks import (
+    PlanResult,
+    ThreadEntry,
+    ThreadKind,
+    card_serves,
+    is_owner_check,
+    render_thread,
+)
 from core.signals import Signal, SignalType
 from core.workspace import Task, TaskStatus, Workspace
 
@@ -106,6 +113,8 @@ class TaskBoard:
     planned: bool = False
     # Cards smaller than this (S < M < L) skip review; visual cards are always reviewed.
     review_min_size: str = "S"
+    # Which acceptance lines the owner checks at acceptance (set by the run from the spec).
+    owner_check: Callable[[str], bool] = field(default=lambda line: is_owner_check(line))
 
     # ── creation ──────────────────────────────────────────────────────────
     def create_from_plan(self, plan: PlanResult, planner: str,
@@ -414,7 +423,11 @@ class TaskBoard:
         lines = [f"**{card.task_id}: {card.title}** (kind {card.kind}, size {card.size}"
                  + (f", review round {card.review_round}" if card.review_round else "") + ")",
                  "", "Acceptance checklist:"]
-        lines += [f"- [ ] {item}" for item in card.acceptance_criteria]
+        must, owner = self.split_checks(card)
+        lines += [f"- [ ] {item}" for item in must]
+        if owner:
+            lines += ["", "The owner checks these at acceptance (not you; never block on them):"]
+            lines += [f"- {item}" for item in owner]
         lines += ["", f"Definition of done: {DEFINITION_OF_DONE.get(card.kind, '')}"]
         if card.files_hint:
             lines.append(f"Files likely involved: {', '.join(card.files_hint)}")
@@ -430,13 +443,43 @@ class TaskBoard:
         entries = self.thread(task_id)
         if entries:
             lines += ["", "Card thread (most recent last):", render_thread(entries)]
+        if not reviewer:
+            lines += self._other_cards(card)
         lines.append("")
         if reviewer:
             lines.append(f"Review only this card. Submit with `task_id` \"{card.task_id}\" and "
                          "one `items` entry per acceptance item (met, and a specific detail "
-                         "for any unmet item). Verdict pass only if every item is met.")
+                         "for any unmet item). Verdict pass only if every item is met."
+                         + (" Owner checks are not yours to judge: do not fail the card on "
+                            "them." if owner else ""))
         else:
             lines.append(f"Work only on this card. Submit with `task_id` \"{card.task_id}\" and "
                          "one `acceptance` entry per checklist item (met, with evidence: the "
-                         "test or command that shows it).")
+                         "test or command that shows it)."
+                         + (" For each owner check, say in `owner_checks` what the owner should "
+                            "try; then submit `done`." if owner else ""))
         return "\n".join(lines)
+
+    def _other_cards(self, card: Task) -> list[str]:
+        """The owner's other open cards, so it never wonders which card is its own."""
+        others = [c for c in self.cards(card.assigned_to)
+                  if c.task_id != card.task_id and c.column != "done"]
+        if not others:
+            return []
+        lines = ["", "Your other cards (not this turn; do not work on them now):"]
+        for c in sorted(others, key=lambda c: c.task_id):
+            if c.column == "blocked":
+                state = f"parked, waiting on {', '.join(c.blocked_on) or 'another card'}"
+            elif c.column == "review":
+                state = "in review"
+            elif c.column == "needs_attention":
+                state = "waiting for the overseer"
+            else:
+                state = "queued after this one"
+            lines.append(f"- {c.task_id} {c.title} ({state})")
+        return lines
+
+    def split_checks(self, card: Task) -> tuple[list[str], list[str]]:
+        """(acceptance lines the worker must meet, lines the owner checks at acceptance)."""
+        must = [line for line in card.acceptance_criteria if not self.owner_check(line)]
+        return must, [line for line in card.acceptance_criteria if line not in must]

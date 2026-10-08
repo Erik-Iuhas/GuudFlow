@@ -75,6 +75,11 @@ DETAIL_SHAPES: dict[str, dict[str, str]] = {
         "check?": "\"passed\" | \"failed\" | \"timed_out\" | \"skipped\"",
         "auto_accept?": "{ accepted: boolean; reason: string }",
     },
+    "RUN_STOPPED": {
+        "status": "string", "summary": "string", "open_items": "string[]",
+        "open_cards": ("{ task_id: string; title: string; owner: string; column: string; "
+                       "backlog_id: string | null; waits_on: string }[]"),
+    },
     "SCREENSHOT_READY": {
         "role?": "string", "path": "string", "url?": "string", "request_id?": "string",
         "question?": "string", "clone_path?": "string", "width?": "number",

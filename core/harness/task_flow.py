@@ -22,7 +22,7 @@ import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
@@ -206,7 +206,8 @@ class TaskFlow:
         """Plan one spawn. None → not task-driven (use role mode)."""
         if role == self.planner:
             owners = self.owners()
-            items = [i.id for i in self.backlog]
+            # Items a continued run already finished need no card (flow hardening §5).
+            items = [i.id for i in self.backlog if i.pending != "done"]
             sections: tuple[tuple[str, str], ...] = (
                 ("Budget and card size", self._sizing_text()),
                 ("Your output: the task list", _planner_instructions(owners)))
@@ -251,7 +252,7 @@ class TaskFlow:
             if card is None:
                 return TurnPlan(model=ReviewResult, skip=True)
             self.board.start(role, card.task_id)
-            criteria = list(card.acceptance_criteria)
+            criteria = self.board.split_checks(card)[0]
             spec_section, extra = self._card_spec(role, card, reviewer=True)
             design_section, design_lines = self._card_design(card, reviewer=True)
             extra = extra + design_lines
@@ -271,7 +272,7 @@ class TaskFlow:
         if card is None:
             return TurnPlan(model=AgentResult, skip=True)
         self.board.start(role, card.task_id)
-        criteria = list(card.acceptance_criteria)
+        criteria, owner = self.board.split_checks(card)
         self_check = ("\n\n" + visual_review.self_check_text(card)
                       if card.kind == "visual" and self.tool_dir_for is not None else "")
         return TurnPlan(
@@ -279,7 +280,7 @@ class TaskFlow:
             extra_sections=self._card_spec(role, card)[0] + self._card_design(card)[0]
             + self._card_knowledge(card) + self._handoff_section(role, card.task_id),
             task_text=self.board.brief_for(card.task_id) + self_check,
-            check=lambda r, tid=card.task_id: (_check_done(r, tid, criteria)
+            check=lambda r, tid=card.task_id: (_check_done(r, tid, criteria, owner)
                                                if isinstance(r, AgentResult) else []))
 
     def _item_effort(self, card: "Task") -> str | None:
@@ -586,6 +587,7 @@ class TaskFlow:
         assert isinstance(result, AgentResult)
         if result.status == "done":
             self._record_handoff(role, card_id, result, merged)
+            self._record_owner_checks(role, card_id, result)
             if not self._visual_precheck(role, card_id):
                 return
             self.board.submitted(card_id, result, commit=commit)
@@ -594,6 +596,24 @@ class TaskFlow:
             self._blocked(role, card_id, result.blocked_on.role, result.blocked_on.need)
         else:
             self.card_problem(role, card_id, result.summary)
+
+    def _record_owner_checks(self, role: str, card_id: str, result: AgentResult) -> None:
+        """Keep the card's owner checks, with what the worker says to try, for acceptance."""
+        card = self.board.card(card_id)
+        owner = self.board.split_checks(card)[1]
+        if not owner or self.run_root is None:
+            return
+        rows = read_owner_checks(self.run_root)
+        rows = [r for r in rows if r.get("task_id") != card_id]
+        for line in owner:
+            how = next((v for k, v in result.owner_checks.items()
+                        if k.strip().casefold() == line.strip().casefold()
+                        or line.strip().casefold().startswith(k.strip().casefold())), "")
+            rows.append({"task_id": card_id, "backlog_id": card.backlog_id, "item": line,
+                         "how": how, "by": role})
+            if how:
+                self.board.note(card_id, "note", role, f"owner check: {line} — try: {how}")
+        write_owner_checks(self.run_root, rows)
 
     def _blocked(self, role: str, card_id: str, on_role: str, need: str) -> None:
         if on_role not in self.role_types or on_role == role:
@@ -695,9 +715,30 @@ def _json_detail(detail: str | None) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
-def _check_done(result: AgentResult, task_id: str, criteria: list[str]) -> list[str]:
-    """Owners must name their card; a `done` result answers every checklist item."""
-    return check_task_result(result, task_id, criteria)
+OWNER_CHECKS_FILE = "owner_checks.json"
+
+
+def read_owner_checks(run_root: Path) -> list[dict[str, Any]]:  # Any: JSON rows
+    """The owner checks a run left for acceptance (empty when none)."""
+    path = Path(run_root) / OWNER_CHECKS_FILE
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def write_owner_checks(run_root: Path, rows: list[dict[str, Any]]) -> None:  # Any: JSON rows
+    """Replace the run's owner-check list."""
+    (Path(run_root) / OWNER_CHECKS_FILE).write_text(json.dumps(rows, indent=1),
+                                                    encoding="utf-8")
+
+
+def _check_done(result: AgentResult, task_id: str, criteria: list[str],
+                owner: Sequence[str] = ()) -> list[str]:
+    """Owners must name their card; a `done` result answers every item they must meet, and
+    nobody blocks on an owner check."""
+    return check_task_result(result, task_id, criteria, owner)
 
 
 def backlog_text(items: Sequence["BacklogItem"]) -> str:
@@ -713,6 +754,9 @@ def _item_text(item: "BacklogItem") -> str:
     """Human-written items as they are; agent-written text (run-created items and
     earlier runs' summaries) wrapped as untrusted data."""
     from core.harness.brief import wrap_untrusted
+    if item.pending == "done":
+        return (f"- **{item.id}** {item.title}: DONE in the run this one continues. Plan no "
+                "card for it; it closes when this run is accepted.")
     text = (item.brief_text() if not item.source.startswith("run:")
             else f"- **{item.id}**\n" + wrap_untrusted(f"backlog item {item.id} (from a run)",
                                                      item.brief_text()))

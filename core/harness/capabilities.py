@@ -263,6 +263,20 @@ HOST_DEV_WARNING = ("⚠️  DEV MODE: opencode agent running on host. "
                     "Do not use with untrusted input.")
 
 
+def shell_summary(perm: PermissionInputs) -> str | None:
+    """The shell commands a role may run, for its brief (flow hardening §6). None: no shell
+    beyond the default ask/deny, nothing worth saying."""
+    if not perm.bash_allow:
+        return None
+    allowed = sorted({p.rstrip("*").strip() for p in perm.bash_allow if p.strip("* ")})
+    default = ("asks a person first" if perm.bash_default == "ask" else "is refused")
+    return ("You may run: " + ", ".join(f"`{a}`" for a in allowed) + f". Anything else {default}, "
+            "and every part of a pipe or `;` chain is checked on its own: `bun test | grep x` "
+            "is fine, but `sed`, `awk`, `echo`, `>` redirection and package installs are not. "
+            "If a command is refused, run its allowed part alone and read the output with the "
+            "read and grep tools; a refusal is never a reason to block a card or ask a person.")
+
+
 def _bash_allow(caps: Capabilities, role_type: str, runners: bool) -> tuple[str, ...]:
     allow: list[str] = list(READONLY_BASH)
     if caps.shell in ("project", "ask"):

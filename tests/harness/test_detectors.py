@@ -93,6 +93,18 @@ def test_a_blocked_card_with_nothing_running_wakes_the_overseer() -> None:
     assert blocked_chain(_view(cards=cards), CFG) == []   # someone is still working
 
 
+def test_a_card_blocked_on_a_finished_role_wakes_the_overseer_even_while_others_work() -> None:
+    cards = [_card("T3", "render", "blocked", blocked_on=["planner"]), _card("T4", "logic", "in_progress")]
+    view = _view(cards=cards, running=["logic"],
+                 role_states={"planner": "complete", "render": "ready", "logic": "running"})
+    found = blocked_chain(view, CFG)
+    assert [(s.detector, s.subject) for s in found] == [("blocked_chain", "render")]
+    assert "finished for this run" in found[0].detail
+    busy = _view(cards=cards, running=["logic", "planner"],
+                 role_states={"planner": "running", "render": "ready", "logic": "running"})
+    assert blocked_chain(busy, CFG) == []
+
+
 def test_burn_without_output() -> None:
     cards = [_card("T1", column="done"), _card("T2"), _card("T3")]
     assert burn_without_output(_view(cards=cards, spent_usd=3.0, budget_usd=5.0), CFG)

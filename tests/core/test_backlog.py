@@ -151,3 +151,20 @@ def test_item_effort_is_checked_and_shown(tmp_path) -> None:
     assert backlog.add("Plain item").effort == ""
     with pytest.raises(BacklogError, match="effort"):
         backlog.add("Bad", effort="turbo")
+
+
+def test_a_continuation_keeps_finished_items_done_and_closes_them_on_accept(
+        tmp_path: Path) -> None:
+    # Session 5: continuing a run re-planned six finished items (flow hardening §5).
+    b = _backlog(tmp_path)
+    lives = b.add("Lives", ["3 lives"])
+    hud = b.add("Lives HUD", ["icons"])
+    b.take_for_run("run_1", ids=[lives.id, hud.id])
+    b.record_outcomes("run_1", [CardOutcome("Lives logic", "done", lives.id),
+                                CardOutcome("HUD", "todo", hud.id)])
+    moved = b.transfer("run_1", "run_2")
+    assert {i.id: i.pending for i in moved} == {lives.id: "done", hud.id: None}
+    b.record_outcomes("run_2", [CardOutcome("HUD", "done", hud.id)])   # no card for lives
+    assert b.get(lives.id).pending == "done" and b.get(hud.id).pending == "done"
+    b.decide("run_2", accepted=True)
+    assert b.get(lives.id).status == "done" and b.get(hud.id).status == "done"

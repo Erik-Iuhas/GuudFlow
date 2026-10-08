@@ -153,6 +153,7 @@ class SignalType(str, Enum):
     # Ongoing projects (plan §13): the run was handed back to its project and
     # waits for a human to accept or reject it.
     RUN_SUBMITTED = "RUN_SUBMITTED"
+    RUN_STOPPED = "RUN_STOPPED"          # ended early with open cards; detail says why
     # A human raised the budget or extended the deadline of a live run.
     RUN_LIMITS_CHANGED = "RUN_LIMITS_CHANGED"
     # The session reached its soft time limit (plan §11.6): no new work starts; running

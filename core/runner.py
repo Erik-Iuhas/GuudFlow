@@ -680,6 +680,7 @@ class AgentRunner:
         if result.status is SchedulerStatus.STOPPED:
             await self._close_project_run(stopped=True, completed=False)
             return result
+        self._report_stop(result)
         # Training rubric scoring runs before the memory writer so the
         # RUBRIC_SCORE signal is on the board before the episode is recorded.
         if (
@@ -725,6 +726,20 @@ class AgentRunner:
         await self._close_project_run(stopped=False,
                                       completed=result.status is SchedulerStatus.COMPLETE)
         return result
+
+    def _report_stop(self, result: SchedulerResult) -> None:
+        """A run that ended before its cards were done says why (flow hardening §4)."""
+        if result.status is SchedulerStatus.COMPLETE or not self.workspace.tasks:
+            return
+        from core.harness.run_stop import build_stop_report, write_stop
+        report = build_stop_report(result.status.value, self.workspace.tasks.values(),
+                                   result.spawn_counts, self.workspace.max_iterations)
+        if report is None:
+            return
+        write_stop(self.run_root, report)
+        self.workspace.post_signal(Signal(
+            type=SignalType.RUN_STOPPED, from_agent="runner", summary=report.summary,
+            detail=json.dumps(report.to_dict())))
 
     def _data_root(self) -> Path | None:
         """`<data>` when the run lives at `<data>/runs/<id>` (else tests / ad-hoc dirs)."""
