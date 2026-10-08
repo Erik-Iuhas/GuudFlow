@@ -158,6 +158,9 @@ class Retrospective:
     stall_minutes: float
     roles_completed: list[str]
     card_costs: list[CardCost] = field(default_factory=list)
+    # Per role: how often it blocked, asked a person, or had a command refused, and on which
+    # model (flow hardening §8), so a team choice can see which models stall.
+    friction: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
     def total_cost(self) -> float:
@@ -181,6 +184,10 @@ class Retrospective:
                 sum(c.cost_usd for c in self.card_costs if c.card in done_ids)
                 / max(1, len(done_ids)), 6),
             "cold_cost_usd": round(sum(c.cold_cost_usd for c in self.card_costs), 6),
+            "blocked_results": float(sum(f.get("blocked", 0) for f in self.friction.values())),
+            "human_questions": float(sum(f.get("asked_human", 0)
+                                         for f in self.friction.values())),
+            "refused_commands": float(sum(f.get("refused", 0) for f in self.friction.values())),
         }
 
     def to_json(self) -> dict[str, Any]:  # Any: JSON document
@@ -276,7 +283,41 @@ def build_retrospective(run_root: Path, run_id: str) -> Retrospective:
                          interventions=interventions, recurring_issues=recurring,
                          review_rounds_used=rounds_used, stall_minutes=stall,
                          roles_completed=sorted(set(completed)),
-                         card_costs=cost_by_card(cost_rows))
+                         card_costs=cost_by_card(cost_rows),
+                         friction=_friction(board, cost_rows))
+
+
+_REFUSED = ("prevents you from using", "permission denied", "rejected permission",
+            "not allowed")
+
+
+def _friction(board: list[dict[str, Any]], cost_rows: list[dict[str, Any]]  # Any: JSON rows
+              ) -> dict[str, dict[str, Any]]:  # Any: counts and the model name
+    """Per role: blocked results, questions to a person, refused commands, and its model."""
+    out: dict[str, dict[str, Any]] = {}
+
+    def bump(role: str, key: str) -> None:
+        row = out.setdefault(role, {"blocked": 0, "asked_human": 0, "refused": 0})
+        row[key] += 1
+
+    for row in board:
+        role = str(row.get("from_agent") or "")
+        if not role or role in ("runner", "git", "overseer", "human"):
+            continue
+        kind = row.get("type")
+        if kind == "BLOCKED":
+            bump(role, "blocked")
+        elif kind == "HUMAN_NEEDED" and "cycle" not in str(row.get("summary", "")):
+            bump(role, "asked_human")
+        elif kind in ("TOOL_CALL", "THINKING"):
+            text = f"{row.get('summary', '')} {row.get('detail', '')}".casefold()
+            if any(p in text for p in _REFUSED):
+                bump(role, "refused")
+    for row in cost_rows:
+        role, model = str(row.get("role") or ""), row.get("model")
+        if role in out and model:
+            out[role]["model"] = str(model)
+    return out
 
 
 def playbook_diff(retro: Retrospective, playbook: Playbook) -> PlaybookDiff:

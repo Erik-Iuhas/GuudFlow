@@ -152,3 +152,20 @@ def test_cost_by_card_groups_labelled_rows() -> None:
 
 def test_cost_by_card_is_empty_for_unlabelled_logs() -> None:
     assert cost_by_card([{"role": "dev", "cost_usd": 1.0}]) == []
+
+
+def test_friction_counts_blocks_questions_and_refusals_per_role(tmp_path: Path) -> None:
+    from core.harness.retrospective import build_retrospective
+    rows = [{"type": "BLOCKED", "from_agent": "logic", "summary": "logic is blocked on planner"},
+            {"type": "HUMAN_NEEDED", "from_agent": "logic", "summary": "which card is mine?"},
+            {"type": "TOOL_CALL", "from_agent": "logic", "summary": "bash bun test | sed → error",
+             "detail": "The user has specified a rule which prevents you from using this"},
+            {"type": "BLOCKED", "from_agent": "runner", "summary": "ignored"}]
+    (tmp_path / "board.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    (tmp_path / "llm_costs.jsonl").write_text(json.dumps(
+        {"role": "logic", "model": "claude-haiku-5-5", "cost_usd": 0.1}) + "\n")
+    retro = build_retrospective(tmp_path, "run_x")
+    assert retro.friction == {"logic": {"blocked": 1, "asked_human": 1, "refused": 1,
+                                        "model": "claude-haiku-5-5"}}
+    m = retro.metrics()
+    assert (m["blocked_results"], m["human_questions"], m["refused_commands"]) == (1.0, 1.0, 1.0)
