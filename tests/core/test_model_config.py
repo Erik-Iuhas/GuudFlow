@@ -118,3 +118,21 @@ def test_a_tier_with_several_models_spreads_roles_and_reviewers_differ(tmp_path:
         assert registry.resolve("heavy", seat=f"proj:r{i}", avoid=[author]).id != author
     assert registry.resolve("heavy").id == "acme-small"            # no seat: the first choice
     assert registry.tier_model("heavy").id == "acme-small"          # estimates use the first
+
+
+
+def test_working_context_and_long_prices_are_checked() -> None:
+    from core.model_config import ModelConfigError, validate as validate_config
+    base = {"providers": {"anthropic": {"client": "anthropic", "api_key_env": "ANTHROPIC_API_KEY"}},
+            "models": [{"id": "m", "provider": "anthropic", "tier": "fast",
+                        "max_context_tokens": 200000, "working_context_tokens": 120000,
+                        "long_context_threshold": 100000, "long_input_per_1k": 0.0005,
+                        "long_output_per_1k": 0.0025}]}
+    model = validate_config(base)["models"][0]
+    assert model["working_context_tokens"] == 120000 and model["long_input_per_1k"] == 0.0005
+    too_big = {**base, "models": [{**base["models"][0], "working_context_tokens": 300000}]}
+    with pytest.raises(ModelConfigError, match="above max_context_tokens"):
+        validate_config(too_big)
+    no_price = {**base, "models": [{**base["models"][0], "long_output_per_1k": None}]}
+    with pytest.raises(ModelConfigError, match="long_output_per_1k is required"):
+        validate_config(no_price)

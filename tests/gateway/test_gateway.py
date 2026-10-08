@@ -472,3 +472,17 @@ def test_cold_call_is_a_big_uncached_context_after_idling(
     gateway._record(call, 200, big)     # 400 s idle, no cache read: a cold re-send
     gateway._record(call, 200, small)   # 400 s idle but a small fresh brief
     assert [r.cold for r in gateway.usage("run1")] == [False, False, True, False]
+
+
+
+def test_long_prompts_use_the_long_context_price() -> None:
+    from gateway.app import Price
+    haiku = Price(input_per_1k=0.0001, output_per_1k=0.0005, cache_read_per_1k=0.00001,
+                  long_threshold=100_000, long_input_per_1k=0.0005, long_output_per_1k=0.0025)
+    assert haiku.for_prompt(100_000) is haiku
+    long = haiku.for_prompt(100_001)
+    assert (long.input_per_1k, long.output_per_1k) == (0.0005, 0.0025)
+    assert long.cache_read_per_1k == pytest.approx(0.00005)          # scaled with input (5x)
+    assert long.cache_write_per_1k == pytest.approx(0.0001 * 1.25 * 5)
+    flat = Price(input_per_1k=0.003, output_per_1k=0.015)
+    assert flat.for_prompt(900_000) is flat

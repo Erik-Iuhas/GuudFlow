@@ -74,6 +74,23 @@ class Price:
     cache_read_per_1k: float = 0.0
     # Cache writes (Anthropic bills them at a premium); None means 1.25x the input price.
     cache_write_per_1k: float | None = None
+    # Long-context pricing: a request whose prompt (input + cache reads + cache writes) is over
+    # `long_threshold` tokens is billed at these input/output prices, and its cache prices scale
+    # by the same factor as input.
+    long_threshold: int | None = None
+    long_input_per_1k: float | None = None
+    long_output_per_1k: float | None = None
+
+    def for_prompt(self, prompt_tokens: int) -> "Price":
+        """The price that applies to a request with this many prompt tokens."""
+        if (self.long_threshold is None or prompt_tokens <= self.long_threshold
+                or self.long_input_per_1k is None or self.long_output_per_1k is None):
+            return self
+        scale = self.long_input_per_1k / self.input_per_1k if self.input_per_1k else 1.0
+        write = (self.cache_write_per_1k if self.cache_write_per_1k is not None
+                 else self.input_per_1k * 1.25)
+        return Price(self.long_input_per_1k, self.long_output_per_1k,
+                     self.cache_read_per_1k * scale, write * scale)
 
 
 @dataclass
@@ -314,6 +331,8 @@ class Gateway:
         price = self._prices(call.model)
         cost = 0.0
         if price is not None:
+            price = price.for_prompt(usage.input_tokens + usage.cache_creation_tokens
+                                     + usage.cache_read_tokens)
             write = (price.cache_write_per_1k if price.cache_write_per_1k is not None
                      else price.input_per_1k * 1.25)
             cost = (usage.input_tokens * price.input_per_1k

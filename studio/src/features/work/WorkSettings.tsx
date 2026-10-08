@@ -7,7 +7,7 @@ export const DEFAULT_AUTOPILOT: AutopilotSettings = {
   enabled: false, every_hours: 24, take: 2, max_usd_per_run: 5, max_usd_per_week: 20, auto_accept: false,
 };
 
-type WorkGates = Pick<ApprovalGates, "check_command" | "project_remote" | "autopilot">;
+type WorkGates = Pick<ApprovalGates, "check_command" | "project_remote" | "autopilot" | "working_context_tokens">;
 
 /**
  * Settings for the project as ongoing work (plan §14): the check run before review,
@@ -41,6 +41,19 @@ export function WorkSettings({
             onChange={(e) => onChange({ check_command: e.target.value })} />
           <p className="m-0 mt-1 text-xs text-muted-foreground">
             Runs on each finished run's code in a sandbox with no network. Its result shows in the review queue.
+          </p>
+        </div>
+        <div>
+          <Label htmlFor="working-context">Working context per turn (thousands of tokens)</Label>
+          <Input id="working-context" inputMode="numeric" className="max-w-[10rem]" placeholder="model default"
+            value={gates.working_context_tokens ? String(Math.round(gates.working_context_tokens / 1000)) : ""}
+            onChange={(e) => {
+              const k = Number(e.target.value.trim());
+              onChange({ working_context_tokens: e.target.value.trim() && Number.isInteger(k) && k > 0 ? k * 1000 : null });
+            }} />
+          <p className="m-0 mt-1 text-xs text-muted-foreground">
+            Agents compact (and drop old tool output) as a turn nears this. It can only lower each model's
+            working context set in Settings; a smaller number keeps every turn cheaper.
           </p>
         </div>
 

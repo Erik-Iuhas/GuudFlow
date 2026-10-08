@@ -144,6 +144,7 @@ def validate(doc: dict[str, Any]) -> dict[str, Any]:  # Any: caller-supplied JSO
             if price < 0 or price > 1000:
                 raise ModelConfigError(f"model {mid}: {field} is out of range")
             clean[field] = price
+        _context_fields(m, clean, mid)
         models.append(clean)
 
     tiers_in = doc.get("tiers") or {}
@@ -173,6 +174,28 @@ def tier_list(value: object) -> list[str]:
         if mid and mid not in out:
             out.append(mid)
     return out
+
+
+def _context_fields(m: dict[str, Any], clean: dict[str, Any], mid: str) -> None:  # Any: JSON
+    """Optional working context and long-context prices, checked and copied into `clean`."""
+    if m.get("working_context_tokens") not in (None, ""):
+        working = _positive_int(m, "working_context_tokens", 0, mid)
+        if working > clean["max_context_tokens"]:
+            raise ModelConfigError(f"model {mid}: working_context_tokens is above "
+                                   f"max_context_tokens")
+        clean["working_context_tokens"] = working
+    if m.get("long_context_threshold") in (None, ""):
+        return
+    clean["long_context_threshold"] = _positive_int(m, "long_context_threshold", 0, mid)
+    for field in ("long_input_per_1k", "long_output_per_1k"):
+        try:
+            price = float(m[field])
+        except (KeyError, TypeError, ValueError):
+            raise ModelConfigError(f"model {mid}: {field} is required with "
+                                   f"long_context_threshold") from None
+        if price < 0 or price > 1000:
+            raise ModelConfigError(f"model {mid}: {field} is out of range")
+        clean[field] = price
 
 
 def _positive_int(m: dict[str, Any], key: str, default: int, mid: str) -> int:  # Any: JSON

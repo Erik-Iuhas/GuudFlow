@@ -340,3 +340,16 @@ def test_real_models_json_loads(monkeypatch):
     assert len(models) > 0
     tiers = {m.tier for m in models}
     assert {"heavy", "solid", "fast"}.issubset(tiers)
+
+
+
+def test_shipped_haiku_5_5_is_the_fast_default_with_a_working_context() -> None:
+    from core.llm.registry import DEFAULT_WORKING_CONTEXT, ModelRegistry
+    from pathlib import Path
+    reg = ModelRegistry(Path(__file__).resolve().parents[2] / "data" / "models.json")
+    haiku = reg.get("claude-haiku-5-5")
+    assert haiku is not None and haiku.long_context_threshold == 100_000
+    assert reg.tier_model("fast").id == "claude-haiku-5-5"
+    sonnet = reg.get("claude-sonnet-5-5")
+    assert sonnet is not None and sonnet.max_context_tokens == 1_000_000
+    assert sonnet.working_context == DEFAULT_WORKING_CONTEXT

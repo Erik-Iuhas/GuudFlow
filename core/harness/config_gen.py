@@ -42,6 +42,7 @@ class ProviderBinding:
     client: str                    # ProviderInfo.client: "anthropic" | "openai_compatible"
     base_url: str | None = None    # override (gateway in P3; provider default otherwise)
     api_key: str | None = None     # host_dev only; None means opencode gets no key
+    working_context: int | None = None  # project override of the model's working context
 
     @property
     def model_ref(self) -> str:
@@ -67,7 +68,10 @@ def provider_entry(binding: ProviderBinding) -> dict[str, Any]:
                     "input": ["text", "image", "pdf"] if model.supports_images else ["text"],
                     "output": ["text"],
                 },
+                # `input` is the working context: opencode compacts once a turn's prompt
+                # nears it, so a 1M-token model still works (and is billed) at ~200k.
                 "limit": {"context": model.max_context_tokens,
+                          "input": binding.working_context or model.working_context,
                           "output": model.max_output_tokens},
             }
         },
@@ -142,7 +146,9 @@ def build_config(*, role: str, agent: dict[str, Any], binding: ProviderBinding,
                        "grep": "allow", "list": "allow"},
         "agent": {role: agent, "explore": EXPLORE_OVERRIDE},
         "subagent_depth": 1,
-        "compaction": {"auto": True},
+        # Compact near the working context and drop old tool output first (prune), so a long
+        # turn stays inside it instead of growing toward the model's full window.
+        "compaction": {"auto": True, "prune": True},
         "attachment": {"image": {
             "auto_resize": True,
             "max_width": image_caps.max_width,

@@ -17,6 +17,11 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+# A 1M-token window is there when a task needs it; a session that fills it costs 5x a 200k one
+# per turn. Agents work in this much unless the model or the project says otherwise.
+DEFAULT_WORKING_CONTEXT = 200_000
+
+
 @dataclass
 class ModelInfo:
     id: str
@@ -33,6 +38,20 @@ class ModelInfo:
     cache_write_per_1k: float | None = None
     deprecated: bool = False
     replacement: str | None = None
+    # The context an agent works in, below the model's maximum: opencode compacts (and prunes
+    # old tool output) as a turn's prompt nears it. None means DEFAULT_WORKING_CONTEXT.
+    working_context_tokens: int | None = None
+    # Prompts over this many tokens are billed at the long-context prices (all of the request);
+    # None means one price at every size.
+    long_context_threshold: int | None = None
+    long_input_per_1k: float | None = None
+    long_output_per_1k: float | None = None
+
+    @property
+    def working_context(self) -> int:
+        """The context opencode is allowed to fill before it compacts."""
+        want = self.working_context_tokens or DEFAULT_WORKING_CONTEXT
+        return max(1, min(want, self.max_context_tokens))
 
     @property
     def cache_write_price(self) -> float:
@@ -80,6 +99,10 @@ class ModelRegistry:
                 cache_write_per_1k=m.get("cache_write_per_1k"),
                 deprecated=m.get("deprecated", False),
                 replacement=m.get("replacement"),
+                working_context_tokens=m.get("working_context_tokens"),
+                long_context_threshold=m.get("long_context_threshold"),
+                long_input_per_1k=m.get("long_input_per_1k"),
+                long_output_per_1k=m.get("long_output_per_1k"),
             )
             self._models[info.id] = info
 

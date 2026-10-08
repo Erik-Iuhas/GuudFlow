@@ -29,6 +29,23 @@
       "replacement": null
     },
     {
+      "id": "claude-haiku-5-5",
+      "provider": "anthropic",
+      "tier": "fast",
+      "supports_tools": true,
+      "supports_images": true,
+      "max_context_tokens": 200000,
+      "max_output_tokens": 64000,
+      "cost_per_1k_input": 0.0001,
+      "cost_per_1k_output": 0.0005,
+      "cache_read_per_1k": 1e-05,
+      "long_context_threshold": 100000,
+      "long_input_per_1k": 0.0005,
+      "long_output_per_1k": 0.0025,
+      "deprecated": false,
+      "replacement": null
+    },
+    {
       "id": "claude-haiku-4-5",
       "provider": "anthropic",
       "tier": "fast",

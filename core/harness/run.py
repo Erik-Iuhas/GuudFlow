@@ -719,7 +719,8 @@ class OpencodeRun:
             m = role.binding.model
             if m.id == model_id:
                 return Price(m.cost_per_1k_input, m.cost_per_1k_output, m.cache_read_per_1k,
-                             m.cache_write_price)
+                             m.cache_write_price, m.long_context_threshold,
+                             m.long_input_per_1k, m.long_output_per_1k)
         return None
 
     def _sandbox_host(self, role: str) -> str:
@@ -770,7 +771,19 @@ class OpencodeRun:
         # (see _upstreams); opencode gets a per-role virtual key.
         return ProviderBinding(provider_key=model.provider, model=model, client=provider.client,
                                base_url=provider.base_url or None,
-                               api_key=registry.api_key(model.provider))
+                               api_key=registry.api_key(model.provider),
+                               working_context=self._working_context(model.working_context))
+
+    def _working_context(self, model_cap: int) -> int:
+        """The project's `working_context_tokens` gate can only lower the model's working
+        context (never raise it past what the install allows)."""
+        raw = self.runner.project.approval_gates.get("working_context_tokens")
+        try:
+            want = int(raw) if raw not in (None, "") else 0
+        except (TypeError, ValueError):
+            log.warning("ignoring working_context_tokens %r: not a whole number", raw)
+            want = 0
+        return min(model_cap, want) if want > 0 else model_cap
 
     async def _ensure_server(self, role: _Role, workdir: Path,
                              task_hint: str = "") -> OpencodeClient:

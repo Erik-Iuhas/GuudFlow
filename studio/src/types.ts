@@ -215,6 +215,8 @@ export interface ApprovalGates {
   token_budget_usd: number | null;
   /** Ongoing projects (plan §14): run on the run's code before review, e.g. "pytest -q". */
   check_command?: string;
+  /** Lower every role's working context for this project (tokens); opencode compacts near it. */
+  working_context_tokens?: number | null;
   project_remote?: ProjectRemote | null;
   autopilot?: AutopilotSettings | null;
 }

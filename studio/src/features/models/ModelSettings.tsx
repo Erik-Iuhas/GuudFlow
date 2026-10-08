@@ -15,7 +15,7 @@ import {
   type TestResult,
   type Tier,
 } from "./api";
-import { envNameFor, fromPerMillion, perMillion, tierModels, toDoc } from "./model";
+import { envNameFor, fromPerMillion, parseWorkingContext, perMillion, tierModels, toDoc } from "./model";
 
 const KEY_VARIANT: Record<KeyStatus, BadgeProps["variant"]> = {
   env: "complete",
@@ -401,7 +401,9 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
     <div>
       <h3 className="m-0 mb-1 text-sm font-semibold">Models and prices</h3>
       <p className="m-0 mb-2 text-xs text-muted-foreground">
-        USD per million tokens. A blank cache-write price means 1.25× input.
+        USD per million tokens. A blank cache-write price means 1.25× input. “Works in” is the
+        context agents use before opencode compacts (blank: 200k, or the model's maximum if
+        smaller); a bigger window costs more on every turn.
       </p>
       <Table aria-label="Models">
         <thead>
@@ -410,6 +412,7 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
             <Th>Provider</Th>
             <Th>Tier</Th>
             {PRICE_FIELDS.map(([, label]) => <Th key={label} className="text-right">{label}</Th>)}
+            <Th className="text-right">Works in</Th>
             <Th>Images</Th>
             <Th><span className="sr-only">Actions</span></Th>
           </tr>
@@ -417,7 +420,15 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
         <tbody>
           {doc.models.map((m, i) => (
             <tr key={m.id} data-testid={`model-${m.id}`} className={m.deprecated ? "opacity-60" : undefined}>
-              <Td className="font-mono text-xs">{m.id}{m.deprecated ? " (deprecated)" : ""}</Td>
+              <Td className="font-mono text-xs">
+                {m.id}{m.deprecated ? " (deprecated)" : ""}
+                {m.long_context_threshold && (
+                  <span className="block font-sans text-[11px] text-muted-foreground">
+                    above {Math.round(m.long_context_threshold / 1000)}k: {perMillion(m.long_input_per_1k)} /{" "}
+                    {perMillion(m.long_output_per_1k)}
+                  </span>
+                )}
+              </Td>
               <Td>
                 <Select aria-label={`Provider for ${m.id}`} value={m.provider} className="h-8 py-0 text-xs"
                   onChange={(e) => set(i, { provider: e.target.value })}>
@@ -437,6 +448,14 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
                     onCommit={(text) => setPrice(i, field, text)} />
                 </Td>
               ))}
+              <Td className="text-right">
+                <ContextInput model={m} onCommit={(tokens) => {
+                  const next: ModelWire = { ...m };
+                  if (tokens === undefined) delete next.working_context_tokens;
+                  else next.working_context_tokens = tokens;
+                  onChange(doc.models.map((x, j) => (j === i ? next : x)));
+                }} />
+              </Td>
               <Td>
                 <input type="checkbox" className="h-4 w-4 accent-primary" aria-label={`${m.id} takes images`}
                   checked={Boolean(m.supports_images)} onChange={(e) => set(i, { supports_images: e.target.checked })} />
@@ -464,6 +483,27 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
         <Button type="submit" size="sm" variant="outline" disabled={!canAdd}>Add</Button>
       </form>
     </div>
+  );
+}
+
+/** The working context in thousands of tokens; blank means the default. */
+function ContextInput({ model, onCommit }: { model: ModelWire; onCommit: (tokens: number | undefined) => void }) {
+  const shown = model.working_context_tokens ? String(Math.round(model.working_context_tokens / 1000)) : "";
+  const [text, setText] = useState(shown);
+  useEffect(() => setText(shown), [shown]);
+  const max = model.max_context_tokens ?? 200_000;
+  const parsed = parseWorkingContext(text, max);
+  const placeholder = String(Math.round(Math.min(200_000, max) / 1000));
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+      <Input aria-label={`Working context for ${model.id} (thousands of tokens)`} inputMode="numeric" value={text}
+        placeholder={placeholder} aria-invalid={parsed === null || undefined}
+        className={`h-8 w-16 text-right font-mono text-xs ${parsed === null ? "border-destructive" : ""}`}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => { if (parsed !== null) onCommit(parsed); }}
+        onKeyDown={(e) => { if (e.key === "Enter" && parsed !== null) { e.preventDefault(); onCommit(parsed); } }} />
+      k / {Math.round(max / 1000)}k
+    </span>
   );
 }
 

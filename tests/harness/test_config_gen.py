@@ -46,8 +46,21 @@ def test_provider_entry_anthropic() -> None:
     assert entry["models"]["claude-x"] == {
         "name": "claude-x", "tool_call": True, "attachment": True,
         "modalities": {"input": ["text", "image", "pdf"], "output": ["text"]},
-        "limit": {"context": 200000, "output": 16000},
+        "limit": {"context": 200000, "input": 200000, "output": 16000},
     }
+
+
+def test_working_context_keeps_a_big_window_cheap() -> None:
+    big = ModelInfo(id="claude-big", provider="anthropic", tier="solid",
+                    max_context_tokens=1_000_000, max_output_tokens=128000)
+    limit = provider_entry(ProviderBinding("anthropic", big, "anthropic"))["models"]["claude-big"]["limit"]
+    assert limit == {"context": 1_000_000, "input": 200_000, "output": 128000}   # the default
+    tuned = ModelInfo(id="claude-big", provider="anthropic", tier="solid",
+                      max_context_tokens=1_000_000, working_context_tokens=400_000)
+    assert provider_entry(ProviderBinding("anthropic", tuned, "anthropic"))[
+        "models"]["claude-big"]["limit"]["input"] == 400_000
+    project = ProviderBinding("anthropic", tuned, "anthropic", working_context=120_000)
+    assert provider_entry(project)["models"]["claude-big"]["limit"]["input"] == 120_000
 
 
 def test_provider_entry_openai_compatible_options() -> None:
@@ -58,7 +71,7 @@ def test_provider_entry_openai_compatible_options() -> None:
     model = entry["models"]["mistral-small"]
     assert model["attachment"] is False
     assert model["modalities"]["input"] == ["text"]
-    assert model["limit"] == {"context": 32000, "output": 4096}
+    assert model["limit"] == {"context": 32000, "input": 32000, "output": 4096}
     only_url = provider_entry(ProviderBinding("mistral", MISTRAL, "openai_compatible",
                                               base_url="http://gw/v1"))
     assert only_url["options"] == {"baseURL": "http://gw/v1"}
@@ -99,7 +112,7 @@ def test_build_config_shape_and_order() -> None:
                                     "grep": "allow", "list": "allow"}
     assert list(config["agent"]) == ["builder", "explore"]
     assert config["agent"]["explore"] == EXPLORE_OVERRIDE
-    assert config["subagent_depth"] == 1 and config["compaction"] == {"auto": True}
+    assert config["subagent_depth"] == 1 and config["compaction"] == {"auto": True, "prune": True}
     assert config["attachment"]["image"] == {
         "auto_resize": True, "max_width": 1280, "max_height": 1280, "max_base64_bytes": 5_000_000}
     assert "mcp" not in config
@@ -184,3 +197,18 @@ async def test_reviewer_config_accepted_by_real_opencode(tmp_path: Path, fake_ll
     agents, status = await _boot_and_list("reviewer", tmp_path, fake_llm)
     assert status == 200
     assert "reviewer" in agents
+
+
+def test_project_can_only_lower_the_working_context() -> None:
+    from types import SimpleNamespace
+
+    from core.harness.run import OpencodeRun
+
+    def cap(gate: object, model_cap: int = 200_000) -> int:
+        fake = SimpleNamespace(runner=SimpleNamespace(project=SimpleNamespace(
+            approval_gates={"working_context_tokens": gate})))
+        return OpencodeRun._working_context(fake, model_cap)  # type: ignore[arg-type]
+
+    assert cap(None) == 200_000 and cap("") == 200_000
+    assert cap(80_000) == 80_000 and cap(500_000) == 200_000
+    assert cap("lots") == 200_000

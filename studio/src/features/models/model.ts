@@ -40,3 +40,13 @@ export function tierModels(models: readonly ModelWire[], tiers: ConfigDoc["tiers
   const first = models.find((m) => m.tier === tier && !m.deprecated)?.id;
   return first ? [first] : [];
 }
+
+/** Thousands of tokens typed into the "Works in" field → tokens; undefined for blank (the
+ * default), null when it is not a whole number between 1k and the model's maximum. */
+export function parseWorkingContext(text: string, maxTokens: number): number | undefined | null {
+  const t = text.trim();
+  if (t === "") return undefined;
+  if (!/^\d+$/.test(t)) return null;
+  const tokens = Number(t) * 1000;
+  return tokens >= 1000 && tokens <= maxTokens ? tokens : null;
+}

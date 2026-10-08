@@ -33,6 +33,12 @@ export interface ModelWire {
   cache_write_per_1k?: number;
   deprecated?: boolean;
   replacement?: string | null;
+  /** The context agents work in (opencode compacts near it); absent: 200k, capped at the max. */
+  working_context_tokens?: number;
+  /** Prompts above this many tokens are billed at the long-context prices. */
+  long_context_threshold?: number;
+  long_input_per_1k?: number;
+  long_output_per_1k?: number;
 }
 
 export interface ModelConfigView {
