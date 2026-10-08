@@ -273,10 +273,12 @@ describe("FollowPanel", () => {
     wrap(<FollowPanel runId="r1" />);
     const panel = within(await screen.findByTestId("follow-panel"));
     expect(panel.getByText("2/3")).toBeInTheDocument();
-    expect(panel.getByText(/Storage: SQLite/)).toBeInTheDocument();
+    expect(panel.getByText("Storage")).toBeInTheDocument();
+    expect(panel.getByText("SQLite")).toBeInTheDocument();
     expect(panel.getByLabelText("rule met")).toBeInTheDocument();
     expect(panel.getByLabelText("rule flagged")).toBeInTheDocument();
-    expect(panel.getByText("Tests for endpoints (2 unmet)")).toBeInTheDocument();
+    expect(panel.getByText("Tests for endpoints")).toBeInTheDocument();
+    expect(panel.getByText("2 unmet")).toBeInTheDocument();
     expect(panel.getByText(/A flagged rule goes back to the builder as a review issue/)).toBeInTheDocument();
   });
 
