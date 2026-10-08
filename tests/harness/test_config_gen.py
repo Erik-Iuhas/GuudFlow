@@ -268,3 +268,17 @@ async def test_real_opencode_sends_the_effort_level(tmp_path: Path, fake_llm: Fa
         await server.stop()
     steps = fake_llm.tool_requests()
     assert steps and all(r["reasoning_effort"] == "high" for r in steps)
+
+
+def test_effort_is_sent_in_the_providers_own_words() -> None:
+    from pathlib import Path as _P
+
+    from core.llm.registry import ModelRegistry
+    small = ModelRegistry(_P(__file__).resolve().parents[2] / "data" / "models.json").get(
+        "mistral-small-latest")
+    assert small is not None
+    level = small.pick_effort("medium")          # Mistral takes "none" or "high": medium -> low
+    entry = provider_entry(ProviderBinding("mistral", small, "openai_compatible",
+                                           base_url="https://x/v1", effort=level))
+    assert entry["models"]["mistral-small-latest"]["options"] == {"reasoningEffort": "none"}
+    assert small.effort_value(small.pick_effort("max")) == "high"

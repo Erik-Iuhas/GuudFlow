@@ -150,3 +150,16 @@ def test_effort_levels_are_checked() -> None:
         validate_config({**base, "models": [{**model, "effort_levels": ["turbo"]}]})
     with pytest.raises(ModelConfigError, match="default_effort"):
         validate_config({**base, "models": [{**model, "default_effort": "high"}]})
+
+
+def test_effort_values_rename_levels_for_the_provider() -> None:
+    from core.model_config import ModelConfigError, validate as validate_config
+    model = {"id": "m", "provider": "anthropic", "tier": "fast",
+             "effort_levels": ["low", "high"], "effort_values": {"low": "none"}}
+    base = {"providers": {"anthropic": {"client": "anthropic", "api_key_env": "ANTHROPIC_API_KEY"}},
+            "models": [model]}
+    assert validate_config(base)["models"][0]["effort_values"] == {"low": "none"}
+    with pytest.raises(ModelConfigError, match="not one of its effort_levels"):
+        validate_config({**base, "models": [{**model, "effort_values": {"max": "max"}}]})
+    with pytest.raises(ModelConfigError, match="short word"):
+        validate_config({**base, "models": [{**model, "effort_values": {"low": "x; drop"}}]})

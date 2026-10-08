@@ -17,7 +17,7 @@ import {
   type TestResult,
   type Tier,
 } from "./api";
-import { envNameFor, fromPerMillion, parseWorkingContext, perMillion, tierModels, toDoc, toggleEffortLevel } from "./model";
+import { envNameFor, fromPerMillion, parseWorkingContext, perMillion, tierModels, toDoc, toggleEffortLevel, parseEffortValues, formatEffortValues } from "./model";
 
 const KEY_VARIANT: Record<KeyStatus, BadgeProps["variant"]> = {
   env: "complete",
@@ -407,7 +407,8 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
         context agents use before opencode compacts (blank: 200k, or the model's maximum if
         smaller); a bigger window costs more on every turn. “Effort” lists the levels the model
         takes and the one agents use unless the team or project picks another (blank: the provider's
-        default); a level a model lacks is lowered to the next one it has.
+        default); a level a model lacks is lowered to the next one it has. Where a provider uses
+        other words (Mistral: none/high, Groq Qwen: none/default), map them, e.g. “low=none”.
       </p>
       <Table aria-label="Models">
         <thead>
@@ -525,7 +526,30 @@ function EffortCell({ model, onChange }: { model: ModelWire; onChange: (next: Mo
           {levels.map((l) => <option key={l} value={l}>{l}</option>)}
         </Select>
       )}
+      {levels.length > 0 && <EffortValuesInput model={model} onChange={onChange} />}
     </span>
+  );
+}
+
+/** The provider's own words for levels, typed as "low=none, high=default"; blank: sent as named. */
+function EffortValuesInput({ model, onChange }: { model: ModelWire; onChange: (next: ModelWire) => void }) {
+  const shown = formatEffortValues(model.effort_values);
+  const [text, setText] = useState(shown);
+  useEffect(() => setText(shown), [shown]);
+  const parsed = parseEffortValues(text, model.effort_levels ?? []);
+  const commit = () => {
+    if (parsed === null) return;
+    const next: ModelWire = { ...model };
+    if (Object.keys(parsed).length) next.effort_values = parsed;
+    else delete next.effort_values;
+    onChange(next);
+  };
+  return (
+    <Input aria-label={`Provider words for ${model.id} effort levels`} value={text} placeholder="sent as named"
+      title="The provider's word for a level, e.g. low=none" aria-invalid={parsed === null || undefined}
+      className={`h-8 w-32 font-mono text-xs ${parsed === null ? "border-destructive" : ""}`}
+      onChange={(e) => setText(e.target.value)} onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }} />
   );
 }
 

@@ -46,6 +46,8 @@ export interface ModelWire {
   /** Effort levels the model takes (absent: no effort control) and the one agents use by default. */
   effort_levels?: EffortLevel[];
   default_effort?: EffortLevel;
+  /** The provider's own word for a level where it differs, e.g. { low: "none" } for Mistral. */
+  effort_values?: Partial<Record<EffortLevel, string>>;
 }
 
 export interface ModelConfigView {

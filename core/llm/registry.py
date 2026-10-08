@@ -6,7 +6,7 @@ import json
 import logging
 import os
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -55,6 +55,13 @@ class ModelInfo:
     # one agents use unless the team or project picks another. None means the provider default.
     effort_levels: tuple[str, ...] = ()
     default_effort: str | None = None
+    # The provider's own word for a level where it differs (e.g. Mistral takes "none"/"high",
+    # Groq's Qwen "none"/"default"); a level not listed is sent as is.
+    effort_values: dict[str, str] = field(default_factory=dict)
+
+    def effort_value(self, level: str | None) -> str | None:
+        """What to send the provider for `level` (a level from `pick_effort`)."""
+        return self.effort_values.get(level, level) if level else None
 
     def pick_effort(self, want: str | None) -> str | None:
         """The level to send for `want` (falling back to the model's default): the highest
@@ -128,6 +135,7 @@ class ModelRegistry:
                 effort_levels=tuple(lv for lv in EFFORT_LEVELS
                                     if lv in (m.get("effort_levels") or ())),
                 default_effort=m.get("default_effort") or None,
+                effort_values={str(k): str(v) for k, v in (m.get("effort_values") or {}).items()},
             )
             self._models[info.id] = info
 

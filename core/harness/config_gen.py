@@ -24,7 +24,9 @@ _NPM_BY_CLIENT = {
 }
 
 # The provider option that carries an effort level: @ai-sdk/anthropic sends `effort` as
-# `output_config.effort`; @ai-sdk/openai-compatible sends `reasoningEffort` as `reasoning_effort`.
+# `output_config.effort`; @ai-sdk/openai-compatible sends `reasoningEffort` as `reasoning_effort`,
+# the top-level field OpenAI, OpenRouter, Groq, DeepSeek, Mistral and Ollama's /v1 all read. The
+# words they accept differ, which a model's `effort_values` covers.
 _EFFORT_OPTION_BY_CLIENT = {
     "anthropic": "effort",
     "openai_compatible": "reasoningEffort",
@@ -80,7 +82,8 @@ def provider_entry(binding: ProviderBinding) -> dict[str, Any]:
     }
     if binding.effort:
         # Model options reach the provider as provider options on every request.
-        model_entry["options"] = {_EFFORT_OPTION_BY_CLIENT[binding.client]: binding.effort}
+        model_entry["options"] = {
+            _EFFORT_OPTION_BY_CLIENT[binding.client]: model.effort_value(binding.effort)}
     return {
         "npm": _NPM_BY_CLIENT[binding.client],
         "options": {k: v for k, v in options.items() if v is not None},

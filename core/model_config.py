@@ -200,6 +200,9 @@ def _context_fields(m: dict[str, Any], clean: dict[str, Any], mid: str) -> None:
         clean[field] = price
 
 
+_EFFORT_VALUE = re.compile(r"^[a-z][a-z0-9_-]{0,19}$")
+
+
 def _effort_fields(m: dict[str, Any], clean: dict[str, Any], mid: str) -> None:  # Any: JSON
     """Optional effort levels and default effort, checked and copied into `clean`."""
     levels = m.get("effort_levels") or []
@@ -213,6 +216,17 @@ def _effort_fields(m: dict[str, Any], clean: dict[str, Any], mid: str) -> None: 
         if default not in levels:
             raise ModelConfigError(f"model {mid}: default_effort must be one of its effort_levels")
         clean["default_effort"] = default
+    values = m.get("effort_values") or {}
+    if not isinstance(values, dict):
+        raise ModelConfigError(f"model {mid}: effort_values must be an object")
+    for level, value in values.items():
+        if level not in levels:
+            raise ModelConfigError(f"model {mid}: effort_values names {level!r}, which is not "
+                                   f"one of its effort_levels")
+        if not isinstance(value, str) or not _EFFORT_VALUE.match(value):
+            raise ModelConfigError(f"model {mid}: effort value for {level} must be a short word")
+    if values:
+        clean["effort_values"] = dict(values)
 
 
 def _positive_int(m: dict[str, Any], key: str, default: int, mid: str) -> int:  # Any: JSON

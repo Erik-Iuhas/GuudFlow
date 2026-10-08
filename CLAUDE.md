@@ -77,7 +77,9 @@ by the API, and an environment variable wins. Always load the registry with
 compacts near it) and may list effort levels (`low`…`max`, `core/llm/registry.py`); a role's
 `effort`, else the project's `effort` gate, else the model's `default_effort` is fitted to those
 levels and sent as the provider's own option (`effort` for Anthropic, `reasoningEffort` for
-OpenAI-compatible APIs) through opencode's model `options` (`core/harness/config_gen.py`).
+OpenAI-compatible APIs, i.e. top-level `reasoning_effort`) through opencode's model `options`
+(`core/harness/config_gen.py`); a model's `effort_values` renames a level where the provider uses
+other words (Mistral `none`/`high`, Groq Qwen `none`/`default`).
 
 **Opencode harness.** Agent work is done by [opencode](https://github.com/anomalyco/opencode)
 running headless, one sandboxed server per role. GuudFlow stays the manager: scheduler,

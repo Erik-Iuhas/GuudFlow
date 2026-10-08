@@ -199,7 +199,14 @@
       "cost_per_1k_output": 0.0003,
       "deprecated": false,
       "replacement": null,
-      "supports_images": false
+      "supports_images": false,
+      "effort_levels": [
+        "low",
+        "high"
+      ],
+      "effort_values": {
+        "low": "none"
+      }
     },
     {
       "id": "codestral-latest",

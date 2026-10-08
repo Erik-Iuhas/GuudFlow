@@ -64,3 +64,20 @@ export function toggleEffortLevel(model: ModelWire, level: EffortLevel): ModelWi
   if (next.default_effort && !on.has(next.default_effort)) delete next.default_effort;
   return next;
 }
+
+/** "low=none, high=default" -> { low: "none", high: "default" } for the model's levels; null when
+ * a pair is malformed or names a level the model does not take. Blank -> {}. */
+export function parseEffortValues(text: string, levels: readonly EffortLevel[]): Partial<Record<EffortLevel, string>> | null {
+  const out: Partial<Record<EffortLevel, string>> = {};
+  for (const pair of text.split(",").map((p) => p.trim()).filter(Boolean)) {
+    const m = /^([a-z]+)\s*=\s*([a-z][a-z0-9_-]{0,19})$/.exec(pair);
+    if (!m || !levels.includes(m[1] as EffortLevel)) return null;
+    out[m[1] as EffortLevel] = m[2];
+  }
+  return out;
+}
+
+/** The inverse of parseEffortValues, for showing a model's mapping. */
+export function formatEffortValues(values: Partial<Record<EffortLevel, string>> | undefined): string {
+  return Object.entries(values ?? {}).map(([k, v]) => `${k}=${v}`).join(", ");
+}
