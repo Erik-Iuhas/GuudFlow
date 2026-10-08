@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from core.design import Design, DesignDrafts, DesignError, render_for_brief as design_brief
 from core.harness.handoff import HostFacts, render_handoffs, select_handoffs, thread_data
 from core.harness.result_inbox import ResultCheck
 from core.harness.results import AgentResult, ReviewResult
@@ -105,7 +106,24 @@ class TaskFlow:
     size_budget: tuple[float | None, float | None] = (None, None)
     # Card handoffs (plan §11.1): git facts for a merged (base, head) range, and worker names.
     facts_for: Callable[[str, str], HostFacts] | None = None
+    # Every exported name of the code files a merged (base, head) range changed (drift check).
+    exports_for: Callable[[str, str], dict[str, list[str]]] | None = None
     names: dict[str, str] = field(default_factory=dict)
+    # The design (role contracts plan §4.2) and who changes it. `designer`: the planner is a
+    # tech lead (its contract owns the design); `design_auto`: no human holds the Lead seat,
+    # so the tech lead's design changes apply at once. `adopt`: the project joined with
+    # existing code (plan §8), so an empty design is recovered before cards are planned.
+    design: Design | None = None
+    designer: bool = False
+    design_auto: bool = True
+    adopt: bool = False
+    data_root: Path | None = None
+    project_id: str | None = None
+    run_id: str | None = None
+    # The knowledge base (role contracts plan §4.3): generated facts and notes, and the roles'
+    # notebooks from the last accepted session (the tech lead promotes from them).
+    facts: dict[str, object] | None = None
+    notebooks: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def build(cls, agents: Sequence["AgentConfig"], role_types: dict[str, str],
@@ -196,13 +214,24 @@ class TaskFlow:
                 if text:
                     sections = (("The spec", text),) + sections
                 spec_ids = self.spec.ids()
+            design = self.design or Design({})
+            recovering = self.designer and self.adopt and design.empty
+            if self.designer:
+                sections = (("The design", self._design_text(design)),
+                            ("Your design work", design_instructions(recovering))) + sections
+                knowledge = self._knowledge_for_lead()
+                if knowledge:
+                    sections = sections + (("The knowledge base", knowledge),)
             if self.backlog:
                 sections = (("This run's backlog items", backlog_text(self.backlog)),) + sections
             item_serves = self._item_serves()
+            designer = self.designer
             return TurnPlan(
                 model=PlanResult,
                 check=lambda r: (check_plan(r, owners, items, spec_ids=spec_ids,
-                                            item_serves=item_serves)
+                                            item_serves=item_serves, design=design,
+                                            require_tasks=not recovering,
+                                            require_design_links=designer)
                                  if isinstance(r, PlanResult) else []),
                 extra_sections=sections)
         if role not in self.card_roles:
@@ -214,12 +243,14 @@ class TaskFlow:
             self.board.start(role, card.task_id)
             criteria = list(card.acceptance_criteria)
             spec_section, extra = self._card_spec(role, card, reviewer=True)
+            design_section, design_lines = self._card_design(card, reviewer=True)
+            extra = extra + design_lines
             criteria += [line for line in extra if line not in criteria]
             visual = self._visual_review_text(role, card.task_id)
             return TurnPlan(
                 model=ReviewResult, card_id=card.task_id,
-                extra_sections=spec_section + self._handoff_section(role, card.task_id,
-                                                                   reviewer=True),
+                extra_sections=spec_section + design_section
+                + self._handoff_section(role, card.task_id, reviewer=True),
                 task_text=self.board.brief_for(card.task_id, reviewer=True) + visual
                 + f"\n\nThe card's work was done by **{card.assigned_to}** and is merged into "
                   f"your working copy. Call `guudflow_changes` with `task_id` "
@@ -235,8 +266,8 @@ class TaskFlow:
                       if card.kind == "visual" and self.tool_dir_for is not None else "")
         return TurnPlan(
             model=AgentResult, card_id=card.task_id,
-            extra_sections=self._card_spec(role, card)[0]
-            + self._handoff_section(role, card.task_id),
+            extra_sections=self._card_spec(role, card)[0] + self._card_design(card)[0]
+            + self._card_knowledge(card) + self._handoff_section(role, card.task_id),
             task_text=self.board.brief_for(card.task_id) + self_check,
             check=lambda r, tid=card.task_id: (_check_done(r, tid, criteria)
                                                if isinstance(r, AgentResult) else []))
@@ -253,6 +284,77 @@ class TaskFlow:
                                       owner_type=owner_type if reviewer else None,
                                       extra_lines=extra, serves=card.serves)
         return ((("The spec", text),) if text else ()), extra
+
+    def _knowledge_rows(self, status: Sequence[str] = ("approved",)) -> list[dict[str, object]]:
+        from core.knowledge import notes
+        try:
+            return notes(self.data_root, self.project_id, status)  # type: ignore[arg-type]
+        except Exception as e:  # noqa: BLE001 — knowledge is context, never a failure
+            log.warning("knowledge notes unreadable: %s", e)
+            return []
+
+    def _card_knowledge(self, card: "Task") -> tuple[tuple[str, str], ...]:
+        """The "Project knowledge" section for a card's files."""
+        from core.knowledge import render_for_brief as knowledge_brief
+        text = knowledge_brief(self.facts, self._knowledge_rows(), card.files_hint)  # type: ignore[arg-type]
+        return (("Project knowledge", text),) if text else ()
+
+    def _knowledge_for_lead(self) -> str | None:
+        """The tech lead's view: the notes (stale and proposed ones flagged), the notebooks
+        to promote from, and what to do with them."""
+        from core.harness.brief import wrap_untrusted
+        rows = self._knowledge_rows(("approved", "stale", "proposed"))
+        parts = []
+        if rows:
+            parts.append("Notes:\n" + "\n".join(
+                f"- **{r['id']}** [{r['status']}] {r['topic']}: {r['text']}" for r in rows))
+        if self.notebooks:
+            parts.append("Notebooks the roles wrote at the end of the last accepted session:\n"
+                         + "\n\n".join(wrap_untrusted(f"notebook of {role}", text)
+                                        for role, text in sorted(self.notebooks.items())))
+        if not parts:
+            return None
+        parts.append("Promote what more than one role needs (conventions, gotchas, how things "
+                     "are wired) into `knowledge` notes with the paths they are about. Rewrite "
+                     "a stale note with `replaces`. Keep notes short and true to the code.")
+        return "\n\n".join(parts)
+
+    def _design_text(self, design: Design) -> str:
+        """The planner's "The design" section: the whole map, open debt and open drafts."""
+        text = design_brief(design) or "There is no design yet."
+        debt = design.open_debt()
+        if debt:
+            text += "\n\nKnown debt:\n" + "\n".join(
+                f"- **{d['id']}** {d['text']}" for d in debt)
+        return text
+
+    def _card_design(self, card: "Task", *, reviewer: bool = False
+                     ) -> tuple[tuple[tuple[str, str], ...], list[str]]:
+        """The design section for a card turn and (reviewers) the interface lines to answer:
+        one per interface the card builds or whose component it builds, one per binding
+        technical decision."""
+        design = self.design
+        if design is None or design.empty:
+            return (), []
+        text = design_brief(design, focus=card.implements, files=card.files_hint)
+        lines: list[str] = []
+        if reviewer:
+            ifaces = design.interfaces()
+            comps = {i for i in card.implements if i.startswith("C")}
+            comps |= {c.id for f in card.files_hint if (c := design.component_of(f))}
+            for i in ifaces:
+                if i.id in card.implements or i.provider in comps:
+                    lines.append(f"design-{i.id}: the change keeps to {i.id} `{i.signature}` "
+                                 f"(or the card says why the design must change)")
+            for d in design.binding_decisions():
+                lines.append(f"design-{d['id']}: {d['choice']}")
+            if lines and text:
+                text += ("\n\nDesign checklist. Besides the card's acceptance items, answer each "
+                         "line with its own entry in `items` (`item` is the line, or at least its "
+                         "leading id). Code that exports names the design does not declare for "
+                         "its component fails the line, with a specific `detail`:\n"
+                         + "\n".join(f"- [ ] {line}" for line in lines))
+        return ((("The design", text),) if text else ()), lines
 
     def continues(self, previous: str | None, card_id: str | None) -> bool:
         """Does `card_id` continue `previous` (same card, depends on it, or shares files)?"""
@@ -287,6 +389,32 @@ class TaskFlow:
                 log.warning("handoff facts for %s failed: %s", card_id, e)
         text, data = thread_data(result, facts)
         self.board.note(card_id, "handoff", role, text, data)
+        self._check_drift(role, card_id, base, head)
+
+    def _check_drift(self, role: str, card_id: str, base: str, head: str) -> None:
+        """Compare what the merge exports with the design (role contracts plan §4.2). Drift is
+        noted on the card (the reviewer sees it) and posted as DESIGN_DRIFT; it does not fail
+        the card: the design or the code changes on purpose afterwards."""
+        design = self.design
+        if design is None or design.empty or self.exports_for is None or not base or not head \
+                or base == head:
+            return
+        from core.design import drift
+        try:
+            found = drift(design, self.exports_for(base, head))
+        except Exception as e:  # noqa: BLE001 — the check is advisory; the merge stands
+            log.warning("drift check for %s failed: %s", card_id, e)
+            return
+        if not found:
+            return
+        lines = [d.text() for d in found[:10]]
+        self.board.note(card_id, "note", "runner",
+                        "Design drift: " + "; ".join(lines),
+                        {"drift": [{"path": d.path, "name": d.name, "component": d.component}
+                                   for d in found]})
+        self.post(SignalType.DESIGN_DRIFT, role,
+                  f"{card_id}: {len(found)} export(s) the design does not declare",
+                  json.dumps({"task_id": card_id, "drift": [d.text() for d in found]}))
 
     def end_turn(self, role: str) -> None:
         """Always called when a spawn ends."""
@@ -297,8 +425,17 @@ class TaskFlow:
         return {i.id: list(i.serves) for i in self.backlog}
 
     def plan_accepted(self, plan: PlanResult) -> None:
-        """Create the cards and give card roles enough spawns for them."""
-        self.board.create_from_plan(plan, self.planner, self._item_serves())
+        """Apply (or draft) the plan's design changes, pass its feasibility notes to the
+        product manager, then create the cards and give card roles enough spawns."""
+        created = self._apply_design(plan)
+        self._spec_notes(plan)
+        self._knowledge_notes(plan)
+        if created:
+            plan = plan.model_copy(update={"tasks": [
+                t.model_copy(update={"implements": [created.get(i, i) for i in t.implements]})
+                for t in plan.tasks]})
+        self.board.create_from_plan(plan, self.planner, self._item_serves(),
+                                    self._component_paths())
         if self.spec is not None:
             missing = missing_check_lines(self.backlog, [t.acceptance for t in plan.tasks])
             if missing:
@@ -314,6 +451,68 @@ class TaskFlow:
         needed = max(per_role.values(), default=1) * (rounds + 1) + len(plan.tasks) + 4
         scheduler = self.scheduler()
         scheduler.max_iterations = max(scheduler.max_iterations, needed)
+
+    def _apply_design(self, plan: PlanResult) -> dict[str, str]:
+        """Apply the tech lead's design changes (or store them as a draft for the Lead)."""
+        turn = plan.design
+        if turn is None or not turn.changes or self.data_root is None or not self.project_id:
+            return {}
+        reqs = [i for i in (self.spec.ids() if self.spec else []) if "." not in i]
+        try:
+            out = DesignDrafts(self.data_root, self.project_id).propose(
+                turn, by=self.planner, auto_apply=self.design_auto, requirement_ids=reqs,
+                run_id=self.run_id)
+        except DesignError as e:
+            # The plan check validated the same turn; only a concurrent edit gets here.
+            log.warning("design changes of the plan were refused: %s", e)
+            self.post(SignalType.THINKING, self.planner, "design changes were refused",
+                      json.dumps({"warning": "design_refused", "problems": str(e)}))
+            return {}
+        self.design = Design.load(self.data_root, self.project_id)
+        summary = (f"{out.draft_id} applied: {len(turn.changes)} design change(s), "
+                   f"design v{out.version}" if out.status == "applied"
+                   else f"{out.draft_id}: {len(turn.changes)} design change(s) wait for the "
+                        f"Lead seat")
+        self.post(SignalType.DESIGN_UPDATED, self.planner, summary, json.dumps({
+            "draft": out.draft_id, "status": out.status, "created": out.created,
+            "version": out.version, "reasons": [g.name for g in turn.groups]}))
+        return out.created
+
+    def _spec_notes(self, plan: PlanResult) -> None:
+        """The tech lead's feasibility notes go to the plan conversation for the PM."""
+        if not plan.spec_notes or self.data_root is None or not self.project_id:
+            return
+        from core.work_db import WorkDB
+        text = ("Feasibility notes from the tech lead:\n"
+                + "\n".join(f"- {n.strip()}" for n in plan.spec_notes))
+        WorkDB(self.data_root / "projects" / self.project_id).add_plan_message(
+            "tech_lead", text, None, "note")
+        self.post(SignalType.THINKING, self.planner,
+                  f"{len(plan.spec_notes)} feasibility note(s) for the product manager",
+                  json.dumps({"spec_notes": list(plan.spec_notes)}))
+
+    def _knowledge_notes(self, plan: PlanResult) -> None:
+        """The plan's knowledge notes: approved at once when no human holds the Lead seat."""
+        if not plan.knowledge or self.data_root is None or not self.project_id:
+            return
+        from core.knowledge import add_notes
+        out = add_notes(self.data_root, self.project_id, plan.knowledge, by=self.planner,
+                        approve=self.design_auto, run_id=self.run_id)
+        self.post(SignalType.THINKING, self.planner,
+                  f"{len(out.added)} knowledge note(s) "
+                  + ("added" if self.design_auto else "proposed for the Lead"),
+                  json.dumps({"knowledge": out.added, "replaced": out.replaced}))
+
+    def _component_paths(self) -> dict[str, list[str]]:
+        """Design element id → the paths of the component that owns it."""
+        design = self.design
+        if design is None:
+            return {}
+        out = {c.id: list(c.paths) for c in design.components()}
+        for i in design.interfaces():
+            if i.provider in out:
+                out[i.id] = out[i.provider]
+        return out
 
     def card_problem(self, role: str, card_id: str, reason: str) -> None:
         """The turn ended badly: the card needs attention; the role carries on."""
@@ -481,6 +680,40 @@ def _item_text(item: "BacklogItem") -> str:
     if summary:
         text += "\n" + wrap_untrusted(f"earlier work on {item.id}", summary)
     return text
+
+
+def design_instructions(recovering: bool) -> str:
+    """What a tech lead does with the design in its planning turn (role contracts plan §2.2)."""
+    if recovering:
+        return (
+            "This project joined GuudFlow with existing code and no design. This session "
+            "recovers it: read the code and submit the design as it is today in `design`.\n"
+            "- Components: the parts of the code with one job each, the paths they own "
+            "(`web/src/logic/**`) and the requirements they serve. No path has two owners.\n"
+            "- Interfaces: what each component exports for others, with the real signature "
+            "and the components that use it.\n"
+            "- Data types that cross interfaces, and Mermaid flows for the main paths.\n"
+            "- Technical decisions the code already follows (with why), and debt: anything "
+            "with two owners, a file everything goes through, code left from dropped ideas "
+            "(`add_debt`, with paths).\n"
+            "Every change names its reason in `design.groups` (summary, because, evidence: the "
+            "files it rests on). Plan no product cards this session unless a backlog item "
+            "needs one; an empty `tasks` list is fine.")
+    return (
+        "You own the design. Before planning cards:\n"
+        "1. Compare the design with the code. Where they differ, change one of them on purpose: "
+        "a design change in `design`, or a card that changes the code.\n"
+        "2. Add or change the components, interfaces, data types and flows this session's "
+        "cards need, before any card depends on them. One behaviour has one owning "
+        "component; record debt you find (`add_debt`) and resolve it when a card fixes it.\n"
+        "3. Every card names what it builds in `implements` (C#, I#, T#, F#, or the `new:N` "
+        "ref of a design change in this plan), or the cards it `supports`. Its files follow "
+        "from the component when you give no `files_hint`.\n"
+        "4. If a requirement cannot be built or tested as written, write a short note in "
+        "`spec_notes` for the product manager instead of planning around it.\n"
+        "Every design change names its reason in `design.groups` (summary, because, evidence). "
+        "Your changes apply when the plan is accepted (or, when a person holds the Lead seat, "
+        "wait for their approval while the cards already follow them).")
 
 
 def _planner_instructions(owners: list[str]) -> str:

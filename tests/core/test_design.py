@@ -181,3 +181,17 @@ def test_work_db_keeps_design_separate_from_spec(tmp_path: Path) -> None:
     assert db.read_spec_doc()["requirements"] == []
     assert db.read_drafts_doc()["drafts"] == []
     assert len(db.read_design_drafts()) == 1
+
+
+def test_drift_finds_undeclared_exports(tmp_path: Path) -> None:
+    from core.design import drift
+    drafts = _drafts(tmp_path)
+    drafts.propose(_turn(LOGIC, RENDER, STEP), by="tech_lead", auto_apply=True)
+    design = Design.load(tmp_path, "p1")
+    found = drift(design, {
+        "web/src/logic/game.js": ["step(input)", "createGame(opts)", "PELLET"],
+        "web/src/render/draw.js": ["draw(ctx)"],              # C2 declares nothing yet: skipped
+        "README.md": ["x"]})
+    assert [(d.path, d.name, d.component) for d in found] == [
+        ("web/src/logic/game.js", "createGame", "C1"), ("web/src/logic/game.js", "PELLET", "C1")]
+    assert "does not declare" in found[0].text()

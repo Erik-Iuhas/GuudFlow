@@ -287,6 +287,8 @@ class Task:
     # Spec checks (R4.2) or requirements (R4) the card serves, or the cards it supports.
     serves: list[str] = field(default_factory=list)
     supports: list[str] = field(default_factory=list)
+    # Design elements the card builds (components C#, interfaces I#, ...; role contracts §4.2).
+    implements: list[str] = field(default_factory=list)
 
 
 # Map a TaskStatus transition to the SignalType the runner posts when

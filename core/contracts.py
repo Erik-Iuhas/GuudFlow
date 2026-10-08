@@ -220,6 +220,21 @@ def contracts_for_team(rows: Iterable[tuple[str, str, str | None]],
     return out
 
 
+def team_owner(rows: Iterable[Mapping[str, Any]], artifact: str,  # Any: agent rows
+               contracts: Mapping[str, Contract] | None = None) -> str | None:
+    """The role on a team (project `agents` rows) whose contract owns `artifact`, if any."""
+    from core.harness.capabilities import infer_role_type
+    lib = contracts if contracts is not None else load_library()
+    for row in rows:
+        role = str(row.get("role") or "")
+        role_type = infer_role_type(role, is_reviewer=bool(row.get("is_reviewer")),
+                                    declared=str(row.get("role_type") or ""))
+        cid = contract_id_for(row, role_type)
+        if cid in lib and lib[cid].may_change(artifact):
+            return role
+    return None
+
+
 def render_for_brief(contract: Contract, roles_by_contract: Mapping[str, list[str]] | None = None,
                      names: Mapping[str, str] | None = None) -> str:
     """The "Your role contract" brief section. `roles_by_contract` turns handoff targets
@@ -261,5 +276,6 @@ def with_rules(contract: Contract, rules: Iterable[str]) -> Contract:
 __all__ = [
     "ARTIFACTS", "Contract", "ContractError", "DEFAULT_FOR_ROLE_TYPE", "Handoff", "LIBRARY_DIR",
     "Measure", "contract_id_for", "contracts_for_team", "load_for_project", "load_library",
+    "team_owner",
     "parse_contract", "project_dir", "render_for_brief", "with_rules",
 ]

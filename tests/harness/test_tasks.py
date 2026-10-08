@@ -246,7 +246,9 @@ def test_plan_schema_details() -> None:
     item = schema["properties"]["tasks"]["items"]
     assert item["properties"]["size"]["enum"] == ["S", "M", "L"]
     assert item["properties"]["acceptance"]["minItems"] == 1
-    assert schema["properties"]["tasks"]["minItems"] == 1
+    # Tasks may be empty in the schema (an adopt session recovers the design only);
+    # check_plan requires them everywhere else.
+    assert "minItems" not in schema["properties"]["tasks"]
 
 
 # ── thread ─────────────────────────────────────────────────────────────────

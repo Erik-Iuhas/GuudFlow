@@ -59,7 +59,8 @@ from core.harness.capabilities import (
 from core.harness.config_gen import ProviderBinding, agent_entry, build_config
 from core.harness.event_bridge import EventBridge
 from core.harness.git_roles import CollectResult, RoleClones
-from core.harness.handoff import host_facts, latest_per_card, render_handoffs, stored_handoffs
+from core.harness.handoff import (changed_exports, host_facts, latest_per_card, render_handoffs,
+                                  stored_handoffs)
 from core.harness.session_policy import SessionLimits, SessionState, keep_session
 from core.harness import mcp_proxy
 from core.mcp_registry import McpRegistry
@@ -320,11 +321,16 @@ class OpencodeRun:
                                        getattr(self.runner.project, "start_mode", None))
             if flow.spec is not None:
                 flow.backlog = self.backlog = flow.spec.resolve(self.backlog)
+            # The design and who owns it (role contracts plan §2.2, §4.2).
+            self._setup_design(flow)
             flow.tool_dir_for = self.clones.tool_dir
             flow.ref_roots = [self.runner.run_root / "inputs", self.runner.git.working_dir]
             flow.run_root = self.runner.run_root
             flow.names = self.names
             flow.facts_for = lambda base, head: host_facts(
+                self.clones.main_numstat(base, head),
+                lambda path, rev=head: self.clones.main_file(rev, path))
+            flow.exports_for = lambda base, head: changed_exports(
                 self.clones.main_numstat(base, head),
                 lambda path, rev=head: self.clones.main_file(rev, path))
             flow.vision_for = lambda r: (r in self._roles and
@@ -380,6 +386,34 @@ class OpencodeRun:
         return contracts_for_team(
             [(c.role, self._roles[c.role].role_type, c.contract or None) for c in self.agents],
             library)
+
+    def _setup_design(self, flow: TaskFlow) -> None:
+        """Give the task flow the project's design, and say whether the planner is a tech
+        lead (its contract owns the design), whether its design changes apply at once (no
+        human in the Lead seat) and whether the project is being adopted (plan §8)."""
+        from core.design import Design
+        from core.pm_prompts import Seats
+        project = self.runner.project
+        planner = self.contracts.get(flow.planner)
+        flow.designer = bool(planner and planner.may_change("design"))
+        flow.data_root, flow.project_id = self._data_root(), project.project_id
+        flow.run_id = self.runner.run_id
+        flow.design = Design.load(flow.data_root, flow.project_id)
+        flow.design_auto = not Seats.from_project({"seats": getattr(project, "seats", {})}).lead
+        flow.adopt = getattr(project, "start_mode", None) == "adopt"
+        # The knowledge base (plan §4.3): facts generated from main (built now if the project
+        # has none yet, e.g. when it is being adopted) and the last session's notebooks.
+        from core.knowledge import build_facts, load_facts
+        facts = load_facts(flow.data_root, flow.project_id)
+        if facts is None and flow.data_root is not None and flow.project_id:
+            try:
+                facts = build_facts(flow.data_root, flow.project_id, check_command=str(
+                    (project.approval_gates or {}).get("check_command") or ""))
+            except Exception:  # noqa: BLE001 — facts are context, never a failure
+                log.exception("building the knowledge facts failed")
+        flow.facts = facts
+        if flow.designer:
+            flow.notebooks = dict(self._notebooks)
 
     def _contract_text(self, role: str) -> str | None:
         """The role's "Your role contract" section, with handoff targets named."""

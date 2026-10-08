@@ -13,6 +13,7 @@ Which handoffs a brief gets (`select_handoffs`):
 """
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -23,6 +24,8 @@ from core.harness.results import AgentResult, Handoff
 
 if TYPE_CHECKING:
     from core.harness.task_board import TaskBoard
+
+log = logging.getLogger(__name__)
 
 MAX_FILES = 12          # files listed in the facts
 MAX_EXPORTS = 15        # exported names listed in the facts
@@ -86,6 +89,25 @@ def host_facts(numstat: Sequence[tuple[str, int, int]],
         for name in exported_names(path, read(path))[:5]:
             exports.append(f"{path}: {name}")
     return HostFacts(files=files, exports=tuple(exports[:MAX_EXPORTS]))
+
+
+def changed_exports(numstat: Sequence[tuple[str, int, int]],
+                    read: Callable[[str], str]) -> dict[str, list[str]]:
+    """Every exported name of the code files a merge changed (no caps; tests skipped), for the
+    design drift check (role contracts plan §4.2)."""
+    out: dict[str, list[str]] = {}
+    for path, _added, _removed in numstat:
+        if not path.endswith(_CODE_SUFFIXES) or "/test" in f"/{path}" or path.startswith("tests/"):
+            continue
+        try:
+            text = read(path)
+        except Exception as e:  # noqa: BLE001 — a deleted file has no exports
+            log.debug("no exports for %s: %s", path, e)
+            continue
+        names = exported_names(path, text)
+        if names:
+            out[path] = names
+    return out
 
 
 def fallback_handoff(result: AgentResult) -> Handoff:

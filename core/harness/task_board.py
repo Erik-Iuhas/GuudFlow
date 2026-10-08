@@ -109,25 +109,33 @@ class TaskBoard:
 
     # ── creation ──────────────────────────────────────────────────────────
     def create_from_plan(self, plan: PlanResult, planner: str,
-                         item_serves: Mapping[str, Sequence[str]] | None = None) -> list[Task]:
+                         item_serves: Mapping[str, Sequence[str]] | None = None,
+                         component_paths: Mapping[str, Sequence[str]] | None = None
+                         ) -> list[Task]:
         """Create one card per planned task (the runner calls this, never an agent).
 
         `item_serves` (backlog item → requirement ids) fills in what a card serves when it
-        names nothing itself."""
+        names nothing itself. `component_paths` (design element id → the paths of the
+        component that owns it) fills in `files_hint` for a card that gives none, so cards
+        that build the same component are not run side by side."""
         cards = []
         for i, planned in enumerate(plan.tasks):
             card = Task(task_id=planned.id, story_id="plan", assigned_to=planned.owner_role,
                         created_by=planner, created_at_iter=self.workspace.iteration,
                         goal=planned.title, title=planned.title,
                         acceptance_criteria=list(planned.acceptance), kind=planned.kind,
-                        size=planned.size, files_hint=list(planned.files_hint),
+                        size=planned.size,
+                        files_hint=list(planned.files_hint) or list(dict.fromkeys(
+                            p for ident in planned.implements
+                            for p in (component_paths or {}).get(ident, ()))),
                         depends_on=list(planned.depends_on),
                         visual_refs=list(planned.visual_refs), column="todo",
                         priority=-i, column_since=self.clock(),
                         backlog_id=planned.backlog_id,
                         serves=card_serves(planned.acceptance, planned.serves,
                                            (item_serves or {}).get(planned.backlog_id or "", ())),
-                        supports=list(planned.supports))
+                        supports=list(planned.supports),
+                        implements=list(planned.implements))
             self.workspace.add_task(card)
             cards.append(card)
         self.planned = True

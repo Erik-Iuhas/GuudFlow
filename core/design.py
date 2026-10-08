@@ -689,6 +689,44 @@ class DesignDrafts:
             return DesignOutcome(draft_id, "discarded")
 
 
+# ── drift (role contracts plan §4.2) ────────────────────────────────────────
+@dataclass(frozen=True)
+class Drift:
+    """An exported name the design does not declare for the component that owns the file."""
+
+    path: str
+    name: str
+    component: str
+
+    def text(self) -> str:
+        """One line for a card thread."""
+        return f"`{self.path}` exports `{self.name}`, which {self.component} does not declare"
+
+
+def drift(design: Design, exports: Mapping[str, Sequence[str]]) -> list[Drift]:
+    """Exported names (path → names, as `handoff.exported_names` gives them) that the owning
+    component's interfaces do not declare. Components that declare no interface yet are
+    skipped: the design is still incomplete there, not drifting."""
+    declared: dict[str, set[str]] = {}
+    for i in design.interfaces():
+        declared.setdefault(i.provider, set()).add(_bare(i.name))
+    out: list[Drift] = []
+    for path, names in exports.items():
+        owner = design.component_of(path)
+        if owner is None or owner.id not in declared:
+            continue
+        for name in names:
+            bare = _bare(name)
+            if bare and bare not in declared[owner.id]:
+                out.append(Drift(path=path, name=bare, component=owner.id))
+    return out
+
+
+def _bare(name: str) -> str:
+    """`step(input)` → `step`; `Game.step` → `step`."""
+    return name.split("(")[0].strip().rsplit(".", 1)[-1]
+
+
 # ── rendering ───────────────────────────────────────────────────────────────
 def render_markdown(design: Design, title: str = "Design") -> str:
     """`DESIGN.md`: the design as people read it, Mermaid diagrams in fenced blocks."""
@@ -797,8 +835,9 @@ def design_view(design: Design) -> dict[str, Any]:  # Any: JSON
 __all__ = [
     "AddComponent", "AddDatatype", "AddDebt", "AddFlow", "AddInterface", "AddTechDecision",
     "Component", "Design", "DesignChange", "DesignDrafts", "DesignError", "DesignOutcome",
-    "DesignReason", "DesignTurn", "EditComponent", "EditDatatype", "EditFlow", "EditInterface",
+    "DesignReason", "DesignTurn", "Drift", "EditComponent", "EditDatatype", "EditFlow", "EditInterface",
     "Interface", "ResolveDebt", "SupersedeTechDecision", "apply_design_turn", "design_view",
+    "drift",
     "parse_design_change", "path_matches", "render_for_brief", "render_markdown",
     "validate_design_turn",
 ]

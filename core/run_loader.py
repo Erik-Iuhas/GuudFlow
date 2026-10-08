@@ -280,6 +280,7 @@ def _deserialise_task(payload: dict[str, Any]) -> Task:
         backlog_id=str(payload["backlog_id"]) if payload.get("backlog_id") else None,
         serves=[str(x) for x in payload.get("serves") or []],
         supports=[str(x) for x in payload.get("supports") or []],
+        implements=[str(x) for x in payload.get("implements") or []],
     )
 
 

@@ -429,6 +429,7 @@ def serialise_task(task) -> dict[str, Any]:
         "backlog_id": task.backlog_id,
         "serves": list(task.serves),
         "supports": list(task.supports),
+        "implements": list(task.implements),
     }
 
 

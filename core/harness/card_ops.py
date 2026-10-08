@@ -191,4 +191,5 @@ def card_view(task: Task) -> dict[str, Any]:
         "backlog_id": task.backlog_id,
         "serves": list(task.serves),
         "supports": list(task.supports),
+        "implements": list(task.implements),
     }

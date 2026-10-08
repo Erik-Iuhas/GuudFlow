@@ -162,6 +162,10 @@ class SignalType(str, Enum):
     OVERSEER_WAKE = "OVERSEER_WAKE"
     # Spend passed the warning share of the session budget (plan §11.4).
     BUDGET_WARNING = "BUDGET_WARNING"
+    # Role contracts plan §4.2: the tech lead's design changes were applied or drafted.
+    DESIGN_UPDATED = "DESIGN_UPDATED"
+    # §4.2 drift check: a merged card exported names its component's design does not declare.
+    DESIGN_DRIFT = "DESIGN_DRIFT"
 
 
 Priority = Literal["normal", "high"]

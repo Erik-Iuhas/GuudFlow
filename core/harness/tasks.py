@@ -11,6 +11,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from core.design import Design, DesignTurn, validate_design_turn
+from core.knowledge import KnowledgeNote
 from core.harness.results import (
     AcceptanceCheck,
     AgentResult,
@@ -57,6 +59,9 @@ class PlannedTask(BaseModel):
     # serves none names the cards it helps in `supports` (a shared helper for T7 and T8).
     serves: list[Annotated[str, Field(pattern=r"^R[0-9]+(\.[0-9]+)?$")]] = []
     supports: list[Annotated[str, Field(pattern=r"^T[0-9]+$")]] = []
+    # The design elements the card builds (role contracts plan §4.2): components (C3),
+    # interfaces (I5), data types (T2) or flows (F1), or refs of design changes in this plan.
+    implements: list[Annotated[str, Field(pattern=r"^((C|I|T|F)[0-9]+|new:[0-9]+)$")]] = []
 
     @field_validator("acceptance")
     @classmethod
@@ -67,12 +72,22 @@ class PlannedTask(BaseModel):
 
 
 class PlanResult(BaseModel):
-    """The planner's structured result: the task list for the run."""
+    """The planner's structured result: the task list for the run.
+
+    A tech lead's plan (role contracts plan §2.2) may also carry design changes, applied before
+    the cards are created, and feasibility notes for the product manager. A plan needs tasks
+    unless it is a design-only session (`check_plan(..., require_tasks=False)`)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    tasks: list[PlannedTask] = Field(min_length=1)
+    tasks: list[PlannedTask] = Field(default_factory=list)
     notes: str = ""
+    design: DesignTurn | None = None
+    spec_notes: list[Annotated[str, Field(min_length=20, max_length=600)]] = Field(
+        default_factory=list, max_length=10)
+    # Notes for the project knowledge base (role contracts plan §4.3), typically promoted from
+    # the last session's notebooks.
+    knowledge: list[KnowledgeNote] = Field(default_factory=list, max_length=20)
 
 
 def _find_cycle(graph: dict[str, list[str]]) -> list[str] | None:
@@ -125,7 +140,9 @@ def card_serves(acceptance: Sequence[str], serves: Sequence[str],
 def check_plan(plan: PlanResult, team_roles: Collection[str],
                backlog_ids: Collection[str] = (), *,
                spec_ids: Collection[str] | None = None,
-               item_serves: Mapping[str, Sequence[str]] | None = None) -> list[str]:
+               item_serves: Mapping[str, Sequence[str]] | None = None,
+               design: Design | None = None, require_tasks: bool = True,
+               require_design_links: bool = False) -> list[str]:
     """Check a schema-valid plan against the team; return one problem per line (empty = ok).
 
     With `backlog_ids` (the run's backlog items, plan §13) every item must be
@@ -136,6 +153,9 @@ def check_plan(plan: PlanResult, team_roles: Collection[str],
     acceptance line or its backlog item's requirements), or it names the cards it `supports`.
     """
     problems: list[str] = []
+    if not plan.tasks and (require_tasks or plan.design is None or not plan.design.changes):
+        problems.append("the plan has no tasks: add at least one card")
+    problems += _check_design(plan, design, spec_ids, require_design_links)
     ids = {t.id for t in plan.tasks}
     for task in plan.tasks:
         for sid in task.supports:
@@ -189,6 +209,36 @@ def check_plan(plan: PlanResult, team_roles: Collection[str],
     cycle = _find_cycle(graph)
     if cycle:
         problems.append(f"dependency cycle: {' -> '.join(cycle)}")
+    return problems
+
+
+def _check_design(plan: PlanResult, design: Design | None, spec_ids: Collection[str] | None,
+                  require_links: bool) -> list[str]:
+    """The design part of a plan: its design changes are valid, and the cards' `implements`
+    name design elements that exist (or are added by this plan). With `require_links` (the
+    planner is a tech lead and there is a design), every card implements something or
+    supports another card (tech lead contract, `done_when`)."""
+    problems: list[str] = []
+    current = design or Design({})
+    turn = plan.design
+    refs: set[str] = set()
+    if turn is not None and turn.changes:
+        reqs = [i for i in (spec_ids or ()) if "." not in i]
+        problems += [f"design: {p}" for p in validate_design_turn(turn, current, reqs)]
+        refs = {getattr(c, "ref") for c in turn.changes if getattr(c, "ref", None)
+                and c.op in ("add_component", "add_interface", "add_datatype", "add_flow")}
+    known = current.ids()
+    for task in plan.tasks:
+        for ident in task.implements:
+            if ident not in known and ident not in refs:
+                problems.append(f"{task.id}: implements {ident}, which is not in the design "
+                                f"(or added by this plan's design changes)")
+    has_design = bool(known) or bool(refs)
+    if require_links and has_design:
+        for task in plan.tasks:
+            if not task.implements and not task.supports:
+                problems.append(f"{task.id}: name the design element it builds in `implements` "
+                                f"(C#, I#, T#, F# or a new:N ref), or the cards it supports")
     return problems
 
 
