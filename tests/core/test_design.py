@@ -195,3 +195,15 @@ def test_drift_finds_undeclared_exports(tmp_path: Path) -> None:
     assert [(d.path, d.name, d.component) for d in found] == [
         ("web/src/logic/game.js", "createGame", "C1"), ("web/src/logic/game.js", "PELLET", "C1")]
     assert "does not declare" in found[0].text()
+
+
+def test_drift_counts_names_the_signature_declares() -> None:
+    from core.design import Design, drift
+    design = Design({"components": [{"id": "C4", "name": "Dash core", "paths": ["web/src/logic/dash_core.js"],
+                                     "responsibility": "the dash", "status": "active"}],
+                     "interfaces": [{"id": "I6", "name": "dash core API", "provider": "C4", "kind": "module",
+                                     "signature": "createDashState(params) -> DashState; startDash(s); DASH_DEFAULTS",
+                                     "status": "active"}]})
+    found = drift(design, {"web/src/logic/dash_core.js": ["createDashState", "startDash", "DASH_DEFAULTS",
+                                                          "secretHelper"]})
+    assert [d.name for d in found] == ["secretHelper"]

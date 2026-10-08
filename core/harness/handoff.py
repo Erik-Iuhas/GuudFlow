@@ -92,9 +92,12 @@ def host_facts(numstat: Sequence[tuple[str, int, int]],
 
 
 def changed_exports(numstat: Sequence[tuple[str, int, int]],
-                    read: Callable[[str], str]) -> dict[str, list[str]]:
-    """Every exported name of the code files a merge changed (no caps; tests skipped), for the
-    design drift check (role contracts plan §4.2)."""
+                    read: Callable[[str], str],
+                    read_before: Callable[[str], str] | None = None) -> dict[str, list[str]]:
+    """The exported names a merge added to the code files it changed (no caps; tests skipped),
+    for the design drift check (role contracts plan §4.2). With `read_before` (the file at the
+    merge's base), names the file already exported are left out: drift is what this change
+    introduced, not what an adopted codebase always had."""
     out: dict[str, list[str]] = {}
     for path, _added, _removed in numstat:
         if not path.endswith(_CODE_SUFFIXES) or "/test" in f"/{path}" or path.startswith("tests/"):
@@ -105,6 +108,12 @@ def changed_exports(numstat: Sequence[tuple[str, int, int]],
             log.debug("no exports for %s: %s", path, e)
             continue
         names = exported_names(path, text)
+        if read_before is not None and names:
+            try:
+                before = set(exported_names(path, read_before(path)))
+            except Exception:  # noqa: BLE001 — a new file exported nothing before
+                before = set()
+            names = [n for n in names if n not in before]
         if names:
             out[path] = names
     return out

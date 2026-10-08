@@ -709,7 +709,11 @@ def drift(design: Design, exports: Mapping[str, Sequence[str]]) -> list[Drift]:
     skipped: the design is still incomplete there, not drifting."""
     declared: dict[str, set[str]] = {}
     for i in design.interfaces():
-        declared.setdefault(i.provider, set()).add(_bare(i.name))
+        # The interface's name and every name its signature mentions ("createDashState(params)
+        # -> DashState; startDash(...); DASH_DEFAULTS"): an interface usually covers several.
+        names = declared.setdefault(i.provider, set())
+        names.add(_bare(i.name))
+        names.update(_NAME.findall(f"{i.name} {i.signature}"))
     out: list[Drift] = []
     for path, names in exports.items():
         owner = design.component_of(path)
@@ -720,6 +724,9 @@ def drift(design: Design, exports: Mapping[str, Sequence[str]]) -> list[Drift]:
             if bare and bare not in declared[owner.id]:
                 out.append(Drift(path=path, name=bare, component=owner.id))
     return out
+
+
+_NAME = re.compile(r"[A-Za-z_$][\w$]*")
 
 
 def _bare(name: str) -> str:

@@ -150,3 +150,14 @@ def test_brief_asks_builders_for_a_handoff_but_not_reviewers() -> None:
     assert "fill `handoff`" not in reviewer
     cont = build_brief(BriefInputs(goal="g", role="logic", description="d", continuation=True))
     assert "fill `handoff`" in cont
+
+
+def test_changed_exports_are_only_the_new_ones() -> None:
+    from core.harness.handoff import changed_exports
+    after = {"web/game.js": "export function step() {}\nexport function newThing() {}\n"}
+    before = {"web/game.js": "export function step() {}\n"}
+    out = changed_exports([("web/game.js", 3, 0), ("web/new.js", 2, 0)],
+                          lambda p: after.get(p, "export const fresh = 1;\n"),
+                          lambda p: before[p])
+    assert {p: [n.split("(")[0] for n in ns] for p, ns in out.items()} == {
+        "web/game.js": ["newThing"], "web/new.js": ["fresh"]}

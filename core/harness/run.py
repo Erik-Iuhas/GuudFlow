@@ -333,7 +333,8 @@ class OpencodeRun:
                 lambda path, rev=head: self.clones.main_file(rev, path))
             flow.exports_for = lambda base, head: changed_exports(
                 self.clones.main_numstat(base, head),
-                lambda path, rev=head: self.clones.main_file(rev, path))
+                lambda path, rev=head: self.clones.main_file(rev, path),
+                lambda path, rev=base: self.clones.main_file(rev, path))
             flow.vision_for = lambda r: (r in self._roles and
                                          self._roles[r].compiled.capabilities.vision == "on")
             self._unsubscribe_flow = self.workspace.subscribe(flow.on_signal)
