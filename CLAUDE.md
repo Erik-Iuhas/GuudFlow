@@ -54,8 +54,17 @@ commits and quips use the name, and a `TEAM` signal at run start tells Studio wh
   against what was said) and cards say which spec checks they serve or which cards they support
   (`PlannedTask.serves` / `supports`). See plan §12.
 - **Record.** `core/record.py` gives the trace and export.
-- **Next (planned, not built):** role contracts, project kinds, a design artifact owned by a tech
-  lead, a shared knowledge base and a verification ledger: `docs/ROLE_CONTRACTS_PLAN.md`.
+- **Role contracts and design (`docs/ROLE_CONTRACTS_PLAN.md`, §10 for where each piece lives).**
+  Every role works under a contract (`core/contracts.py`, `data/contracts/*.yaml`, project overrides
+  in `projects/{id}/contracts/`). A tech lead (role type `architect`, contract `tech_lead`) owns the
+  design (`core/design.py`: components, interfaces, data, flows, technical decisions, debt; design
+  drafts it approves itself unless a human holds the Lead seat), plans each session against it
+  (cards name what they `implements`), and drift is noted after each merge. The verification
+  ledger (`core/ledger.py`) says which checks a test proved. The knowledge base
+  (`core/knowledge.py`) holds facts generated from `main` and notes a person approves. Project
+  kinds (`core/kinds.py`, `data/kinds/*.yaml`) set phases and the starting team; the `adopt` start
+  mode recovers the design of existing code first. Contract measures and rule proposals
+  (`core/contract_measures.py`) run when a session is accepted; a person ticks every rule.
 - **MCP.** Third-party MCP servers are proxied on the host (`core/mcp_registry.py`,
   `core/harness/mcp_proxy.py`; `docs/MCP_PLAN.md`).
 

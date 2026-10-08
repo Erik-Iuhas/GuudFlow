@@ -1,7 +1,8 @@
 # Role contracts, project kinds and a shared knowledge base
 
-Status: plan, not started (2026-10-07). Builds on `PROJECT_FLOW_PLAN.md` (§10 Jack, §11 handoffs and
-structured requirements, §12 reasons) and the opencode harness plan. Nothing here is built yet.
+Status: RC1–RC9 built (2026-10-08); see §10 for where each piece lives. Builds on
+`PROJECT_FLOW_PLAN.md` (§10 Jack, §11 handoffs and structured requirements, §12 reasons) and the
+opencode harness plan. Pacrogue session 4, the first `adopt` run, has not been run yet.
 
 ## 0. Why
 
@@ -314,9 +315,29 @@ project to test design before code.
 
 1. ~~Who approves design changes when no human holds the Lead seat?~~ Decided (2026-10-08): the
    tech lead approves its own design drafts then; a human Lead approves them when the seat is held.
-2. Should a project be able to run without a design phase (prototype-first, maintenance), and who
-   decides that: the kind, the start mode, or Jack per session?
-3. How many non-software kinds should the first release prove the schema against: none (software
-   only, keep the fields general), one (research report), or two (research report and docs)?
+2. ~~Should a project be able to run without a design phase?~~ Decided in RC7: the kind decides
+   (`maintenance` has no design phase), the start mode can defer it (`prototype_first`,
+   `maintain`), and a team without the design owner skips it.
+3. ~~How many non-software kinds?~~ Two (`research_report`, `docs`), shipped behind the kind
+   picker (RC8).
 4. ~~Session 4 before or after RC1–RC2?~~ Decided (2026-10-08): after; session 4 is the first
    `adopt` run (§8).
+
+## 10. Implementation (2026-10-08)
+
+| # | What was built | Where |
+|---|---|---|
+| RC1 | Contract schema, library of 14 contracts, project overrides (fields replace, rules append), "Your role contract" brief section, contract on team rows and in `TEAM` | `core/contracts.py`, `data/contracts/`, `core/harness/brief.py`, `api/routes/contracts.py` |
+| RC2 | JUnit parsing (pytest, bun, vitest, jest), test ↔ check matching, ledger states, test-first base check, owner confirmations at accept | `core/ledger.py`, `core/project_checks.py`, `core/spec_adherence.py` |
+| RC3 | The planner is whoever owns `session_plan`; a tech lead plans with design sections and feasibility notes (`spec_notes`, posted to the plan conversation as `tech_lead`); Jack's prompt splits product and technical decisions | `core/harness/task_flow.py`, `tasks.py`, `run.py`, `core/pm_prompts.py` |
+| RC4 | Design document in `work.db`, design turns with reasons, design drafts (auto-applied when the Lead seat is empty, else a human decides), `DESIGN.md` in the record, accept waits on an open design draft | `core/design.py`, `core/work_db.py`, `api/routes/design.py` |
+| RC5 | `PlannedTask.implements`, `files_hint` from component paths, reviewer `design-I#` / `design-TD#` lines, drift check after each merge (`DESIGN_DRIFT`) | `core/harness/task_flow.py`, `handoff.py`, `task_board.py` |
+| RC6 | Facts from `main` (modules, exports, owning component, tests, test map, command), notes proposed/approved/stale, notes in briefs (only person-approved notes are trusted), refresh after accept | `core/knowledge.py`, `core/project_runs.py` |
+| RC7 | Kinds with phases, gates, team and uses; `adopt` start mode; `set_kind` draft op; Jack's kind context; meta proposal assigns the kind's contracts (a tech lead replaces the default planner); phase strip and item phases | `core/kinds.py`, `data/kinds/`, `core/start_modes.py`, `core/meta_proposal.py`, `GET /api/kinds`, `GET /api/projects/{id}/phases` |
+| RC8 | `research_report` and `docs` kinds over the editor, writer, fact checker and docs lead contracts | `data/kinds/`, `data/contracts/` |
+| RC9 | Measures per contract scored when a session is accepted; a measure bad in 2 of the last 3 sessions proposes a fixed rule as an undecided `add_contract_rule` change; approving appends it to the project override; Jack sees the measures; kind tags on Jack's episodes | `core/contract_measures.py`, `core/pm_memory.py` |
+| Studio | Design tab (design, design drafts by reason, knowledge base), phase strip and item chips on Work, ledger with confirm boxes at review, role contracts on Team, kind picker and adopt mode on New project, labels for the new draft ops | `studio/src/features/design/`, `work/Ledger.tsx`, `team/ContractsPanel.tsx` |
+
+Not built: `escaped_issues` and `spec_churn` measures (they need findings recorded at acceptance),
+Mermaid rendering in Studio (flows show their source), and the migration of
+`docs/worker-archetypes.yaml` into contracts (§2.4).
