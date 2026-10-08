@@ -52,7 +52,8 @@ async def test_empty_spec_and_plan(client, auth_header) -> None:
     spec = (await client.get("/api/projects/p1/spec", headers=auth_header)).json()
     assert spec == {"version": 0, "requirements": [], "decisions": [], "rules": []}
     plan = (await client.get("/api/projects/p1/plan", headers=auth_header)).json()
-    assert plan == {"messages": [], "draft": None}
+    assert plan == {"messages": [], "draft": None, "pm_spend": {
+        "calls": 0, "total_usd": 0.0, "last_24h_usd": 0.0, "wasted_usd": 0.0}}
 
 
 async def test_full_flow_start_message_tick_approve(client, auth_header, app) -> None:

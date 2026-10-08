@@ -5,6 +5,7 @@ generated from nothing):
 
   record_session_outcome   a session was accepted or rejected
   record_draft_outcome     a plan draft was approved or discarded
+  record_turn_problems     a plan turn's changes were rejected by the validator (self-repair J6)
 
 Both update Jack's reputation (kept in `production.by_task_type["pm"]`, which the memory
 writer's refresh leaves alone). Patterns are not made here: `distill()` runs the existing
@@ -264,6 +265,48 @@ def record_draft_outcome(data_root: Path | str, project_id: str, draft: Any,  # 
     except Exception:  # noqa: BLE001 — memory must never fail a plan action
         log.exception("recording draft %s in the project manager's memory failed",
                       getattr(draft, "id", "?"))
+        return None
+
+
+def record_turn_problems(data_root: Path | str, project_id: str, turn_id: str,
+                         problems: Mapping[str, list[str]], unresolved: list[str]
+                         ) -> Episode | None:
+    """A plan turn hit validation problems (self-repair plan J6). Never raises.
+
+    `problems` maps each problem code to the messages it produced over the turn and its
+    repairs; `unresolved` are the messages still open at the end. Each code becomes a tag
+    (`pm_problem:<code>`), so recall brings the episode back on the next turn that risks the
+    same mistake and the memory writer can form a pattern once 3+ episodes share it (rule 16).
+    """
+    data_root = Path(data_root)
+    try:
+        if not problems:
+            return None
+        ctx = _context(data_root, project_id)
+        outcome = "unresolved" if unresolved else "repaired"
+        codes = sorted(problems)
+
+        def build(_: Persona) -> Episode:
+            tags = _tags(ctx, "plan_turn", outcome, ctx["roles"]) + [
+                f"pm_problem:{c}" for c in codes]
+            examples = [f"{c}: {problems[c][0][:160]}" for c in codes if problems[c]]
+            return Episode(
+                episode_id=f"ep_{uuid4().hex[:10]}", run_id=turn_id,
+                project_type=ctx["project_type"], task_context=ctx["goal"][:GOAL_CAP],
+                situation=(f"plan turn on a {ctx['project_type']} project; the validator "
+                           f"rejected changes: {', '.join(codes)}"),
+                what_i_tried="proposed changes to the spec and backlog",
+                what_failed=_short(examples),
+                what_worked=("all fixed in repair calls" if not unresolved
+                             else f"{len(unresolved)} still left out at the end"),
+                tags=list(dict.fromkeys(tags)), timestamp=datetime.now(timezone.utc).isoformat())
+
+        def bump(c: dict[str, int]) -> None:
+            c["turn_problems"] = c.get("turn_problems", 0) + 1
+
+        return _append(data_root, build, bump)
+    except Exception:  # noqa: BLE001 — memory must never fail a plan action
+        log.exception("recording plan turn problems in the project manager's memory failed")
         return None
 
 

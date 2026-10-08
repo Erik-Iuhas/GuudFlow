@@ -168,7 +168,10 @@ async def get_plan(request: Request, project_id: str) -> dict[str, Any]:  # Any:
     data_root, _ = await _project(request, project_id)
     drafts = PlanDrafts(data_root, project_id)
     messages = await asyncio.to_thread(drafts.messages, 500)
-    return {"messages": messages, "draft": _draft_json(await asyncio.to_thread(drafts.current))}
+    from core.project_manager import pm_spend
+    spend = await asyncio.to_thread(pm_spend, drafts.db.project_dir)
+    return {"messages": messages, "draft": _draft_json(await asyncio.to_thread(drafts.current)),
+            "pm_spend": spend}
 
 
 @router.post("/{project_id}/plan/start")

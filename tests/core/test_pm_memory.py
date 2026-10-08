@@ -259,3 +259,13 @@ async def test_distill_makes_a_pattern_from_three_episodes(tmp_path: Path) -> No
     jack = load_pm(tmp_path)
     assert len(jack.patterns) == 1 and jack.patterns[0].source_episodes
     assert len(jack.episodes) == 3
+
+
+def test_turn_problems_become_tagged_episodes(tmp_path: Path) -> None:
+    from core.pm_memory import record_turn_problems
+    ep = record_turn_problems(tmp_path, "p", "turn-7",
+                              {"unknown_requirement": ["change 2 (add_item): unknown requirement R14"]},
+                              [])
+    assert ep is not None and "pm_problem:unknown_requirement" in ep.tags
+    assert "repaired" in ep.tags and "R14" in ep.what_failed
+    assert record_turn_problems(tmp_path, "p", "turn-8", {}, []) is None

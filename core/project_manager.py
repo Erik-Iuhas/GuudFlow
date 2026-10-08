@@ -117,6 +117,33 @@ class AskResult:
     failure: list[str] = field(default_factory=list)  # why nothing was usable
 
 
+def pm_spend(project_dir: Path, now: float | None = None) -> dict[str, float | int]:
+    """What the project manager's calls cost (from `pm_costs.jsonl`): all time, the last
+    24 hours, and how much of it bought nothing (cut off, no call, invalid, rejected)."""
+    path = Path(project_dir) / PM_COSTS_FILE
+    now = time.time() if now is None else now
+    total = day = wasted = 0.0
+    calls = 0
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        cost = float(row.get("cost_usd") or 0.0)
+        calls += 1
+        total += cost
+        if now - float(row.get("at") or 0.0) <= 86_400:
+            day += cost
+        if row.get("outcome") in ("cut_off", "no_call", "invalid"):
+            wasted += cost
+    return {"calls": calls, "total_usd": round(total, 4), "last_24h_usd": round(day, 4),
+            "wasted_usd": round(wasted, 4)}
+
+
 def _cached_content(context: str, tail: str) -> list[dict[str, Any]]:  # Any: content blocks
     """The user message as text blocks, with a cache breakpoint after the part that does not
     change within a turn (everything before the open draft), so repair calls and retries
@@ -130,6 +157,24 @@ def _cached_content(context: str, tail: str) -> list[dict[str, Any]]:  # Any: co
     return blocks
 
 
+# How to fix each kind of left-out change, shown with the problem (self-repair plan J4).
+WORKED_EXAMPLES: dict[str, str] = {
+    "unknown_requirement": (
+        "serve a requirement that exists (R#), or one this draft adds by its ref: "
+        "`\"serves\": [\"new:3\"]`. Ids like R14 exist only after approval."),
+    "unknown_item": "depend on an open item (B#) or on an item this draft adds by its ref (new:N).",
+    "ref_not_in_draft": ("a ref must be defined by a change in this turn or the open draft; add "
+                         "that change or use an existing id."),
+    "missing_check": ("give the requirement at least one check: `\"checks\": [{\"text\": "
+                      "\"Bun test: ...\", \"method\": \"unit\"}]`."),
+    "missing_group": ("set `group` on the change to a reason name, and describe that reason in "
+                      "`groups` with `summary` and `because`."),
+    "pinned_field": "a person set this field; leave it out of the change.",
+    "dependency_cycle": "drop one `depends_on` so the items no longer wait on each other.",
+    "needs_left_out": "send it again together with the change it needs.",
+}
+
+
 def _repair_text(round_no: int, left_out: list[Problem]) -> str:
     """The request for corrected versions of only the changes that were left out."""
     lines = [f"\n\nRepair round {round_no}. Your other changes are already in the open draft "
@@ -138,6 +183,8 @@ def _repair_text(round_no: int, left_out: list[Problem]) -> str:
         lines.append(f"- {p.message}")
         if p.change_json:
             lines.append(f"  it was: {p.change_json}")
+        if p.code in WORKED_EXAMPLES:
+            lines.append(f"  how to fix: {WORKED_EXAMPLES[p.code]}")
     lines.append(f"Call {TOOL_NAME} with ONLY corrected versions of these changes. Reuse their "
                  "refs; a ref in the open draft may be served or depended on. Describe their "
                  "reason in `groups` unless the open draft already lists it. If one cannot be "
@@ -234,6 +281,9 @@ class ProjectManager:
         if turn is not None and mode == "update" and turn.changes:
             draft = await asyncio.to_thread(self._merge, turn, asked.warnings)
         left_out = list(asked.left_out) if mode == "update" else []
+        seen_codes: dict[str, list[str]] = {}
+        for p in left_out:
+            seen_codes.setdefault(p.code, []).append(p.message)
         repairs: list[str] = []
         dropped: list[Problem] = []
         seen = {(p.code, p.target) for p in left_out}
@@ -259,6 +309,8 @@ class ProjectManager:
             if fix.turn.changes:
                 draft = await asyncio.to_thread(self._merge, fix.turn, fix.warnings)
             left_out = list(fix.left_out)
+            for p in left_out:
+                seen_codes.setdefault(p.code, []).append(p.message)
             keys = {(p.code, p.target) for p in left_out}
             if keys <= seen:
                 break
@@ -286,6 +338,10 @@ class ProjectManager:
         new.append(await asyncio.to_thread(
             self.drafts.add_message, "pm", reply, draft.id if draft else None, mode,
             cost, tokens, status, problems))
+        if seen_codes:
+            from core.pm_memory import record_turn_problems
+            await asyncio.to_thread(record_turn_problems, self.data_root, self.project_id,
+                                    f"turn-{new[-1].get('id', '')}", seen_codes, problems)
         return TurnOutcome(messages=new, draft=draft, reply=turn.reply if turn else reply,
                            questions=list(turn.questions) if turn else [],
                            status=status, problems=problems, notes=notes)

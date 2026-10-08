@@ -101,6 +101,7 @@ async def test_one_retry_on_invalid_output(tmp_path: Path) -> None:
     assert [c.op for c in out.draft.changes] == ["add_decision"]
     repair = user_text(llm, 1)
     assert "Repair round 1" in repair and "R99" in repair and "it was:" in repair
+    assert "how to fix: serve a requirement that exists" in repair
     assert out.messages[-1]["text"].endswith("Repairs: Fixed.")
 
 
@@ -407,3 +408,13 @@ async def test_repairs_stop_at_the_turn_budget(tmp_path: Path) -> None:
     manager._usage = lambda responses: (0.6, 1000)  # type: ignore[method-assign]
     out = await manager.turn("plan", mode="update")
     assert len(llm.calls) == 1 and out.status == "partial"
+
+
+def test_pm_spend_sums_calls_and_waste(tmp_path: Path) -> None:
+    from core.project_manager import pm_spend
+    rows = [{"at": 200_000.0, "cost_usd": 0.5, "outcome": "ok"},
+            {"at": 200_000.0, "cost_usd": 0.3, "outcome": "cut_off"},
+            {"at": 0.0, "cost_usd": 0.2, "outcome": "rejected"}]
+    (tmp_path / "pm_costs.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\nbad\n")
+    assert pm_spend(tmp_path, now=200_000.0 + 3600) == {
+        "calls": 3, "total_usd": 1.0, "last_24h_usd": 0.8, "wasted_usd": 0.3}
