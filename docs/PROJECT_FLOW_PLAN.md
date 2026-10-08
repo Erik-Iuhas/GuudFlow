@@ -705,6 +705,18 @@ That is the owner's call; running session 4 on the new spec shape would also tes
   of the snapshot: facts build (26 modules, 25 test files), `bun test` passes 661 on `main`,
   the team has no warnings after the in-place change.
 
+- **Session 4 ran (2026-10-08, `run_5e906cdb1a`), waiting for the owner's accept.** Kind game,
+  start mode adopt, the planner turned tech lead, Sonnet 5.5 for everyone, draft-4 approved, B11 and
+  B12. The tech lead recovered design v1 (14 components, 12 interfaces, 2 flows, 3 technical
+  decisions, 4 debt items: two dash owners, Dark leftovers, the `game.js` hub, Magnet offer-only),
+  linked 22 existing tests to checks and planned 4 M cards; all 4 passed review (T1 in round 2),
+  `bun test` 741 pass. Cost $10.13: planning $1.92, cards T1 $3.39, T2 $1.74, T3 $1.43, T4 $1.47
+  (about $2.01 per card against session 3's $2.41, with design recovery as a one-off). Ledger: 22
+  verified, 20 claimed. Found and fixed during it: no ripgrep in the sandbox image (every `grep`
+  failed), drift counted every export of touched files and ignored interface signatures (111
+  "drifting" exports on T1), test links to a describe block read as missing. State:
+  `snapshots/pacrogue-2026-10-08.tar.gz` (no keys).
+
 ### 11.10 Implementation status (2026-10-07)
 W1–W9 are implemented, with tests. Where the build differs from the text above:
 - **Handoff is optional in the schema.** A done result without one still validates; GuudFlow then
