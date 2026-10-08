@@ -285,21 +285,38 @@ RC1 and RC2 do not depend on each other and help the next pacrogue session even 
 session 4's results provable. RC3 to RC5 are the design layer. RC6 turns notebooks into shared
 knowledge. RC7 to RC9 generalise.
 
-## 8. Pacrogue
+## 8. Joining an existing codebase (and pacrogue session 4)
 
-- **Session 4 as planned** (draft-4 approved, current team) works without any of this.
-- **With RC1 and RC2 first**, session 4's dash and Rush checks come back verified or failing
-  instead of claimed, and roles get contract rules.
-- **With RC3 to RC5**, the tech lead would first record pacrogue's real design (components and
-  interfaces read from the code, `game.js` header and Sol's notebook), then plan session 4 against
-  it. That is when "who owns the dash" gets an answer before anyone builds it.
+Many projects arrive as an existing repo with no design: code first, structure implied. That is a
+start mode of its own, `adopt`, available in every software kind:
+
+1. **Facts first.** GuudFlow generates the knowledge base's facts layer from the repo (module map,
+   exports, test map, commands that work) and runs the test suite once as the ledger's baseline.
+2. **Design recovery.** The tech lead's first session reads the code and writes the design *as it
+   is*: components, the interfaces actually used, the data that crosses them, and the debt it sees
+   (two owners of one behaviour, a hub file, dead code from dropped ideas). Existing notes (code
+   header comments, role notebooks) are promoted into the knowledge base. No product code changes.
+3. **Target design.** For the work at hand, the tech lead proposes design changes against the
+   recovered design, with reasons: what moves where, which interface is added or narrowed.
+4. **Build against it.** Sessions after that are planned from the target design as usual.
+
+Pacrogue session 4 is the first run of this. The recovered design should name the debt already
+known (the dash lives in two abilities, the offer table has no contract with the registry, Dark is
+still wired into drawing, `game.js` and `draw.js` are where everything gathers). The target design
+then gives the default dash one owner before draft-4's cards are built. The tech lead reviews
+draft-4 for feasibility first and may send changes back to Jack. Session 3 ($19.30 for 8 cards) is
+the cost baseline to compare against.
+
+Order: RC1–RC5 and RC6's facts layer, then the `adopt` sessions on pacrogue, then a greenfield
+project to test design before code.
 
 ## 9. Open questions
 
-1. Does the tech lead approve design changes itself when no human holds the Lead seat (as Jack's
-   decisions auto-tick today), or must the Owner tick design drafts too?
+1. ~~Who approves design changes when no human holds the Lead seat?~~ Decided (2026-10-08): the
+   tech lead approves its own design drafts then; a human Lead approves them when the seat is held.
 2. Should a project be able to run without a design phase (prototype-first, maintenance), and who
    decides that: the kind, the start mode, or Jack per session?
 3. How many non-software kinds should the first release prove the schema against: none (software
    only, keep the fields general), one (research report), or two (research report and docs)?
-4. Session 4 before or after RC1–RC2?
+4. ~~Session 4 before or after RC1–RC2?~~ Decided (2026-10-08): after; session 4 is the first
+   `adopt` run (§8).
