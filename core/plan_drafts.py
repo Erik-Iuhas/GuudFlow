@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter
 
 from core.backlog import BacklogError, _check_deps, add_to_doc, update_in_doc
 from core.harness.capabilities import ROLE_TYPES, Capabilities, CapabilityError
@@ -189,6 +189,18 @@ FIELD_OPS = ("set_title", "set_statement", "set_param", "remove_param", "add_che
              "edit_check", "remove_check")
 
 
+_CHECK_OF = re.compile(r"^(R[0-9]+)\.[0-9]+$")
+
+
+def _to_requirements(serves: list[str]) -> list[str]:
+    """`serves` names requirements; a check id (`R2.4`) means its requirement (`R2`)."""
+    out = [m.group(1) if (m := _CHECK_OF.match(s.strip())) else s.strip() for s in serves]
+    return list(dict.fromkeys(out))
+
+
+Serves = Annotated[list[str], AfterValidator(_to_requirements)]
+
+
 class AddDecision(_Op):
     """Record a decision; the reason is at least 20 characters."""
 
@@ -197,7 +209,7 @@ class AddDecision(_Op):
     title: str = Field(min_length=3)
     choice: str = Field(min_length=1)
     reason: str
-    serves: list[str] = Field(default_factory=list)
+    serves: Serves = Field(default_factory=list)
     binding: bool = False
 
 
@@ -210,7 +222,7 @@ class SupersedeDecision(_Op):
     title: str = Field(min_length=3)
     choice: str = Field(min_length=1)
     reason: str
-    serves: list[str] = Field(default_factory=list)
+    serves: Serves = Field(default_factory=list)
     binding: bool = False
 
 
@@ -221,7 +233,7 @@ class AddItem(_Op):
     ref: str = Field(pattern=_REF.pattern)
     title: str = Field(min_length=3)
     acceptance: list[str] = Field(default_factory=list)
-    serves: list[str] = Field(default_factory=list)
+    serves: Serves = Field(default_factory=list)
     kind: ItemKind = "code"
     size: ItemSize = "M"
     effort: ItemEffort | None = None
@@ -242,7 +254,7 @@ class EditItem(_Op):
     notes: str | None = None
     files_hint: list[str] | None = None
     depends_on: list[str] | None = None
-    serves: list[str] | None = None
+    serves: Serves | None = None
 
 
 class DropItem(_Op):

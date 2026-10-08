@@ -702,3 +702,12 @@ def test_a_tech_lead_replaces_the_planner_in_place(pd: PlanDrafts) -> None:
     in_place = _turn({"op": "edit_role", "role": "planner", "role_type": "architect",
                       "contract": "tech_lead", "reason": TEAM_REASON})
     assert validate_turn(in_place, spec, backlog, team) == []
+
+
+def test_serves_maps_check_ids_to_their_requirement() -> None:
+    """An item that names checks (`R2.4`) serves their requirement; duplicates collapse."""
+    from core.plan_drafts import AddItem, EditItem
+    item = AddItem(op="add_item", ref="new:1", title="Lives", serves=["R2.4", "R2", "R3.10"])
+    assert item.serves == ["R2", "R3"]
+    assert EditItem(op="edit_item", id="B1", serves=["R5.1"]).serves == ["R5"]
+    assert EditItem(op="edit_item", id="B1").serves is None
