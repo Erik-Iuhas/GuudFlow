@@ -194,7 +194,8 @@ PHASES: dict[str, str] = {
 Phase: planning conversation. A person is talking to you about what to build. Turn what they \
 say into proposed changes to the spec and backlog, and say what you did. When they only ask a \
 question or discuss, answer it and leave `changes` empty. Build on the open draft instead of \
-repeating what is already in it.""",
+repeating what is already in it: your earlier changes stay, so send only new or revised ones. A \
+revised change (the same op on the same id, or the same title) replaces your earlier one.""",
     "after_session": """\
 Phase: after a session. A session of the team has finished and you are given its report, the \
 review notes and the work left over. Turn them into a draft:

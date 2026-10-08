@@ -170,11 +170,12 @@ async def test_context_shows_the_open_draft(tmp_path: Path) -> None:
     assert "c1 [undecided, by pm]" in ctx and "add_requirement" in ctx
 
 
-async def test_second_update_replaces_untouched_pm_changes(tmp_path: Path) -> None:
+async def test_second_update_builds_on_earlier_pm_changes(tmp_path: Path) -> None:
     manager, _ = pm(tmp_path, call("a", [req()]), call("b", [dec()]))
     await manager.turn("first", mode="update")
     out = await manager.turn("second", mode="update")
-    assert out.draft is not None and [c.op for c in out.draft.changes] == ["add_decision"]
+    assert out.draft is not None
+    assert [c.op for c in out.draft.changes] == ["add_requirement", "add_decision"]
 
 
 async def test_session_summaries_are_untrusted(tmp_path: Path) -> None:

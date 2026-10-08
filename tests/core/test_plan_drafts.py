@@ -711,3 +711,18 @@ def test_serves_maps_check_ids_to_their_requirement() -> None:
     assert item.serves == ["R2", "R3"]
     assert EditItem(op="edit_item", id="B1", serves=["R5.1"]).serves == ["R5"]
     assert EditItem(op="edit_item", id="B1").serves is None
+
+
+def test_later_turn_builds_on_the_draft(pd: PlanDrafts) -> None:
+    """A follow-up turn keeps earlier proposals and replaces only a revised one."""
+    d = pd.merge_pm_turn(pd.open_draft(), _turn(req(), item("new:2", serves=["new:1"]),
+                                               {"op": "edit_item", "id": "B1", "priority": 3}), True)
+    d = pd.merge_pm_turn(d, _turn({"op": "edit_item", "id": "B1", "priority": 1},
+                                  item("new:1", title="Another item")), True)
+    ops = [(c.change["op"], c.change.get("ref"), c.change.get("priority")) for c in d.changes]
+    assert ("add_requirement", "new:1", "must") in ops
+    assert ("add_item", "new:2", None) in ops
+    edits = [o for o in ops if o[0] == "edit_item"]
+    assert edits == [("edit_item", None, 1)]
+    # the new item's clashing ref was renamed, not merged into the kept one
+    assert len({c.change.get("ref") for c in d.changes if c.change.get("ref")}) == 3

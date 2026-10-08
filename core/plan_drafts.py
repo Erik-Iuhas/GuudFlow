@@ -897,6 +897,24 @@ def _rename_refs(change: dict[str, Any], mapping: dict[str, str]) -> None:  # An
             change[key] = [mapping.get(v, v) for v in change[key]]
 
 
+def _target(change: dict[str, Any]) -> tuple[str, ...] | None:  # Any: Change row
+    """What a draft change acts on, so a revised proposal replaces the earlier one.
+
+    The same op on the same id (and param key or check id), or for an addition the same title (else
+    text). None when the change has neither.
+    """
+    op = str(change.get("op", ""))
+    if change.get("id"):
+        check = change.get("check")
+        extra = check.get("text") if isinstance(check, dict) else change.get("key")
+        return (op, str(change["id"]), str(extra or ""))
+    title = (change.get("title") or change.get("name") or change.get("role")
+             or change.get("text"))
+    if title:
+        return (op, str(title).strip().lower())
+    return None
+
+
 class PlanDrafts:
     """Drafts, approval and the plan conversation of one project."""
 
@@ -941,8 +959,10 @@ class PlanDrafts:
     def merge_pm_turn(self, draft: Draft | str, turn: PlanTurn, lead_held: bool) -> Draft:
         """Put a PM turn's changes into the draft.
 
-        The PM's earlier proposals a human has not touched are replaced; changes a human
-        ticked or rejected (and changes a human wrote) stay. With `lead_held` False the PM's
+        Earlier changes stay: the PM builds on the open draft and only sends what is new or
+        revised. An incoming change replaces the PM's untouched change with the same target
+        (`_target`: the same op on the same id, or the same added title); changes a human
+        ticked, rejected or wrote are never replaced. With `lead_held` False the PM's
         decision changes start ticked; otherwise every change starts undecided. Team ops
         (add_role, edit_role, remove_role) always start undecided: only a human ticks them
         (hard rule 24).
@@ -956,8 +976,10 @@ class PlanDrafts:
             d = Draft.from_dict(row)
             if d.status != "open":
                 raise PlanDraftError(f"{draft_id} is {d.status}, not open")
-            kept = [c for c in d.changes if c.touched or c.by != "pm"]
             incoming = [c.model_dump(mode="json") for c in turn.changes]
+            revised = {t for c in incoming if (t := _target(c)) is not None}
+            kept = [c for c in d.changes
+                    if c.touched or c.by != "pm" or _target(c.change) not in revised]
             taken = {c.change["ref"] for c in kept if c.change.get("ref")}
             top = max([int(r.split(":")[1]) for r in taken]
                       + [int(c["ref"].split(":")[1]) for c in incoming if c.get("ref")] + [0])
