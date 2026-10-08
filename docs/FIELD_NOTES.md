@@ -99,3 +99,8 @@ The owner had about $8 left on the key, so a third of it went here.
 - **Seen again** in the continuation (`run_2f30d76622`). Lena blocked T3 on the planner for a reference screenshot. T4 depended on T3 because they share files, so it never started, and the run ended `stuck` again with the overseer never woken.
 - **Fix 2:** the `blocked_chain` detector also fires when a card is blocked and no role is running. The watchdog runs right before the scheduler would return `stuck`, so the overseer wakes and can decide, and reopening now settles the unblock card. `fixed`
 - **Still open:** a run that ends `stuck` should post why: the open cards and what each waits on.
+
+### F14. A continued run re-plans the items its parent already finished
+- **Seen:** session 5, last pass (`run_d34e8e25dd`, continuing `run_2f30d76622`). The goal said only two render cards were left. `continue_run` moves all the parent's items to the new run, and the planner check needs at least one card per item, so the tech lead had to plan 8 cards, six of them "confirm X still works". Earlier, the first continuation had re-planned three finished items the same way.
+- **Operator:** none. The extra cards are small, and on Haiku they cost little.
+- **Proposed fix:** when continuing, carry only the parent's items whose cards did not all finish. Finished items stay with the parent and close when the chain is accepted. Or let the plan list such items as "done in the parent" without a card. `open`
