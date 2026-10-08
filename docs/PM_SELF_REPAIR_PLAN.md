@@ -153,7 +153,28 @@ the third time. No pattern changes validation; they only shape Jack's prompt.
 | J6 | Problem codes in `pm_memory` episodes and recall | `core/pm_memory.py` |
 | J7 | Replay tests: the six F10 failures as scripted-LLM fixtures. Each must end with the valid work kept, no 502, bounded calls and recorded cost | `tests/core/test_project_manager.py`, `tests/api/test_plan_routes.py` |
 
-Order: J1 → J2 → J7 (for J1/J2) → J3 → J4 → J5 → J6. J1 and J2 alone stop the money disappearing.
+Order: J1 → J2 → J7 (for J1/J2) → J3 → J4 → J5 → J6.
+
+### Status
+
+- **J1 done.** Problem codes and severity (`classify_problem`), warnings stored on draft changes,
+  `_NAMED_NUMBER` ("level 1"), draft-wide refs, predicted ids read as refs
+  (`resolve_predicted_ids`), team-wide problems leave out the role ops.
+- **J2 done.** `TurnOutcome.status` / `problems` / `notes`, stored on the PM message, every call
+  in `pm_costs.jsonl` (`kind` turn or repair, `outcome`), the API answers 200 with the status.
+- **J3 done, simpler than §3.** Jack keeps the single `submit_plan_turn` tool. The valid changes
+  of a turn go into the draft at once, and up to `REPAIR_ROUNDS` (2) repair calls ask for
+  corrected versions of only the left-out changes, each shown back with its problem. A full
+  retry happens only when nothing in the answer is usable. The stable part of the context
+  (everything before the open draft) carries a cache breakpoint. The per-change tools of §3
+  stay an option if repairs still cost too much.
+- **J4 partly done.** A problem that comes back with the same code on the same change ends the
+  repair rounds. Still to do: the per-turn budget gate and worked examples per code.
+- **J5 partly done.** The Plan tab shows each PM turn's cost and status, warnings on cards, and
+  "Ask Jack to fix these" on the latest partial or failed turn. Still to do: "Accept the
+  suggestion" (needs suggestions as data, not only in the message).
+- **J6, J7 open.** J7 has unit tests for every F10 failure shape, but no replay of the real
+  session yet. J1 and J2 alone stop the money disappearing.
 J3 and J4 make the repair cheap.
 
 **Measure of done:** the five F10 turns replayed against the scripted LLM produce the same
