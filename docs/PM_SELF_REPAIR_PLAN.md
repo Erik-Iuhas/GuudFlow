@@ -169,7 +169,8 @@ Order: J1 → J2 → J7 (for J1/J2) → J3 → J4 → J5 → J6.
   (everything before the open draft) carries a cache breakpoint. The per-change tools of §3
   stay an option if repairs still cost too much.
 - **J4 partly done.** A problem that comes back with the same code on the same change ends the
-  repair rounds. Still to do: the per-turn budget gate and worked examples per code.
+  repair rounds, and repairs stop once the turn has spent `pm_turn_budget_usd` (default $1).
+  Still to do: worked examples per code.
 - **J5 partly done.** The Plan tab shows each PM turn's cost and status, warnings on cards, and
   "Ask Jack to fix these" on the latest partial or failed turn. Still to do: "Accept the
   suggestion" (needs suggestions as data, not only in the message).

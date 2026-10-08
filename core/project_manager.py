@@ -51,6 +51,7 @@ MAX_TOKENS = 32000
 HISTORY_MESSAGES = 20
 PM_COSTS_FILE = "pm_costs.jsonl"
 REPAIR_ROUNDS = 2          # repair calls after a turn that left changes out
+DEFAULT_TURN_BUDGET_USD = 1.0  # repairs stop once a turn has spent this (pm_turn_budget_usd)
 REPAIR_CHANGE_CAP = 600    # characters of a left-out change shown back in a repair call
 SESSIONS_SHOWN = 3
 BACKLOG_SHOWN = 60
@@ -236,8 +237,13 @@ class ProjectManager:
         repairs: list[str] = []
         dropped: list[Problem] = []
         seen = {(p.code, p.target) for p in left_out}
+        budget = self._turn_budget()
         for round_no in range(1, REPAIR_ROUNDS + 1):
             if turn is None or not left_out:
+                break
+            spent, _ = self._usage(responses)
+            if spent is not None and spent >= budget:
+                log.warning("pm: turn spent $%.2f of its $%.2f budget; no repair", spent, budget)
                 break
             fix = await self._ask(phase, await build(), sources,
                                   repair=_repair_text(round_no, left_out), attempts=1)
@@ -389,6 +395,15 @@ class ProjectManager:
                 p.change_json = json.dumps(turn.changes[p.change - 1].model_dump(
                     mode="json", exclude_none=True), ensure_ascii=False)[:REPAIR_CHANGE_CAP]
         return AskResult(kept, responses, warnings, notes, left_out)
+
+    def _turn_budget(self) -> float:
+        """The most one turn may spend before repairs stop (gate `pm_turn_budget_usd`)."""
+        gates = self.doc.get("approval_gates") or {}
+        try:
+            value = float(gates.get("pm_turn_budget_usd") or DEFAULT_TURN_BUDGET_USD)
+        except (TypeError, ValueError):
+            return DEFAULT_TURN_BUDGET_USD
+        return value if value > 0 else DEFAULT_TURN_BUDGET_USD
 
     def _record_call(self, phase: str, kind: str, attempt: int, response: LLMResponse,
                      outcome: str) -> None:

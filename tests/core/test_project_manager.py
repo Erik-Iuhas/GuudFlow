@@ -399,3 +399,11 @@ async def test_the_stable_part_of_the_context_is_cached(tmp_path: Path) -> None:
     blocks = llm.calls[0]["messages"][0].content
     assert blocks[0]["cache_control"] == {"type": "ephemeral"}
     assert "Open draft" not in blocks[0]["text"] and blocks[1]["text"].startswith("Open draft")
+
+
+async def test_repairs_stop_at_the_turn_budget(tmp_path: Path) -> None:
+    manager, llm = pm(tmp_path, call("plan", [req(), {**dec(), "serves": ["R99"]}]),
+                      doc={**DOC, "approval_gates": {"pm_turn_budget_usd": 0.5}})
+    manager._usage = lambda responses: (0.6, 1000)  # type: ignore[method-assign]
+    out = await manager.turn("plan", mode="update")
+    assert len(llm.calls) == 1 and out.status == "partial"
