@@ -23,6 +23,8 @@ export interface AgentConfig {
   /** Effort level for this role; "" or missing: the project's effort, else the model's default. */
   effort?: "" | "low" | "medium" | "high" | "xhigh" | "max";
   agent_class_role_type?: string | null;
+  /** The role type (core/harness/capabilities.py ROLE_TYPES); empty: inferred from the name. */
+  role_type?: string;
   is_reviewer?: boolean;
   is_final_reviewer?: boolean;
   max_tool_iterations?: number;
@@ -73,6 +75,8 @@ export interface ProjectConfig {
   start_mode?: StartMode;
   /** The project kind (role contracts plan §3); none means software_app. */
   kind?: string;
+  /** What would stop the team from working (from the API; never saved). */
+  team_warnings?: string[];
   /** Keep SPEC.md and docs/decisions/ in the project repo, updated on each accepted session. */
   record?: { keep_in_repo?: boolean };
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { KindPanel } from "../features/team/KindPanel";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, invokeApi, projectsApi, runsApi } from "../api";
 import { PersonaSlideOver } from "../components/PersonaSlideOver";
@@ -133,7 +134,8 @@ export function Studio() {
     if (!project || !id) return;
     setSaving(true);
     try {
-      await projectsApi.update(id, project);
+      const saved = await projectsApi.update(id, project);
+      if (saved) setProject(saved);
       setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -223,6 +225,7 @@ export function Studio() {
         id && <ProjectWork projectId={id} seats={project.seats} starting={starting} onStartRun={(r) => void runNow(false, r)} />
       ) : tab === "team" ? (
         <>
+          <KindPanel project={project} onChange={setProject} />
           <SeatsPanel project={project} onSaved={setProject} />
           {id && <RulesPanel projectId={id} />}
           {id && <ContractsPanel projectId={id} />}
@@ -398,7 +401,8 @@ export function Studio() {
                   a.role === settingsRole ? { ...a, ...partial } : a,
                 ),
               };
-              await projectsApi.update(id, latest);
+              const saved = await projectsApi.update(id, latest);
+              if (saved) setProject(saved);
             }}
             onRbacChange={(add, remove) => {
               if (!id) return;

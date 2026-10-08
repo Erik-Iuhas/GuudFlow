@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useContractLibrary } from "../features/design/api";
+import { ROLE_TYPES } from "../features/mcp/model";
 import { EFFORT_LEVELS } from "../features/models/api";
 import type { AgentConfig, ModelTier } from "../types";
 import { modelsApi, toolsApi, type ModelEntry } from "../api";
@@ -504,6 +506,38 @@ function GroupedToolPicker({
   );
 }
 
+// ── Role type and contract ──────────────────────────────────────────────────
+
+/** The role's type and the contract it works under. Changing a planner into a tech lead here
+ * keeps its name, so the roles after it stay after it. */
+function RoleTypeAndContract({ roleType, contract, onChange }: {
+  roleType: string;
+  contract: string;
+  onChange: (partial: Partial<AgentConfig>) => void;
+}) {
+  const library = useContractLibrary();
+  return (
+    <div className="mt-2 grid grid-cols-2 gap-2">
+      <div>
+        <label className={labelCls} htmlFor="worker-role-type">Role type</label>
+        <select id="worker-role-type" className={fieldCls} value={roleType}
+          onChange={(e) => onChange({ role_type: e.target.value })}>
+          <option value="">(from the role name)</option>
+          {ROLE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className={labelCls} htmlFor="worker-contract">Contract</label>
+        <select id="worker-contract" className={fieldCls} value={contract}
+          onChange={(e) => onChange({ contract: e.target.value })}>
+          <option value="">(the role type's default)</option>
+          {(library.data?.contracts ?? []).map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
+
 // ── Main panel ───────────────────────────────────────────────────────────────
 
 export function WorkerSettingsPanel({
@@ -588,6 +622,11 @@ export function WorkerSettingsPanel({
             <option value="architect">architect</option>
             <option value="code_reviewer">code_reviewer</option>
           </select>
+          <RoleTypeAndContract
+            roleType={current.role_type ?? ""}
+            contract={current.contract ?? ""}
+            onChange={(partial) => void handleChange(partial)}
+          />
         </section>
 
         {/* Description + system prompt */}

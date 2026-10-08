@@ -35,6 +35,7 @@ vi.mock("../../work/WorkSettings", () => ({ WorkSettings: () => <div /> }));
 vi.mock("../../team/SeatsPanel", () => ({ SeatsPanel: () => <div>seats panel</div> }));
 vi.mock("../../team/RulesPanel", () => ({ RulesPanel: () => <div>rules panel</div> }));
 vi.mock("../../team/ContractsPanel", () => ({ ContractsPanel: () => <div>contracts panel</div> }));
+vi.mock("../../team/KindPanel", () => ({ KindPanel: () => <div>kind panel</div> }));
 vi.mock("../../design/DesignTab", () => ({ DesignTab: () => <div>design content</div> }));
 
 import { Studio } from "../../../views/Studio";

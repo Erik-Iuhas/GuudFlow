@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WorkerSettingsPanel } from "../WorkerSettingsPanel";
 import type { AgentConfig } from "../../types";
 
@@ -38,7 +39,7 @@ function renderPanel(overrides: Partial<Parameters<typeof WorkerSettingsPanel>[0
   const onClose = vi.fn();
   const onRbacChange = vi.fn();
   render(
-    <WorkerSettingsPanel
+    <QueryClientProvider client={new QueryClient()}><WorkerSettingsPanel
       agent={agent}
       allRoles={["developer", "reviewer"]}
       projectRbacScopes={["code-exec"]}
@@ -47,7 +48,7 @@ function renderPanel(overrides: Partial<Parameters<typeof WorkerSettingsPanel>[0
       onSave={onSave}
       onRbacChange={onRbacChange}
       {...overrides}
-    />,
+    /></QueryClientProvider>,
   );
   return { onChange, onSave, onClose, onRbacChange };
 }
@@ -238,14 +239,14 @@ describe("WorkerSettingsPanel", () => {
     const onChange = vi.fn();
     const onSave = vi.fn().mockRejectedValue(new Error("Network error"));
     render(
-      <WorkerSettingsPanel
+      <QueryClientProvider client={new QueryClient()}><WorkerSettingsPanel
         agent={agent}
         allRoles={[]}
         projectRbacScopes={[]}
         onClose={() => {}}
         onChange={onChange}
         onSave={onSave}
-      />,
+      /></QueryClientProvider>,
     );
     const modelSelect = await waitFor(() => screen.getByLabelText("Model"));
     fireEvent.change(modelSelect, { target: { value: "claude-haiku-4-5-20251001" } });

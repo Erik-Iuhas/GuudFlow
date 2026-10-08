@@ -236,6 +236,7 @@ export const designApi = {
   phases: (pid: string) => call<PhasesResponse>(`/api/projects/${enc(pid)}/phases`),
   kinds: () => call<{ kinds: KindWire[] }>("/api/kinds"),
   contracts: (pid: string) => call<ProjectContracts>(`/api/projects/${enc(pid)}/contracts`),
+  library: () => call<{ contracts: ContractWire[] }>("/api/contracts"),
 };
 
 export const designKeys = {
@@ -260,6 +261,10 @@ export function usePhases(pid: string): UseQueryResult<PhasesResponse, Error> {
 
 export function useKinds(): UseQueryResult<{ kinds: KindWire[] }, Error> {
   return useQuery({ queryKey: designKeys.kinds, queryFn: () => designApi.kinds(), staleTime: 300_000 });
+}
+
+export function useContractLibrary(): UseQueryResult<{ contracts: ContractWire[] }, Error> {
+  return useQuery({ queryKey: ["contract-library"], queryFn: () => designApi.library(), staleTime: 300_000 });
 }
 
 export function useProjectContracts(pid: string): UseQueryResult<ProjectContracts, Error> {

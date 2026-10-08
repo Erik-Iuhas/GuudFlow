@@ -10,7 +10,7 @@ export const GRANT_ROLES = [
   ["tester", "Tester"],
 ] as const;
 
-const ROLE_TYPES = [
+export const ROLE_TYPES = [
   "researcher", "planner", "architect", "builder", "frontend_builder",
   "tester", "reviewer", "it_agent", "overseer",
 ];
