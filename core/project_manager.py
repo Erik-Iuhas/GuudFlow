@@ -32,7 +32,8 @@ from core.spec import Spec
 log = logging.getLogger(__name__)
 
 TOOL_NAME = "submit_plan_turn"
-MAX_TOKENS = 16000
+# Thinking at the project's effort counts against this too, so it leaves room for both.
+MAX_TOKENS = 32000
 HISTORY_MESSAGES = 20
 SESSIONS_SHOWN = 3
 BACKLOG_SHOWN = 60
@@ -209,12 +210,14 @@ class ProjectManager:
             turn, error = validate_result(PlanTurn, call.arguments)
             if turn is None:
                 problems = (error or "invalid payload").splitlines()
+                log.warning("pm: attempt %d invalid: %s", attempt, "; ".join(problems)[:500])
                 continue
             current = self.drafts.current()
             problems = validate_turn(turn, spec, backlog_doc, self._team(), sources,
                                      set(current.groups) if current else ())
             if not problems:
                 return turn, responses
+            log.warning("pm: attempt %d rejected: %s", attempt, "; ".join(problems)[:500])
         raise ProjectManagerError(problems)
 
     def _merge(self, turn: PlanTurn) -> Draft:
