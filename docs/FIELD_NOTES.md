@@ -85,3 +85,9 @@ The owner had about $8 left on the key, so a third of it went here.
 - **Operator:** answered the pause from the run (a Studio action): run `bun test` plain, pipe only to grep/head/tail.
 - **Cause:** the refusal does not say which part of the command line was denied, and the brief does not list the allowed commands.
 - **Proposed fix:** the builder brief lists the allowed shell commands. Where opencode reports a denied bash call, the event bridge names the refused segment ("`sed` is not allowed; `bun test` is"), so the worker can retry on its own without asking a human. `open`
+
+### F12. Workers stop to ask questions the board already answers
+- **Seen:** session 5. Kenji (game logic, Haiku) paused the run twice. The first pause was F11. The second asked which card was his: T7, from his brief, or T5, which the board still showed as his while it was blocked. It also asked which families Magnet suits, which the spec had left open.
+- **Operator:** answered from the run, which is a Studio action. T7 is his, the overseer had already settled T5, and the suited families are speed and rush.
+- **Cause:** the brief names the current card, but a blocked card stays assigned to its worker, and nothing says it is parked. A spec gap the registry test enforces (`suited` must not be empty) reached a worker as a question rather than a decision for the tech lead.
+- **Proposed fix:** the brief lists the worker's parked cards as "parked, not yours to work on now", with who they wait on. A question about the spec goes to the tech lead as a `blocked_on: planner` note before it becomes `ask_human`. Only an owner choice reaches a person. `open`
