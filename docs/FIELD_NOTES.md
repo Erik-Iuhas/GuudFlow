@@ -65,3 +65,17 @@ it on its own (budget re-briefs and a priority order). What still needed the ope
 - **Escaped text on the board:** the overseer's `decide` summary had HTML entities (`T4 &gt; T6`). The model wrote them itself; overseer results are now unescaped when validated. `fixed`
 - **Overseer wake reason not on the board:** the overseer started with no signal saying which detector woke it (here `burn_without_output`). Post the detector and its numbers as a signal so Studio can show why. `fixed` (`OVERSEER_WAKE`)
 - **Serial plans leave workers idle:** the planner chained most cards (T3 → T4 → T5 → T7 → T8), so the renderer waited about 8 minutes twice. Worth a planner hint: prefer cards that can start on agreed interfaces. `fixed` (planner hint)
+
+## Session 5 planning (pacrogue)
+
+Drafting the session-5 plan took five calls to Jack where one should have done. About $3.60 went
+to Jack, and roughly $3 of it was waste. The two turns that failed were never recorded (about
+$1.80, estimated from the two recorded turns of the same size). Rejected attempts inside turns
+that did succeed cost about $0.80, and one turn ($0.68) only re-sent what a merge bug had dropped.
+The owner had about $8 left on the key, so a third of it went here.
+
+### F10. Jack cannot repair its own answer; every mistake re-buys the whole turn
+- **Seen:** (1) the answer was cut off at the output cap, because thinking at the project's effort counts against it. (2) Items named checks (`R2.4`) where requirements go. (3) Statements said "level 1" and were rejected as "numbers belong in params". (4) A re-sent turn named `R14`–`R17`, ids that only exist after approval, instead of refs. Each time the validator rejected the *whole* turn (20+ changes), Jack regenerated all of it from scratch, and after two attempts the API returned 502 and kept nothing. (5) A follow-up turn dropped every earlier undecided proposal, although the prompt tells Jack to build on the open draft.
+- **Operator:** raised the output cap, mapped check ids to requirements, made follow-up turns keep the draft (all `fixed`, commits on `claude/clever-pascal-vpz71c`), restarted the API three times, and told Jack in chat to re-send what was lost.
+- **Cause:** a turn is all-or-nothing. One tool call carries every change, one bad change sinks all of them, the retry repeats the full context and output, and a failed turn leaves no trace: no draft changes, no cost, no message.
+- **Proposed fix:** `docs/PM_SELF_REPAIR_PLAN.md`: Jack edits the draft change by change and repairs only what failed, a failed turn keeps its valid work and its cost, and repeated mistakes are detected and broken. `open`
