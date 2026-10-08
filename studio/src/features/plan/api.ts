@@ -207,6 +207,15 @@ export interface PlanMessageWire {
 export interface PlanWire {
   messages: PlanMessageWire[];
   draft: DraftWire | null;
+  /** What the project manager's calls cost (all time, last 24 h, and calls that bought nothing). */
+  pm_spend?: PmSpendWire;
+}
+
+export interface PmSpendWire {
+  calls: number;
+  total_usd: number;
+  last_24h_usd: number;
+  wasted_usd: number;
 }
 
 export interface PlanTurnWire {

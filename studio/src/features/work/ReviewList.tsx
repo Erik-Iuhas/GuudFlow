@@ -9,6 +9,7 @@ import { changeSummary } from "./model";
 import { COSIGN_WHY, Cosign, canAccept } from "./Cosign";
 import { SpecResults } from "./SpecResults";
 import { Ledger } from "./Ledger";
+import { OwnerChecks, StopReason } from "./OwnerChecks";
 
 const STATE_VARIANT: Record<RunState, BadgeProps["variant"]> = {
   pending: "waiting",
@@ -164,6 +165,11 @@ function PendingRun({
       {diff !== undefined && <DiffBlock text={diff} />}
       {run.check?.ledger && Object.keys(run.check.ledger).length > 0 && (
         <Ledger entries={Object.values(run.check.ledger)} confirmed={confirmed}
+          onToggle={(id) => setConfirmed(confirmed.includes(id) ? confirmed.filter((x) => x !== id) : [...confirmed, id])} />
+      )}
+      {run.stopped && <StopReason stopped={run.stopped} />}
+      {run.state === "pending" && (run.owner_checks?.length ?? 0) > 0 && (
+        <OwnerChecks checks={run.owner_checks ?? []} confirmed={confirmed}
           onToggle={(id) => setConfirmed(confirmed.includes(id) ? confirmed.filter((x) => x !== id) : [...confirmed, id])} />
       )}
       {projectId && <SpecResults runId={run.run_id} />}

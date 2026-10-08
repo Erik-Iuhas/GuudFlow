@@ -133,6 +133,25 @@ export interface RunBranchWire {
   /** A reviewer's co-sign is needed before the owner can accept. */
   needs_cosign?: boolean;
   cosign?: CosignWire | null;
+  /** Checks only the owner can do (playtests, looks by hand), with what the worker says to try. */
+  owner_checks?: OwnerCheckWire[];
+  /** Set when the run ended before its cards were done: why, and what each open card waits on. */
+  stopped?: RunStoppedWire | null;
+}
+
+export interface OwnerCheckWire {
+  task_id: string;
+  backlog_id: string | null;
+  item: string;
+  how: string;
+  by: string;
+}
+
+export interface RunStoppedWire {
+  status: string;
+  summary: string;
+  open_items: string[];
+  open_cards: { task_id: string; title: string; owner: string; column: string; backlog_id: string | null; waits_on: string }[];
 }
 
 export interface NewItem {

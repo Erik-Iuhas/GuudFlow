@@ -86,6 +86,25 @@ describe("BacklogList", () => {
 });
 
 describe("ReviewList", () => {
+  it("lists the owner's checks and records ticked ones as confirmed; shows why a run stopped", () => {
+    const onDecide = vi.fn();
+    render(<MemoryRouter><ReviewList pending={[run("run_a", {
+      owner_checks: [
+        { task_id: "T3", backlog_id: "B16", item: "R16.3: Manual: a new player clears level 1", how: "play level 1 three times", by: "logic" },
+        { task_id: "T9", backlog_id: null, item: "Browser check: the pop is readable", how: "", by: "render" },
+      ],
+      stopped: { status: "stuck", summary: "Stopped early: nothing could start and nothing was running. 1 card(s) still open.",
+        open_items: ["B7"], open_cards: [{ task_id: "T4", title: "Magnet render", owner: "render", column: "todo", backlog_id: "B7", waits_on: "waits for T3 (render, blocked)" }] },
+    })]} decided={[]} changes={{}} onViewChanges={vi.fn()} onDecide={onDecide} onContinue={vi.fn()} /></MemoryRouter>);
+    const checks = screen.getByTestId("owner-checks");
+    expect(within(checks).getByText("Try: play level 1 three times")).toBeInTheDocument();
+    fireEvent.click(within(checks).getByLabelText("Confirmed R16.3"));
+    fireEvent.click(screen.getByRole("button", { name: "Accept into the project" }));
+    expect(onDecide).toHaveBeenCalledWith("run_a", true, "", ["R16.3"]);
+    expect(screen.getByTestId("stop-reason")).toHaveTextContent("T4 Magnet render (render): waits for T3");
+  });
+
+
   it("accepts or rejects with a note, and shows a conflict's files", () => {
     const onDecide = vi.fn();
     const { rerender } = render(<MemoryRouter><ReviewList pending={[run("run_a")]} decided={[]} changes={{}}

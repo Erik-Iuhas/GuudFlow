@@ -46,7 +46,15 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
   const pending = start.isPending || send.isPending;
   const panelError = tick.error ?? approve.error ?? discard.error ?? edit.error;
 
+  const spend = plan.data?.pm_spend;
   return (
+    <div className="flex flex-col gap-2">
+    {spend && spend.calls > 0 && (
+      <p className="m-0 text-xs text-muted-foreground" data-testid="pm-spend">
+        Planning cost so far: ${spend.total_usd.toFixed(2)} (${spend.last_24h_usd.toFixed(2)} in the last 24 h
+        {spend.wasted_usd > 0 ? `, $${spend.wasted_usd.toFixed(2)} on calls that produced nothing usable` : ""}).
+      </p>
+    )}
     <div className="flex flex-col gap-4 min-[1000px]:flex-row min-[1000px]:items-start">
       <Conversation
         messages={plan.data?.messages ?? []}
@@ -108,6 +116,7 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
           <Skeleton className="h-40 w-full" />
         )}
       </aside>
+    </div>
     </div>
   );
 }
