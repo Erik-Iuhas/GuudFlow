@@ -79,3 +79,9 @@ The owner had about $8 left on the key, so a third of it went here.
 - **Operator:** raised the output cap, mapped check ids to requirements, made follow-up turns keep the draft (all `fixed`, commits on `claude/clever-pascal-vpz71c`), restarted the API three times, and told Jack in chat to re-send what was lost.
 - **Cause:** a turn is all-or-nothing. One tool call carries every change, one bad change sinks all of them, the retry repeats the full context and output, and a failed turn leaves no trace: no draft changes, no cost, no message.
 - **Proposed fix:** `docs/PM_SELF_REPAIR_PLAN.md`: Jack edits the draft change by change and repairs only what failed, a failed turn keeps its valid work and its cost, and repeated mistakes are detected and broken. `open`
+
+### F11. A worker read a denied pipe as "bun test is blocked"
+- **Seen:** session 5, T1. Sol (Haiku) ran `bun test 2>&1 | grep … | sed …` and `bun test > /work/.t.txt; echo done`. Both were refused because `sed`, `echo` and redirection are not on the shell allow-list. Sol concluded `bun test` itself was denied and paused the run to ask for access.
+- **Operator:** answered the pause from the run (a Studio action): run `bun test` plain, pipe only to grep/head/tail.
+- **Cause:** the refusal does not say which part of the command line was denied, and the brief does not list the allowed commands.
+- **Proposed fix:** the builder brief lists the allowed shell commands. Where opencode reports a denied bash call, the event bridge names the refused segment ("`sed` is not allowed; `bun test` is"), so the worker can retry on its own without asking a human. `open`
