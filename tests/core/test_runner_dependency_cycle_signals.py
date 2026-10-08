@@ -70,7 +70,7 @@ def test_a_role_waiting_on_a_missing_role_stops_the_run(tmp_path: Path):
         AgentConfig(role="reviewer", depends_on=["builder"], review_of=["builder"]),
     ]
     runner = _make_runner(agents, tmp_path)
-    with pytest.raises(RuntimeError, match="not on it: builder → planner"):
+    with pytest.raises(RuntimeError, match="builder: depends_on names planner"):
         runner._prepare_team()
     failed = [s for s in runner.workspace.board if s.type == SignalType.FAILED]
-    assert failed and "builder → planner" in failed[0].summary
+    assert failed and "depends_on names planner" in failed[0].summary

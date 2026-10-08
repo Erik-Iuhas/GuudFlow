@@ -279,9 +279,25 @@ async def test_a_team_must_not_wait_on_a_missing_role(client, auth_header):
         {"role": "tech_lead", "role_type": "architect"},
         {"role": "builder", "depends_on": ["planner"]}]}
     r = await client.post("/api/projects", json=body, headers=auth_header)
-    assert r.status_code == 400 and "'planner'" in r.json()["detail"]
+    assert r.status_code == 400 and "names planner" in r.json()["detail"]
     body["agents"][1]["depends_on"] = ["tech_lead"]
     assert (await client.post("/api/projects", json=body, headers=auth_header)).status_code == 201
     body["agents"][1]["review_of"] = ["ghost"]
     r = await client.put("/api/projects/swap", json=body, headers=auth_header)
     assert r.status_code == 400 and "review_of" in r.json()["detail"]
+
+
+async def test_team_warnings_name_what_would_stop_a_run(client, auth_header):
+    body = {"project_id": "warn", "goal": "g", "agents": [
+        {"role": "planner", "role_type": "planner"},
+        {"role": "tech_lead", "role_type": "architect", "contract": "tech_lead"},
+        {"role": "builder", "role_type": "builder", "depends_on": ["planner"]}]}
+    assert (await client.post("/api/projects", json=body, headers=auth_header)).status_code == 201
+    got = (await client.get("/api/projects/warn")).json()
+    assert any("both plan sessions" in w for w in got["team_warnings"])
+    body["agents"] = [{"role": "planner", "role_type": "architect", "contract": "tech_lead"},
+                      body["agents"][2]]
+    r = await client.put("/api/projects/warn", json={**got, **body}, headers=auth_header)
+    assert r.status_code == 200 and r.json()["team_warnings"] == []
+    stored = (await client.get("/api/projects/warn")).json()
+    assert stored["agents"][0]["contract"] == "tech_lead"

@@ -570,20 +570,23 @@ class AgentRunner:
                     r for r in non_final_roles if r != cfg.role and r not in blockers
                 ]
 
-        roles = {c.role for c in self.project.agents}
-        dangling = sorted({f"{c.role} → {d}" for c in self.project.agents
-                           for d in [*(c.depends_on or []), *(c.review_of or [])]
-                           if d not in roles})
-        if dangling:
-            # A role waiting on one that is not on the team would never get work.
+        from core.team_changes import team_problems
+        problems = team_problems([{"role": c.role, "role_type": c.role_type,
+                                   "contract": c.contract, "is_reviewer": c.is_reviewer,
+                                   "depends_on": list(c.depends_on or []),
+                                   "review_of": list(c.review_of or [])}
+                                  for c in self.project.agents])
+        if problems:
+            # A team that cannot work (a role waiting on nobody, two planners, a builder no
+            # card can reach) would start and stall, so the run stops before it spends anything.
             self.workspace.post_signal(Signal(
                 type=SignalType.FAILED,
-                summary=f"team names roles that are not on it: {', '.join(dangling)}",
-                detail=("Run cannot start: edit depends_on / review_of so every role they "
-                        "name is on the team (e.g. after replacing a planner)."),
+                summary="the team cannot work: " + "; ".join(problems),
+                detail=("Run cannot start. Fix the team (depends_on, review_of, role types) "
+                        "and start again."),
                 from_agent="scheduler",
             ))
-            raise RuntimeError(f"team names roles that are not on it: {', '.join(dangling)}")
+            raise RuntimeError("the team cannot work: " + "; ".join(problems))
 
         cycle = _detect_dependency_cycle(self.project.agents)
         if cycle:

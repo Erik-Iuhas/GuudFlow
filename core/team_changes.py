@@ -11,6 +11,10 @@ from typing import Any
 
 from core.harness.capabilities import infer_role_type
 
+# Role types that build from cards: with a session planner on the team they must come after it
+# (directly or through another role), or the task board never gives them work.
+_CARD_BUILDERS = frozenset({"builder", "frontend_builder", "tester"})
+
 DEFAULT_REVIEW_ROUNDS = 2
 _EDITABLE = ("role_type", "description", "model_tier", "depends_on", "review_of",
              "max_review_rounds", "name", "capabilities", "contract")
@@ -93,3 +97,58 @@ def contract_rules(changes: list[dict[str, Any]]) -> list[tuple[str, str]]:  # A
     """(contract, rule) for each ticked `add_contract_rule`, in order."""
     return [(str(ch["contract"]), str(ch["rule"])) for ch in changes
             if ch.get("op") == "add_contract_rule"]
+
+
+def missing_roles(agents: list[dict[str, Any]]) -> list[str]:  # Any: agent rows
+    """The `team_problems` lines about roles named but not on the team (always a mistake)."""
+    return [p for p in team_problems(agents) if p.endswith(_NOT_ON_TEAM)]
+
+
+_NOT_ON_TEAM = "which is not on the team"
+
+
+def team_problems(agents: list[dict[str, Any]],  # Any: agent rows
+                  contracts: Any = None) -> list[str]:  # Any: Mapping[str, Contract]
+    """What would stop a team from working, one line each (empty when it is fine):
+
+    - a `depends_on` / `review_of` naming a role that is not on the team;
+    - more than one role whose contract owns the session plan (e.g. a tech lead added next to
+      the old planner): only one plans, the other idles;
+    - a builder that does not come after the session planner, so it would get no cards.
+
+    `contracts` is the contract library (default: the shipped one)."""
+    from core.contracts import contract_id_for, load_library
+    lib = contracts if contracts is not None else load_library()
+    rows = [a for a in agents if isinstance(a, dict) and a.get("role")]
+    roles = {str(a["role"]) for a in rows}
+    problems: list[str] = []
+    for a in rows:
+        for key in ("depends_on", "review_of"):
+            missing = [r for r in (a.get(key) or []) if r not in roles]
+            if missing:
+                problems.append(f"{a['role']}: {key} names {', '.join(missing)}, "
+                                + _NOT_ON_TEAM)
+    types = {str(a["role"]): infer_role_type(str(a["role"]), is_reviewer=bool(a.get("is_reviewer")),
+                                             declared=str(a.get("role_type") or ""))
+             for a in rows}
+    planners = [str(a["role"]) for a in rows
+                if (cid := contract_id_for(a, types[str(a["role"])])) in lib
+                and lib[cid].may_change("session_plan")]
+    if len(planners) > 1:
+        problems.append(f"{' and '.join(planners)} both plan sessions; keep one (change the "
+                        f"old planner into the new role instead of adding a second)")
+        return problems
+    if not planners:
+        return problems
+    planner = planners[0]
+    deps = {str(a["role"]): set(a.get("depends_on") or []) for a in rows}
+
+    def after_planner(role: str, seen: frozenset[str] = frozenset()) -> bool:
+        return any(d == planner or (d not in seen and after_planner(d, seen | {role}))
+                   for d in deps.get(role, ()))
+
+    for role, role_type in types.items():
+        if role != planner and role_type in _CARD_BUILDERS and not after_planner(role):
+            problems.append(f"{role} does not come after the planner {planner}, so it would get "
+                            f"no cards; add {planner} to its depends_on")
+    return problems

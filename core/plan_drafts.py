@@ -676,7 +676,9 @@ def _validate_team(turn: PlanTurn, team: list[dict[str, Any]]) -> list[str]:  # 
     final: dict[str, dict[str, Any]] = {  # Any: role_type str + two str lists
         str(a["role"]): {"role_type": str(a.get("role_type") or ""),
                          "depends_on": list(a.get("depends_on") or []),
-                         "review_of": list(a.get("review_of") or [])}
+                         "review_of": list(a.get("review_of") or []),
+                         "contract": a.get("contract") or None,
+                         "is_reviewer": bool(a.get("is_reviewer"))}
         for a in team if a.get("role")}
     existing = set(final)
     added: set[str] = set()
@@ -695,7 +697,8 @@ def _validate_team(turn: PlanTurn, team: list[dict[str, Any]]) -> list[str]:  # 
             else:
                 added.add(ch.role)
                 final[ch.role] = {"role_type": ch.role_type, "depends_on": list(ch.depends_on),
-                                  "review_of": list(ch.review_of)}
+                                  "review_of": list(ch.review_of), "contract": ch.contract,
+                                  "is_reviewer": ch.role_type == "reviewer"}
             if ch.role_type not in ROLE_TYPES:
                 problems.append(f"{where}: role_type {ch.role_type!r} is not one of "
                                 f"{', '.join(ROLE_TYPES)}")
@@ -711,10 +714,12 @@ def _validate_team(turn: PlanTurn, team: list[dict[str, Any]]) -> list[str]:  # 
                                 f"{', '.join(ROLE_TYPES)}")
             problems += _contract_problems(where, ch.contract)
             if ch.role in final:
-                for key in ("role_type", "depends_on", "review_of"):
+                for key in ("role_type", "depends_on", "review_of", "contract"):
                     value = getattr(ch, key)
                     if value is not None:
-                        final[ch.role][key] = value if key == "role_type" else list(value)
+                        final[ch.role][key] = list(value) if isinstance(value, list) else value
+                if ch.role_type is not None:
+                    final[ch.role]["is_reviewer"] = ch.role_type == "reviewer"
         else:
             if ch.role not in existing and ch.role not in added:
                 problems.append(f"{where}: unknown role {ch.role}")
@@ -748,7 +753,25 @@ def _validate_team(turn: PlanTurn, team: list[dict[str, Any]]) -> list[str]:  # 
         problems.append("the team's depends_on would form a cycle")
     if not any(row["role_type"] in _BUILDER_TYPES for row in final.values()):
         problems.append("the team must keep at least one builder or frontend_builder role")
+    # The team the changes produce must be able to work: no second session planner, every
+    # builder after the planner (core/team_changes.team_problems). Only problems the turn
+    # introduces count; to bring in a tech lead, change the existing planner with edit_role.
+    from core.team_changes import team_problems
+    before = set(team_problems([{"role": r, **row} for r, row in _team_rows(team).items()]))
+    for line in team_problems([{"role": r, **row} for r, row in final.items()]):
+        if line not in before:
+            problems.append(f"the team after these changes: {line}")
     return problems
+
+
+def _team_rows(team: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:  # Any: agent rows
+    """The fields `team_problems` reads, by role."""
+    return {str(a["role"]): {"role_type": str(a.get("role_type") or ""),
+                             "depends_on": list(a.get("depends_on") or []),
+                             "review_of": list(a.get("review_of") or []),
+                             "contract": a.get("contract") or None,
+                             "is_reviewer": bool(a.get("is_reviewer"))}
+            for a in team if a.get("role")}
 
 
 def _contract_problems(where: str, contract: str | None) -> list[str]:

@@ -655,7 +655,9 @@ def test_add_role_names_a_known_contract(pd: PlanDrafts) -> None:
     from core.team_changes import apply_team_changes
     ok = {"op": "add_role", "role": "lead", "role_type": "architect", "model_tier": "heavy",
           "description": "Owns the design.", "contract": "tech_lead", "reason": TEAM_REASON}
-    assert _team_problems(pd, ok) == []
+    assert any("does not come after the planner lead" in p for p in _team_problems(pd, ok))
+    after = {"op": "edit_role", "role": "builder", "depends_on": ["lead"], "reason": TEAM_REASON}
+    assert _team_problems(pd, ok, after) == []
     assert any("contract 'chief'" in p for p in _team_problems(pd, {**ok, "contract": "chief"}))
     team, _ = apply_team_changes([], [ok])
     assert team[0]["contract"] == "tech_lead"
@@ -684,3 +686,19 @@ def test_pm_sets_item_effort_by_difficulty(pd: PlanDrafts) -> None:
     assert b1()["effort"] == "low"
     with pytest.raises(ValueError):
         _turn(item(effort="turbo"))
+
+
+def test_a_tech_lead_replaces_the_planner_in_place(pd: PlanDrafts) -> None:
+    """Moving an older project to a tech lead: a second planner is refused, an edit is not."""
+    team = [{"role": "planner", "role_type": "planner"},
+            {"role": "builder", "role_type": "builder", "depends_on": ["planner"]},
+            {"role": "reviewer", "role_type": "reviewer", "is_reviewer": True,
+             "depends_on": ["builder"], "review_of": ["builder"]}]
+    spec, backlog = Spec(pd.db.read_spec_doc()), pd.db.read_backlog_doc()
+    second = _turn({"op": "add_role", "role": "tech_lead", "role_type": "architect",
+                    "contract": "tech_lead", "description": "Owns the design.", "model_tier": "solid",
+                    "reason": TEAM_REASON})
+    assert any("both plan sessions" in p for p in validate_turn(second, spec, backlog, team))
+    in_place = _turn({"op": "edit_role", "role": "planner", "role_type": "architect",
+                      "contract": "tech_lead", "reason": TEAM_REASON})
+    assert validate_turn(in_place, spec, backlog, team) == []

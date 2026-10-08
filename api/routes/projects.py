@@ -26,7 +26,14 @@ async def get_project(request: Request, project_id: str) -> dict:
     project = await _store(request).get(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
-    return project
+    return _with_warnings(project)
+
+
+def _with_warnings(project: dict) -> dict:
+    """The project plus `team_warnings`: what would stop its team from working (not stored)."""
+    from core.team_changes import team_problems
+    agents = project.get("agents")
+    return {**project, "team_warnings": team_problems(agents) if isinstance(agents, list) else []}
 
 
 @router.get("/{project_id}/playbook", dependencies=[Depends(require_bearer)])
@@ -95,22 +102,16 @@ def _check_kind(project: dict) -> None:
 
 
 def _check_team(project: dict) -> None:
-    """Every role a team row waits on (`depends_on`) or reviews (`review_of`) must be on the
-    team. Renaming or replacing a role (a planner swapped for a tech lead) otherwise leaves the
-    roles below it waiting on nobody, and they never get work."""
+    """Refuse a team row waiting on or reviewing a role that is not on the team. The softer
+    problems (two planners, a builder no card reaches) are allowed while a team is being
+    edited; `team_warnings` reports them and a run refuses to start with them."""
     agents = project.get("agents")
     if not isinstance(agents, list):
         return
-    roles = {a.get("role") for a in agents if isinstance(a, dict)}
-    for a in agents:
-        if not isinstance(a, dict):
-            continue
-        for key in ("depends_on", "review_of"):
-            missing = [r for r in (a.get(key) or []) if r not in roles]
-            if missing:
-                raise HTTPException(status_code=400, detail=(
-                    f"role {a.get('role')!r}: {key} names {', '.join(map(repr, missing))}, "
-                    f"which is not on the team"))
+    from core.team_changes import missing_roles
+    problems = missing_roles(agents)
+    if problems:
+        raise HTTPException(status_code=400, detail="; ".join(problems))
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_bearer)])
@@ -119,6 +120,7 @@ async def create_project(request: Request, project: dict = Body(...)) -> dict:
         raise HTTPException(status_code=400, detail="project_id is required")
     if "goal" not in project:
         raise HTTPException(status_code=400, detail="goal is required")
+    project.pop("team_warnings", None)
     _check_kind(project)
     _check_team(project)
     try:
@@ -130,13 +132,14 @@ async def create_project(request: Request, project: dict = Body(...)) -> dict:
 
 @router.put("/{project_id}", dependencies=[Depends(require_bearer)])
 async def update_project(request: Request, project_id: str, project: dict = Body(...)) -> dict:
+    project.pop("team_warnings", None)
     _check_kind(project)
     _check_team(project)
     result = await _store(request).update(project_id,
                                           await _with_names(request, project, project_id))
     if result is None:
         raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
-    return result
+    return _with_warnings(result)
 
 
 @router.delete(
