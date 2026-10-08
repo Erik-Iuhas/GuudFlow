@@ -35,7 +35,8 @@ _NUMBER = re.compile(r"(?<![A-Za-z0-9.])[0-9]+(?:\.[0-9]+)?(?![0-9])")
 _BACKLOG_ID = re.compile(r"^B[0-9]+$")
 _DECISION_ID = re.compile(r"^D[0-9]+$")
 _DECISION_OPS = ("add_decision", "supersede_decision")
-TEAM_OPS = ("add_role", "edit_role", "remove_role", "set_kind")   # change the project doc
+TEAM_OPS = ("add_role", "edit_role", "remove_role", "set_kind",  # change the project doc,
+            "add_contract_rule")                                # not the spec
 _ROLE_SLUG = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
 _BUILDER_TYPES = ("builder", "frontend_builder")
 
@@ -313,6 +314,17 @@ class RemoveRole(_Op):
     reason: str
 
 
+class AddContractRule(_Op):
+    """Add a rule to one of the project's role contracts (role contracts plan §6), proposed from
+    contract measures with the sessions that support it; a human always ticks it."""
+
+    op: Literal["add_contract_rule"]
+    contract: str
+    rule: str = Field(min_length=10, max_length=400)
+    evidence_runs: list[str] = Field(default_factory=list, max_length=10)
+    reason: str
+
+
 class SetKind(_Op):
     """Set the project's kind (role contracts plan §3), and optionally its start mode; a human
     always ticks it and it applies from the next session."""
@@ -327,7 +339,7 @@ Change = Annotated[
     AddRequirement | EditRequirement | DropRequirement | SetTitle | SetStatement | SetParam
     | RemoveParam | AddCheck | EditCheck | RemoveCheck | AddDecision | SupersedeDecision
     | AddItem | EditItem | DropItem | AddRule | DropRule | AddRole | EditRole | RemoveRole
-    | SetKind,
+    | SetKind | AddContractRule,
     Field(discriminator="op")]
 _CHANGE_ADAPTER: TypeAdapter[Any] = TypeAdapter(Change)  # Any: the union members above
 _REF_KIND = {"add_requirement": "requirement", "add_decision": "decision",
@@ -622,6 +634,9 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
                                 f"{rule.source}; supersede the decision instead")
     problems.extend(_validate_team(turn, team or []))
     problems.extend(_validate_kind(turn))
+    for n, ch in enumerate(turn.changes, 1):
+        if isinstance(ch, AddContractRule):
+            problems += _contract_problems(f"change {n} (add_contract_rule)", ch.contract)
     return problems
 
 
@@ -937,7 +952,7 @@ class PlanDrafts:
             parsed = parse_change(change)
         except ValueError as e:
             raise PlanDraftError(f"not a team change: {e}") from e
-        if not isinstance(parsed, (AddRole, EditRole, RemoveRole)):
+        if not isinstance(parsed, (AddRole, EditRole, RemoveRole, AddContractRule)):
             raise PlanDraftError(f"{parsed.op} is not a team change")
         self.open_draft()
         with self.db.drafts_doc() as doc:
@@ -1067,7 +1082,8 @@ class _Applier:
         parsed = [(dc, parse_change(dc.change)) for dc in chosen]
         self.team_changes = [ch.model_dump(mode="json", exclude_none=True, exclude={"group"})
                              for _, ch in parsed
-                             if isinstance(ch, (AddRole, EditRole, RemoveRole, SetKind))]
+                             if isinstance(ch, (AddRole, EditRole, RemoveRole, SetKind,
+                                                AddContractRule))]
         phases: list[tuple[type, ...]] = [
             (AddRequirement, EditRequirement, DropRequirement),
             (SetTitle, SetStatement, SetParam, RemoveParam, AddCheck, EditCheck),

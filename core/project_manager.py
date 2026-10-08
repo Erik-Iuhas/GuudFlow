@@ -274,6 +274,10 @@ class ProjectManager:
                      + (rendered or "(empty: nothing is approved yet)"))
         parts.append(self._team_context())
         parts.append(self._kind_context())
+        from core.contract_measures import render_for_pm as render_measures
+        measures = render_measures(self.data_root, self.project_id)
+        if measures:
+            parts.append(measures)
         parts.append("Open draft (proposed, not yet part of the spec):\n"
                      + self._draft_summary())
         parts.append("Open backlog:\n" + self._backlog_summary())

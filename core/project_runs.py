@@ -253,6 +253,7 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
         run = repo.get(run_id) or run
         keep_notebooks(data_root, project_id, run_id)
         _refresh_knowledge(data_root, project_id, run_id, list(run.files))
+        _score_contracts(data_root, project_id, run_id, run.check)
         carry = Path(data_root) / "runs" / run_id / "carry_forward.json"
         target = Path(data_root) / "projects" / project_id / "context" / LAST_ACCEPTED_JSON
         if carry.is_file():
@@ -271,6 +272,24 @@ def _refresh_knowledge(data_root: Path, project_id: str, run_id: str,
         build_facts(data_root, project_id, check_command=_check_command(data_root, project_id))
     except Exception:  # noqa: BLE001 — see docstring
         log.exception("refreshing the knowledge base after %s failed", run_id)
+
+
+def _score_contracts(data_root: Path, project_id: str, run_id: str,
+                     check: object) -> None:
+    """After an accept: score the team's contract measures and propose rules the evidence
+    supports (role contracts plan §6). Never raises: the merge has already happened."""
+    try:
+        from core.contract_measures import propose_into_draft, record_session
+        from core.json_store import read_json
+        doc = (read_json(Path(data_root) / "projects.json", {}) or {}).get(project_id) or {}
+        team = [a for a in (doc.get("agents") or []) if isinstance(a, dict)] \
+            if isinstance(doc, dict) else []
+        ledger = check.get("ledger") if isinstance(check, dict) else None
+        record_session(data_root, project_id, run_id, team,
+                       ledger if isinstance(ledger, dict) else None)
+        propose_into_draft(data_root, project_id)
+    except Exception:  # noqa: BLE001 — see docstring
+        log.exception("scoring the contracts after %s failed", run_id)
 
 
 def _check_command(data_root: Path, project_id: str) -> str:

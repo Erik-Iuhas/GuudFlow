@@ -300,6 +300,17 @@ async def test_approve_sets_the_kind(client, auth_header, app) -> None:
     assert "data_builder" in {a["role"] for a in doc["agents"]}
 
 
+async def test_approve_adds_a_contract_rule(client, auth_header, app, data_root) -> None:
+    rule = {"op": "add_contract_rule", "contract": "builder",
+            "rule": "Use integer maths for positions.", "evidence_runs": ["r1", "r2"],
+            "reason": TEAM_REASON}
+    await _team_draft(client, auth_header, app, rule)
+    r = await client.post("/api/projects/p1/plan/draft/approve", headers=auth_header)
+    assert r.status_code == 200, r.text
+    from core.contracts import load_for_project
+    assert load_for_project(data_root, "p1")["builder"].rules[-1] == rule["rule"]
+
+
 async def test_approve_adds_a_role_with_defaults(client, auth_header, app) -> None:
     await _team_draft(client, auth_header, app, ADD_ROLE)
     r = await client.post("/api/projects/p1/plan/draft/approve", headers=auth_header)

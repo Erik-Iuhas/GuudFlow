@@ -22,7 +22,8 @@ from core.plan_drafts import TEAM_OPS, Draft, PlanDraftError, PlanDrafts, parse_
 from core.project_manager import ProjectManager, ProjectManagerError, TurnOutcome
 from core.project_runs import write_record
 from core.spec import Spec, SpecError
-from core.team_changes import TeamChangeError, apply_team_changes, kind_change
+from core.team_changes import (TeamChangeError, apply_team_changes, contract_rules,
+                                kind_change)
 
 router = APIRouter(prefix="/api/projects", tags=["plan"],
                    dependencies=[Depends(require_bearer)])
@@ -207,7 +208,8 @@ async def approve_draft(request: Request, project_id: str) -> dict[str, Any]:  #
     """Apply the ticked changes: `{version, applied, created, team_changes, team}`.
 
     Ticked team ops (add_role, edit_role, remove_role) then change the project's `agents`, and
-    a ticked set_kind its `kind` (and start mode);
+    a ticked set_kind its `kind` (and start mode); a ticked add_contract_rule is appended to the
+    project's override of that contract;
     `team` is `{added, edited, removed}` (role names). The new team applies from the next
     session.
     """
@@ -238,6 +240,9 @@ async def approve_draft(request: Request, project_id: str) -> dict[str, Any]:  #
                 project_id, {**doc, "agents": agents, **kind_change(result.team_changes)})
             if updated is None:
                 raise TeamChangeError(f"project {project_id!r} not found")
+            from core.contract_measures import add_project_rule
+            for cid, rule in contract_rules(result.team_changes):
+                await asyncio.to_thread(add_project_rule, data_root, project_id, cid, rule)
         except Exception as exc:  # noqa: BLE001 — reported in full, the draft stays approved
             raise HTTPException(
                 status_code=500,

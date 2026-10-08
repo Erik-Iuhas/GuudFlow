@@ -61,8 +61,8 @@ def apply_team_changes(agents: list[dict[str, Any]],  # Any: agent rows
                     == "reviewer"
             if role not in summary["edited"]:
                 summary["edited"].append(role)
-        elif op == "set_kind":
-            continue                     # the project's kind, not its team: see kind_change
+        elif op in ("set_kind", "add_contract_rule"):
+            continue                     # not the team: see kind_change, contract_rules
         elif op == "remove_role":
             if row is None:
                 raise TeamChangeError(f"role {role!r} is not on the team")
@@ -87,3 +87,9 @@ def kind_change(changes: list[dict[str, Any]]) -> dict[str, str]:  # Any: dumped
             if ch.get("start_mode"):
                 out["start_mode"] = str(ch["start_mode"])
     return out
+
+
+def contract_rules(changes: list[dict[str, Any]]) -> list[tuple[str, str]]:  # Any: Changes
+    """(contract, rule) for each ticked `add_contract_rule`, in order."""
+    return [(str(ch["contract"]), str(ch["rule"])) for ch in changes
+            if ch.get("op") == "add_contract_rule"]
