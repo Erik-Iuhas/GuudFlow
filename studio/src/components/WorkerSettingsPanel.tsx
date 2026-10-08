@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { EFFORT_LEVELS } from "../features/models/api";
 import type { AgentConfig, ModelTier } from "../types";
 import { modelsApi, toolsApi, type ModelEntry } from "../api";
 import { checkCls, checkLabelCls, errorCls, fieldCls, labelCls, sectionHeadingCls } from "../lib/field";
@@ -654,6 +655,18 @@ export function WorkerSettingsPanel({
             valueModelId={current.model_id ?? ""}
             onChange={(next) => void handleChange(next)}
           />
+          <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+            Effort
+            <select
+              aria-label="Effort"
+              className="h-8 rounded border bg-background px-1 text-xs text-foreground"
+              value={current.effort ?? ""}
+              onChange={(e) => void handleChange({ effort: e.target.value as AgentConfig["effort"] })}
+            >
+              <option value="">project or model default</option>
+              {EFFORT_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </label>
         </section>
 
         {/* Tools — grouped accordion */}

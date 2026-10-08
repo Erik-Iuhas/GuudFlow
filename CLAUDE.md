@@ -73,7 +73,11 @@ model (`core/model_config.py`, `api/routes/model_config.py`). The install's choi
 `{data_root}/model_config.json` (the shipped `data/models.json` is the default); provider keys typed
 into Studio are stored host-only in `{data_root}/secrets/provider_keys.json` (0600), are never returned
 by the API, and an environment variable wins. Always load the registry with
-`ModelRegistry.for_data_root()`.
+`ModelRegistry.for_data_root()`. Each model has a working context below its maximum (opencode
+compacts near it) and may list effort levels (`low`…`max`, `core/llm/registry.py`); a role's
+`effort`, else the project's `effort` gate, else the model's `default_effort` is fitted to those
+levels and sent as the provider's own option (`effort` for Anthropic, `reasoningEffort` for
+OpenAI-compatible APIs) through opencode's model `options` (`core/harness/config_gen.py`).
 
 **Opencode harness.** Agent work is done by [opencode](https://github.com/anomalyco/opencode)
 running headless, one sandboxed server per role. GuudFlow stays the manager: scheduler,

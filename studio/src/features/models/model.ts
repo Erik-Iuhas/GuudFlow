@@ -1,4 +1,4 @@
-import type { ConfigDoc, ModelConfigView, ModelWire } from "./api";
+import { EFFORT_LEVELS, type ConfigDoc, type EffortLevel, type ModelConfigView, type ModelWire } from "./api";
 
 /** USD per 1k tokens -> USD per million tokens, for display (rounded to cents of a cent). */
 export function perMillion(per1k: number | undefined): string {
@@ -49,4 +49,18 @@ export function parseWorkingContext(text: string, maxTokens: number): number | u
   if (!/^\d+$/.test(t)) return null;
   const tokens = Number(t) * 1000;
   return tokens >= 1000 && tokens <= maxTokens ? tokens : null;
+}
+
+/** The model with `level` switched on or off in its effort levels (kept in order); switching off
+ * the default level clears the default. */
+export function toggleEffortLevel(model: ModelWire, level: EffortLevel): ModelWire {
+  const on = new Set(model.effort_levels ?? []);
+  if (on.has(level)) on.delete(level);
+  else on.add(level);
+  const next: ModelWire = { ...model };
+  const levels = EFFORT_LEVELS.filter((l) => on.has(l));
+  if (levels.length) next.effort_levels = levels;
+  else delete next.effort_levels;
+  if (next.default_effort && !on.has(next.default_effort)) delete next.default_effort;
+  return next;
 }

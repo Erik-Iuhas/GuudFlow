@@ -23,6 +23,13 @@ _NPM_BY_CLIENT = {
     "openai_compatible": "@ai-sdk/openai-compatible",
 }
 
+# The provider option that carries an effort level: @ai-sdk/anthropic sends `effort` as
+# `output_config.effort`; @ai-sdk/openai-compatible sends `reasoningEffort` as `reasoning_effort`.
+_EFFORT_OPTION_BY_CLIENT = {
+    "anthropic": "effort",
+    "openai_compatible": "reasoningEffort",
+}
+
 
 @dataclass(frozen=True)
 class ImageCaps:
@@ -43,6 +50,7 @@ class ProviderBinding:
     base_url: str | None = None    # override (gateway in P3; provider default otherwise)
     api_key: str | None = None     # host_dev only; None means opencode gets no key
     working_context: int | None = None  # project override of the model's working context
+    effort: str | None = None      # effort level to send, already fitted to the model's levels
 
     @property
     def model_ref(self) -> str:
@@ -56,25 +64,27 @@ def provider_entry(binding: ProviderBinding) -> dict[str, Any]:
         raise ValueError(f"unknown provider client {binding.client!r}")
     model = binding.model
     options = {"baseURL": binding.base_url, "apiKey": binding.api_key}
+    model_entry: dict[str, Any] = {
+        "name": model.id,
+        "tool_call": model.supports_tools,
+        "attachment": model.supports_images,
+        "modalities": {
+            "input": ["text", "image", "pdf"] if model.supports_images else ["text"],
+            "output": ["text"],
+        },
+        # `input` is the working context: opencode compacts once a turn's prompt
+        # nears it, so a 1M-token model still works (and is billed) at ~200k.
+        "limit": {"context": model.max_context_tokens,
+                  "input": binding.working_context or model.working_context,
+                  "output": model.max_output_tokens},
+    }
+    if binding.effort:
+        # Model options reach the provider as provider options on every request.
+        model_entry["options"] = {_EFFORT_OPTION_BY_CLIENT[binding.client]: binding.effort}
     return {
         "npm": _NPM_BY_CLIENT[binding.client],
         "options": {k: v for k, v in options.items() if v is not None},
-        "models": {
-            model.id: {
-                "name": model.id,
-                "tool_call": model.supports_tools,
-                "attachment": model.supports_images,
-                "modalities": {
-                    "input": ["text", "image", "pdf"] if model.supports_images else ["text"],
-                    "output": ["text"],
-                },
-                # `input` is the working context: opencode compacts once a turn's prompt
-                # nears it, so a 1M-token model still works (and is billed) at ~200k.
-                "limit": {"context": model.max_context_tokens,
-                          "input": binding.working_context or model.working_context,
-                          "output": model.max_output_tokens},
-            }
-        },
+        "models": {model.id: model_entry},
     }
 
 
@@ -115,7 +125,9 @@ def _providers(bindings: list[ProviderBinding]) -> dict[str, dict[str, Any]]:
         if existing is None:
             providers[binding.provider_key] = entry
         else:
-            existing["models"].update(entry["models"])
+            # The first binding (the role's own model) wins when the small model is the same one.
+            for mid, model_entry in entry["models"].items():
+                existing["models"].setdefault(mid, model_entry)
     return providers
 
 

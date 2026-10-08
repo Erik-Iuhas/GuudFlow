@@ -17,6 +17,10 @@ export interface ProviderWire {
   key: KeyStatus;
 }
 
+/** GuudFlow's effort levels, least to most thinking (core/llm/registry.py EFFORT_LEVELS). */
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type EffortLevel = (typeof EFFORT_LEVELS)[number];
+
 export interface ModelWire {
   id: string;
   provider: string;
@@ -39,6 +43,9 @@ export interface ModelWire {
   long_context_threshold?: number;
   long_input_per_1k?: number;
   long_output_per_1k?: number;
+  /** Effort levels the model takes (absent: no effort control) and the one agents use by default. */
+  effort_levels?: EffortLevel[];
+  default_effort?: EffortLevel;
 }
 
 export interface ModelConfigView {

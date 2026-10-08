@@ -21,6 +21,11 @@ log = logging.getLogger(__name__)
 # per turn. Agents work in this much unless the model or the project says otherwise.
 DEFAULT_WORKING_CONTEXT = 200_000
 
+# Effort levels in GuudFlow's own words, least to most thinking. A model lists the ones it takes;
+# config_gen turns a level into the provider's option (`effort` for Anthropic, `reasoningEffort`
+# for OpenAI-compatible APIs).
+EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+
 
 @dataclass
 class ModelInfo:
@@ -46,6 +51,23 @@ class ModelInfo:
     long_context_threshold: int | None = None
     long_input_per_1k: float | None = None
     long_output_per_1k: float | None = None
+    # Effort levels the model accepts (empty: no effort control, the provider decides) and the
+    # one agents use unless the team or project picks another. None means the provider default.
+    effort_levels: tuple[str, ...] = ()
+    default_effort: str | None = None
+
+    def pick_effort(self, want: str | None) -> str | None:
+        """The level to send for `want` (falling back to the model's default): the highest
+        supported level at or below it, else the lowest supported one. None when the model has
+        no effort control or nothing was asked for."""
+        want = want or self.default_effort
+        if not self.effort_levels or want not in EFFORT_LEVELS:
+            return None
+        rank = EFFORT_LEVELS.index(want)
+        below = [lv for lv in self.effort_levels if EFFORT_LEVELS.index(lv) <= rank]
+        if below:
+            return max(below, key=EFFORT_LEVELS.index)
+        return min(self.effort_levels, key=EFFORT_LEVELS.index)
 
     @property
     def working_context(self) -> int:
@@ -103,6 +125,9 @@ class ModelRegistry:
                 long_context_threshold=m.get("long_context_threshold"),
                 long_input_per_1k=m.get("long_input_per_1k"),
                 long_output_per_1k=m.get("long_output_per_1k"),
+                effort_levels=tuple(lv for lv in EFFORT_LEVELS
+                                    if lv in (m.get("effort_levels") or ())),
+                default_effort=m.get("default_effort") or None,
             )
             self._models[info.id] = info
 

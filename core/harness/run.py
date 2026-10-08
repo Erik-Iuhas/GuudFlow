@@ -85,7 +85,7 @@ from core.harness.retrospective import load_prior_carry_forward
 from core.harness.visual_review import ImageBudget, capped
 from core.harness.tasks import PlanResult
 from core.harness.tool_context import RunToolContext
-from core.llm.registry import ModelRegistry
+from core.llm.registry import ModelInfo, ModelRegistry
 from core.scheduler import AgentSpec, Scheduler, SchedulerResult
 from core.signals import Signal, SignalType
 from core.workspace import AgentState, Artifact, Workspace
@@ -139,7 +139,8 @@ def _comment_target(sig: Signal) -> str | None:
 
 def _config_key(cfg: "AgentConfig") -> str:
     """What a running server was configured from; a change means a restart."""
-    return repr((cfg.model_tier, getattr(cfg, "model_id", None), cfg.description,
+    return repr((cfg.model_tier, getattr(cfg, "model_id", None), getattr(cfg, "effort", ""),
+                 cfg.description,
                  tuple(getattr(cfg, "declared_local_tools", None) or ()), cfg.system_prompt))
 
 
@@ -774,6 +775,12 @@ class OpencodeRun:
                                api_key=registry.api_key(model.provider),
                                working_context=self._working_context(model.working_context))
 
+    def _effort(self, cfg: "AgentConfig", model: ModelInfo) -> str | None:
+        """The role's effort level, else the project's `effort` gate, else the model's default,
+        fitted to the levels the model accepts (None: the provider decides)."""
+        gate = (self.runner.project.approval_gates or {}).get("effort")
+        return model.pick_effort(cfg.effort or (str(gate) if gate else None))
+
     def _working_context(self, model_cap: int) -> int:
         """The project's `working_context_tokens` gate can only lower the model's working
         context (never raise it past what the install allows)."""
@@ -802,9 +809,11 @@ class OpencodeRun:
         role.token = self.mcp.issue_token(identity)
         virtual_key = self.gateway.issue_key(self.run_id, name, [role.binding.model.id],
                                              budget_usd=self._role_budget(role))
+        # Effort is read here, not when the role was built, so an edit applies from this spawn.
         via_gateway = replace(role.binding,
                               base_url=f"{self._gw_http.url}/{role.binding.provider_key}",
-                              api_key=virtual_key)
+                              api_key=virtual_key,
+                              effort=self._effort(role.cfg, role.binding.model))
         role.prompt = await self._system_prompt(role, task_hint)
         agent = agent_entry(role.compiled, model_ref=via_gateway.model_ref,
                             prompt=role.prompt.render(), description=role.cfg.description,

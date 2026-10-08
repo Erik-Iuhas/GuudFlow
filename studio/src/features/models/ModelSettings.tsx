@@ -3,19 +3,21 @@ import { Badge, type BadgeProps } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Alert, Input, Label, Select, Skeleton, Table, Td, Th } from "../../components/ui/form-controls";
 import {
+  EFFORT_LEVELS,
   TIERS,
   modelConfigApi,
   useConfigMutation,
   useModelConfig,
   type ClientKind,
   type ConfigDoc,
+  type EffortLevel,
   type KeyStatus,
   type ModelWire,
   type ProviderWire,
   type TestResult,
   type Tier,
 } from "./api";
-import { envNameFor, fromPerMillion, parseWorkingContext, perMillion, tierModels, toDoc } from "./model";
+import { envNameFor, fromPerMillion, parseWorkingContext, perMillion, tierModels, toDoc, toggleEffortLevel } from "./model";
 
 const KEY_VARIANT: Record<KeyStatus, BadgeProps["variant"]> = {
   env: "complete",
@@ -403,7 +405,9 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
       <p className="m-0 mb-2 text-xs text-muted-foreground">
         USD per million tokens. A blank cache-write price means 1.25× input. “Works in” is the
         context agents use before opencode compacts (blank: 200k, or the model's maximum if
-        smaller); a bigger window costs more on every turn.
+        smaller); a bigger window costs more on every turn. “Effort” lists the levels the model
+        takes and the one agents use unless the team or project picks another (blank: the provider's
+        default); a level a model lacks is lowered to the next one it has.
       </p>
       <Table aria-label="Models">
         <thead>
@@ -413,6 +417,7 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
             <Th>Tier</Th>
             {PRICE_FIELDS.map(([, label]) => <Th key={label} className="text-right">{label}</Th>)}
             <Th className="text-right">Works in</Th>
+            <Th>Effort</Th>
             <Th>Images</Th>
             <Th><span className="sr-only">Actions</span></Th>
           </tr>
@@ -457,6 +462,9 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
                 }} />
               </Td>
               <Td>
+                <EffortCell model={m} onChange={(next) => onChange(doc.models.map((x, j) => (j === i ? next : x)))} />
+              </Td>
+              <Td>
                 <input type="checkbox" className="h-4 w-4 accent-primary" aria-label={`${m.id} takes images`}
                   checked={Boolean(m.supports_images)} onChange={(e) => set(i, { supports_images: e.target.checked })} />
               </Td>
@@ -483,6 +491,41 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
         <Button type="submit" size="sm" variant="outline" disabled={!canAdd}>Add</Button>
       </form>
     </div>
+  );
+}
+
+const EFFORT_SHORT: Record<EffortLevel, string> = { low: "L", medium: "M", high: "H", xhigh: "XH", max: "Max" };
+
+/** Which effort levels a model takes (toggles) and its default level. */
+function EffortCell({ model, onChange }: { model: ModelWire; onChange: (next: ModelWire) => void }) {
+  const levels = model.effort_levels ?? [];
+  return (
+    <span className="inline-flex items-center gap-1">
+      {EFFORT_LEVELS.map((level) => {
+        const on = levels.includes(level);
+        return (
+          <button key={level} type="button" aria-pressed={on} title={level}
+            aria-label={`${model.id} takes ${level} effort`}
+            className={`rounded border px-1 text-[11px] ${on ? "border-primary bg-primary/10" : "text-muted-foreground"}`}
+            onClick={() => onChange(toggleEffortLevel(model, level))}>
+            {EFFORT_SHORT[level]}
+          </button>
+        );
+      })}
+      {levels.length > 0 && (
+        <Select aria-label={`Default effort for ${model.id}`} value={model.default_effort ?? ""}
+          className="h-8 w-24 py-0 text-xs"
+          onChange={(e) => {
+            const next: ModelWire = { ...model };
+            if (e.target.value) next.default_effort = e.target.value as EffortLevel;
+            else delete next.default_effort;
+            onChange(next);
+          }}>
+          <option value="">provider</option>
+          {levels.map((l) => <option key={l} value={l}>{l}</option>)}
+        </Select>
+      )}
+    </span>
   );
 }
 

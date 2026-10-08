@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from core.json_store import read_json, write_json
+from core.llm.registry import EFFORT_LEVELS
 
 DEFAULTS_PATH = Path(__file__).resolve().parent.parent / "data" / "models.json"
 CONFIG_FILE = "model_config.json"
@@ -145,6 +146,7 @@ def validate(doc: dict[str, Any]) -> dict[str, Any]:  # Any: caller-supplied JSO
                 raise ModelConfigError(f"model {mid}: {field} is out of range")
             clean[field] = price
         _context_fields(m, clean, mid)
+        _effort_fields(m, clean, mid)
         models.append(clean)
 
     tiers_in = doc.get("tiers") or {}
@@ -196,6 +198,21 @@ def _context_fields(m: dict[str, Any], clean: dict[str, Any], mid: str) -> None:
         if price < 0 or price > 1000:
             raise ModelConfigError(f"model {mid}: {field} is out of range")
         clean[field] = price
+
+
+def _effort_fields(m: dict[str, Any], clean: dict[str, Any], mid: str) -> None:  # Any: JSON
+    """Optional effort levels and default effort, checked and copied into `clean`."""
+    levels = m.get("effort_levels") or []
+    if not isinstance(levels, list) or any(lv not in EFFORT_LEVELS for lv in levels):
+        raise ModelConfigError(f"model {mid}: effort_levels must be a list of "
+                               f"{', '.join(EFFORT_LEVELS)}")
+    if levels:
+        clean["effort_levels"] = [lv for lv in EFFORT_LEVELS if lv in levels]
+    default = m.get("default_effort") or None
+    if default is not None:
+        if default not in levels:
+            raise ModelConfigError(f"model {mid}: default_effort must be one of its effort_levels")
+        clean["default_effort"] = default
 
 
 def _positive_int(m: dict[str, Any], key: str, default: int, mid: str) -> int:  # Any: JSON

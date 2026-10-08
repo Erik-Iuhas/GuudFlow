@@ -136,3 +136,17 @@ def test_working_context_and_long_prices_are_checked() -> None:
     no_price = {**base, "models": [{**base["models"][0], "long_output_per_1k": None}]}
     with pytest.raises(ModelConfigError, match="long_output_per_1k is required"):
         validate_config(no_price)
+
+
+def test_effort_levels_are_checked() -> None:
+    from core.model_config import ModelConfigError, validate as validate_config
+    model = {"id": "m", "provider": "anthropic", "tier": "fast",
+             "effort_levels": ["max", "low"], "default_effort": "low"}
+    base = {"providers": {"anthropic": {"client": "anthropic", "api_key_env": "ANTHROPIC_API_KEY"}},
+            "models": [model]}
+    clean = validate_config(base)["models"][0]
+    assert clean["effort_levels"] == ["low", "max"] and clean["default_effort"] == "low"
+    with pytest.raises(ModelConfigError, match="effort_levels"):
+        validate_config({**base, "models": [{**model, "effort_levels": ["turbo"]}]})
+    with pytest.raises(ModelConfigError, match="default_effort"):
+        validate_config({**base, "models": [{**model, "default_effort": "high"}]})

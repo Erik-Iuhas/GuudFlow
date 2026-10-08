@@ -76,6 +76,9 @@ class AgentConfig:
     # default behaviour). Studio's ModelPicker writes both fields so the
     # provider+model dropdowns persist correctly across reloads.
     model_id: str = ""
+    # Effort level for this role ("low" … "max", core/llm/registry.py EFFORT_LEVELS). Empty: the
+    # project's `effort` gate, else the model's default. Fitted to what the model accepts.
+    effort: str = ""
     agent_class_role_type: str | None = None  # registry lookup; None = generic BaseAgent
     is_reviewer: bool = False
     # Phase C.4: final-stage reviewer (architect pattern). Auto-depends
@@ -495,6 +498,7 @@ class AgentRunner:
             "declared_local_tools",
             "model_tier",
             "model_id",
+            "effort",
             "description",
             "max_tool_iterations",
             "max_protocol_retries",

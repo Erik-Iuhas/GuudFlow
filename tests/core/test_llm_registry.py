@@ -353,3 +353,29 @@ def test_shipped_haiku_5_5_is_the_fast_default_with_a_working_context() -> None:
     sonnet = reg.get("claude-sonnet-5-5")
     assert sonnet is not None and sonnet.max_context_tokens == 1_000_000
     assert sonnet.working_context == DEFAULT_WORKING_CONTEXT
+
+
+def test_pick_effort_fits_the_level_to_what_the_model_takes() -> None:
+    from core.llm.registry import ModelInfo
+    m = ModelInfo(id="m", provider="anthropic", tier="solid",
+                  effort_levels=("low", "medium", "high", "max"), default_effort="high")
+    assert m.pick_effort(None) == "high"            # the model's default
+    assert m.pick_effort("low") == "low"
+    assert m.pick_effort("xhigh") == "high"         # not offered: the next level down
+    assert m.pick_effort("bogus") is None
+    assert ModelInfo(id="n", provider="openai", tier="fast").pick_effort("high") is None
+    only_high = ModelInfo(id="h", provider="openai", tier="fast", effort_levels=("high",))
+    assert only_high.pick_effort("low") == "high"   # nothing lower: the lowest it has
+    assert only_high.pick_effort(None) is None      # no default: the provider decides
+
+
+def test_shipped_models_carry_effort_levels() -> None:
+    from pathlib import Path
+
+    from core.llm.registry import ModelRegistry
+    reg = ModelRegistry(Path(__file__).resolve().parents[2] / "data" / "models.json")
+    opus = reg.get("claude-opus-5-5")
+    assert opus is not None and opus.default_effort == "high" and "max" in opus.effort_levels
+    haiku = reg.get("claude-haiku-5-5")
+    assert haiku is not None and haiku.max_context_tokens == 1_000_000
+    assert reg.get("claude-haiku-4-5") is not None and reg.get("claude-haiku-4-5").effort_levels == ()

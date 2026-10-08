@@ -151,6 +151,7 @@ class FakeLLM:
                         "tool_specs": body.get("tools") or [],
                         "tool_choice": body.get("tool_choice"),
                         "messages": body.get("messages", []),
+                        "reasoning_effort": body.get("reasoning_effort"),
                         "turn": turn,
                     })
                 if body.get("stream", True):

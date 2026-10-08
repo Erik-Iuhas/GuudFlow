@@ -212,3 +212,59 @@ def test_project_can_only_lower_the_working_context() -> None:
     assert cap(None) == 200_000 and cap("") == 200_000
     assert cap(80_000) == 80_000 and cap(500_000) == 200_000
     assert cap("lots") == 200_000
+
+
+def test_effort_becomes_the_providers_own_option() -> None:
+    m = ModelInfo(id="m1", provider="anthropic", tier="solid", effort_levels=("low", "high"))
+    entry = provider_entry(ProviderBinding("anthropic", m, "anthropic", effort="high"))
+    assert entry["models"]["m1"]["options"] == {"effort": "high"}
+    oai = provider_entry(ProviderBinding("openai", m, "openai_compatible",
+                                         base_url="https://x/v1", effort="low"))
+    assert oai["models"]["m1"]["options"] == {"reasoningEffort": "low"}
+    assert "options" not in provider_entry(ProviderBinding("anthropic", m, "anthropic"))["models"]["m1"]
+
+
+def test_role_effort_then_project_gate_then_model_default() -> None:
+    from types import SimpleNamespace
+
+    from core.harness.run import OpencodeRun
+
+    model = ModelInfo(id="m", provider="anthropic", tier="solid",
+                      effort_levels=("low", "medium", "high"), default_effort="medium")
+
+    def effort(role: str, gate: object) -> str | None:
+        fake = SimpleNamespace(runner=SimpleNamespace(project=SimpleNamespace(
+            approval_gates={"effort": gate} if gate is not None else {})))
+        return OpencodeRun._effort(fake, SimpleNamespace(effort=role), model)  # type: ignore[arg-type]
+
+    assert effort("", None) == "medium"
+    assert effort("", "low") == "low"
+    assert effort("high", "low") == "high"
+    assert effort("max", None) == "high"   # fitted to the model
+
+
+@requires_opencode
+async def test_real_opencode_sends_the_effort_level(tmp_path: Path, fake_llm: FakeLLM) -> None:
+    from core.harness.opencode_client import OpencodeClient, text_part
+    from tests.harness.fake_llm import Text
+
+    fake_llm.script(Text("ok"))
+    model = ModelInfo(id="fake-model", provider="fake", tier="fast", max_output_tokens=8000,
+                      effort_levels=("low", "high"))
+    binding = ProviderBinding("fake", model, "openai_compatible", base_url=fake_llm.base_url,
+                              api_key="fake-key", effort="high")
+    agent = agent_entry(_compiled("builder"), model_ref=binding.model_ref, prompt="You build.")
+    config = build_config(role="builder", agent=agent, binding=binding)
+    workdir = init_repo(tmp_path / "work")
+    server = OpencodeServer(config=config, home=tmp_path / "home", workdir=workdir)
+    await server.start()
+    try:
+        client = OpencodeClient(server.base_url, str(workdir), password=server.password,
+                                timeout=60.0)
+        session = await client.create_session()
+        await client.prompt(session["id"], [text_part("hi")], agent="builder")
+        await client.aclose()
+    finally:
+        await server.stop()
+    steps = fake_llm.tool_requests()
+    assert steps and all(r["reasoning_effort"] == "high" for r in steps)

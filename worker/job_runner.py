@@ -135,6 +135,7 @@ def serialise_project(data: dict[str, Any]) -> ProjectConfig:
             name=(str(a.get("name") or "").strip() or None),
             model_tier=a.get("model_tier", "solid"),
             model_id=str(a.get("model_id") or ""),
+            effort=str(a.get("effort") or ""),
             agent_class_role_type=a.get("agent_class_role_type"),
             is_reviewer=bool(a.get("is_reviewer", False)),
             is_final_reviewer=bool(a.get("is_final_reviewer", False)),

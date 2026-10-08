@@ -2,12 +2,13 @@ import { Card } from "../../components/ui/card";
 import { Input, Label, Select } from "../../components/ui/form-controls";
 import { Switch } from "../../components/ui/switch";
 import type { ApprovalGates, AutopilotSettings, ProjectRemote } from "../../types";
+import { EFFORT_LEVELS, type EffortLevel } from "../models/api";
 
 export const DEFAULT_AUTOPILOT: AutopilotSettings = {
   enabled: false, every_hours: 24, take: 2, max_usd_per_run: 5, max_usd_per_week: 20, auto_accept: false,
 };
 
-type WorkGates = Pick<ApprovalGates, "check_command" | "project_remote" | "autopilot" | "working_context_tokens">;
+type WorkGates = Pick<ApprovalGates, "check_command" | "project_remote" | "autopilot" | "working_context_tokens" | "effort">;
 
 /**
  * Settings for the project as ongoing work (plan §14): the check run before review,
@@ -54,6 +55,18 @@ export function WorkSettings({
           <p className="m-0 mt-1 text-xs text-muted-foreground">
             Agents compact (and drop old tool output) as a turn nears this. It can only lower each model's
             working context set in Settings; a smaller number keeps every turn cheaper.
+          </p>
+        </div>
+        <div>
+          <Label htmlFor="project-effort">Effort</Label>
+          <Select id="project-effort" className="max-w-[10rem]" value={gates.effort ?? ""}
+            onChange={(e) => onChange({ effort: (e.target.value || null) as EffortLevel | null })}>
+            <option value="">model default</option>
+            {EFFORT_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+          </Select>
+          <p className="m-0 mt-1 text-xs text-muted-foreground">
+            How hard agents think, for roles that do not set their own. Higher levels are slower and
+            spend more tokens; a model that lacks a level uses the next lower one it has.
           </p>
         </div>
 

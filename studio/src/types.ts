@@ -20,6 +20,8 @@ export interface AgentConfig {
    *  AND the model's tier matches `model_tier`, the runner uses this exact
    *  model. Empty / missing → first available model in tier. */
   model_id?: string;
+  /** Effort level for this role; "" or missing: the project's effort, else the model's default. */
+  effort?: "" | "low" | "medium" | "high" | "xhigh" | "max";
   agent_class_role_type?: string | null;
   is_reviewer?: boolean;
   is_final_reviewer?: boolean;
@@ -217,6 +219,8 @@ export interface ApprovalGates {
   check_command?: string;
   /** Lower every role's working context for this project (tokens); opencode compacts near it. */
   working_context_tokens?: number | null;
+  /** Effort level for roles that do not set their own ("low" … "max"); null: each model's default. */
+  effort?: "low" | "medium" | "high" | "xhigh" | "max" | null;
   project_remote?: ProjectRemote | null;
   autopilot?: AutopilotSettings | null;
 }
