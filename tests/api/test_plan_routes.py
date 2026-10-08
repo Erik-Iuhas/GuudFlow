@@ -169,13 +169,17 @@ async def test_llm_failure_is_502(client, auth_header, app) -> None:
     assert r.status_code == 502 and "provider down" in r.json()["detail"]
 
 
-async def test_invalid_pm_output_is_502_with_problems(client, auth_header, app) -> None:
+async def test_invalid_pm_output_is_a_partial_turn_with_problems(client, auth_header,
+                                                                  app) -> None:
     await _project(client, auth_header)
     bad = _call("bad", [{"op": "edit_requirement", "id": "R9", "text": "x"}])
     _llm(app, bad, bad)
     r = await client.post("/api/projects/p1/plan/messages", headers=auth_header,
                           json={"text": "go", "mode": "update"})
-    assert r.status_code == 502 and "R9" in r.json()["detail"]
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "partial" and any("R9" in p for p in body["problems"])
+    assert body["messages"][-1]["status"] == "partial"
 
 
 async def test_direct_edit(client, auth_header, app) -> None:

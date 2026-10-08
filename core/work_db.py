@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS spec_items (
 CREATE TABLE IF NOT EXISTS plan_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, author TEXT NOT NULL,
     text TEXT NOT NULL, draft_id TEXT, mode TEXT NOT NULL DEFAULT '',
-    cost_usd REAL, tokens INTEGER);
+    cost_usd REAL, tokens INTEGER, status TEXT, problems TEXT);
 CREATE TABLE IF NOT EXISTS drafts (
     id TEXT PRIMARY KEY, base_version INTEGER NOT NULL, status TEXT NOT NULL,
     data TEXT NOT NULL);
@@ -347,27 +347,42 @@ class WorkDB:
     # ── plan messages ───────────────────────────────────────────────────────
     def add_plan_message(self, author: str, text: str, draft_id: str | None = None,
                          mode: str = "", cost_usd: float | None = None,
-                         tokens: int | None = None) -> dict[str, Any]:  # Any: JSON row
-        """Append one message to the plan conversation (a PM message may carry its usage)."""
+                         tokens: int | None = None, status: str = "",
+                         problems: list[str] | None = None) -> dict[str, Any]:  # Any: JSON row
+        """Append one message to the plan conversation.
+
+        A PM message may carry its usage, its turn `status` (complete, partial, failed) and the
+        `problems` that kept changes out of the draft.
+        """
         now = time.time()
+        probs = list(problems or [])
         with self._write() as conn:
             cur = conn.execute("INSERT INTO plan_messages(at, author, text, draft_id, mode, "
-                               "cost_usd, tokens) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                               (now, author, text, draft_id, mode, cost_usd, tokens))
+                               "cost_usd, tokens, status, problems) "
+                               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                               (now, author, text, draft_id, mode, cost_usd, tokens, status,
+                                json.dumps(probs) if probs else None))
             return {"id": cur.lastrowid, "at": now, "author": author, "text": text,
-                    "draft_id": draft_id, "mode": mode, "cost_usd": cost_usd, "tokens": tokens}
+                    "draft_id": draft_id, "mode": mode, "cost_usd": cost_usd, "tokens": tokens,
+                    "status": status, "problems": probs}
 
     def list_plan_messages(self, limit: int = 100) -> list[dict[str, Any]]:  # Any: JSON rows
         """The latest `limit` plan messages, oldest first (no lock)."""
         conn = self._connect()
         try:
             rows = conn.execute("SELECT id, at, author, text, draft_id, mode, "
-                                "cost_usd, tokens FROM plan_messages "
+                                "cost_usd, tokens, status, problems FROM plan_messages "
                                 "ORDER BY id DESC LIMIT ?", (max(0, limit),)).fetchall()
         finally:
             conn.close()
         keys = ("id", "at", "author", "text", "draft_id", "mode", "cost_usd", "tokens")
-        return [dict(zip(keys, r)) for r in reversed(rows)]
+        out = []
+        for r in reversed(rows):
+            row = dict(zip(keys, r[:8]))
+            row["status"] = r[8] or ""
+            row["problems"] = json.loads(r[9]) if r[9] else []
+            out.append(row)
+        return out
 
     # ── run states ──────────────────────────────────────────────────────────
     def read_runs_doc(self) -> dict[str, dict[str, Any]]:  # Any: JSON rows
@@ -399,7 +414,8 @@ class WorkDB:
     # ── one-time import of the JSON files ───────────────────────────────────
     def _migrate(self, conn: sqlite3.Connection) -> None:
         columns = {r[1] for r in conn.execute("PRAGMA table_info(plan_messages)")}
-        for name, kind in (("cost_usd", "REAL"), ("tokens", "INTEGER")):
+        for name, kind in (("cost_usd", "REAL"), ("tokens", "INTEGER"), ("status", "TEXT"),
+                           ("problems", "TEXT")):
             if name not in columns:  # databases made before the PM reported usage
                 conn.execute(f"ALTER TABLE plan_messages ADD COLUMN {name} {kind}")
         backlog = self.project_dir / "backlog.json"

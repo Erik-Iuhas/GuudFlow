@@ -726,3 +726,20 @@ def test_later_turn_builds_on_the_draft(pd: PlanDrafts) -> None:
     assert edits == [("edit_item", None, 1)]
     # the new item's clashing ref was renamed, not merged into the kept one
     assert len({c.change.get("ref") for c in d.changes if c.change.get("ref")}) == 3
+
+
+def test_problems_have_codes_and_severity() -> None:
+    from core.plan_drafts import classify_problem
+    p = classify_problem("change 3 (add_requirement): the statement has numbers (5); put …")
+    assert (p.code, p.severity, p.change) == ("numbers_in_statement", "warn", 3)
+    p = classify_problem("change 2 (add_item): unknown requirement R14")
+    assert (p.code, p.severity, p.change) == ("unknown_requirement", "block", 2)
+    assert classify_problem("something new").code == "invalid"
+
+
+def test_a_number_that_names_something_is_not_tunable(pd: PlanDrafts) -> None:
+    spec = Spec(pd.db.read_spec_doc())
+    turn = _turn(req(text="Level 1 is clearable within 3 tries", params=[
+        {"key": "tries", "value": 3}]))
+    problems = validate_turn(turn, spec, pd.db.read_backlog_doc())
+    assert any("(3)" in p for p in problems) and not any("1," in p or "(1" in p for p in problems)

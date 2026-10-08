@@ -11,7 +11,7 @@ import pytest
 
 from core.llm.client import LLMResponse, MockLLMClient, MockTurn, ToolCall
 from core.plan_drafts import PlanDrafts
-from core.project_manager import TOOL_NAME, ProjectManager, ProjectManagerError, turn_tool
+from core.project_manager import TOOL_NAME, ProjectManager, turn_tool
 from core.project_repo import ProjectRepo
 from tests.spec_fixtures import with_reasons
 
@@ -93,12 +93,19 @@ async def test_discuss_keeps_the_open_draft_link(tmp_path: Path) -> None:
 
 
 async def test_one_retry_on_invalid_output(tmp_path: Path) -> None:
-    bad = call("bad", [{**dec(), "reason": "short"}])
+    bad = call("bad", [{**dec(), "serves": ["R99"]}])
     manager, llm = pm(tmp_path, bad, call("Fixed.", [dec()]))
     out = await manager.turn("decide", mode="update")
-    assert out.reply == "Fixed." and len(llm.calls) == 2
+    assert out.reply == "Fixed." and len(llm.calls) == 2 and out.status == "complete"
     retry = user_text(llm, 1)
-    assert "rejected" in retry and "reason" in retry and retry.startswith(user_text(llm, 0))
+    assert "rejected" in retry and "R99" in retry and retry.startswith(user_text(llm, 0))
+
+
+async def test_a_style_problem_is_a_warning_not_a_retry(tmp_path: Path) -> None:
+    manager, llm = pm(tmp_path, call("ok", [{**dec(), "reason": "short"}]))
+    out = await manager.turn("decide", mode="update")
+    assert len(llm.calls) == 1 and out.status == "complete" and out.draft is not None
+    assert any("reason" in w for w in out.draft.changes[0].warnings)
 
 
 async def test_a_cut_off_answer_is_never_accepted(tmp_path: Path) -> None:
@@ -123,15 +130,60 @@ async def test_retry_when_no_tool_call(tmp_path: Path) -> None:
     assert out.reply == "ok" and "did not call" in user_text(llm, 1)
 
 
-async def test_fails_after_second_invalid_output(tmp_path: Path) -> None:
-    bad = call("bad", [{"op": "edit_requirement", "id": "R9", "text": "x"}])
+async def test_second_invalid_output_keeps_the_valid_changes(tmp_path: Path) -> None:
+    bad = call("bad", [req(), {"op": "edit_requirement", "id": "R9", "text": "x"}])
     manager, llm = pm(tmp_path, bad, bad)
-    with pytest.raises(ProjectManagerError) as exc:
-        await manager.turn("edit", mode="update")
-    assert len(llm.calls) == 2 and any("R9" in p for p in exc.value.problems)
-    # The human's message stays; nothing from the PM was stored.
-    assert [m["author"] for m in PlanDrafts(tmp_path, "p").messages()] == ["human"]
+    out = await manager.turn("edit", mode="update")
+    assert len(llm.calls) == 2 and out.status == "partial"
+    assert any("R9" in p for p in out.problems)
+    assert out.draft is not None and [c.op for c in out.draft.changes] == ["add_requirement"]
+    pm_row = PlanDrafts(tmp_path, "p").messages()[-1]
+    assert pm_row["status"] == "partial" and pm_row["problems"] == out.problems
+    assert "Left out of the draft" in pm_row["text"]
+
+
+async def test_a_turn_with_nothing_usable_is_stored_as_failed(tmp_path: Path) -> None:
+    cut = MockTurn(tool_calls=[ToolCall("1", TOOL_NAME, {"reply": "Long…"})],
+                   stop_reason="max_tokens")
+    manager, llm = pm(tmp_path, cut, cut)
+    out = await manager.turn("plan it", mode="update")
+    assert out.status == "failed" and len(llm.calls) == 2
+    rows = PlanDrafts(tmp_path, "p").messages()
+    assert [m["author"] for m in rows] == ["human", "pm"] and rows[-1]["status"] == "failed"
     assert PlanDrafts(tmp_path, "p").current() is None
+    calls = (tmp_path / "projects" / "p" / "pm_costs.jsonl").read_text().splitlines()
+    assert [json.loads(c)["outcome"] for c in calls] == ["cut_off", "cut_off"]
+
+
+async def test_a_change_needing_a_left_out_change_is_left_out_too(tmp_path: Path) -> None:
+    bad = call("bad", [{**req(), "checks": []}, {"op": "add_item", "ref": "new:2",
+                                                 "title": "Build it", "serves": ["new:1"]},
+                       dec("new:3")])
+    manager, _ = pm(tmp_path, bad, bad)
+    out = await manager.turn("plan", mode="update")
+    assert out.status == "partial" and out.draft is not None
+    assert [c.op for c in out.draft.changes] == ["add_decision"]
+    assert any("left out because" in p for p in out.problems)
+
+
+async def test_predicted_ids_are_read_as_refs(tmp_path: Path) -> None:
+    turn = call("ok", [req(), {"op": "add_item", "ref": "new:2", "title": "Build it",
+                               "serves": ["R1"]}])
+    manager, llm = pm(tmp_path, turn)
+    out = await manager.turn("plan", mode="update")
+    assert len(llm.calls) == 1 and out.status == "complete"
+    assert out.draft is not None and out.draft.changes[1].change["serves"] == ["new:1"]
+    assert out.notes == ["R1 is not approved yet; read as new:1"]
+
+
+async def test_a_later_turn_may_use_refs_from_the_open_draft(tmp_path: Path) -> None:
+    manager, llm = pm(tmp_path, call("a", [req()]),
+                      call("b", [{"op": "add_item", "ref": "new:2", "title": "Build it",
+                                  "serves": ["new:1"]}]))
+    await manager.turn("first", mode="update")
+    out = await manager.turn("second", mode="update")
+    assert len(llm.calls) == 2 and out.status == "complete" and out.draft is not None
+    assert [c.op for c in out.draft.changes] == ["add_requirement", "add_item"]
 
 
 async def test_schema_violation_is_retried(tmp_path: Path) -> None:

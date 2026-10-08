@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -31,6 +31,10 @@ MAX_CHANGES = 20
 MIN_REASON = 20
 _REF = re.compile(r"^new:[0-9]+$")
 # A tunable-looking number in a statement: digits, not part of an id like R4 or a version.
+# A number that names something ("level 1", "phase 2") is not a tunable value.
+_NAMED_NUMBER = re.compile(r"\b(?:level|levels|wave|waves|stage|stages|phase|phases|round|rounds|"
+                           r"step|version|player|players|session|sessions|slot|slots)\s+[0-9]+\b",
+                           re.IGNORECASE)
 _NUMBER = re.compile(r"(?<![A-Za-z0-9.])[0-9]+(?:\.[0-9]+)?(?![0-9])")
 _BACKLOG_ID = re.compile(r"^B[0-9]+$")
 _DECISION_ID = re.compile(r"^D[0-9]+$")
@@ -456,8 +460,12 @@ def validate_reasons(turn: PlanTurn, sources: Sequence[str] | None = None,
 def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # Any: JSON doc
                   team: list[dict[str, Any]] | None = None,  # Any: agent rows
                   sources: Sequence[str] | None = None,
-                  known_groups: Collection[str] = ()) -> list[str]:
+                  known_groups: Collection[str] = (),
+                  draft_refs: Mapping[str, str] | None = None) -> list[str]:
     """Problems with a PM turn, one line each (empty when it is fine).
+
+    `draft_refs` are the refs the open draft already defines (ref → kind): a change may serve
+    or depend on any of them, not only on refs added in this turn.
 
     Checks that every change carries a described reason (`validate_reasons`), ids exist, refs
     resolve within the turn, dependencies have no cycle, a decision's reason is long enough,
@@ -466,12 +474,14 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
     against it (see `_validate_team`).
     """
     problems: list[str] = validate_reasons(turn, sources, known_groups)
-    refs: dict[str, str] = {}
+    refs: dict[str, str] = dict(draft_refs or {})
+    own: set[str] = set()
     for n, ch in enumerate(turn.changes, 1):
         ref = getattr(ch, "ref", None)
         if ref:
-            if ref in refs:
+            if ref in own:
                 problems.append(f"change {n} ({ch.op}): ref {ref} is used twice")
+            own.add(ref)
             refs[ref] = _REF_KIND[ch.op]
     items = {str(r["id"]): r for r in backlog_doc.get("items", [])}
     sim: dict[str, Any] = {"items": [{"id": i, "depends_on": list(r.get("depends_on") or [])}
@@ -484,7 +494,7 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
             if _REF.match(s):
                 if refs.get(s) != "requirement":
                     problems.append(f"change {n} ({ch.op}): serves {s}, which is not a "
-                                    f"requirement added in this turn")
+                                    f"requirement added in this draft")
             elif not REQ_ID.match(s):
                 problems.append(f"change {n} ({ch.op}): serves {s!r} is not a requirement id")
             else:
@@ -500,7 +510,7 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
             if _REF.match(d):
                 if refs.get(d) != "item":
                     problems.append(f"change {n} ({ch.op}): depends_on {d} is not an item "
-                                    f"added in this turn")
+                                    f"added in this draft")
                     bad = True
             elif d not in items:
                 problems.append(f"change {n} ({ch.op}): unknown item {d}")
@@ -526,7 +536,7 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
                             f"characters and say why")
 
     def statement_ok(n: int, ch: Any, text: str, has_params: bool) -> None:  # Any: Change
-        nums = sorted(set(_NUMBER.findall(text)))
+        nums = sorted(set(_NUMBER.findall(_NAMED_NUMBER.sub(" ", text))))
         if has_params and nums:
             problems.append(f"change {n} ({ch.op}): the statement has numbers "
                             f"({', '.join(nums)}); put tunable numbers in params")
@@ -814,6 +824,131 @@ def _has_cycle(graph: dict[str, list[str]]) -> bool:
 
 # ── draft records ───────────────────────────────────────────────────────────
 @dataclass
+class Problem:
+    """One problem with a PM turn: the change it is about, a stable code and how bad it is.
+
+    `block` means approving the change would break the spec or the backlog, so it is left out
+    of the draft; `warn` is a style rule, so the change goes in with the warning on it and a
+    person decides (docs/PM_SELF_REPAIR_PLAN.md §4).
+    """
+
+    message: str
+    code: str
+    severity: Literal["block", "warn"]
+    change: int | None = None   # 1-based index into the turn's changes; None: the turn itself
+
+
+# validate_turn words each problem for the model; this table gives each wording its code.
+# First match wins; anything unmatched blocks as "invalid".
+_PROBLEM_CODES: tuple[tuple[re.Pattern[str], str, Literal["block", "warn"]], ...] = (
+    (re.compile(r"the statement has numbers"), "numbers_in_statement", "warn"),
+    (re.compile(r"reason must be at least"), "reason_too_short", "warn"),
+    (re.compile(r"the quote of .* is not in the conversation"), "quote_not_said", "warn"),
+    (re.compile(r"is described twice"), "group_described_twice", "warn"),
+    (re.compile(r"unknown requirement"), "unknown_requirement", "block"),
+    (re.compile(r"unknown item"), "unknown_item", "block"),
+    (re.compile(r"not an? (requirement|item) added in this draft|not an item added"),
+     "ref_not_in_draft", "block"),
+    (re.compile(r"human-set"), "pinned_field", "block"),
+    (re.compile(r"cycle"), "dependency_cycle", "block"),
+    (re.compile(r"needs at least one check|would have no check left"), "missing_check", "block"),
+    (re.compile(r"`group`|group .* is not described"), "missing_group", "block"),
+)
+_CHANGE_N = re.compile(r"^change ([0-9]+) \(")
+
+
+def classify_problem(message: str) -> Problem:
+    """The code, severity and change index of one `validate_turn` line."""
+    m = _CHANGE_N.match(message)
+    index = int(m.group(1)) if m else None
+    for pattern, code, severity in _PROBLEM_CODES:
+        if pattern.search(message):
+            return Problem(message, code, severity, index)
+    return Problem(message, "invalid", "block", index)
+
+
+def draft_refs(draft: Draft | None) -> dict[str, str]:
+    """The refs an open draft defines (ref → kind), leaving out changes a person rejected."""
+    if draft is None:
+        return {}
+    return {str(c.change["ref"]): _REF_KIND[c.op] for c in draft.changes
+            if c.change.get("ref") and c.accepted is not False and c.op in _REF_KIND}
+
+
+def resolve_predicted_ids(turn: PlanTurn, spec_doc: dict[str, Any],  # Any: JSON doc
+                          backlog_doc: dict[str, Any],  # Any: JSON doc
+                          draft: Draft | None) -> list[str]:
+    """Replace ids the model predicted for not-yet-approved additions with their refs.
+
+    Approval numbers new requirements and items in draft order from the spec's and backlog's
+    counters, so `R14` with the counter at 14 can only mean the first requirement the draft
+    adds. Only `serves` and `depends_on` are rewritten, and only when the id does not exist
+    and exactly one addition sits at that position. Returns one note per replacement.
+    """
+    existing = draft.changes if draft is not None else []
+    pending = [c.change for c in existing if c.accepted is not False] \
+        + [c.model_dump(mode="json") for c in turn.changes]
+    adds = {"R": [str(c["ref"]) for c in pending if c.get("op") == "add_requirement"],
+            "B": [str(c["ref"]) for c in pending if c.get("op") == "add_item"]}
+    known = {"R": {str(r.get("id")) for r in spec_doc.get("requirements", [])},
+             "B": {str(r.get("id")) for r in backlog_doc.get("items", [])}}
+    start = {"R": int((spec_doc.get("next") or {}).get("R", 1)),
+             "B": int(backlog_doc.get("next", 1))}
+    notes: list[str] = []
+
+    def fix(value: str) -> str:
+        m = re.fullmatch(r"([RB])([0-9]+)", value)
+        if not m or value in known[m.group(1)]:
+            return value
+        kind, k = m.group(1), int(m.group(2)) - start[m.group(1)]
+        if 0 <= k < len(adds[kind]):
+            notes.append(f"{value} is not approved yet; read as {adds[kind][k]}")
+            return adds[kind][k]
+        return value
+
+    for ch in turn.changes:
+        for key in ("serves", "depends_on"):
+            values = getattr(ch, key, None)
+            if values:
+                setattr(ch, key, list(dict.fromkeys(fix(v) for v in values)))
+    return notes
+
+
+def split_turn(turn: PlanTurn, problems: Sequence[Problem]
+               ) -> tuple[PlanTurn, dict[int, list[str]], list[Problem]]:
+    """Keep what can go into the draft: `(kept turn, warnings by kept index, left out)`.
+
+    A change with a blocking problem is left out, and so is any change that serves or depends
+    on a ref only a left-out change defined (repeated until nothing more drops). Warnings stay
+    with their change. Indexes in the result are 0-based positions in the kept turn.
+    """
+    dropped = {p.change for p in problems if p.severity == "block" and p.change}
+    while True:
+        gone = {getattr(turn.changes[n - 1], "ref", None) for n in dropped} - {None}
+        more = {n for n, ch in enumerate(turn.changes, 1) if n not in dropped and any(
+            v in gone for key in ("serves", "depends_on") for v in (getattr(ch, key, None) or []))}
+        if not more:
+            break
+        dropped |= more
+    left_out = [p for p in problems if p.severity == "block"]
+    for n in sorted(dropped - {p.change for p in left_out}):
+        ch = turn.changes[n - 1]
+        left_out.append(Problem(f"change {n} ({ch.op}): left out because a change it needs "
+                                f"was left out", "needs_left_out", "block", n))
+    kept = [ch for n, ch in enumerate(turn.changes, 1) if n not in dropped]
+    position = {n: i for i, n in enumerate(
+        (n for n in range(1, len(turn.changes) + 1) if n not in dropped))}
+    warnings: dict[int, list[str]] = {}
+    for p in problems:
+        if p.severity == "warn" and p.change in position:
+            warnings.setdefault(position[p.change], []).append(p.message)
+    used = {ch.group for ch in kept}
+    groups = [g for g in turn.groups if g.name in used]
+    return (turn.model_copy(update={"changes": kept, "groups": groups}), warnings,
+            left_out)
+
+
+@dataclass
 class DraftChange:
     """One change in a draft."""
 
@@ -822,6 +957,7 @@ class DraftChange:
     accepted: bool | None = None   # None: undecided, True: ticked, False: rejected
     by: str = "pm"                 # who proposed it: pm | human
     touched: bool = False          # a human set `accepted` (the PM may not replace it)
+    warnings: list[str] = field(default_factory=list)  # style problems a person should see
 
     @property
     def op(self) -> str:
@@ -956,7 +1092,8 @@ class PlanDrafts:
         txn.drafts.setdefault("drafts", []).append(row)
         return row
 
-    def merge_pm_turn(self, draft: Draft | str, turn: PlanTurn, lead_held: bool) -> Draft:
+    def merge_pm_turn(self, draft: Draft | str, turn: PlanTurn, lead_held: bool,
+                      warnings: Mapping[int, list[str]] | None = None) -> Draft:
         """Put a PM turn's changes into the draft.
 
         Earlier changes stay: the PM builds on the open draft and only sends what is new or
@@ -965,7 +1102,7 @@ class PlanDrafts:
         ticked, rejected or wrote are never replaced. With `lead_held` False the PM's
         decision changes start ticked; otherwise every change starts undecided. Team ops
         (add_role, edit_role, remove_role) always start undecided: only a human ticks them
-        (hard rule 24).
+        (hard rule 24). `warnings` (by 0-based position in the turn) go onto their changes.
 
         # QUESTION: plan §3 lets the PM "explicitly revise" a human-decided change; there is no
         # syntax for that yet, so a touched change is always kept.
@@ -990,10 +1127,10 @@ class PlanDrafts:
                     mapping[c["ref"]] = f"new:{top}"
             for c in incoming:
                 _rename_refs(c, mapping)
-            for c in incoming:
+            for i, c in enumerate(incoming):
                 ticked = True if (c["op"] in _DECISION_OPS and not lead_held) else None
                 kept.append(DraftChange(cid=f"c{d.next_cid}", change=c, accepted=ticked,
-                                        by="pm"))
+                                        by="pm", warnings=list((warnings or {}).get(i, []))))
                 d.next_cid += 1
             d.changes = kept
             d.groups.update({g.name: g.model_dump() for g in turn.groups})
@@ -1092,9 +1229,11 @@ class PlanDrafts:
     # ── plan conversation ───────────────────────────────────────────────────
     def add_message(self, author: str, text: str, draft_id: str | None = None,
                     mode: str = "", cost_usd: float | None = None,
-                    tokens: int | None = None) -> dict[str, Any]:  # Any: JSON row
-        """Append a message to the plan conversation."""
-        return self.db.add_plan_message(author, text, draft_id, mode, cost_usd, tokens)
+                    tokens: int | None = None, status: str = "",
+                    problems: list[str] | None = None) -> dict[str, Any]:  # Any: JSON row
+        """Append a message to the plan conversation (a PM turn's status and open problems)."""
+        return self.db.add_plan_message(author, text, draft_id, mode, cost_usd, tokens,
+                                        status, problems)
 
     def messages(self, limit: int = 100) -> list[dict[str, Any]]:  # Any: JSON rows
         """The latest messages, oldest first."""

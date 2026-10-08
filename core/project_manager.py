@@ -3,8 +3,10 @@
 `ProjectManager.turn()` stores the human's message, shows the model the goal, the spec, the
 open draft, the recent conversation, the backlog and (as untrusted data) the latest session
 reports and input files, and asks it to answer with one validating tool, `submit_plan_turn`
-(a `PlanTurn`). An invalid answer gets one retry with the error text; a second miss raises
-`ProjectManagerError`. In `update` mode the changes go into the project's open draft (nothing
+(a `PlanTurn`). An invalid answer gets one retry with the error text; after that the valid
+changes are kept and the rest reported (`TurnOutcome.status` "partial"), and a turn with nothing
+usable is stored as "failed". Every call's cost goes to `pm_costs.jsonl`
+(docs/PM_SELF_REPAIR_PLAN.md). In `update` mode the changes go into the project's open draft (nothing
 is applied until a human approves it); in `discuss` mode only the reply is kept.
 
 Like `core/groom.py` this is one `LLMClient` call with no files and no shell, so tests drive it
@@ -17,6 +19,7 @@ import asyncio
 import json
 import logging
 import subprocess
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,7 +28,17 @@ from typing import Any, Literal
 from core.harness.brief import wrap_untrusted
 from core.harness.results import result_json_schema, validate_result
 from core.llm.client import LLMClient, LLMMessage, LLMResponse
-from core.plan_drafts import Draft, PlanDrafts, PlanTurn, validate_turn
+from core.plan_drafts import (
+    Draft,
+    PlanDrafts,
+    PlanTurn,
+    Problem,
+    classify_problem,
+    draft_refs,
+    resolve_predicted_ids,
+    split_turn,
+    validate_turn,
+)
 from core.pm_prompts import Phase, Seats, normalise_mode, persona_layers, pm_system_prompt
 from core.spec import Spec
 
@@ -35,6 +48,7 @@ TOOL_NAME = "submit_plan_turn"
 # Thinking at the project's effort counts against this too, so it leaves room for both.
 MAX_TOKENS = 32000
 HISTORY_MESSAGES = 20
+PM_COSTS_FILE = "pm_costs.jsonl"
 SESSIONS_SHOWN = 3
 BACKLOG_SHOWN = 60
 FILES_SHOWN = 200
@@ -79,6 +93,43 @@ class TurnOutcome:
     draft: Draft | None             # the open draft after the turn
     reply: str = ""
     questions: list[str] = field(default_factory=list)
+    status: TurnStatus = "complete"   # complete | partial (some changes left out) | failed
+    problems: list[str] = field(default_factory=list)  # why changes were left out
+    notes: list[str] = field(default_factory=list)     # ids GuudFlow read as refs
+
+
+TurnStatus = Literal["complete", "partial", "failed"]
+
+
+@dataclass
+class AskResult:
+    """What the model calls of one turn produced (`turn` is None when nothing was usable)."""
+
+    turn: PlanTurn | None
+    responses: list[LLMResponse]
+    status: TurnStatus
+    problems: list[str]
+    warnings: dict[int, list[str]]
+    notes: list[str]
+
+
+def _fix_groups(turn: PlanTurn, problems: list[Problem]) -> PlanTurn:
+    """Repair the reasons in place of rejecting them: a reason described twice keeps its first
+    description, and a quote that was never said is dropped (the reason stays)."""
+    codes = {p.code for p in problems}
+    if not codes & {"group_described_twice", "quote_not_said"}:
+        return turn
+    seen: set[str] = set()
+    groups = []
+    for g in turn.groups:
+        if g.name in seen:
+            continue
+        seen.add(g.name)
+        if "quote_not_said" in codes and g.quote and any(
+                p.code == "quote_not_said" and repr(g.name) in p.message for p in problems):
+            g = g.model_copy(update={"quote": None})
+        groups.append(g)
+    return turn.model_copy(update={"groups": groups})
 
 
 def _strip_discriminators(node: Any) -> Any:  # Any: JSON schema node
@@ -134,21 +185,31 @@ class ProjectManager:
         context = _insert_memory(context, await self._memory_context(text))
         sources = [str(m["text"]) for m in await asyncio.to_thread(self.drafts.messages, 500)
                    if m.get("author") == "human"] + ([extra_context] if extra_context else [])
-        turn, usage = await self._ask(phase, context, sources)
+        asked = await self._ask(phase, context, sources)
+        turn = asked.turn
         draft: Draft | None
-        if mode == "update" and turn.changes:
-            draft = await asyncio.to_thread(self._merge, turn)
+        if turn is not None and mode == "update" and turn.changes:
+            draft = await asyncio.to_thread(self._merge, turn, asked.warnings)
         else:
             draft = await asyncio.to_thread(self.drafts.current)
-        cost, tokens = self._usage(usage)
-        reply = turn.reply.strip()
-        if turn.questions:
-            reply += "\n\n" + "\n".join(f"Question: {q.strip()}" for q in turn.questions)
+        cost, tokens = self._usage(asked.responses)
+        if turn is None:
+            reply = ("I could not finish this turn, and nothing was added to the draft. "
+                     "What went wrong:\n" + "\n".join(f"- {p}" for p in asked.problems))
+        else:
+            reply = turn.reply.strip()
+            if turn.questions:
+                reply += "\n\n" + "\n".join(f"Question: {q.strip()}" for q in turn.questions)
+            if asked.problems and mode == "update":
+                reply += ("\n\nLeft out of the draft until fixed:\n"
+                          + "\n".join(f"- {p}" for p in asked.problems))
         new.append(await asyncio.to_thread(
             self.drafts.add_message, "pm", reply, draft.id if draft else None, mode,
-            cost, tokens))
-        return TurnOutcome(messages=new, draft=draft, reply=turn.reply,
-                           questions=list(turn.questions))
+            cost, tokens, asked.status, asked.problems))
+        return TurnOutcome(messages=new, draft=draft, reply=turn.reply if turn else reply,
+                           questions=list(turn.questions) if turn else [],
+                           status=asked.status, problems=list(asked.problems),
+                           notes=list(asked.notes))
 
     async def start(self) -> TurnOutcome:
         """The first draft: no human text, the PM drafts spec, decisions and items."""
@@ -173,15 +234,27 @@ class ProjectManager:
 
     # ── the model call ──────────────────────────────────────────────────────
     async def _ask(self, phase: Phase, context: str, sources: list[str] | None = None
-                   ) -> tuple[PlanTurn, list[LLMResponse]]:
+                   ) -> AskResult:
+        """Ask for a turn; at most two calls, and whatever is valid is kept.
+
+        A cut-off, a missing tool call or a payload that does not parse gets one retry. A turn
+        with blocking problems gets one retry that lists them; after that the attempt with the
+        fewest blocking problems is split (`split_turn`): its valid changes go into the draft
+        and the rest are reported. Every call is recorded in `pm_costs.jsonl`.
+        """
         system = pm_system_prompt(seats=self.seats, start_mode=self.start_mode, phase=phase,
                                   has_tech_lead=self._has_tech_lead())
         if self._persona is not None:
             system = persona_layers(self._persona) + "\n\n" + system
         spec = Spec(self.drafts.db.read_spec_doc())
+        spec_doc = self.drafts.db.read_spec_doc()
         backlog_doc = self.drafts.db.read_backlog_doc()
+        current = self.drafts.current()
+        refs = draft_refs(current)
+        known_groups = set(current.groups) if current else set()
         responses: list[LLMResponse] = []
         problems: list[str] = []
+        best: tuple[PlanTurn, list[Problem], list[str]] | None = None
         content = context
         for attempt in (1, 2):
             if problems:
@@ -200,29 +273,64 @@ class ProjectManager:
                 # are lost and only the reply survives), so it is never accepted.
                 problems = ["your answer was cut off at the output limit: keep `reply` under "
                             "200 words and propose fewer, smaller changes"]
+                self._record_call(phase, attempt, response, "cut_off")
                 log.warning("pm: attempt %d hit the output limit", attempt)
                 continue
             call = next((c for c in response.tool_calls if c.name == TOOL_NAME), None)
             if call is None:
                 problems = [f"you did not call {TOOL_NAME}"]
+                self._record_call(phase, attempt, response, "no_call")
                 log.warning("pm: attempt %d made no %s call", attempt, TOOL_NAME)
                 continue
             turn, error = validate_result(PlanTurn, call.arguments)
             if turn is None:
                 problems = (error or "invalid payload").splitlines()
+                self._record_call(phase, attempt, response, "invalid")
                 log.warning("pm: attempt %d invalid: %s", attempt, "; ".join(problems)[:500])
                 continue
-            current = self.drafts.current()
-            problems = validate_turn(turn, spec, backlog_doc, self._team(), sources,
-                                     set(current.groups) if current else ())
-            if not problems:
-                return turn, responses
+            notes = resolve_predicted_ids(turn, spec_doc, backlog_doc, current)
+            found = [classify_problem(p) for p in validate_turn(
+                turn, spec, backlog_doc, self._team(), sources, known_groups, refs)]
+            turn = _fix_groups(turn, found)
+            blocking = [p for p in found if p.severity == "block"]
+            if best is None or len(blocking) <= len([p for p in best[1]
+                                                     if p.severity == "block"]):
+                best = (turn, found, notes)
+            self._record_call(phase, attempt, response, "rejected" if blocking else "ok")
+            if not blocking:
+                break
+            problems = [p.message for p in blocking]
             log.warning("pm: attempt %d rejected: %s", attempt, "; ".join(problems)[:500])
-        raise ProjectManagerError(problems)
+        if best is None:
+            return AskResult(None, responses, "failed", problems, {}, [])
+        turn, found, notes = best
+        kept, warnings, left_out = split_turn(turn, found)
+        status: TurnStatus = "partial" if left_out else "complete"
+        return AskResult(kept, responses, status, [p.message for p in left_out], warnings,
+                         notes)
 
-    def _merge(self, turn: PlanTurn) -> Draft:
+    def _record_call(self, phase: str, attempt: int, response: LLMResponse,
+                     outcome: str) -> None:
+        """Append one call to the project's `pm_costs.jsonl`, whatever came of it."""
+        cost, tokens = self._usage([response])
+        row = {"at": time.time(), "phase": phase, "attempt": attempt,
+               "model": response.model or self.model, "effort": self.effort,
+               "input_tokens": response.input_tokens, "output_tokens": response.output_tokens,
+               "cache_read_tokens": response.cache_read_tokens,
+               "cache_creation_tokens": response.cache_creation_tokens,
+               "tokens": tokens, "cost_usd": cost, "outcome": outcome}
+        path = self.drafts.db.project_dir / PM_COSTS_FILE
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(row) + "\n")
+        except OSError:
+            log.warning("pm: could not record a call in %s", path, exc_info=True)
+
+    def _merge(self, turn: PlanTurn, warnings: Mapping[int, list[str]] | None = None) -> Draft:
         draft = self.drafts.current() or self.drafts.open_draft()
-        return self.drafts.merge_pm_turn(draft, turn, lead_held=self.seats.lead)
+        return self.drafts.merge_pm_turn(draft, turn, lead_held=self.seats.lead,
+                                         warnings=warnings)
 
     def _usage(self, responses: list[LLMResponse]) -> tuple[float | None, int | None]:
         """Cost (USD) and tokens of the calls; (None, None) when the client reported none."""

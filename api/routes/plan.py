@@ -71,7 +71,8 @@ def _draft_json(draft: Draft | None) -> dict[str, Any] | None:  # Any: JSON
 
 
 def _outcome_json(outcome: TurnOutcome) -> dict[str, Any]:  # Any: JSON
-    return {"messages": outcome.messages, "draft": _draft_json(outcome.draft)}
+    return {"messages": outcome.messages, "draft": _draft_json(outcome.draft),
+            "status": outcome.status, "problems": outcome.problems, "notes": outcome.notes}
 
 
 def _draft_error(exc: Exception) -> HTTPException:
