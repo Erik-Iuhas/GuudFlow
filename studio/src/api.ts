@@ -666,7 +666,7 @@ export const metaApi = {
    *  response will populate `deltas` rather than just a fresh team. */
   propose: (
     goal: string,
-    options?: { projectId?: string; priorRunId?: string; metaModel?: string; startMode?: StartMode },
+    options?: { projectId?: string; priorRunId?: string; metaModel?: string; startMode?: StartMode; kind?: string },
   ) =>
     request<MetaProposal>(
       "POST",
@@ -677,6 +677,7 @@ export const metaApi = {
         ...(options?.priorRunId ? { prior_run_id: options.priorRunId } : {}),
         ...(options?.metaModel ? { meta_model: options.metaModel } : {}),
         ...(options?.startMode ? { start_mode: options.startMode } : {}),
+        ...(options?.kind ? { kind: options.kind } : {}),
       },
       true,
     ),

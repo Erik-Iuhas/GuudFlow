@@ -20,6 +20,8 @@ export interface BacklogListProps {
   onStart: () => void;
   adding?: boolean;
   starting?: boolean;
+  /** The lifecycle phase an open item waits on ("waits for design"), if any. */
+  phaseLabel?: (itemId: string) => string | null;
 }
 
 /**
@@ -27,7 +29,7 @@ export interface BacklogListProps {
  * priority order; a run takes the selected ones and the rest stay for later.
  */
 export function BacklogList({
-  items, selected, onToggle, onMove, onDrop, onReopen, onAdd, onStart, adding, starting,
+  items, selected, onToggle, onMove, onDrop, onReopen, onAdd, onStart, adding, starting, phaseLabel,
 }: BacklogListProps) {
   const groups = groupBacklog(items);
   return (
@@ -75,6 +77,7 @@ export function BacklogList({
                     />
                   }
                 >
+                  {phaseLabel?.(item.id) && <Badge variant="outline">{phaseLabel(item.id)}</Badge>}
                   <Button variant="ghost" size="sm" className={ARROW} aria-label={`Move ${item.id} up`} disabled={up === null}
                     onClick={() => up !== null && onMove(item.id, up)}>↑</Button>
                   <Button variant="ghost" size="sm" className={ARROW} aria-label={`Move ${item.id} down`}

@@ -37,7 +37,21 @@ export interface BacklogItemWire {
 
 export type RunState = "pending" | "accepted" | "rejected" | "no_changes" | "superseded";
 
+export type LedgerState =
+  | "verified" | "failing" | "missing_test" | "claimed" | "unmet" | "unchecked" | "person";
+
+/** One check's evidence in the verification ledger (role contracts plan §4.4). */
+export interface LedgerEntryWire {
+  check: string;
+  state: LedgerState;
+  method: string | null;
+  tests: string[];
+  detail: string;
+}
+
 export interface CheckWire {
+  /** Check id ("R3.2") → its evidence, when the run's checks were linked to tests. */
+  ledger?: Record<string, LedgerEntryWire>;
   command: string;
   status: "passed" | "failed" | "timed_out" | "skipped";
   exit_code: number | null;
@@ -203,11 +217,11 @@ export const workApi = {
     send<{ diff: string }>("GET", `/api/projects/${enc(projectId)}/runs-review/${enc(runId)}/changes`).then(
       (r) => r.diff,
     ),
-  decide: (projectId: string, runId: string, accept: boolean, note: string) =>
+  decide: (projectId: string, runId: string, accept: boolean, note: string, confirmed: string[] = []) =>
     send<{ run: RunBranchWire; items: BacklogItemWire[] }>(
       "POST",
       `/api/projects/${enc(projectId)}/runs-review/${enc(runId)}/${accept ? "accept" : "reject"}`,
-      { note },
+      accept && confirmed.length ? { note, confirmed_checks: confirmed } : { note },
     ),
 };
 
@@ -260,10 +274,10 @@ export function useSyncRemote(projectId: string): UseMutationResult<SyncWire, Er
 
 export function useDecideRun(
   projectId: string,
-): UseMutationResult<unknown, Error, { runId: string; accept: boolean; note: string }> {
+): UseMutationResult<unknown, Error, { runId: string; accept: boolean; note: string; confirmed?: string[] }> {
   const invalidate = useInvalidate(projectId);
   return useMutation({
-    mutationFn: ({ runId, accept, note }) => workApi.decide(projectId, runId, accept, note),
+    mutationFn: ({ runId, accept, note, confirmed }) => workApi.decide(projectId, runId, accept, note, confirmed),
     onSuccess: invalidate,
   });
 }

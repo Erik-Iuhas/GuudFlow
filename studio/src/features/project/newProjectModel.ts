@@ -6,10 +6,11 @@ export const START_MODES: { value: StartMode; title: string; hint: string }[] = 
   { value: "test_first", title: "Test first", hint: "A tester writes checks from the spec before builders start." },
   { value: "research_first", title: "Research first", hint: "Compare approaches and recommend one before building." },
   { value: "maintain", title: "Maintain", hint: "For existing code: the smallest safe change and a regression test per fix." },
+  { value: "adopt", title: "Adopt existing code", hint: "The tech lead first recovers the design from the code, then the team builds against it." },
 ];
 
 export const LEAD_HINT =
-  "Technical decisions wait for your approval in plan drafts. Otherwise Jack, the project manager, makes them and records why.";
+  "Design changes wait for your approval. Otherwise the tech lead approves its own design and records why.";
 export const REVIEWER_HINT = "You co-sign the code of each item before it is accepted, after the agent reviewer.";
 
 export const DEFAULT_CAP_USD = 5;
@@ -30,6 +31,8 @@ export interface NewProjectChoices {
   lead: boolean;
   reviewer: boolean;
   startMode: StartMode;
+  /** The project kind id; empty leaves it unset (software_app). */
+  kind?: string;
   /** Spend cap per session in USD; null for no cap. */
   capUsd: number | null;
 }
@@ -52,6 +55,7 @@ export function buildProject(
     harness: "opencode" as const, // always explicit: a missing field means opencode
     seats: seatsFor(c.lead, c.reviewer),
     start_mode: c.startMode,
+    ...(c.kind ? { kind: c.kind } : {}),
     approval_gates: { token_budget_usd: c.capUsd },
   };
 }

@@ -190,7 +190,7 @@ export function draftCounts(draft: DraftWire): DraftCounts {
 
 function sectionOf(op: string): Section {
   if (FIELD_OPS.has(op)) return "Requirements";
-  if (op.endsWith("_role")) return "Team";
+  if (op.endsWith("_role") || op === "set_kind" || op === "add_contract_rule") return "Team";
   if (op.endsWith("requirement")) return "Requirements";
   if (op.endsWith("decision")) return "Decisions";
   if (op.endsWith("rule")) return "Rules";
@@ -264,7 +264,11 @@ function summaryOf(c: ChangeWire): string {
     case "remove_check":
       return "Remove a check";
     case "add_role":
-      return `${c.role_type ?? "role"} · ${c.model_tier ?? "solid"}`;
+      return `${c.role_type ?? "role"} · ${c.model_tier ?? "solid"}${c.contract ? ` · ${c.contract.replace(/_/g, " ")} contract` : ""}`;
+    case "set_kind":
+      return `Project kind: ${(c.kind ?? "").replace(/_/g, " ")}${c.start_mode ? `, start mode ${c.start_mode.replace(/_/g, " ")}` : ""}`;
+    case "add_contract_rule":
+      return `${(c.contract ?? "").replace(/_/g, " ")} rule: ${c.rule ?? ""}${c.evidence_runs?.length ? ` (from ${c.evidence_runs.join(", ")})` : ""}`;
     case "edit_role":
       return "Changes the role";
     case "remove_role":

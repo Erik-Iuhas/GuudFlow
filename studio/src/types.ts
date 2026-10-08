@@ -67,6 +67,8 @@ export interface ProjectConfig {
   /** Project flow plan §2: who holds the Lead and Reviewer seats (Owner is always on). */
   seats?: ProjectSeats;
   start_mode?: StartMode;
+  /** The project kind (role contracts plan §3); none means software_app. */
+  kind?: string;
   /** Keep SPEC.md and docs/decisions/ in the project repo, updated on each accepted session. */
   record?: { keep_in_repo?: boolean };
 }
@@ -76,7 +78,7 @@ export interface ProjectSeats {
   reviewer: "off" | "all" | "must";
 }
 
-export type StartMode = "spec_first" | "prototype_first" | "test_first" | "research_first" | "maintain";
+export type StartMode = "spec_first" | "prototype_first" | "test_first" | "research_first" | "maintain" | "adopt";
 
 export interface PrReadyInfo {
   integration_branch: string;

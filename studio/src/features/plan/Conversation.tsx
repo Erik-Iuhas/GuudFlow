@@ -28,23 +28,26 @@ function draftNumber(id: string | null): string | null {
 }
 
 function Message({ m, pmName }: { m: PlanMessageWire; pmName: string }) {
-  const pm = m.author === "pm";
+  const lead = m.author === "tech_lead";
+  const pm = m.author === "pm" || lead;
   const draft = draftNumber(m.draft_id);
+  const who = lead ? "Tech lead" : pmName;
   return (
     <li className="flex gap-3" data-testid={`msg-${m.id}`}>
       <span
         aria-hidden="true"
         className={cn(
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-          pm ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground",
+          lead ? "bg-status-running/20 text-foreground" : pm ? "bg-primary text-primary-foreground"
+            : "bg-secondary text-secondary-foreground",
         )}
       >
-        {pm ? pmName.charAt(0).toUpperCase() : "You"}
+        {pm ? who.charAt(0).toUpperCase() : "You"}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">{pm ? pmName : "You"}</span>
-          {pm && <span>project manager</span>}
+          <span className="font-medium text-foreground">{pm ? who : "You"}</span>
+          {pm && <span>{lead ? "feasibility note" : "project manager"}</span>}
           <time>{timeLabel(m.at)}</time>
           {draft && <span>{pm ? `proposed changes in draft ${draft}` : `draft ${draft}`}</span>}
           {m.mode === "discuss" && !pm && <span>just discussing</span>}

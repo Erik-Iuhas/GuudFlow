@@ -19,6 +19,7 @@ import { ProjectInsights } from "../features/project/ProjectInsights";
 import { SeatChips } from "../features/project/SeatChips";
 import { SessionsTab } from "../features/project/SessionsTab";
 import { PROJECT_TABS, TAB_LABEL, normalizeTab, type ProjectTab } from "../features/project/projectTabs";
+import { DesignTab } from "../features/design/DesignTab";
 import { useDetailLevel, type DetailLevel } from "../features/project/useDetailLevel";
 import { ProjectWork, type RunRequest } from "../features/work/ProjectWork";
 import { WorkSettings } from "../features/work/WorkSettings";
@@ -28,6 +29,7 @@ import { PlanTab } from "../features/plan/PlanTab";
 import { SpecPage } from "../features/plan/SpecPage";
 import { SeatsPanel } from "../features/team/SeatsPanel";
 import { RulesPanel } from "../features/team/RulesPanel";
+import { ContractsPanel } from "../features/team/ContractsPanel";
 import { RecordTab } from "../features/record/RecordTab";
 
 const DETAIL_OPTIONS: { value: DetailLevel; label: string }[] = [
@@ -223,6 +225,7 @@ export function Studio() {
         <>
           <SeatsPanel project={project} onSaved={setProject} />
           {id && <RulesPanel projectId={id} />}
+          {id && <ContractsPanel projectId={id} />}
           <Card className="mb-3 p-4">
             <Label>Goal</Label>
             <Textarea
@@ -309,6 +312,8 @@ export function Studio() {
         )
       ) : tab === "spec" ? (
         id && <SpecPage projectId={id} />
+      ) : tab === "design" ? (
+        id && <DesignTab projectId={id} />
       ) : tab === "sessions" ? (
         <SessionsTab runs={runs} onResumed={() => void load()} />
       ) : tab === "record" ? (

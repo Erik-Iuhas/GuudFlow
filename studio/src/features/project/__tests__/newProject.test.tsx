@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { slugify } from "../newProjectModel";
 
 const mocks = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ vi.mock("../../../api", () => {
   }
   return {
     ApiError,
+    getToken: () => null,
     metaApi: { propose: mocks.propose },
     projectsApi: { create: mocks.create },
     inputsApi: { uploadFiles: mocks.upload, importGit: mocks.importGit },
@@ -32,13 +34,16 @@ function Where() {
 }
 
 function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={["/projects/new"]}>
-      <Routes>
-        <Route path="/projects/new" element={<NewProject />} />
-        <Route path="*" element={<Where />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/projects/new"]}>
+        <Routes>
+          <Route path="/projects/new" element={<NewProject />} />
+          <Route path="*" element={<Where />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -96,7 +101,7 @@ describe("NewProject", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start planning" }));
 
     await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/projects/a-tiny-book-club-app?tab=plan"));
-    expect(mocks.propose).toHaveBeenCalledWith("A tiny Book Club app", { startMode: "test_first" });
+    expect(mocks.propose).toHaveBeenCalledWith("A tiny Book Club app", { startMode: "test_first", kind: "software_app" });
     const body = mocks.create.mock.calls[0][0];
     expect(body.project_id).toBe("a-tiny-book-club-app");
     expect(body.goal).toBe("A tiny Book Club app");

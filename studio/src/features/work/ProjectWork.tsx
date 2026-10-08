@@ -28,6 +28,9 @@ import { specApi } from "../spec/api";
 import type { ProjectSeats } from "../../types";
 import { Link } from "react-router-dom";
 import { usePmName } from "../pm/api";
+import { PhaseStrip } from "../design/PhaseStrip";
+import { usePhases } from "../design/api";
+import { itemPhaseLabel } from "../design/model";
 
 export interface RunRequest {
   backlog_items?: string[];
@@ -54,6 +57,7 @@ export function ProjectWork({
   const patch = usePatchItem(projectId);
   const decide = useDecideRun(projectId);
   const groom = useGroom(projectId);
+  const phases = usePhases(projectId);
   const syncRemote = useSyncRemote(projectId);
   const client = useQueryClient();
   const [detail] = useDetailLevel(projectId);
@@ -87,10 +91,10 @@ export function ProjectWork({
     }
   }
 
-  function onDecide(runId: string, accept: boolean, note: string) {
+  function onDecide(runId: string, accept: boolean, note: string, confirmed: string[] = []) {
     setDecisionError(null);
     setBusyRun(runId);
-    decide.mutate({ runId, accept, note }, {
+    decide.mutate({ runId, accept, note, confirmed }, {
       onSuccess: () => {
         if (!accept) return;
         // The project manager drafts spec suggestions from the session; the answer shows up in Plan.
@@ -159,6 +163,7 @@ export function ProjectWork({
             onStart={() => onStartRun({ backlog_items: chosen })}
             adding={add.isPending}
             starting={starting}
+            phaseLabel={(id) => itemPhaseLabel(phases.data?.items[id], phases.data?.phases ?? [])}
           />
         )}
       </div>
@@ -185,6 +190,7 @@ export function ProjectWork({
     <div className="flex flex-col gap-6" data-testid="project-work">
       {loadError && <Alert variant="error">{loadError.message}</Alert>}
       <Interrupted projectId={projectId} />
+      <PhaseStrip projectId={projectId} />
       {runs.data && (
         <WorkHeader
           remote={runs.data.remote}

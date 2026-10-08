@@ -1,11 +1,12 @@
 /** Project page tabs (project flow plan §7) and the mapping of older `?tab=` values. */
-export const PROJECT_TABS = ["work", "plan", "spec", "sessions", "team", "record", "settings"] as const;
+export const PROJECT_TABS = ["work", "plan", "spec", "design", "sessions", "team", "record", "settings"] as const;
 export type ProjectTab = (typeof PROJECT_TABS)[number];
 
 export const TAB_LABEL: Record<ProjectTab, string> = {
   work: "Work",
   plan: "Plan",
   spec: "Spec",
+  design: "Design",
   sessions: "Sessions",
   team: "Team",
   record: "Record",
@@ -17,6 +18,7 @@ const LEGACY_TABS: Record<string, ProjectTab> = {
   inputs: "plan",
   roadmap: "plan",
   insights: "record",
+  knowledge: "design",
 };
 
 /** A `?tab=` value as a tab: current names pass through, old ones map, anything else is Work. */

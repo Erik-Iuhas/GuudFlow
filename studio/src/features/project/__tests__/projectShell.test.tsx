@@ -34,6 +34,8 @@ vi.mock("../../../components/PersonaSlideOver", () => ({ PersonaSlideOver: () =>
 vi.mock("../../work/WorkSettings", () => ({ WorkSettings: () => <div /> }));
 vi.mock("../../team/SeatsPanel", () => ({ SeatsPanel: () => <div>seats panel</div> }));
 vi.mock("../../team/RulesPanel", () => ({ RulesPanel: () => <div>rules panel</div> }));
+vi.mock("../../team/ContractsPanel", () => ({ ContractsPanel: () => <div>contracts panel</div> }));
+vi.mock("../../design/DesignTab", () => ({ DesignTab: () => <div>design content</div> }));
 
 import { Studio } from "../../../views/Studio";
 
@@ -44,7 +46,7 @@ afterEach(() => {
 
 describe("normalizeTab", () => {
   it("keeps current names and maps the old ones", () => {
-    for (const t of ["work", "plan", "sessions", "team", "record", "settings"]) expect(normalizeTab(t)).toBe(t);
+    for (const t of ["work", "plan", "design", "sessions", "team", "record", "settings"]) expect(normalizeTab(t)).toBe(t);
     expect(normalizeTab("inputs")).toBe("plan");
     expect(normalizeTab("roadmap")).toBe("plan");
     expect(normalizeTab("insights")).toBe("record");
@@ -97,13 +99,13 @@ const PROJECT = {
 };
 
 describe("Studio project page", () => {
-  it("has the six tabs, Work first and selected by default", async () => {
+  it("has the eight tabs, Work first and selected by default", async () => {
     mocks.get.mockResolvedValue(PROJECT);
     mocks.runs.mockResolvedValue([]);
     renderStudio("/projects/p1");
     expect(await screen.findByText("work content")).toBeTruthy();
     const names = screen.getAllByRole("tab").map((t) => t.textContent);
-    expect(names).toEqual(["Work", "Plan", "Spec", "Sessions", "Team", "Record", "Settings"]);
+    expect(names).toEqual(["Work", "Plan", "Spec", "Design", "Sessions", "Team", "Record", "Settings"]);
     expect(screen.getByRole("tab", { name: "Work" }).getAttribute("aria-selected")).toBe("true");
   });
 

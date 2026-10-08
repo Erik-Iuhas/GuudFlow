@@ -8,6 +8,7 @@ import type { CheckWire, PublishWire, RunBranchWire, RunState } from "./api";
 import { changeSummary } from "./model";
 import { COSIGN_WHY, Cosign, canAccept } from "./Cosign";
 import { SpecResults } from "./SpecResults";
+import { Ledger } from "./Ledger";
 
 const STATE_VARIANT: Record<RunState, BadgeProps["variant"]> = {
   pending: "waiting",
@@ -49,7 +50,7 @@ export interface ReviewListProps {
   /** Diff text per run whose changes were requested (undefined while loading). */
   changes: Record<string, string | undefined>;
   onViewChanges: (runId: string) => void;
-  onDecide: (runId: string, accept: boolean, note: string) => void;
+  onDecide: (runId: string, accept: boolean, note: string, confirmed?: string[]) => void;
   onContinue: (runId: string) => void;
   busyRunId?: string | null;
   error?: DecisionError | null;
@@ -82,7 +83,7 @@ export function ReviewList({
               busy={busyRunId === run.run_id}
               error={error?.runId === run.run_id ? error : null}
               onViewChanges={() => onViewChanges(run.run_id)}
-              onDecide={(accept, note) => onDecide(run.run_id, accept, note)}
+              onDecide={(accept, note, confirmed) => onDecide(run.run_id, accept, note, confirmed)}
               onContinue={() => onContinue(run.run_id)}
             />
           ))}
@@ -122,10 +123,11 @@ function PendingRun({
   busy: boolean;
   error: DecisionError | null;
   onViewChanges: () => void;
-  onDecide: (accept: boolean, note: string) => void;
+  onDecide: (accept: boolean, note: string, confirmed?: string[]) => void;
   onContinue: () => void;
 }) {
   const [note, setNote] = useState("");
+  const [confirmed, setConfirmed] = useState<string[]>([]);
   const allowed = canAccept(run);
   return (
     <li className="rounded-lg border border-border bg-card p-3 text-card-foreground" data-testid={`review-${run.run_id}`}>
@@ -160,6 +162,10 @@ function PendingRun({
         <Button variant="outline" size="sm" onClick={onContinue}>Continue this run</Button>
       </div>
       {diff !== undefined && <DiffBlock text={diff} />}
+      {run.check?.ledger && Object.keys(run.check.ledger).length > 0 && (
+        <Ledger entries={Object.values(run.check.ledger)} confirmed={confirmed}
+          onToggle={(id) => setConfirmed(confirmed.includes(id) ? confirmed.filter((x) => x !== id) : [...confirmed, id])} />
+      )}
       {projectId && <SpecResults runId={run.run_id} />}
       {projectId && run.needs_cosign && <Cosign projectId={projectId} run={run} onViewChanges={onViewChanges} />}
       <div className="mt-2 grid gap-2">
@@ -172,7 +178,7 @@ function PendingRun({
         />
         <div className="flex flex-wrap gap-2">
           <span title={allowed ? undefined : COSIGN_WHY}>
-            <Button size="sm" onClick={() => onDecide(true, note)} disabled={busy || !allowed}
+            <Button size="sm" onClick={() => onDecide(true, note, confirmed)} disabled={busy || !allowed}
               aria-describedby={allowed ? undefined : `why-${run.run_id}`}>
               Accept into the project
             </Button>

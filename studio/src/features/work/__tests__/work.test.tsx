@@ -93,9 +93,9 @@ describe("ReviewList", () => {
     expect(screen.getByText("2 commits, 1 file")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Note for run_a"), { target: { value: "ship it" } });
     fireEvent.click(screen.getByRole("button", { name: "Accept into the project" }));
-    expect(onDecide).toHaveBeenCalledWith("run_a", true, "ship it");
+    expect(onDecide).toHaveBeenCalledWith("run_a", true, "ship it", []);
     fireEvent.click(screen.getByRole("button", { name: "Reject" }));
-    expect(onDecide).toHaveBeenLastCalledWith("run_a", false, "ship it");
+    expect(onDecide).toHaveBeenLastCalledWith("run_a", false, "ship it", undefined);
     rerender(<MemoryRouter><ReviewList pending={[run("run_a")]} decided={[run("run_0", { state: "accepted", note: "fine" })]}
       changes={{ run_a: "+added\n-removed" }} onViewChanges={vi.fn()} onDecide={onDecide} onContinue={vi.fn()}
       error={{ runId: "run_a", message: "main changed", files: ["same.py"] }} /></MemoryRouter>);

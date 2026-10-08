@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { ApiError, inputsApi, metaApi, projectsApi } from "../../api";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
-import { Alert, Input, Label, Page, Textarea } from "../../components/ui/form-controls";
+import { Alert, Input, Label, Page, Select, Textarea } from "../../components/ui/form-controls";
+import { useKinds } from "../design/api";
 import { cn } from "../../lib/utils";
 import type { StartMode } from "../../types";
 import {
@@ -65,6 +66,10 @@ export function NewProject() {
   const [lead, setLead] = useState(false);
   const [reviewer, setReviewer] = useState(false);
   const [startMode, setStartMode] = useState<StartMode>("spec_first");
+  const [kind, setKind] = useState("software_app");
+  const kinds = useKinds();
+  const kindRow = kinds.data?.kinds.find((k) => k.id === kind);
+  const modes = kindRow ? START_MODES.filter((m) => kindRow.start_modes.includes(m.value)) : START_MODES;
   const [cap, setCap] = useState(String(DEFAULT_CAP_USD));
   const [name, setName] = useState("");
   const [nameEdited, setNameEdited] = useState(false);
@@ -87,11 +92,11 @@ export function NewProject() {
     try {
       // 1. The project manager's team, shaped by the start mode (can take a while).
       setProgress("Drafting the team. This can take a minute…");
-      const proposal = await metaApi.propose(goal.trim(), { startMode });
+      const proposal = await metaApi.propose(goal.trim(), { startMode, kind });
       // 2. The project, with seats, mode and the spend cap.
       setProgress("Creating the project…");
       await projectsApi.create(
-        buildProject({ projectId, goal: goal.trim(), lead, reviewer, startMode, capUsd: capNumber }, proposal),
+        buildProject({ projectId, goal: goal.trim(), lead, reviewer, startMode, kind, capUsd: capNumber }, proposal),
       );
     } catch (e) {
       setError(errorText(e));
@@ -224,11 +229,32 @@ export function NewProject() {
             />
           </section>
 
+          {kinds.data && (
+            <section aria-labelledby="np-kind" className="flex flex-col gap-2">
+              <h2 id="np-kind" className="m-0 text-base font-semibold">
+                What kind of work is it?
+              </h2>
+              <Select aria-labelledby="np-kind" value={kind} disabled={busy}
+                onChange={(e) => {
+                  const next = kinds.data?.kinds.find((k) => k.id === e.target.value);
+                  setKind(e.target.value);
+                  if (next && !next.start_modes.includes(startMode)) setStartMode(next.default_start_mode as StartMode);
+                }}>
+                {kinds.data.kinds.map((k) => <option key={k.id} value={k.id}>{k.title}</option>)}
+              </Select>
+              {kindRow && (
+                <p className="m-0 text-sm text-muted-foreground">
+                  {kindRow.purpose} Team: {kindRow.team_template.map((r) => r.role.replace(/_/g, " ")).join(", ")}.
+                </p>
+              )}
+            </section>
+          )}
+
           <section aria-labelledby="np-mode" className="flex flex-col gap-2">
             <h2 id="np-mode" className="m-0 text-base font-semibold">
               How should it start?
             </h2>
-            {START_MODES.map((m) => (
+            {modes.map((m) => (
               <ChoiceCard
                 key={m.value}
                 title={m.title}

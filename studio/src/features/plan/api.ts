@@ -151,6 +151,11 @@ export interface ChangeWire {
   max_review_rounds?: number;
   name?: string;
   capabilities?: Record<string, string>;
+  contract?: string;
+  // Project ops (set_kind uses `kind` above; add_contract_rule; role contracts plan §3, §6).
+  start_mode?: string;
+  rule?: string;
+  evidence_runs?: string[];
 }
 
 export interface DraftChangeWire {
@@ -184,7 +189,8 @@ export interface DraftWire {
 export interface PlanMessageWire {
   id: number;
   at: number;
-  author: "human" | "pm";
+  /** `tech_lead`: a feasibility note the tech lead left while planning (role contracts plan §2.2). */
+  author: "human" | "pm" | "tech_lead";
   text: string;
   draft_id: string | null;
   mode: string;
