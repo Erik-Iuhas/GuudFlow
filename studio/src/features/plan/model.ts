@@ -113,6 +113,8 @@ export interface ChangeView {
   oldText: string | null;
   accepted: boolean | null;
   byPm: boolean;
+  /** Style problems found when the change was proposed (a person decides). */
+  warnings: string[];
   /** For role edits: each changed field with its old value. */
   teamFields: TeamFieldChange[];
   /** Theme label set by the project manager, if any. */
@@ -362,6 +364,7 @@ export function viewChange(dc: DraftChangeWire, spec: SpecWire | undefined, team
     oldText: oldTextFor(c, spec),
     accepted: dc.accepted,
     byPm: dc.by === "pm",
+    warnings: dc.warnings ?? [],
     teamFields: teamFieldChanges(c, team),
     group: c.group ?? null,
     ...structured(c, spec),

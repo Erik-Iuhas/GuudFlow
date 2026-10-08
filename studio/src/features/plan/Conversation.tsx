@@ -27,7 +27,18 @@ function draftNumber(id: string | null): string | null {
   return m ? m[1] : null;
 }
 
-function Message({ m, pmName }: { m: PlanMessageWire; pmName: string }) {
+/** The message that asks the project manager to repair what it left out of the draft. */
+export function fixRequest(problems: string[]): string {
+  return ("Please fix the changes you left out of the draft last turn. Send only those, " +
+    "corrected:\n" + problems.map((p) => `- ${p}`).join("\n"));
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  partial: "some changes left out",
+  failed: "turn failed, nothing added",
+};
+
+function Message({ m, pmName, onFix }: { m: PlanMessageWire; pmName: string; onFix?: () => void }) {
   const lead = m.author === "tech_lead";
   const pm = m.author === "pm" || lead;
   const draft = draftNumber(m.draft_id);
@@ -51,11 +62,23 @@ function Message({ m, pmName }: { m: PlanMessageWire; pmName: string }) {
           <time>{timeLabel(m.at)}</time>
           {draft && <span>{pm ? `proposed changes in draft ${draft}` : `draft ${draft}`}</span>}
           {m.mode === "discuss" && !pm && <span>just discussing</span>}
+          {pm && typeof m.cost_usd === "number" && <span>${m.cost_usd.toFixed(2)}</span>}
+          {m.status && STATUS_LABEL[m.status] && (
+            <span className={m.status === "failed" ? "text-status-failed" : "text-status-blocked"}
+              data-testid={`turn-status-${m.id}`}>
+              {STATUS_LABEL[m.status]}
+            </span>
+          )}
         </div>
         {pm ? (
           <Markdown text={m.text} className="mt-1 break-words text-sm" />
         ) : (
           <p className="mt-1 whitespace-pre-wrap break-words text-sm">{m.text}</p>
+        )}
+        {onFix && (
+          <Button size="sm" variant="outline" className="mt-2" onClick={onFix}>
+            Ask {pmName} to fix these
+          </Button>
         )}
       </div>
     </li>
@@ -105,6 +128,20 @@ export function Conversation({ messages, pending, onSend, onStart, error, curren
     }
   }
 
+  // Only the latest PM turn can be repaired, and only while it is still the latest message.
+  const last = messages[messages.length - 1];
+  const fixableId = last && last.author === "pm" && (last.problems?.length ?? 0) > 0
+    && (last.status === "partial" || last.status === "failed") ? last.id : null;
+
+  async function fix(problems: string[]): Promise<void> {
+    setFailure(null);
+    try {
+      await onSend(fixRequest(problems), "update");
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   const empty = messages.length === 0 && !pending;
   const thread = foldThread(messages, currentDraftId ?? null);
   const shownError = failure ?? error ?? null;
@@ -139,7 +176,8 @@ export function Conversation({ messages, pending, onSend, onStart, error, curren
           ))}
           <ol className="flex flex-col gap-4" aria-live="polite">
             {thread.open.map((m) => (
-              <Message key={m.id} m={m} pmName={pmName} />
+              <Message key={m.id} m={m} pmName={pmName}
+                onFix={m.id === fixableId && !pending ? () => void fix(m.problems ?? []) : undefined} />
             ))}
           </ol>
         </div>

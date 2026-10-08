@@ -216,6 +216,15 @@ function ChangeRow({ v, focused, onTick }: { v: ChangeView; focused: boolean; on
           <span className={cn(v.accepted === false && "text-muted-foreground line-through")}>{v.summary}</span>
         </p>
         <Details v={v} />
+        {v.warnings.length > 0 && (
+          <ul className="mt-2 flex flex-col gap-1" aria-label="Warnings">
+            {v.warnings.map((w) => (
+              <li key={w} className="text-xs text-status-blocked">
+                ⚠ {w.replace(/^change \d+ \([a-z_]+\): /, "")}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
       <div className="flex shrink-0 gap-1">
         <Button

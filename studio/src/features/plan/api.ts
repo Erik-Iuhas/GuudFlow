@@ -165,6 +165,8 @@ export interface DraftChangeWire {
   accepted: boolean | null;
   by: string;
   touched: boolean;
+  /** Style problems the project manager's change has; a person decides. */
+  warnings?: string[];
 }
 
 /** Why a set of draft changes is proposed (core/plan_drafts.py ChangeGroup). */
@@ -196,6 +198,10 @@ export interface PlanMessageWire {
   draft_id: string | null;
   mode: string;
   cost_usd?: number;
+  /** A PM turn: complete, partial (some changes left out) or failed (nothing usable). */
+  status?: "" | "complete" | "partial" | "failed";
+  /** Why changes were left out of the draft (a partial or failed turn). */
+  problems?: string[];
 }
 
 export interface PlanWire {
