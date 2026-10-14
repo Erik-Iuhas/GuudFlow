@@ -15,9 +15,10 @@ export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"   # where the uv installer
 what="${1:-all}"; [ $# -gt 0 ] && shift
 [ "${1:-}" = "--" ] && shift
 
-backend() { GUUDFLOW_SKIP_DOCKER_TESTS=1 python -m pytest -q "$@"; }
+PYV="python"; [ -x venv/bin/python ] && PYV="venv/bin/python"
+backend() { GUUDFLOW_SKIP_DOCKER_TESTS=1 "$PYV" -m pytest -q "$@"; }
 studio()  { (cd studio && npm run typecheck && npm test); }
-escape()  { python -m pytest -q tests/harness/test_escape_suite.py tests/harness/test_run_docker.py "$@"; }
+escape()  { "$PYV" -m pytest -q tests/harness/test_escape_suite.py tests/harness/test_run_docker.py "$@"; }
 
 case "$what" in
   all)     backend "$@"; studio ;;

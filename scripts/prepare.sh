@@ -8,8 +8,8 @@
 # whether Docker Engine can host sandboxes, and whether npm can reach its registry, then:
 #   1. installs uv                     -> Python 3.11 and the packages
 #   2. runs setup                      -> venv, packages, Chromium, opencode, .env, seed data
-#   3. gets Studio                     -> npm build if npm works; else unpacks studio-dist.tar.gz
-#                                         from the repo folder if you put one there
+#   3. gets Studio                     -> studio-dist.tar.gz / artifact zip in the repo folder first,
+#                                         else an npm build, else a download of the release
 #   4. writes GUUDFLOW_SANDBOX=host to .env when there is no usable Docker Engine
 #   5. runs doctor and says what to do next
 set -uo pipefail
@@ -57,20 +57,22 @@ step "2/5 setup (Python packages, Chromium, opencode, .env)"
 GUUDFLOW_SKIP_NPM=1 bash scripts/setup.sh || NEXT+=("setup reported a problem above; fix it and run Prepare again")
 
 step "3/5 Studio"
-ARCHIVE="$(ls -t studio-dist*.tar.gz 2>/dev/null | head -1)"
-if [ -f studio/dist/index.html ] && [ -z "$ARCHIVE" ] && [ "$NPM_OK" = 0 ]; then
+# Order: a prebuilt archive you put in the repo folder (tar.gz, or the GitHub artifact zip) wins,
+# then an npm build, then a download of the studio-latest release.
+ARCHIVE="$(ls -t studio-dist*.tar.gz studio-dist*.zip 2>/dev/null | head -1)"
+if [ -n "$ARCHIVE" ]; then
+  bash scripts/studio_bundle.sh unpack "$ARCHIVE" && note "Studio installed from $ARCHIVE (npm skipped)"
+elif [ -f studio/dist/index.html ] && [ "$NPM_OK" = 0 ]; then
   note "a Studio build is already in studio/dist"
 elif [ "$NPM_OK" = 1 ] && bash scripts/studio_deps.sh && (cd studio && npm run build); then
   note "Studio built from npm packages"
-elif [ -n "$ARCHIVE" ]; then
-  bash scripts/studio_bundle.sh unpack "$ARCHIVE" && note "Studio installed from $ARCHIVE"
 elif [ -f studio/dist/index.html ]; then
   note "npm failed; keeping the existing build in studio/dist"
 elif bash scripts/studio_fetch.sh; then
   note "Studio downloaded from the repo's studio-latest release (built by the Studio bundle action)"
 else
-  note "No Studio yet: npm is not usable, there is no studio-dist.tar.gz here, and the download failed."
-  NEXT+=("get studio-dist.tar.gz (task 'Studio: pack…' on a machine with npm, or the CI artifact),"
+  note "No Studio yet: no archive here, npm is not usable, and the download failed."
+  NEXT+=("download studio-dist.tar.gz (or the studio-dist-tar-gz artifact zip) from GitHub,"
          "put it in $ROOT and run Prepare again")
 fi
 

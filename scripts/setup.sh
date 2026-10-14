@@ -14,32 +14,38 @@ echo "==============="
 echo "Repo: ${ROOT}"
 echo
 
-# 1. Python check
-if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
-    echo "ERROR: python (3.11+) not found in PATH"
-    exit 1
-fi
-PY="$(command -v python3 || command -v python)"
-PY_VERSION="$(${PY} --version | awk '{print $2}')"
-echo "Python: ${PY} (${PY_VERSION})"
-
-# 2. Virtualenv + 3. Python deps. uv is used when present (much faster); set GUUDFLOW_NO_UV=1
-# to force python -m venv + pip.
-# uv manages the Python packages. GUUDFLOW_NO_UV=1 falls back to python -m venv + pip.
+# 1. Python 3.11+ (a system python3 can be older: Ubuntu 22.04 / WSL ships 3.10)
+source scripts/pick_python.sh
 USE_UV=1
 if [ "${GUUDFLOW_NO_UV:-0}" = "1" ]; then USE_UV=0
 elif ! command -v uv >/dev/null 2>&1; then
-    echo "ERROR: uv not found. Install it: curl -LsSf https://astral.sh/uv/install.sh | sh"
-    echo "       (or set GUUDFLOW_NO_UV=1 to use pip)"
+    echo "ERROR: uv not found. Install it: bash scripts/run.sh install-uv"
+    echo "       (or set GUUDFLOW_NO_UV=1 to use pip with a Python 3.11+ you installed)"
     exit 1
 fi
+PY="$(pick_python || true)"
+if [ -n "$PY" ]; then
+    echo "Python: $PY ($("$PY" --version 2>&1))"
+elif [ "${USE_UV}" = "1" ]; then
+    echo "No Python 3.11+ on this machine: uv will download one."
+else
+    echo "ERROR: Python 3.11+ not found (set GUUDFLOW_PYTHON=/path/to/python3.11, or use uv)"; exit 1
+fi
 
+# 2. Virtualenv. An existing one that is broken or older than 3.11 is rebuilt.
+if [ -d venv ] && ! venv_ok; then
+    echo "./venv is missing Python or is older than 3.11 ($(venv/bin/python --version 2>&1 || echo broken)): rebuilding"
+    rm -rf venv
+fi
 if [ ! -d "venv" ]; then
     echo "Creating virtualenv at ./venv ..."
-    if [ "${USE_UV}" = "1" ]; then uv venv --python 3.11 venv || uv venv venv
-    else "${PY}" -m venv venv; fi
+    if [ "${USE_UV}" = "1" ]; then
+        uv venv --python "${PY:-3.11}" venv || { echo "ERROR: uv could not create a Python 3.11 venv (downloads blocked? set GUUDFLOW_PYTHON to an installed 3.11+)"; exit 1; }
+    else
+        "$PY" -m venv venv
+    fi
 else
-    echo "Virtualenv already exists at ./venv"
+    echo "Virtualenv already exists at ./venv ($(venv/bin/python --version 2>&1))"
 fi
 
 # shellcheck disable=SC1091

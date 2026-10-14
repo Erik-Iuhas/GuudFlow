@@ -18,8 +18,17 @@ case "${1:-}" in
     tar -czf "$out" -C studio dist
     echo "wrote $out ($(du -h "$out" | cut -f1)); copy it over and run: bash scripts/run.sh studio-unpack $out" ;;
   unpack)
-    file="${2:?usage: studio_bundle.sh unpack <file.tar.gz>}"
+    file="${2:?usage: studio_bundle.sh unpack <file.tar.gz|artifact.zip>}"
     [ -f "$file" ] || { echo "$file not found" >&2; exit 1; }
+    case "$file" in
+      *.zip)  # the GitHub Actions artifact: a zip with studio-dist.tar.gz inside
+        tmp="$(mktemp -d)"
+        python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$file" "$tmp"
+        inner="$(find "$tmp" -name '*.tar.gz' | head -1)"
+        [ -n "$inner" ] || { rm -rf "$tmp"; echo "$file has no .tar.gz inside" >&2; exit 1; }
+        mv "$inner" studio-dist.tar.gz; rm -rf "$tmp"; file=studio-dist.tar.gz
+        echo "took studio-dist.tar.gz out of the artifact zip" ;;
+    esac
     rm -rf studio/dist.new && mkdir -p studio/dist.new
     tar -xzf "$file" -C studio/dist.new
     src=studio/dist.new/dist; [ -d "$src" ] || src=studio/dist.new

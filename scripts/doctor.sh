@@ -17,14 +17,11 @@ have() { command -v "$1" >/dev/null 2>&1; }
 env_value() { grep -E "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'"; }
 
 echo "Tools"
-PY="$(command -v python3 || command -v python || true)"
-if [ -z "$PY" ]; then
-  bad "Python 3.11+ not found (https://www.python.org/downloads/ or: uv python install 3.11)"
-elif "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
-  ok "Python $("$PY" --version 2>&1 | awk '{print $2}')"
-else
-  bad "Python is $("$PY" --version 2>&1 | awk '{print $2}'); 3.11+ is required"
-fi
+source scripts/pick_python.sh
+PY="$(pick_python || true)"
+if [ -n "$PY" ]; then ok "Python 3.11+: $PY ($("$PY" --version 2>&1 | awk '{print $2}'))"
+elif have uv; then warn "no Python 3.11+ installed; uv downloads one for the venv"
+else bad "Python 3.11+ not found (bash scripts/run.sh install-uv, then Setup)"; fi
 have git && ok "git $(git --version | awk '{print $3}')" || bad "git not found"
 if have uv; then ok "uv $(uv --version | awk '{print $2}') (installs the Python packages)"
 else bad "uv not found (curl -LsSf https://astral.sh/uv/install.sh | sh)"; fi
@@ -53,7 +50,9 @@ fi
   || warn "opencode not installed locally (scripts/install_opencode.sh); Compose bundles it"
 
 echo "Project"
-[ -d venv ] && ok "Python environment ./venv" || warn "no ./venv yet (scripts/setup.sh)"
+if venv_ok; then ok "Python environment ./venv ($(venv/bin/python --version 2>&1))"
+elif [ -d venv ]; then bad "./venv uses $(venv/bin/python --version 2>&1 || echo a broken Python); run Setup to rebuild it with 3.11+"
+else warn "no ./venv yet (Setup)"; fi
 [ -d studio/node_modules ] && ok "Studio packages installed" || warn "studio/node_modules missing (scripts/setup.sh)"
 [ -f studio/dist/index.html ] && ok "Studio built (studio/dist)" \
   || warn "Studio not built (scripts/build.sh studio); the dev server on :3001 works without it"

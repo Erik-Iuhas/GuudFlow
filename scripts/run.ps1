@@ -70,6 +70,14 @@ function Install-Opencode {
 function Studio-Unpack($file) {
     if (-not $file) { $file = "studio-dist.tar.gz" }
     if (-not (Test-Path $file)) { throw "$file not found (put the prebuilt Studio archive in the repo folder)" }
+    if ($file -like "*.zip") {
+        $tmp = Join-Path $env:TEMP ("studio-" + [guid]::NewGuid())
+        Expand-Archive -Path $file -DestinationPath $tmp -Force
+        $inner = Get-ChildItem -Path $tmp -Recurse -Filter "*.tar.gz" | Select-Object -First 1
+        if (-not $inner) { Remove-Item -Recurse -Force $tmp; throw "$file has no .tar.gz inside" }
+        Move-Item -Force $inner.FullName "studio-dist.tar.gz"; Remove-Item -Recurse -Force $tmp
+        $file = "studio-dist.tar.gz"
+    }
     Remove-Item -Recurse -Force studio\dist.new -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force studio\dist.new | Out-Null
     & tar.exe -xzf $file -C studio\dist.new
@@ -108,11 +116,12 @@ switch ($Command) {
         & "$PSScriptRoot\setup.ps1" @Rest
         $env:GUUDFLOW_SKIP_NPM = $null
         if (-not (Test-Path ".tools\opencode\node_modules")) { try { Install-Opencode } catch { Write-Warning "$_" } }
-        $archive = Get-ChildItem -Filter "studio-dist*.tar.gz" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        # A prebuilt archive in the folder wins (tar.gz, or the GitHub artifact zip), then npm, then download.
+        $archive = Get-ChildItem -Path ".\*" -Include "studio-dist*.tar.gz", "studio-dist*.zip" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
         $built = $false
-        try { Build-Studio; $built = $true; Write-Host "Studio built from npm packages" } catch { Write-Warning "$_" }
-        if (-not $built -and $archive) { Studio-Unpack $archive.FullName }
-        elseif (-not $built -and -not (Test-Path "studio\dist\index.html")) {
+        if ($archive) { Studio-Unpack $archive.FullName; $built = $true; Write-Host "Studio installed from $($archive.Name) (npm skipped)" }
+        else { try { Build-Studio; $built = $true; Write-Host "Studio built from npm packages" } catch { Write-Warning "$_" } }
+        if (-not $built -and -not (Test-Path "studio\dist\index.html")) {
             try { & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSCommandPath" studio-fetch }
             catch { Write-Warning "No Studio yet: put studio-dist.tar.gz in this folder and run Prepare again." }
         }
