@@ -320,3 +320,29 @@ async def test_watchdog_can_rearm_a_role_before_stuck() -> None:
     result = await asyncio.wait_for(s.run(), timeout=5)
     assert result.status is SchedulerStatus.COMPLETE
     assert calls == ["worker", "overseer"]
+
+
+async def test_a_crashed_turn_is_logged_and_posted(caplog) -> None:
+    """A turn that raises before posting a result says why on the board (never silent)."""
+    import logging
+
+    from core.scheduler import Scheduler
+    from core.signals import SignalType
+    from core.workspace import Workspace
+
+    ws = Workspace(run_id="r", goal="g")
+
+    async def boom(role: str) -> None:
+        raise RuntimeError("opencode serve exited with 1")
+
+    sched = Scheduler.__new__(Scheduler)
+    sched.workspace, sched._failed = ws, set()
+    import asyncio
+    task = asyncio.ensure_future(boom("tech_lead"))
+    await asyncio.sleep(0)
+    sched._tasks = {"tech_lead": task}
+    with caplog.at_level(logging.ERROR, logger="core.scheduler"):
+        sched._reap_done()
+    failed = [s for s in ws.board if s.type is SignalType.FAILED]
+    assert failed and "opencode serve exited with 1" in failed[0].summary
+    assert failed[0].from_agent == "tech_lead" and "turn crashed" in caplog.text

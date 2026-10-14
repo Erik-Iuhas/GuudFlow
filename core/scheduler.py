@@ -29,6 +29,7 @@ which runners to invoke when. Runners do the work.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -36,6 +37,8 @@ from enum import Enum
 from typing import Any, Awaitable, Callable, Literal
 
 from core.workspace import AgentState, Workspace
+
+log = logging.getLogger(__name__)
 
 
 AgentRunner = Callable[[Workspace], Awaitable[None]]
@@ -748,9 +751,17 @@ class Scheduler:
                 task.result()
             except asyncio.CancelledError:
                 pass
-            except Exception:
+            except Exception as exc:
+                from core.signals import Signal, SignalType
                 self._failed.add(role)
                 self.workspace.agent_states[role] = AgentState.FAILED
+                # Never silent: a turn that crashed before it could post a result (its server
+                # did not start, the gateway refused the model, ...) says why on the board.
+                log.exception("%s: turn crashed", role)
+                self.workspace.post_signal(Signal(
+                    type=SignalType.FAILED, from_agent=role,
+                    summary=f"{role}: turn crashed: {type(exc).__name__}: {exc}"[:300],
+                    detail=str(exc)[:4000]))
 
     async def _cancel_remaining(self) -> None:
         """Cancel any in-flight tasks at scheduler shutdown."""

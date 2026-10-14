@@ -68,6 +68,7 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
   const cardsQuery = useRunCards(runId);
   const cards = useRunStore((s) => s.cards);
   const agents = useRunStore((s) => s.agents);
+  const names = useRunStore((s) => s.names);
   const live = useRunStore((s) => s.live);
   const stubCount = useRunStore((s) => Object.values(s.cards).filter((c) => c.stub).length);
   const setPriority = useSetPriority(runId);
@@ -98,9 +99,11 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
   );
   const list = useMemo(() => Object.values(cards), [cards]);
   const roles = useMemo(() => {
-    const all = [...Object.keys(agents), ...list.map((c) => c.owner)].filter(Boolean);
+    // The team from the TEAM signal too, so cards can be added before anyone has started.
+    const all = [...Object.keys(agents), ...Object.keys(names), ...list.map((c) => c.owner)]
+      .filter((r) => Boolean(r) && !r.includes("overseer"));
     return [...new Set(all)];
-  }, [agents, list]);
+  }, [agents, names, list]);
   const lanes = useMemo(() => buildLanes(list, roles, priorityOf), [list, roles, priorityOf]);
   const counts = useMemo(() => columnCounts(list), [list]);
 
