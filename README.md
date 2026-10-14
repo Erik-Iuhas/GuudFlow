@@ -141,7 +141,22 @@ troubleshooting.
 
 Run `scripts/check.sh escape` too when you touch `core/harness/`, `worker/`, `sandbox/` or `gateway/`.
 
-**VS Code:** the tasks run through `bash`, so open the folder in WSL (Remote - WSL) or have Git Bash on your PATH. Then run **Tasks: Run Task**. The tasks in `.vscode/tasks.json` cover
+**Where it runs.** Every task goes through one entry point, so it works the same whichever way you
+opened the folder:
+
+| You opened the folder… | What the tasks do |
+|---|---|
+| Linux, macOS, or VS Code connected to WSL (Remote - WSL) | `bash scripts/run.sh <task>` |
+| Windows VS Code on a Windows or `\\wsl.localhost\…` folder | `scripts/run.ps1 <task>`, which forwards to WSL by default |
+
+`GUUDFLOW_WINDOWS_MODE` (in your environment or `.env`) picks the Windows behaviour: `wsl` (default,
+needs WSL; agent sandboxes need Linux anyway) or `native` (runs `setup.ps1` / `dev.ps1` on Windows
+itself, with agents in host mode, so trusted work only). Scripts are always started with `bash`, so a
+copy that lost its execute bits (copied from a Windows disk, unpacked from a zip) still runs, and
+`.gitattributes` keeps them LF so a Windows checkout does not break them. Tip: keep the project in the
+WSL file system (`~/GuudFlow`), not under `/mnt/c`, which is much slower.
+
+**VS Code:** run **Tasks: Run Task**. The tasks in `.vscode/tasks.json` cover
 setup, doctor, the dev stack, Compose up/logs/down, builds, and each check. `.vscode/launch.json` debugs the API, the current pytest file, and a one-shot run.
 Run **Tasks: Run Test Task** for the fast checks.
 

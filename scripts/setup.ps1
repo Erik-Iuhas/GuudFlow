@@ -28,10 +28,11 @@ if (-not $python) {
 $pyVersion = & $python.Source --version
 Write-Host "Python: $($python.Source) ($pyVersion)"
 
-# 2. Virtualenv
+# 2. Virtualenv (uv when installed: it also fetches Python 3.11 if this machine lacks it)
+$uv = Get-Command uv -ErrorAction SilentlyContinue
 if (-not (Test-Path "venv")) {
     Write-Host "Creating virtualenv at .\venv ..."
-    & $python.Source -m venv venv
+    if ($uv) { & uv venv --python 3.11 venv } else { & $python.Source -m venv venv }
 } else {
     Write-Host "Virtualenv already exists at .\venv"
 }
@@ -46,8 +47,11 @@ Write-Host "Activated: $($pyVenv.Source)"
 
 # 3. Python deps
 Write-Host "Installing Python dependencies..."
-& python -m pip install --quiet --upgrade pip
-& python -m pip install --quiet -r requirements.txt
+if ($uv) { & uv pip install --quiet --python venv\Scripts\python.exe -r requirements.txt }
+else {
+    & python -m pip install --quiet --upgrade pip
+    & python -m pip install --quiet -r requirements.txt
+}
 
 # Optional embeddings (heavy — pulls PyTorch). Off by default; opt in
 # with $env:GUUDFLOW_WITH_EMBEDDINGS=1.

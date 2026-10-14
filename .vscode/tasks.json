@@ -3,35 +3,95 @@
   "tasks": [
     {
       "label": "Install uv",
-      "type": "shell",
-      "command": "scripts/install_uv.sh",
-      "problemMatcher": []
+      "type": "process",
+      "command": "bash",
+      "problemMatcher": [],
+      "args": [
+        "scripts/run.sh",
+        "install-uv"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "install-uv"
+        ]
+      }
     },
     {
       "label": "Setup (venv, packages, Studio, .env)",
-      "type": "shell",
-      "command": "scripts/setup.sh",
+      "type": "process",
+      "command": "bash",
       "problemMatcher": [],
       "dependsOn": [
         "Install uv"
-      ]
+      ],
+      "args": [
+        "scripts/run.sh",
+        "setup"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "setup"
+        ]
+      }
     },
     {
       "label": "Stop dev stack",
-      "type": "shell",
-      "command": "scripts/stop.sh",
-      "problemMatcher": []
+      "type": "process",
+      "command": "bash",
+      "problemMatcher": [],
+      "args": [
+        "scripts/run.sh",
+        "stop"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "stop"
+        ]
+      }
     },
     {
       "label": "Doctor (is this machine ready?)",
-      "type": "shell",
-      "command": "scripts/doctor.sh",
-      "problemMatcher": []
+      "type": "process",
+      "command": "bash",
+      "problemMatcher": [],
+      "args": [
+        "scripts/run.sh",
+        "doctor"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "doctor"
+        ]
+      }
     },
     {
       "label": "Run dev stack (API :8000 + Studio :3001)",
-      "type": "shell",
-      "command": "scripts/dev.sh",
+      "type": "process",
+      "command": "bash",
       "isBackground": true,
       "problemMatcher": [],
       "presentation": {
@@ -39,12 +99,27 @@
       },
       "dependsOn": [
         "Install uv"
-      ]
+      ],
+      "args": [
+        "scripts/run.sh",
+        "dev"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "dev"
+        ]
+      }
     },
     {
       "label": "Run dev stack (no reload, safe for agent runs)",
-      "type": "shell",
-      "command": "scripts/dev.sh --no-reload",
+      "type": "process",
+      "command": "bash",
       "isBackground": true,
       "problemMatcher": [],
       "presentation": {
@@ -52,17 +127,49 @@
       },
       "dependsOn": [
         "Install uv"
-      ]
+      ],
+      "args": [
+        "scripts/run.sh",
+        "dev",
+        "--no-reload"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "dev",
+          "--no-reload"
+        ]
+      }
     },
     {
       "label": "Run API (built Studio on :8000)",
-      "type": "shell",
-      "command": "source venv/bin/activate && GUUDFLOW_STUDIO_DIST=studio/dist uvicorn api.main:app --port 8000",
+      "type": "process",
+      "command": "bash",
       "dependsOn": [
         "Build Studio"
       ],
       "isBackground": true,
-      "problemMatcher": []
+      "problemMatcher": [],
+      "args": [
+        "scripts/run.sh",
+        "api"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "api"
+        ]
+      }
     },
     {
       "label": "Docker Compose up",
@@ -85,68 +192,192 @@
     },
     {
       "label": "Build Studio",
-      "type": "shell",
-      "command": "scripts/build.sh studio",
+      "type": "process",
+      "command": "bash",
       "problemMatcher": [
         "$tsc"
-      ]
+      ],
+      "args": [
+        "scripts/run.sh",
+        "build",
+        "studio"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "build",
+          "studio"
+        ]
+      }
     },
     {
       "label": "Build for the Python path (Studio + opencode)",
-      "type": "shell",
-      "command": "scripts/build.sh native",
-      "problemMatcher": []
+      "type": "process",
+      "command": "bash",
+      "problemMatcher": [],
+      "args": [
+        "scripts/run.sh",
+        "build",
+        "native"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "build",
+          "native"
+        ]
+      }
     },
     {
       "label": "Install opencode",
-      "type": "shell",
-      "command": "scripts/install_opencode.sh",
-      "problemMatcher": []
+      "type": "process",
+      "command": "bash",
+      "problemMatcher": [],
+      "args": [
+        "scripts/run.sh",
+        "install-opencode"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "install-opencode"
+        ]
+      }
     },
     {
       "label": "Check: everything fast",
-      "type": "shell",
-      "command": "scripts/check.sh",
+      "type": "process",
+      "command": "bash",
       "group": {
         "kind": "test",
         "isDefault": true
       },
-      "problemMatcher": []
+      "problemMatcher": [],
+      "args": [
+        "scripts/run.sh",
+        "check"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "check"
+        ]
+      }
     },
     {
       "label": "Check: backend",
-      "type": "shell",
-      "command": "scripts/check.sh backend",
+      "type": "process",
+      "command": "bash",
       "group": "test",
-      "problemMatcher": []
+      "problemMatcher": [],
+      "args": [
+        "scripts/run.sh",
+        "check",
+        "backend"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "check",
+          "backend"
+        ]
+      }
     },
     {
       "label": "Check: Studio",
-      "type": "shell",
-      "command": "scripts/check.sh studio",
+      "type": "process",
+      "command": "bash",
       "group": "test",
-      "problemMatcher": []
+      "problemMatcher": [],
+      "args": [
+        "scripts/run.sh",
+        "check",
+        "studio"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "check",
+          "studio"
+        ]
+      }
     },
     {
       "label": "Check: escape suite (Docker, root)",
-      "type": "shell",
-      "command": "scripts/check.sh escape",
+      "type": "process",
+      "command": "bash",
       "group": "test",
-      "problemMatcher": []
+      "problemMatcher": [],
+      "args": [
+        "scripts/run.sh",
+        "check",
+        "escape"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "check",
+          "escape"
+        ]
+      }
     },
     {
       "label": "Build Docker image",
-      "type": "shell",
-      "command": "scripts/build.sh docker",
-      "problemMatcher": []
-    }
-  ],
-  "options": {
-    "shell": {
-      "executable": "bash",
+      "type": "process",
+      "command": "bash",
+      "problemMatcher": [],
       "args": [
-        "-c"
-      ]
+        "scripts/run.sh",
+        "build",
+        "docker"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "build",
+          "docker"
+        ]
+      }
     }
-  }
+  ]
 }

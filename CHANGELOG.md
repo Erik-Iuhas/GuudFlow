@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Tasks and scripts across setups: one entry point (`scripts/run.sh`, `scripts/run.ps1` on Windows),
+  `GUUDFLOW_WINDOWS_MODE=wsl|native`, scripts always run through bash, LF line endings enforced.
+- Agent turns that crash are logged and posted (were silent); opencode startup waits 180 s, ignores
+  proxies and reports its log.
 - `GUUDFLOW_CA_BUNDLE`: trust a custom certificate authority (public roots kept, verification
   never off) in GuudFlow's HTTP calls, git, npm and opencode.
 - Plan tab streams Jack's changes while he drafts.

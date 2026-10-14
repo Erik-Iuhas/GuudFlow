@@ -52,7 +52,7 @@ kill_leftover_uvicorn() {
 
 # ── stop existing servers ───────────────────────────────────────────────────
 info "→ Stopping existing servers..."
-"${ROOT}/scripts/stop.sh" >/dev/null 2>&1 || true
+bash "${ROOT}/scripts/stop.sh" >/dev/null 2>&1 || true
 sleep 0.3
 
 # ── python / venv (uv; fetches Python 3.11 if the system one is older) ───────
@@ -75,7 +75,7 @@ source venv/bin/activate
 # The agent runtime: every role runs in opencode. Without it no agent can start.
 if [ ! -x .tools/opencode ] && [ "${GUUDFLOW_SKIP_OPENCODE:-0}" != "1" ]; then
     info "→ Installing the pinned opencode agent runtime (scripts/install_opencode.sh)..."
-    scripts/install_opencode.sh || echo "WARN: opencode install failed: agents cannot start until scripts/install_opencode.sh succeeds"
+    bash scripts/install_opencode.sh || echo "WARN: opencode install failed: agents cannot start until scripts/install_opencode.sh succeeds"
 fi
 
 # ── .env sanity check ──────────────────────────────────────────────────────

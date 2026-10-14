@@ -13,8 +13,8 @@ cd "$ROOT"
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"   # where the uv installer puts uv
 
 studio()   { (cd studio && npm ci --no-audit --no-fund && npm run build); }
-opencode() { scripts/install_opencode.sh; }
-sandbox()  { scripts/build_sandbox.sh; }
+opencode() { bash scripts/install_opencode.sh; }
+sandbox()  { bash scripts/build_sandbox.sh; }
 docker_()  { docker compose build; }
 
 case "${1:-native}" in
