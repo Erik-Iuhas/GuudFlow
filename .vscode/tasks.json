@@ -71,9 +71,9 @@
       ]
     },
     {
-      "label": "Build all (Studio, opencode, Docker image)",
+      "label": "Build for the Python path (Studio + opencode)",
       "type": "shell",
-      "command": "scripts/build.sh all",
+      "command": "scripts/build.sh native",
       "problemMatcher": []
     },
     {
@@ -111,6 +111,12 @@
       "type": "shell",
       "command": "scripts/check.sh escape",
       "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Docker image",
+      "type": "shell",
+      "command": "scripts/build.sh docker",
       "problemMatcher": []
     }
   ],

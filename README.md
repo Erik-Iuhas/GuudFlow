@@ -134,7 +134,7 @@ troubleshooting.
 | `scripts/doctor.sh` | Checks tools, Docker, `.env`, built pieces and the port |
 | `scripts/setup.sh` | First-time install (packages via uv) |
 | `scripts/dev.sh [--no-reload]` | API on :8000 and Studio dev server on :3001 |
-| `scripts/build.sh studio\|opencode\|sandbox\|docker\|all` | Build one piece or everything |
+| `scripts/build.sh native\|docker\|studio\|opencode\|sandbox` | `native` = Studio + opencode for the Python path; `docker` = the Compose image (builds its own, independent of the others) |
 | `scripts/check.sh [backend\|studio\|escape]` | Tests: pytest, Studio typecheck and vitest, or the sandbox escape suite |
 
 Run `scripts/check.sh escape` too when you touch `core/harness/`, `worker/`, `sandbox/` or `gateway/`.
