@@ -52,9 +52,7 @@ kill_leftover_uvicorn() {
 
 # ── stop existing servers ───────────────────────────────────────────────────
 info "→ Stopping existing servers..."
-kill_port 8000
-kill_port 3001
-kill_leftover_uvicorn
+"${ROOT}/scripts/stop.sh" >/dev/null 2>&1 || true
 sleep 0.3
 
 # ── python / venv (uv; fetches Python 3.11 if the system one is older) ───────

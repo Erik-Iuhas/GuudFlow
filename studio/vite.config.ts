@@ -16,6 +16,7 @@ export default defineConfig({
   },
   server: {
     port: 3001,
+    strictPort: true,   // fail loudly if the old dev server still holds 3001 (run scripts/stop.sh)
     proxy: {
       "/api": { target: API_TARGET, changeOrigin: true },
       "/ws": { target: API_TARGET, ws: true, changeOrigin: true },
