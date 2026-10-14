@@ -6,6 +6,7 @@
 #   bash scripts/run.sh build <studio|opencode|sandbox|docker|native>
 #   bash scripts/run.sh check [all|backend|studio|escape]
 #   bash scripts/run.sh api        # the API with the built Studio on :8000
+#   bash scripts/run.sh studio-deps | studio-pack [out] | studio-unpack <file>   # npm trouble
 #
 # On Windows, VS Code runs scripts/run.ps1 instead, which forwards here through WSL (default)
 # or uses the PowerShell scripts natively (GUUDFLOW_WINDOWS_MODE=native).
@@ -24,6 +25,9 @@ case "$cmd" in
   install-uv)       exec bash scripts/install_uv.sh "$@" ;;
   install-opencode) exec bash scripts/install_opencode.sh "$@" ;;
   build)            exec bash scripts/build.sh "$@" ;;
+  studio-deps)      exec bash scripts/studio_deps.sh "$@" ;;
+  studio-pack)      exec bash scripts/studio_bundle.sh pack "$@" ;;
+  studio-unpack)    exec bash scripts/studio_bundle.sh unpack "$@" ;;
   check)            exec bash scripts/check.sh "$@" ;;
   api)
     [ -f venv/bin/activate ] && source venv/bin/activate

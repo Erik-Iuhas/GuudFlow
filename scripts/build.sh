@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"   # where the uv installer puts uv
 
-studio()   { (cd studio && npm ci --no-audit --no-fund && npm run build); }
+studio()   { bash scripts/studio_deps.sh && (cd studio && npm run build); }
 opencode() { bash scripts/install_opencode.sh; }
 sandbox()  { bash scripts/build_sandbox.sh; }
 docker_()  { docker compose build; }

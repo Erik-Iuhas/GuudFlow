@@ -76,7 +76,7 @@ fi
 if command -v npm >/dev/null 2>&1; then
     if [ "${GUUDFLOW_SKIP_NPM:-0}" != "1" ]; then
         echo "Installing studio dependencies..."
-        (cd studio && npm install --silent --no-audit --no-fund)
+        bash scripts/studio_deps.sh || echo "WARN: Studio packages missing. Studio still works from a prebuilt studio/dist (see README: Behind a proxy)."
     fi
 else
     echo "INFO: npm not found — skipping studio. Install Node 18+ to run the frontend."

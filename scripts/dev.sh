@@ -89,15 +89,24 @@ EOF
 fi
 
 # ── frontend deps ──────────────────────────────────────────────────────────
+USE_DIST=0
 if [ ! -d studio/node_modules ]; then
     info "→ Installing studio deps..."
-    (cd studio && npm install --silent --no-audit --no-fund)
+    if ! bash scripts/studio_deps.sh; then
+        if [ -f studio/dist/index.html ]; then
+            warn "  npm packages unavailable: serving the prebuilt studio/dist from the API on :8000 instead"
+            USE_DIST=1
+        else
+            die "Studio needs its npm packages or a prebuilt studio/dist (bash scripts/run.sh studio-unpack <file>)"
+        fi
+    fi
 fi
 
 # ── launch ─────────────────────────────────────────────────────────────────
 LOG_BACK="${ROOT}/.dev-backend.log"
 LOG_FRONT="${ROOT}/.dev-frontend.log"
 
+[ "${USE_DIST}" -eq 1 ] && export GUUDFLOW_STUDIO_DIST="${ROOT}/studio/dist"
 if [ "${NO_RELOAD}" -eq 1 ]; then
     info "→ Starting backend  → http://localhost:8000  [NO RELOAD — safe for agent testing]"
     uvicorn api.main:app --port 8000 > "${LOG_BACK}" 2>&1 &
@@ -113,9 +122,15 @@ else
 fi
 BACK_PID=$!
 
-info "→ Starting frontend → http://localhost:3001"
-(cd studio && npm run dev) > "${LOG_FRONT}" 2>&1 &
-FRONT_PID=$!
+if [ "${USE_DIST}" -eq 1 ]; then
+    info "→ Studio (prebuilt) → http://localhost:8000"
+    : > "${LOG_FRONT}"
+    sleep infinity & FRONT_PID=$!
+else
+    info "→ Starting frontend → http://localhost:3001"
+    (cd studio && npm run dev) > "${LOG_FRONT}" 2>&1 &
+    FRONT_PID=$!
+fi
 
 ok "
   Backend  pid ${BACK_PID}  →  http://localhost:8000
