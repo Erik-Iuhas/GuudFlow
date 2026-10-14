@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.1 (2026-10-14)
+
+Setup behind a company proxy, prebuilt Studio and Python wheels, certificates, and runs that
+no longer stall silently when model calls fail.
+
 - Settings → Models & providers → Test now makes one streamed chat call with a tool for an
   OpenAI-compatible provider, the way an agent turn does, and names what fails: a rejected
   parameter (with the provider's message), no tool calling, no streaming, or a proxy that holds
