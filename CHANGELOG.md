@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Settings → Models & providers → Test now makes one streamed chat call with a tool for an
+  OpenAI-compatible provider, the way an agent turn does, and names what fails: a rejected
+  parameter (with the provider's message), no tool calling, no streaming, or a proxy that holds
+  the stream back until the end.
 - A team run no longer sits silent when model calls fail: opencode's retries are logged in the
   run console with the provider's message, and after `GUUDFLOW_MODEL_RETRIES` (default 4) failed
   tries in a row the turn stops with that reason. The gateway logs what the provider answered for

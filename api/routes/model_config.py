@@ -116,7 +116,10 @@ async def clear_key(request: Request, name: str) -> dict[str, Any]:
 
 @router.post("/providers/{name}/test")
 async def test_provider(request: Request, name: str) -> dict[str, Any]:
-    """Call the provider's model list with the host-side key; report what it says."""
+    """Check the provider the way agents use it: the model list, then (OpenAI-compatible) one
+    streamed chat call with a tool, as an agent turn makes. Reports what fails: the key, the
+    certificate, a rejected parameter, no tool calling, or a proxy that holds back streaming
+    (which makes agent turns look stalled)."""
     p = _provider(request, name)
     key = model_config.api_key(p, name, KeyStore(_root(request)))
     client = p.get("client")
@@ -131,18 +134,93 @@ async def test_provider(request: Request, name: str) -> dict[str, Any]:
             headers["x-api-key"] = key
     elif key:
         headers = {"authorization": f"Bearer {key}"}
+    from core.tls import describe_error, httpx_verify
+    ids: list[str] = []
+    listing = ""
     try:
-        from core.tls import httpx_verify
         async with httpx.AsyncClient(timeout=TEST_TIMEOUT, verify=httpx_verify()) as http:
             r = await http.get(f"{base}/models", headers=headers)
+        if r.status_code == 200:
+            try:
+                data = r.json().get("data") or []
+            except ValueError:
+                data = []
+            ids = sorted({str(m.get("id")) for m in data if isinstance(m, dict) and m.get("id")})
+            listing = f"{len(ids)} model(s) available"
+        else:
+            listing = f"{base}/models answered {r.status_code}"
+    except httpx.HTTPError as e:
+        return {"ok": False, "detail": f"could not reach {base}: {describe_error(e)}", "models": []}
+    if client != "openai_compatible":
+        return {"ok": r.status_code == 200, "detail": listing, "models": ids[:200]}
+
+    models = [m for m in model_config.load(_root(request)).get("models") or []
+              if isinstance(m, dict) and m.get("provider") == name]
+    if not models:
+        return {"ok": r.status_code == 200, "detail": f"{listing}; add a model for this provider "
+                "to test a chat call", "models": ids[:200]}
+    ok, detail = await _agent_call(base, headers, models[0], httpx_verify())
+    return {"ok": ok, "detail": f"{listing}; {models[0]['id']}: {detail}", "models": ids[:200]}
+
+
+CHAT_TEST_TIMEOUT = 90.0
+
+
+async def _agent_call(base: str, headers: dict[str, str], model: dict[str, Any],  # Any: JSON
+                      verify: Any,  # Any: ssl context or bool
+                      transport: httpx.AsyncBaseTransport | None = None) -> tuple[bool, str]:
+    """One streamed chat call with a tool, shaped like an agent turn."""
+    import json as _json
+    import time
+    body: dict[str, Any] = {  # Any: a JSON request
+        "model": model["id"],
+        "messages": [{"role": "user", "content": "Call the ping tool with ok set to true."}],
+        "tools": [{"type": "function", "function": {
+            "name": "ping", "description": "Answer the check.",
+            "parameters": {"type": "object", "properties": {"ok": {"type": "boolean"}},
+                           "required": ["ok"]}}}],
+        "stream": True, "stream_options": {"include_usage": True}, "max_tokens": 256,
+    }
+    level = model.get("default_effort")
+    if level:  # agents send the model's effort, so check the endpoint takes it
+        body["reasoning_effort"] = (model.get("effort_values") or {}).get(level, level)
+    start = time.monotonic()
+    first: float | None = None
+    chunks = 0
+    tool = False
+    try:
+        async with httpx.AsyncClient(timeout=CHAT_TEST_TIMEOUT, verify=verify,
+                                     transport=transport) as http:
+            async with http.stream("POST", f"{base}/chat/completions", headers=headers,
+                                   json=body) as resp:
+                if resp.status_code != 200:
+                    text = (await resp.aread()).decode("utf-8", "replace")[:300]
+                    return False, f"chat call answered {resp.status_code}: {text}"
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:") or line.strip() == "data: [DONE]":
+                        continue
+                    chunks += 1
+                    if first is None:
+                        first = time.monotonic() - start
+                    try:
+                        for c in _json.loads(line[5:]).get("choices") or []:
+                            if (c.get("delta") or {}).get("tool_calls"):
+                                tool = True
+                    except ValueError:
+                        pass
     except httpx.HTTPError as e:
         from core.tls import describe_error
-        return {"ok": False, "detail": f"could not reach {base}: {describe_error(e)}", "models": []}
-    if r.status_code != 200:
-        return {"ok": False, "detail": f"{base}/models answered {r.status_code}", "models": []}
-    try:
-        data = r.json().get("data") or []
-    except ValueError:
-        data = []
-    ids = sorted({str(m.get("id")) for m in data if isinstance(m, dict) and m.get("id")})
-    return {"ok": True, "detail": f"{len(ids)} model(s) available", "models": ids[:200]}
+        return False, f"chat call failed: {describe_error(e)}"
+    total = time.monotonic() - start
+    if chunks == 0:
+        return False, ("chat call returned no streamed data: the endpoint (or a proxy) does not "
+                       "stream; agents need server-sent events")
+    if not tool:
+        return False, ("the model answered without calling the tool: agents finish by calling "
+                       "a tool, so this model or server needs tool calling (vLLM: "
+                       "--enable-auto-tool-choice --tool-call-parser ...)")
+    if chunks > 1 and first is not None and total > 3 and first > 0.9 * total:
+        return False, (f"the whole answer arrived at once after {total:.0f}s: something between "
+                       "here and the endpoint (often a company proxy) holds back streaming, so "
+                       "agent turns look stalled")
+    return True, f"streamed chat with a tool call works (first data after {first or 0:.1f}s)"

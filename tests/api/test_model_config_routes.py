@@ -88,3 +88,40 @@ async def test_provider_test_uses_the_stored_key(client, auth_header, monkeypatc
     assert body["ok"] is True and body["models"] == ["claude-haiku-4-5", "claude-opus-5-5"]
     assert seen == {"url": "https://api.anthropic.com/v1/models", "key": SECRET}
     assert SECRET not in r.text
+
+
+def _sse(*chunks: dict) -> bytes:
+    return b"".join(b"data: " + json.dumps(c).encode() + b"\n\n" for c in chunks) + b"data: [DONE]\n\n"
+
+
+@pytest.mark.asyncio
+async def test_the_agent_shaped_chat_check_names_what_fails():
+    from api.routes.model_config import _agent_call
+    model = {"id": "m1", "default_effort": "high", "effort_values": {"high": "max"}}
+    sent: dict = {}
+
+    def run(handler):
+        return _agent_call("https://llm.test/v1", {}, model, True, httpx.MockTransport(handler))
+
+    def rejects(req: httpx.Request) -> httpx.Response:
+        sent.update(json.loads(req.content))
+        return httpx.Response(400, json={"error": {"message": "Unrecognized request argument: reasoning_effort"}})
+    ok, detail = await run(rejects)
+    assert not ok and "answered 400" in detail and "reasoning_effort" in detail
+    assert sent["reasoning_effort"] == "max" and sent["stream"] is True and sent["tools"]
+
+    no_tool = lambda _r: httpx.Response(200, content=_sse({"choices": [{"delta": {"content": "ok"}}]}),  # noqa: E731
+                                        headers={"content-type": "text/event-stream"})
+    ok, detail = await run(no_tool)
+    assert not ok and "without calling the tool" in detail
+
+    tool = lambda _r: httpx.Response(200, content=_sse(  # noqa: E731
+        {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"name": "ping"}}]}}]},
+        {"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 2}}),
+        headers={"content-type": "text/event-stream"})
+    ok, detail = await run(tool)
+    assert ok and "works" in detail
+
+    no_stream = lambda _r: httpx.Response(200, json={"choices": []})  # noqa: E731
+    ok, detail = await run(no_stream)
+    assert not ok and "does not stream" in detail
