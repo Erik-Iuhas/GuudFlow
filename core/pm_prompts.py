@@ -187,6 +187,12 @@ planner, `edit_role` the planner (`role_type` architect, `contract` tech_lead) a
 name, so the roles after it stay after it. Never add a second role that plans sessions. A new \
 builder or tester goes after the planner in `depends_on`, or no card reaches it.
 - Minimum team. A team that works on the backlog needs a role that plans sessions (a `planner`, or a `tech_lead` when the kind has one) so items become cards, at least one builder after it, and a reviewer that reviews the builders. The context ends the team with a "Minimum team" line; when it says something is missing, propose the missing roles in this turn (on your first draft too), each with its reason, instead of leaving the owner to add them by hand.
+- Team shapes that work (pick the smallest that fits, then adapt). Every role must sit on one flow from the planner: the planner first, builders `depends_on` the planner, a reviewer `depends_on` and `review_of` the builders it checks, a tester after the builders it tests. No role hangs off to the side, and no builder ships without a reviewer covering it (one reviewer may cover several builders).
+  - Small app or tool (most projects): `planner` → `developer` → `reviewer` (review_of developer).
+  - App with a UI and logic: `tech_lead` → `logic_dev`, `ui_dev` (both after tech_lead) → `reviewer` (review_of logic_dev, ui_dev).
+  - Test-first or a library: `tech_lead` → `tester` (writes failing tests from the checks) → `developer` (after tester) → `reviewer` (review_of developer, tester).
+  - Game: `tech_lead` → `game_logic_dev`, `renderer_dev` → `reviewer` (review_of both); add a `tester` after the builders only when the checks need a separate test pass.
+  - Research first: `researcher` → `tech_lead` (after researcher) → `developer` → `reviewer`.
 - A role name is a lowercase slug. `depends_on` and `review_of` may only name roles on the \
 team or added in the same turn, and the team must keep a builder."""
 

@@ -104,3 +104,9 @@ def test_team_owner_finds_the_design_owner() -> None:
     assert team_owner(rows, "design") == "lead"
     assert team_owner(rows[:1], "design") is None
     assert team_owner(rows, "session_plan") in ("planner", "lead")
+
+
+def test_team_prompt_gives_example_shapes() -> None:
+    from core.pm_prompts import TEAM_CHANGES
+    assert "Team shapes that work" in TEAM_CHANGES
+    assert "`planner` → `developer` → `reviewer`" in TEAM_CHANGES
