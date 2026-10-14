@@ -21,6 +21,7 @@ Auth: bearer required (real LLM cost on every call).
 
 from __future__ import annotations
 
+from pathlib import Path
 import logging
 import os
 from typing import Any
@@ -104,16 +105,17 @@ def _build_meta_llm(request: Request, meta_model: str | None = None) -> LLMClien
     injected = getattr(request.app.state, "meta_llm", None)
     if injected is not None:
         return injected
-    if meta_model is not None:
-        registry = getattr(request.app.state, "model_registry", None)
-        if registry is not None:
-            try:
-                model_info = registry.resolve(meta_model)
-                return registry.get_client(model_info)
-            except Exception:
-                pass
-    # Production default.
-    return AnthropicClient()
+    tier = meta_model or "heavy"
+    registry = getattr(request.app.state, "model_registry", None)
+    if registry is None:
+        from core.llm.registry import ModelRegistry
+        registry = ModelRegistry.for_data_root(Path(request.app.state.data_root))
+    try:
+        return registry.get_client(registry.resolve(tier))
+    except Exception as exc:  # noqa: BLE001 — say which tier has no usable model
+        raise RuntimeError(
+            f"No model with an API key is available for the {tier!r} tier. Pick a model for it "
+            f"and add its key under Settings → Models & providers ({exc})") from exc
 
 
 @router.post("/propose")
