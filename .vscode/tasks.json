@@ -17,6 +17,12 @@
       ]
     },
     {
+      "label": "Stop dev stack",
+      "type": "shell",
+      "command": "scripts/stop.sh",
+      "problemMatcher": []
+    },
+    {
       "label": "Doctor (is this machine ready?)",
       "type": "shell",
       "command": "scripts/doctor.sh",
