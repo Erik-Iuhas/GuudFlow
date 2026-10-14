@@ -1,4 +1,4 @@
-# GuudFlow local setup — Windows PowerShell.
+# GuudFlow local setup - Windows PowerShell.
 #
 # Run from the repo root:
 #   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
@@ -21,15 +21,19 @@ $python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $python) {
     $python = Get-Command py -ErrorAction SilentlyContinue
 }
-if (-not $python) {
-    Write-Error "python (3.11+) not found in PATH"
+$uv = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $python -and -not $uv) {
+    Write-Error "Neither uv nor python (3.11+) found. Install uv (it brings Python): scripts\run.ps1 install-uv"
     exit 1
 }
-$pyVersion = & $python.Source --version
-Write-Host "Python: $($python.Source) ($pyVersion)"
+if ($python) {
+    $pyVersion = & $python.Source --version
+    Write-Host "Python: $($python.Source) ($pyVersion)"
+} else {
+    Write-Host "No python on PATH: uv will download Python 3.11 for the venv."
+}
 
 # 2. Virtualenv (uv when installed: it also fetches Python 3.11 if this machine lacks it)
-$uv = Get-Command uv -ErrorAction SilentlyContinue
 if (-not (Test-Path "venv")) {
     Write-Host "Creating virtualenv at .\venv ..."
     if ($uv) { & uv venv --python 3.11 venv } else { & $python.Source -m venv venv }
@@ -53,7 +57,7 @@ else {
     & python -m pip install --quiet -r requirements.txt
 }
 
-# Optional embeddings (heavy — pulls PyTorch). Off by default; opt in
+# Optional embeddings (heavy - pulls PyTorch). Off by default; opt in
 # with $env:GUUDFLOW_WITH_EMBEDDINGS=1.
 if ($env:GUUDFLOW_WITH_EMBEDDINGS -eq "1") {
     Write-Host "Installing optional embedding dependencies (this is heavy)..."
@@ -66,7 +70,7 @@ if ($env:GUUDFLOW_SKIP_PLAYWRIGHT -ne "1") {
     try {
         & python -m playwright install chromium
     } catch {
-        Write-Warning "playwright install failed — re-run later if you need visual_checker"
+        Write-Warning "playwright install failed - re-run later if you need visual_checker"
     }
 }
 
@@ -80,7 +84,7 @@ if ($npm) {
         Pop-Location
     }
 } else {
-    Write-Host "INFO: npm not found — skipping studio. Install Node 18+ to run the frontend." -ForegroundColor Yellow
+    Write-Host "INFO: npm not found - skipping studio. Install Node 18+ to run the frontend." -ForegroundColor Yellow
 }
 
 # 6. .env
@@ -99,17 +103,17 @@ GUUDFLOW_MODE=dev
         Write-Host "Created .env (no .env.example found)"
     }
 } else {
-    Write-Host ".env already exists — leaving alone"
+    Write-Host ".env already exists - leaving alone"
 }
 
-# 7. Seed default personas on first install (idempotent — won't
+# 7. Seed default personas on first install (idempotent - won't
 # overwrite existing personas; safe to skip on re-run).
 if ($freshInstall -or $env:GUUDFLOW_FORCE_SEED -eq "1") {
     Write-Host "Seeding default personas..."
     try {
         & python scripts/seed_data.py
     } catch {
-        Write-Warning "seed_data.py failed — you can re-run manually"
+        Write-Warning "seed_data.py failed - you can re-run manually"
     }
 }
 

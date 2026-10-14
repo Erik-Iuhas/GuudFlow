@@ -61,7 +61,7 @@ $reloadArgs = if ($NoReload) {
     ""
 } else {
     Write-Host "Starting backend  -> http://localhost:8000  [reload watches api/core/agents/worker]" -ForegroundColor Cyan
-    # NOTE: do NOT pass --reload-include — it OVERRIDES the --reload-dir
+    # NOTE: do NOT pass --reload-include - it OVERRIDES the --reload-dir
     # scoping and makes watchfiles see *.py files anywhere in the project,
     # including data/runs/<id>/workspace/working/**/*.py written by agents.
     # That's how src/constants.py writes were killing the worker mid-run.
