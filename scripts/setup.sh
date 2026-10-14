@@ -22,10 +22,15 @@ PY="$(command -v python3 || command -v python)"
 PY_VERSION="$(${PY} --version | awk '{print $2}')"
 echo "Python: ${PY} (${PY_VERSION})"
 
-# 2. Virtualenv
+# 2. Virtualenv + 3. Python deps. uv is used when present (much faster); set GUUDFLOW_NO_UV=1
+# to force python -m venv + pip.
+USE_UV=0
+if command -v uv >/dev/null 2>&1 && [ "${GUUDFLOW_NO_UV:-0}" != "1" ]; then USE_UV=1; fi
+
 if [ ! -d "venv" ]; then
     echo "Creating virtualenv at ./venv ..."
-    "${PY}" -m venv venv
+    if [ "${USE_UV}" = "1" ]; then uv venv --python 3.11 venv || uv venv venv
+    else "${PY}" -m venv venv; fi
 else
     echo "Virtualenv already exists at ./venv"
 fi
@@ -35,16 +40,21 @@ source venv/bin/activate
 PY_VENV="$(command -v python)"
 echo "Activated: ${PY_VENV}"
 
-# 3. Python deps
-echo "Installing Python dependencies..."
-pip install --quiet --upgrade pip
-pip install --quiet -r requirements.txt
+echo "Installing Python dependencies$([ "${USE_UV}" = "1" ] && echo ' (uv)')..."
+if [ "${USE_UV}" = "1" ]; then
+    uv pip install --quiet -r requirements.txt
+    pip_install() { uv pip install --quiet "$@"; }
+else
+    pip install --quiet --upgrade pip
+    pip install --quiet -r requirements.txt
+    pip_install() { pip install --quiet "$@"; }
+fi
 
 # Optional embeddings (heavy — pulls PyTorch). Off by default; opt in with
 # GUUDFLOW_WITH_EMBEDDINGS=1.
 if [ "${GUUDFLOW_WITH_EMBEDDINGS:-0}" = "1" ]; then
     echo "Installing optional embedding dependencies (this is heavy)..."
-    pip install --quiet -r requirements-optional.txt
+    pip_install -r requirements-optional.txt
 fi
 
 # 4. Playwright browsers (skippable)
@@ -97,7 +107,7 @@ echo
 echo "Next steps:"
 echo "  1. Edit .env and add your ANTHROPIC_API_KEY"
 echo "  2. Activate the venv:    source venv/bin/activate"
-echo "  3. Install opencode:     scripts/install_opencode.sh"
+echo "  3. Install opencode:     scripts/install_opencode.sh   (then: scripts/doctor.sh)"
 echo "  4. Start the backend:    uvicorn api.main:app --port 8000"
 echo "  5. Start the frontend:   cd studio && npm run dev"
 echo "  6. Open the studio:      http://localhost:3001"

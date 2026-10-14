@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API (uvicorn, debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["api.main:app", "--port", "8000"],
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": false
+    },
+    {
+      "name": "pytest: current file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-x", "-q"],
+      "justMyCode": false
+    },
+    {
+      "name": "One-shot run (CLI)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "cli.oneshot",
+      "args": ["${input:goal}", "--budget", "2", "--demo"],
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ],
+  "inputs": [{ "id": "goal", "type": "promptString", "description": "Goal for the one-shot run" }]
+}

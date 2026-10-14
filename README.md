@@ -41,43 +41,101 @@ your project until you accept the run.
 
 ---
 
+## Before you start
+
+The laundry list. `scripts/doctor.sh` checks all of it and tells you what to fix.
+
+**Always**
+- [ ] **A model API key**: Anthropic, or any OpenAI-compatible provider or local model you add in
+      Studio. You can paste it in Studio after starting, so it does not have to be in a file.
+- [ ] **An API token** you make up: any long random string (`openssl rand -hex 24`). It protects the
+      API and Studio. It goes in `.env` as `GUUDFLOW_API_TOKEN`.
+- [ ] **git** (any recent version).
+- [ ] **Free port 8000** (Studio dev server uses 3001).
+- [ ] **A budget in mind.** Runs spend real money. Set per-run and weekly caps before the first run.
+
+**For the Docker path**
+- [ ] **Docker Engine** on Linux, or on Windows inside WSL2. Docker Desktop cannot host the
+      sandboxes. The Compose file also needs `/var/run/docker.sock` and `NET_ADMIN`.
+- [ ] A few GB of disk for the image and per-run containers.
+
+**For the uv / Python path**
+- [ ] **Python 3.11+** (uv can install it: `uv python install 3.11`).
+- [ ] **[uv](https://docs.astral.sh/uv/)** (optional, much faster than pip; setup uses it when present).
+- [ ] **Node 18+ and npm**, to build Studio once.
+- [ ] **Docker Engine** if you want sandboxed agents. Without it, set `GUUDFLOW_SANDBOX=host` (agents
+      then run as your user, so use it only for work you trust).
+
+**Optional**
+- [ ] `BRAVE_API_KEY` or `TAVILY_API_KEY` for the researcher role's web search.
+- [ ] `GUUDFLOW_GIT_TOKEN` to push accepted runs to a real remote.
+- [ ] Playwright Chromium for screenshots (setup installs it; `GUUDFLOW_SKIP_PLAYWRIGHT=1` skips it).
+
 ## Get started
 
-You need a model API key (Anthropic, or any provider you add in Studio). Choose one of these:
+Pick one. Both end at <http://localhost:8000>, where you paste your token at the top right and add
+your model key under **Settings → Models & providers**.
 
-| Your machine | Easiest way | Sandboxed agents? |
-|---|---|---|
-| Linux with Docker Engine | `docker compose up -d --build` | Yes |
-| Windows | Use WSL2 with Docker Engine inside it, then follow the Linux steps | Yes |
-| Anything without Docker | Install locally and set `GUUDFLOW_SANDBOX=host` | No (trusted work only) |
-
-**[docs/SETUP.md](docs/SETUP.md) is the full guide.** It covers every option, WSL, keys,
-configuration, security and troubleshooting.
-
-### With Docker Compose (Linux)
+### A. Docker Compose (the easy one, with full sandboxing)
 
 ```bash
 git clone https://github.com/Erik-Iuhas/GuudFlow.git && cd GuudFlow
-cp .env.example .env            # set GUUDFLOW_API_TOKEN (any long random string)
+cp .env.example .env            # set GUUDFLOW_API_TOKEN; ANTHROPIC_API_KEY is optional here
 docker compose up -d --build
+docker compose logs -f          # wait for "Application startup complete"
 ```
 
-Open <http://localhost:8000> and paste your token at the top right. Then add your model key under
-**Settings → Models & providers**, or set `ANTHROPIC_API_KEY` in `.env`.
+Stop with `docker compose down`. Your data stays in `./data` (set `GUUDFLOW_HOST_DATA` to move it).
+Update with `git pull && docker compose up -d --build`.
 
-### Installed locally (Python 3.11+, Node 18+, git)
+### B. uv and Python (no container for the app)
 
 ```bash
-./scripts/setup.sh              # venv, Python deps, .env  (Windows without WSL: ./scripts/setup.ps1)
-scripts/install_opencode.sh     # the pinned agent runtime
-(cd studio && npm install && npm run build)
+git clone https://github.com/Erik-Iuhas/GuudFlow.git && cd GuudFlow
+scripts/setup.sh                # venv with uv (or pip), packages, Studio packages, .env, seed data
+scripts/install_opencode.sh     # the pinned agent runtime into .tools/opencode
+scripts/build.sh studio         # build Studio into studio/dist
+$EDITOR .env                    # set GUUDFLOW_API_TOKEN (and GUUDFLOW_SANDBOX=host if no Docker)
+scripts/doctor.sh               # tells you if anything is still missing
 
 source venv/bin/activate
 GUUDFLOW_STUDIO_DIST=studio/dist uvicorn api.main:app --port 8000
 ```
 
-Open <http://localhost:8000>. Without Docker, add `GUUDFLOW_SANDBOX=host` to `.env`. Agents then
-run as plain processes on your machine, so use it only for work you trust.
+By hand, without the scripts: `uv venv venv && uv pip install -r requirements.txt` (or
+`python -m venv venv && pip install -r requirements.txt`), then `python -m playwright install chromium`
+and `cd studio && npm ci && npm run build`. Windows without WSL: `scripts/setup.ps1`.
+
+For development, `scripts/dev.sh` starts the API with reload on :8000 and the Studio dev server on
+:3001. Use `scripts/dev.sh --no-reload` while agents are running, so a code edit does not restart
+the worker under them.
+
+[docs/SETUP.md](docs/SETUP.md) is the full guide: WSL, keys, configuration, security and
+troubleshooting.
+
+---
+
+## Working on GuudFlow
+
+| Script | What it does |
+|---|---|
+| `scripts/doctor.sh` | Checks tools, Docker, `.env`, built pieces and the port |
+| `scripts/setup.sh` | First-time install (uv when present) |
+| `scripts/dev.sh [--no-reload]` | API on :8000 and Studio dev server on :3001 |
+| `scripts/build.sh studio\|opencode\|sandbox\|docker\|all` | Build one piece or everything |
+| `scripts/check.sh [backend\|studio\|escape]` | Tests: pytest, Studio typecheck and vitest, or the sandbox escape suite |
+| `scripts/to-main.sh [--tag vX.Y.Z]` | Checks, then fast-forwards `main` from your branch (asks first) |
+
+`scripts/to-main.sh` only fast-forwards. It refuses with uncommitted changes, when `main` has
+commits your branch lacks, or when a commit adds something that looks like a key. Run
+`scripts/check.sh escape` too when you touch `core/harness/`, `worker/`, `sandbox/` or `gateway/`.
+
+**VS Code:** open the folder and run **Tasks: Run Task**. The tasks in `.vscode/tasks.json` cover
+setup, doctor, the dev stack, Compose up/logs/down, builds, each check, and merging to main (with an
+optional tag). `.vscode/launch.json` debugs the API, the current pytest file, and a one-shot run.
+Run **Tasks: Run Test Task** for the fast checks.
+
+---
 
 ### Your first run
 

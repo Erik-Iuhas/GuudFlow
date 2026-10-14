@@ -25,6 +25,10 @@ data/personas/
 *.log
 .DS_Store
 .idea/
-.vscode/
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/extensions.json
 .tools/
 .claude/worktrees/
