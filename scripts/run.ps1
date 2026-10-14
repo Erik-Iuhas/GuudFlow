@@ -54,7 +54,7 @@ function Studio-Deps {
         return $false
     } finally { Pop-Location }
 }
-function Build-Studio { if (Studio-Deps) { Push-Location studio; try { & npm run build; if ($LASTEXITCODE -ne 0) { throw "Studio build failed" } } finally { Pop-Location } } else { throw "Studio packages missing" } }
+function Npm-Build-Studio { if (Studio-Deps) { Push-Location studio; try { & npm run build; if ($LASTEXITCODE -ne 0) { throw "Studio build failed" } } finally { Pop-Location } } else { throw "Studio packages missing" } }
 function Install-Opencode {
     $ver = (Select-String -Path "core\harness\server.py" -Pattern 'OPENCODE_VERSION = "([^"]+)"').Matches[0].Groups[1].Value
     New-Item -ItemType Directory -Force ".tools\opencode" | Out-Null
@@ -72,23 +72,23 @@ function Studio-Unpack($file) {
     if (-not $file) { $file = "prebuilt\studio-dist.tar.gz" }
     if (-not (Test-Path $file)) { throw "$file not found (put the prebuilt Studio archive in prebuilt\)" }
     if ($file -like "*.zip") {
-        $tmp = Join-Path $env:TEMP ("studio-" + [guid]::NewGuid())
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("studio-" + [guid]::NewGuid())
         Expand-Archive -Path $file -DestinationPath $tmp -Force
         $inner = Get-ChildItem -Path $tmp -Recurse -Filter "*.tar.gz" | Select-Object -First 1
         if (-not $inner) { Remove-Item -Recurse -Force $tmp; throw "$file has no .tar.gz inside" }
         $file = $inner.FullName
     }
-    Remove-Item -Recurse -Force studio\dist.new -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force studio\dist.new | Out-Null
-    & tar.exe -xzf $file -C studio\dist.new
-    $src = if (Test-Path studio\dist.new\dist\index.html) { "studio\dist.new\dist" } else { "studio\dist.new" }
-    if (-not (Test-Path "$src\index.html")) { Remove-Item -Recurse -Force studio\dist.new; throw "$file has no Studio build (index.html)" }
-    Remove-Item -Recurse -Force studio\dist -ErrorAction SilentlyContinue
-    Move-Item $src studio\dist
-    Remove-Item -Recurse -Force studio\dist.new -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force studio/dist.new -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force studio/dist.new | Out-Null
+    & tar.exe -xzf $file -C studio/dist.new
+    $src = if (Test-Path studio/dist.new/dist/index.html) { "studio/dist.new/dist" } else { "studio/dist.new" }
+    if (-not (Test-Path "$src/index.html")) { Remove-Item -Recurse -Force studio/dist.new; throw "$file has no Studio build (index.html)" }
+    Remove-Item -Recurse -Force studio/dist -ErrorAction SilentlyContinue
+    Move-Item $src studio/dist
+    Remove-Item -Recurse -Force studio/dist.new -ErrorAction SilentlyContinue
     if ($tmp) { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
-    Set-Content "studio\dist\.unpacked" ""   # Studio-Ensure unpacks again only when an archive is newer
-    Write-Host "Studio installed in studio\dist"
+    Set-Content "studio/dist/.unpacked" ""   # Studio-Ensure unpacks again only when an archive is newer
+    Write-Host "Studio installed in studio/dist"
 }
 function Doctor {
     $script:DoctorFail = $false
@@ -113,17 +113,19 @@ function Doctor {
 # The one Studio step (prepare, setup, dev): an archive in prebuilt\ wins and npm is never run,
 # then an existing studio\dist, then npm packages ($build also builds studio\dist).
 function Studio-Ensure([bool]$build = $false) {
-    $arch = Get-ChildItem -Path "prebuilt\*" -Include "studio-dist*.tar.gz", "studio-dist*.zip" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    # Any .tar.gz / .tgz / .zip in prebuilt\ counts (browsers rename downloads).
+    $arch = Get-ChildItem -LiteralPath (Join-Path $Repo "prebuilt") -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '\.(tar\.gz|tgz|zip)$' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($arch) {
-        if (-not (Test-Path "studio\dist\.unpacked") -or $arch.LastWriteTime -gt (Get-Item "studio\dist\.unpacked").LastWriteTime) { Studio-Unpack $arch.FullName }
+        if (-not (Test-Path "studio/dist/.unpacked") -or $arch.LastWriteTime -gt (Get-Item -Force "studio/dist/.unpacked").LastWriteTime) { Studio-Unpack $arch.FullName }
         Write-Host "Studio: prebuilt from prebuilt\$($arch.Name) (npm skipped)"; return $true
     }
-    if ((Test-Path "studio\dist\index.html") -and -not (Test-Path "studio\node_modules")) { Write-Host "Studio: using the existing build in studio\dist (npm skipped)"; return $true }
-    if ((Test-Path "studio\node_modules") -and -not $build) { Write-Host "Studio: npm packages already installed"; return $true }
+    if ((Test-Path "studio/dist/index.html") -and -not (Test-Path "studio/node_modules")) { Write-Host "Studio: using the existing build in studio\dist (npm skipped)"; return $true }
+    if ((Test-Path "studio/node_modules") -and -not $build) { Write-Host "Studio: npm packages already installed"; return $true }
     if ($env:GUUDFLOW_SKIP_NPM -ne "1" -and (Get-Command npm -ErrorAction SilentlyContinue)) {
-        try { if ($build) { Build-Studio } elseif (-not (Studio-Deps)) { throw "npm failed" }; return $true } catch { Write-Warning "$_" }
+        try { if ($build) { Npm-Build-Studio } elseif (-not (Studio-Deps)) { throw "npm failed" }; return $true } catch { Write-Warning "$_" }
     }
-    if (Test-Path "studio\dist\index.html") { Write-Host "Studio: npm failed; keeping the existing studio\dist"; return $true }
+    if (Test-Path "studio/dist/index.html") { Write-Host "Studio: npm failed; keeping the existing studio\dist"; return $true }
     Write-Warning "Studio: not available. Put studio-dist.tar.gz (or the GitHub artifact zip) in $Repo\prebuilt\ and run this again."
     return $false
 }
@@ -192,9 +194,9 @@ switch ($Command) {
     "build" {
         $what = if ($Rest) { $Rest[0] } else { "native" }
         switch ($what) {
-            "studio"   { Build-Studio }
+            "studio"   { if (-not (Studio-Ensure $true)) { exit 1 } }
             "opencode" { Install-Opencode }
-            "native"   { Build-Studio; Install-Opencode }
+            "native"   { if (-not (Studio-Ensure $true)) { exit 1 }; Install-Opencode }
             "docker"   { & docker compose build }
             default    { throw "build '$what' is not available on native Windows (sandbox images need Linux)" }
         }
