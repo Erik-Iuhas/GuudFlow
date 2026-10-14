@@ -2,10 +2,19 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Install uv",
+      "type": "shell",
+      "command": "scripts/install_uv.sh",
+      "problemMatcher": []
+    },
+    {
       "label": "Setup (venv, packages, Studio, .env)",
       "type": "shell",
       "command": "scripts/setup.sh",
-      "problemMatcher": []
+      "problemMatcher": [],
+      "dependsOn": [
+        "Install uv"
+      ]
     },
     {
       "label": "Doctor (is this machine ready?)",
@@ -21,7 +30,10 @@
       "problemMatcher": [],
       "presentation": {
         "panel": "dedicated"
-      }
+      },
+      "dependsOn": [
+        "Install uv"
+      ]
     },
     {
       "label": "Run dev stack (no reload, safe for agent runs)",
@@ -31,7 +43,10 @@
       "problemMatcher": [],
       "presentation": {
         "panel": "dedicated"
-      }
+      },
+      "dependsOn": [
+        "Install uv"
+      ]
     },
     {
       "label": "Run API (built Studio on :8000)",

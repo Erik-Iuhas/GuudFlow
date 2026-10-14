@@ -10,6 +10,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"   # where the uv installer puts uv
 
 studio()   { (cd studio && npm ci --no-audit --no-fund && npm run build); }
 opencode() { scripts/install_opencode.sh; }

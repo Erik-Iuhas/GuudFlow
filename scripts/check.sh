@@ -10,6 +10,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"   # where the uv installer puts uv
 [ -f venv/bin/activate ] && source venv/bin/activate
 what="${1:-all}"; [ $# -gt 0 ] && shift
 [ "${1:-}" = "--" ] && shift

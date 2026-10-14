@@ -80,7 +80,7 @@ The laundry list. `scripts/doctor.sh` checks all of it and tells you what to fix
 | Windows (PowerShell) | `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
 | Any (pipx or pip) | `pipx install uv` or `pip install uv` |
 
-Open a new terminal afterwards so `uv` is on your `PATH`, then check with `uv --version`. No
+`scripts/install_uv.sh` (or the VS Code task **Install uv**) does the Linux/WSL one and skips if uv exists; the GuudFlow scripts find uv on their own afterwards. Open a new terminal afterwards in other shells so `uv` is on your `PATH`, then check with `uv --version`. No
 Python 3.11 on the machine is fine: `uv venv` downloads one. Details: <https://docs.astral.sh/uv/getting-started/installation/>.
 
 ## Get started
