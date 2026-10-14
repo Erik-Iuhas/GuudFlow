@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.1.2 (2026-10-14)
+
+- Runs no longer hang after "opencode server listening" behind a company proxy: GuudFlow's calls
+  to each worker's local opencode server ignore `HTTP(S)_PROXY`, and opencode always has
+  localhost in `NO_PROXY`, so its calls to the gateway and MCP server stay on this machine.
+- Each worker's opencode server is only GuudFlow's harness: `enabled_providers` limits it to
+  GuudFlow's providers (opencode's own hosted models are gone), and opencode's stock agents
+  (build, plan, general) are switched off. The worker's own agent does all the work, with the
+  read-only explore helper.
+
 ## 0.1.1 (2026-10-14)
 
 Setup behind a company proxy, prebuilt Studio and Python wheels, certificates, and runs that
