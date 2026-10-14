@@ -378,3 +378,12 @@ async def test_accept_a_parked_change_with_its_computed_fix(client, auth_header,
     assert r.status_code == 200, r.text
     assert any(c["change"]["op"] == "add_decision" for c in r.json()["draft"]["changes"])
     assert (await client.post(url, headers=auth_header)).status_code == 404
+
+
+async def test_plan_preview_is_inactive_without_a_turn(client, auth_header, app) -> None:
+    await _project(client, auth_header)
+    r = await client.get("/api/projects/p1/plan/preview", headers=auth_header)
+    assert r.status_code == 200 and r.json() == {"active": False, "changes": []}
+    app.state.pm_previews = {"p1": [{"op": "add_item", "title": "One"}]}
+    r = await client.get("/api/projects/p1/plan/preview", headers=auth_header)
+    assert r.json() == {"active": True, "changes": [{"op": "add_item", "title": "One"}]}

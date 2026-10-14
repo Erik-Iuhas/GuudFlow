@@ -454,3 +454,24 @@ async def test_the_context_and_prompt_carry_the_minimum_team(tmp_path: Path) -> 
     await manager.turn("hi", mode="discuss")
     assert "Minimum team: missing a role that plans sessions" in user_text(llm)
     assert "Minimum team. A team that works on the backlog" in llm.calls[0]["system"]
+
+
+async def test_streamed_changes_reach_the_preview_and_the_draft_is_unchanged(
+        tmp_path: Path) -> None:
+    class Streaming(MockLLMClient):
+        async def complete_streaming(self, *, on_text, **kw):  # type: ignore[no-untyped-def]
+            resp = await self.complete(**kw)
+            text = json.dumps(resp.tool_calls[0].arguments)
+            for end in range(1, len(text) + 1, 7):
+                on_text(text[:end])
+            on_text(text)
+            return resp
+
+    llm = Streaming([call("Added.", [req(), dec()])])
+    manager = ProjectManager(llm, tmp_path, "p", DOC)
+    seen: list[int] = []
+    manager.on_preview = lambda items: seen.append(len(items))
+    out = await manager.turn("Build a recipe box", mode="update")
+    assert seen == [1, 2]
+    assert out.draft is not None and [c.op for c in out.draft.changes] == \
+        ["add_requirement", "add_decision"]

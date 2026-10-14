@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 from core.llm.client import LLMMessage, LLMResponse, ToolCall
@@ -61,6 +62,7 @@ class OpenAIClient:
         model: str = "gpt-4o-mini",
         cache_system: bool = False,  # no-op: OpenAI auto-prefix-caches
         effort: str | None = None,
+        on_text: Callable[[str], None] | None = None,
     ) -> LLMResponse:
         if self._client is None:
             import httpx
@@ -87,6 +89,8 @@ class OpenAIClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
         headers.update(self._extra_headers)
 
+        if on_text is not None:
+            return await self._stream(body, headers, on_text)
         try:
             resp = await self._client.post(
                 f"{self._base_url}/chat/completions",
@@ -98,6 +102,79 @@ class OpenAIClient:
             raise _map_error(exc) from exc
 
         return _from_openai_response(resp.json())
+
+    async def complete_streaming(
+        self,
+        system: str,
+        messages: list[LLMMessage],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int = 4096,
+        model: str = "gpt-4o-mini",
+        cache_system: bool = False,
+        effort: str | None = None,
+        *,
+        on_text: Callable[[str], None],
+    ) -> LLMResponse:
+        """`complete`, streamed: `on_text` gets the tool-call arguments written so far."""
+        return await self.complete(system, messages, tools, max_tokens, model, cache_system,
+                                   effort, on_text=on_text)
+
+    async def _stream(self, body: dict[str, Any], headers: dict[str, str],
+                      on_text: Callable[[str], None]) -> LLMResponse:
+        """Stream /chat/completions (SSE) and fold the chunks back into one response body,
+        so `_from_openai_response` reads it as if it had not streamed."""
+        body = {**body, "stream": True}
+        if "api.openai.com" in self._base_url:
+            body["stream_options"] = {"include_usage": True}
+        content: list[str] = []
+        calls: dict[int, dict[str, Any]] = {}
+        finish: str | None = None
+        usage: dict[str, Any] | None = None
+        model: str | None = None
+        try:
+            async with self._client.stream("POST", f"{self._base_url}/chat/completions",
+                                           json=body, headers=headers) as resp:
+                if resp.status_code >= 400:
+                    await resp.aread()
+                    resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        chunk = json.loads(data)
+                    except ValueError:
+                        continue
+                    model = chunk.get("model") or model
+                    usage = chunk.get("usage") or usage
+                    for choice in chunk.get("choices") or []:
+                        delta = choice.get("delta") or {}
+                        if delta.get("content"):
+                            content.append(delta["content"])
+                        for tc in delta.get("tool_calls") or []:
+                            slot = calls.setdefault(int(tc.get("index") or 0), {
+                                "id": "", "type": "function",
+                                "function": {"name": "", "arguments": ""}})
+                            slot["id"] = tc.get("id") or slot["id"]
+                            fn = tc.get("function") or {}
+                            slot["function"]["name"] += fn.get("name") or ""
+                            if fn.get("arguments"):
+                                slot["function"]["arguments"] += fn["arguments"]
+                                on_text(slot["function"]["arguments"])
+                        finish = choice.get("finish_reason") or finish
+        except Exception as exc:
+            raise _map_error(exc) from exc
+        message: dict[str, Any] = {"role": "assistant", "content": "".join(content) or None}
+        if calls:
+            message["tool_calls"] = [calls[i] for i in sorted(calls)]
+        folded: dict[str, Any] = {"choices": [{"message": message, "finish_reason": finish}]}
+        if usage:
+            folded["usage"] = usage
+        if model:
+            folded["model"] = model
+        return _from_openai_response(folded)
 
     async def aclose(self) -> None:
         if self._owns_client and self._client is not None:

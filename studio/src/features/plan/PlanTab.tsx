@@ -7,6 +7,7 @@ import {
   useEditSpec,
   usePlan,
   useAcceptParked,
+  usePlanPreview,
   useSendMessage,
   useSpec,
   useStartPlan,
@@ -38,6 +39,7 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
   const backlog = useBacklog(projectId);
   const edit = useEditSpec(projectId);
   const [panel, setPanel] = useState<Panel | null>(null);
+  const preview = usePlanPreview(projectId, start.isPending || send.isPending);
   const [approvedVersion, setApprovedVersion] = useState<number | null>(null);
 
   if (plan.isLoading) return <Skeleton className="h-64 w-full" />;
@@ -46,6 +48,7 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
   const draft = plan.data?.draft ?? null;
   const shown: Panel = draft ? (panel ?? "draft") : "spec";
   const pending = start.isPending || send.isPending;
+  const previewItems = pending ? (preview.data?.changes ?? []) : [];
   const panelError = tick.error ?? approve.error ?? discard.error ?? edit.error;
 
   const spend = plan.data?.pm_spend;
@@ -62,6 +65,7 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
         messages={plan.data?.messages ?? []}
         currentDraftId={draft?.id ?? null}
         pending={pending}
+        preview={previewItems}
         onStart={() => {
           setApprovedVersion(null);
           return start.mutateAsync();

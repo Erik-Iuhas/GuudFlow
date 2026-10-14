@@ -1,6 +1,7 @@
 """Anthropic Claude client with normalized error taxonomy and prompt caching."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from core.llm.client import LLMMessage, LLMResponse, ToolCall
@@ -39,6 +40,7 @@ class AnthropicClient:
         model: str = "claude-sonnet-4-6",
         cache_system: bool = False,
         effort: str | None = None,
+        on_text: Callable[[str], None] | None = None,
     ) -> LLMResponse:
         if self._client is None:
             import httpx
@@ -73,12 +75,41 @@ class AnthropicClient:
             # The pinned SDK predates `output_config`; extra_body sends it as is.
             kwargs["extra_body"] = {"output_config": {"effort": effort}}
 
+        if on_text is None:
+            try:
+                resp = await self._client.messages.create(**kwargs)
+            except Exception as exc:
+                raise _map_error(exc) from exc
+            return _api_to_response(resp)
+        # Streaming: hand the tool-call arguments written so far to `on_text`, then build
+        # the same response from the final message.
+        written = ""
         try:
-            resp = await self._client.messages.create(**kwargs)
+            async with self._client.messages.stream(**kwargs) as stream:
+                async for event in stream:
+                    if getattr(event, "type", "") == "input_json":
+                        written += getattr(event, "partial_json", "") or ""
+                        on_text(written)
+                resp = await stream.get_final_message()
         except Exception as exc:
             raise _map_error(exc) from exc
-
         return _api_to_response(resp)
+
+    async def complete_streaming(
+        self,
+        system: str,
+        messages: list[LLMMessage],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int = 8192,
+        model: str = "claude-sonnet-4-6",
+        cache_system: bool = False,
+        effort: str | None = None,
+        *,
+        on_text: Callable[[str], None],
+    ) -> LLMResponse:
+        """`complete`, streamed: `on_text` gets the tool-call arguments written so far."""
+        return await self.complete(system, messages, tools, max_tokens, model, cache_system,
+                                   effort, on_text=on_text)
 
 
 def _map_error(exc: Exception) -> LLMError:

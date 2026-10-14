@@ -67,4 +67,13 @@ describe("Jack's self-repair in Studio", () => {
     fireEvent.click(screen.getByRole("button", { name: /Accept the suggestion: stop serving R99/ }));
     expect(onAcceptParked).toHaveBeenCalledWith(2, 0);
   });
+
+  it("lists the changes being written while Jack drafts", () => {
+    wrap(<Conversation messages={[msg({ id: 1, author: "human", text: "plan it" })]}
+      pending onSend={vi.fn()} onStart={async () => {}} error={null} currentDraftId="draft-1"
+      preview={[{ op: "add_requirement", text: "Save a recipe" }, { op: "add_item", title: "Generator" }]} />);
+    expect(screen.getByTestId("drafting")).toHaveTextContent("2 changes so far");
+    const items = within(screen.getByTestId("preview")).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual(["add requirement: Save a recipe", "add item: Generator"]);
+  });
 });

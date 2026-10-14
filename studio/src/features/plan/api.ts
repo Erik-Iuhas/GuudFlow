@@ -275,9 +275,18 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 export const planKeys = {
   spec: (projectId: string) => ["spec", projectId] as const,
   plan: (projectId: string) => ["plan", projectId] as const,
+  preview: (projectId: string) => ["plan-preview", projectId] as const,
 };
 
+/** Changes Jack has finished writing in the turn now running (a preview, not validated). */
+export interface PlanPreviewWire {
+  active: boolean;
+  changes: Record<string, unknown>[];
+}
+
 export const planApi = {
+  preview: (projectId: string) =>
+    send<PlanPreviewWire>("GET", `/api/projects/${enc(projectId)}/plan/preview`),
   spec: (projectId: string) => send<SpecWire>("GET", `/api/projects/${enc(projectId)}/spec`),
   plan: (projectId: string) => send<PlanWire>("GET", `/api/projects/${enc(projectId)}/plan`),
   start: (projectId: string) => send<PlanTurnWire>("POST", `/api/projects/${enc(projectId)}/plan/start`, {}),
@@ -308,6 +317,16 @@ export function usePlan(projectId: string): UseQueryResult<PlanWire> {
 function mergeTurn(prev: PlanWire | undefined, turn: PlanTurnWire): PlanWire {
   const have = new Set((prev?.messages ?? []).map((m) => m.id));
   return { messages: [...(prev?.messages ?? []), ...turn.messages.filter((m) => !have.has(m.id))], draft: turn.draft };
+}
+
+/** Polls the streamed preview once a second while a turn is running. */
+export function usePlanPreview(projectId: string, running: boolean): UseQueryResult<PlanPreviewWire> {
+  return useQuery({
+    queryKey: planKeys.preview(projectId),
+    queryFn: () => planApi.preview(projectId),
+    enabled: running && !!projectId,
+    refetchInterval: running ? 1000 : false,
+  });
 }
 
 export function useStartPlan(projectId: string): UseMutationResult<PlanTurnWire, Error, void> {

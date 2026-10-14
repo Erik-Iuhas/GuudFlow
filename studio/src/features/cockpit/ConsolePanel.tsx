@@ -30,7 +30,7 @@ export function ConsolePanel({ runId, live }: { runId: string; live: boolean }) 
           className="rounded border border-border bg-background px-2 py-1">
           {sources.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        {q.isError && <span className="text-status-failed">could not load the console</span>}
+        {q.isError && <span className="text-status-failed">could not load the console: {q.error instanceof Error ? q.error.message : String(q.error)}</span>}
       </div>
       <pre className="m-0 min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-card p-2 font-mono text-xs">
         {roleLog

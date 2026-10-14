@@ -21,6 +21,15 @@ export interface ConversationProps {
   currentDraftId?: string | null;
   /** Puts a left-out change into the draft with its computed fix (the latest turn only). */
   onAcceptParked?: (messageId: number, parkedId: number) => Promise<unknown>;
+  /** Changes Jack has written so far in the running turn (not validated yet). */
+  preview?: readonly Record<string, unknown>[];
+}
+
+/** One line for a streamed change: its op and what it names. */
+export function previewLabel(c: Record<string, unknown>): string {
+  const what = ["title", "text", "choice", "role", "id", "key"]
+    .map((k) => c[k]).find((v) => typeof v === "string" && v.trim());
+  return `${String(c.op ?? "change").replace(/_/g, " ")}${what ? `: ${String(what)}` : ""}`;
 }
 
 /** "draft 3" from a draft id such as "draft-3" or "d3". */
@@ -103,7 +112,7 @@ function Message({ m, pmName, onFix, onAccept }: {
 }
 
 /** The plan conversation: the thread, an empty state and the composer. */
-export function Conversation({ messages, pending, onSend, onStart, error, currentDraftId, onAcceptParked }: ConversationProps) {
+export function Conversation({ messages, pending, onSend, onStart, error, currentDraftId, onAcceptParked, preview = [] }: ConversationProps) {
   const pmName = usePmName();
   const [text, setText] = useState("");
   const [mode, setMode] = useState<PlanMode>("update");
@@ -204,9 +213,21 @@ export function Conversation({ messages, pending, onSend, onStart, error, curren
         </div>
       )}
       {pending && (
-        <p role="status" className="text-sm text-muted-foreground">
-          {pmName} is drafting…
-        </p>
+        <div role="status" className="text-sm text-muted-foreground" data-testid="drafting">
+          <p className="m-0">
+            {pmName} is drafting…{preview.length > 0 ? ` ${preview.length} change${preview.length === 1 ? "" : "s"} so far` : ""}
+          </p>
+          {preview.length > 0 && (
+            <ul className="m-0 mt-1 list-none p-0 opacity-60" aria-label="Changes being written" data-testid="preview">
+              {preview.map((c, i) => (
+                <li key={i} className="truncate border-l-2 border-border pl-2 text-xs">{previewLabel(c)}</li>
+              ))}
+            </ul>
+          )}
+          {preview.length > 0 && (
+            <p className="m-0 mt-1 text-xs">Being written: these join the draft once {pmName} finishes and they are checked.</p>
+          )}
+        </div>
       )}
       <div ref={endRef} />
       {shownError && <Alert variant="error">{shownError}</Alert>}

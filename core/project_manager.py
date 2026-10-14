@@ -20,7 +20,7 @@ import json
 import logging
 import subprocess
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -280,6 +280,10 @@ class ProjectManager:
         self.drafts = PlanDrafts(self.data_root, project_id)
         self._project_dir = self.data_root / "projects" / project_id
         self._persona: Any = None  # Any: Jack (agents.persona.Persona), loaded per turn
+        # Called with the changes Jack has finished writing so far, while a call streams
+        # (docs/PLAN_STREAMING_PLAN.md). A preview only: the draft still fills from the
+        # validated turn. None: no streaming, plain `complete`.
+        self.on_preview: Callable[[list[dict[str, Any]]], None] | None = None
 
     # ── public ──────────────────────────────────────────────────────────────
     async def turn(self, text: str | None, *, mode: Mode = "update", phase: Phase = "plan",
@@ -442,10 +446,15 @@ class ProjectManager:
             kwargs: dict[str, Any] = {} if self.model is None else {"model": self.model}
             if self.effort:
                 kwargs["effort"] = self.effort
-            response = await self.llm.complete(
+            call_kwargs: dict[str, Any] = dict(  # Any: complete()'s keyword arguments
                 system=system, messages=[LLMMessage(role="user",
                                                     content=_cached_content(context, tail))],
                 tools=[turn_tool()], max_tokens=MAX_TOKENS, cache_system=True, **kwargs)
+            streaming = getattr(self.llm, "complete_streaming", None)
+            if self.on_preview is not None and streaming is not None:
+                response = await streaming(**call_kwargs, on_text=self._previewer())
+            else:
+                response = await self.llm.complete(**call_kwargs)
             responses.append(response)
             if response.stop_reason == "max_tokens":
                 # A cut-off tool call parses as a shorter, valid-looking payload (the changes
@@ -494,6 +503,23 @@ class ProjectManager:
                 p.group_data = next((g.model_dump(mode="json", exclude_none=True)
                                      for g in turn.groups if g.name == data.get("group")), None)
         return AskResult(kept, responses, warnings, notes, left_out)
+
+    def _previewer(self) -> Callable[[str], None]:
+        """An `on_text` that passes newly finished changes to `on_preview`."""
+        from core.partial_json import complete_items
+        seen = [0]
+
+        def on_text(text: str) -> None:
+            if self.on_preview is None or '}' not in text:
+                return
+            items = complete_items(text, "changes")
+            if len(items) > seen[0]:
+                seen[0] = len(items)
+                try:
+                    self.on_preview(items)
+                except Exception:  # noqa: BLE001 — a preview must never break the turn
+                    log.warning("pm: preview callback failed", exc_info=True)
+        return on_text
 
     def _turn_budget(self) -> float:
         """The most one turn may spend before repairs stop (gate `pm_turn_budget_usd`)."""

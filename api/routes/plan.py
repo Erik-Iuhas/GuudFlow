@@ -123,6 +123,9 @@ async def _manager(request: Request, project_id: str,
 async def _run_turn(request: Request, project_id: str, meta_model: str | None,
                     text: str | None, mode: Literal["update", "discuss"]) -> dict[str, Any]:  # Any: JSON
     pm = await _manager(request, project_id, meta_model)
+    previews = _previews(request)
+    previews[project_id] = []
+    pm.on_preview = lambda items: previews.__setitem__(project_id, list(items))
     try:
         outcome = await (pm.start() if text is None else pm.turn(text, mode=mode))
     except ProjectManagerError as exc:
@@ -132,7 +135,26 @@ async def _run_turn(request: Request, project_id: str, meta_model: str | None,
     except Exception as exc:  # noqa: BLE001 — an LLM failure is a 502, not a crash
         raise HTTPException(status_code=502,
                             detail=f"the project manager could not answer: {exc}") from None
+    finally:
+        previews.pop(project_id, None)
     return _outcome_json(outcome)
+
+
+def _previews(request: Request) -> dict[str, list[dict[str, Any]]]:  # Any: JSON changes
+    """Changes Jack has finished writing in the turn now running, by project (preview only)."""
+    store = getattr(request.app.state, "pm_previews", None)
+    if store is None:
+        store = request.app.state.pm_previews = {}
+    return store
+
+
+@router.get("/{project_id}/plan/preview")
+async def plan_preview(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
+    """While a turn runs, the changes Jack has written so far (not validated, not in the
+    draft yet): `{active, changes}`. Inactive when no turn is running."""
+    await _project(request, project_id)
+    items = _previews(request).get(project_id)
+    return {"active": items is not None, "changes": items or []}
 
 
 # ── spec ────────────────────────────────────────────────────────────────────
