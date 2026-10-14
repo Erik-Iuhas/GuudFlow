@@ -38,6 +38,7 @@ from core.plan_drafts import (
     draft_refs,
     resolve_predicted_ids,
     split_turn,
+    suggest_fix,
     validate_turn,
 )
 from core.pm_prompts import Phase, Seats, normalise_mode, persona_layers, pm_system_prompt
@@ -228,6 +229,20 @@ def turn_tool() -> dict[str, Any]:  # Any: JSON schema
             "input_schema": _strip_discriminators(result_json_schema(PlanTurn))}
 
 
+def _parked(left_out: list[Problem]) -> list[dict[str, Any]]:  # Any: JSON rows
+    """The changes still left out, each with its computed fix, for Studio's "Accept the
+    suggestion" (docs/PM_SELF_REPAIR_PLAN.md J5)."""
+    rows: list[dict[str, Any]] = []  # Any: JSON rows
+    for n, p in enumerate(left_out):
+        if p.change_data is None:
+            continue
+        fix = suggest_fix(p, p.change_data)
+        rows.append({"id": n, "code": p.code, "problem": p.message, "change": p.change_data,
+                     "group": p.group_data,
+                     "suggestion": {"change": fix[0], "label": fix[1]} if fix else None})
+    return rows
+
+
 class ProjectManager:
     """The plan conversation of one project."""
 
@@ -337,7 +352,7 @@ class ProjectManager:
                           + "\n".join(f"- {p}" for p in problems))
         new.append(await asyncio.to_thread(
             self.drafts.add_message, "pm", reply, draft.id if draft else None, mode,
-            cost, tokens, status, problems))
+            cost, tokens, status, problems, _parked(left_out)))
         if seen_codes:
             from core.pm_memory import record_turn_problems
             await asyncio.to_thread(record_turn_problems, self.data_root, self.project_id,
@@ -448,8 +463,11 @@ class ProjectManager:
         for p in left_out:
             if p.change:
                 p.target = change_target(turn.changes[p.change - 1].model_dump(mode="json"))
-                p.change_json = json.dumps(turn.changes[p.change - 1].model_dump(
-                    mode="json", exclude_none=True), ensure_ascii=False)[:REPAIR_CHANGE_CAP]
+                data = turn.changes[p.change - 1].model_dump(mode="json", exclude_none=True)
+                p.change_data = data
+                p.change_json = json.dumps(data, ensure_ascii=False)[:REPAIR_CHANGE_CAP]
+                p.group_data = next((g.model_dump(mode="json", exclude_none=True)
+                                     for g in turn.groups if g.name == data.get("group")), None)
         return AskResult(kept, responses, warnings, notes, left_out)
 
     def _turn_budget(self) -> float:
@@ -478,6 +496,40 @@ class ProjectManager:
                 f.write(json.dumps(row) + "\n")
         except OSError:
             log.warning("pm: could not record a call in %s", path, exc_info=True)
+
+    async def accept_parked(self, message_id: int, parked_id: int) -> TurnOutcome:
+        """Put a parked change into the draft with its computed fix applied ("Accept the
+        suggestion", docs/PM_SELF_REPAIR_PLAN.md J5). The fixed change is checked like any
+        other; if it still has a blocking problem nothing is added and ProjectManagerError
+        says why."""
+        message = await asyncio.to_thread(self.drafts.db.get_plan_message, message_id)
+        held = list(message.get("parked") or [])
+        row = next((r for r in held if r.get("id") == parked_id), None)
+        if row is None:
+            raise ProjectManagerError([f"message {message_id} has no parked change {parked_id}"])
+        fix = row.get("suggestion")
+        if not fix:
+            raise ProjectManagerError(["this change has no computed fix; ask Jack to fix it"])
+        groups = [row["group"]] if row.get("group") else []
+        turn = PlanTurn.model_validate({"groups": groups, "changes": [fix["change"]],
+                                        "reply": "accepted suggestion"})
+        spec = Spec(self.drafts.db.read_spec_doc())
+        current = self.drafts.current()
+        found = [classify_problem(p) for p in validate_turn(
+            turn, spec, self.drafts.db.read_backlog_doc(), self._team(), None,
+            set(current.groups) if current else set(), draft_refs(current))]
+        blocking = [p.message for p in found if p.severity == "block"]
+        if blocking:
+            raise ProjectManagerError(["the suggestion still has problems: " + "; ".join(blocking)])
+        warnings = {p.change - 1: [p.message] for p in found if p.change}
+        draft = await asyncio.to_thread(self._merge, turn, warnings)
+        remaining = [r for r in held if r.get("id") != parked_id]
+        await asyncio.to_thread(self.drafts.db.set_plan_message_parked, message_id, remaining)
+        note = await asyncio.to_thread(
+            self.drafts.add_message, "pm",
+            f"Added the left-out change with this fix: {fix.get('label', 'suggested fix')}.",
+            draft.id, "update")
+        return TurnOutcome(messages=[note], draft=draft, reply=note["text"], questions=[])
 
     def _merge(self, turn: PlanTurn, warnings: Mapping[int, list[str]] | None = None) -> Draft:
         draft = self.drafts.current() or self.drafts.open_draft()

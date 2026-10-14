@@ -52,4 +52,19 @@ describe("Jack's self-repair in Studio", () => {
       pending={false} onSend={vi.fn()} onStart={async () => {}} error={null} currentDraftId="draft-1" />);
     expect(screen.queryByRole("button", { name: /to fix these/ })).toBeNull();
   });
+
+  it("offers the computed fix of a left-out change", () => {
+    const onAcceptParked = vi.fn().mockResolvedValue(undefined);
+    const parked = [{
+      id: 0, code: "unknown_requirement", problem: "change 2 (add_decision): unknown requirement R99",
+      change: {}, suggestion: { change: {}, label: "stop serving R99" },
+    }, { id: 1, code: "invalid", problem: "x", change: {}, suggestion: null }];
+    wrap(<Conversation messages={[msg({ id: 2, status: "partial", problems: ["p"], parked } as never)]}
+      pending={false} onSend={vi.fn()} onStart={async () => {}} error={null} currentDraftId="draft-1"
+      onAcceptParked={onAcceptParked} />);
+    expect(screen.queryByTestId("parked-2-1")).toBeNull();
+    expect(screen.getByTestId("parked-2-0")).toHaveTextContent("unknown requirement R99");
+    fireEvent.click(screen.getByRole("button", { name: /Accept the suggestion: stop serving R99/ }));
+    expect(onAcceptParked).toHaveBeenCalledWith(2, 0);
+  });
 });

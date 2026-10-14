@@ -19,6 +19,8 @@ export interface ConversationProps {
   error?: string | null;
   /** The open draft's id; its thread stays open and earlier drafts' threads fold. */
   currentDraftId?: string | null;
+  /** Puts a left-out change into the draft with its computed fix (the latest turn only). */
+  onAcceptParked?: (messageId: number, parkedId: number) => Promise<unknown>;
 }
 
 /** "draft 3" from a draft id such as "draft-3" or "d3". */
@@ -38,7 +40,10 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "turn failed, nothing added",
 };
 
-function Message({ m, pmName, onFix }: { m: PlanMessageWire; pmName: string; onFix?: () => void }) {
+function Message({ m, pmName, onFix, onAccept }: {
+  m: PlanMessageWire; pmName: string; onFix?: () => void;
+  onAccept?: (parkedId: number) => void;
+}) {
   const lead = m.author === "tech_lead";
   const pm = m.author === "pm" || lead;
   const draft = draftNumber(m.draft_id);
@@ -75,6 +80,18 @@ function Message({ m, pmName, onFix }: { m: PlanMessageWire; pmName: string; onF
         ) : (
           <p className="mt-1 whitespace-pre-wrap break-words text-sm">{m.text}</p>
         )}
+        {onAccept && (m.parked ?? []).some((p) => p.suggestion) && (
+          <ul className="mt-2 flex flex-col gap-1" aria-label="Left-out changes">
+            {(m.parked ?? []).filter((p) => p.suggestion).map((p) => (
+              <li key={p.id} className="flex flex-wrap items-center gap-2 text-sm" data-testid={`parked-${m.id}-${p.id}`}>
+                <span className="text-muted-foreground">{p.problem.replace(/^change \d+ \([^)]*\): /, "")}</span>
+                <Button size="sm" variant="outline" onClick={() => onAccept(p.id)}>
+                  Accept the suggestion: {p.suggestion?.label}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
         {onFix && (
           <Button size="sm" variant="outline" className="mt-2" onClick={onFix}>
             Ask {pmName} to fix these
@@ -86,7 +103,7 @@ function Message({ m, pmName, onFix }: { m: PlanMessageWire; pmName: string; onF
 }
 
 /** The plan conversation: the thread, an empty state and the composer. */
-export function Conversation({ messages, pending, onSend, onStart, error, currentDraftId }: ConversationProps) {
+export function Conversation({ messages, pending, onSend, onStart, error, currentDraftId, onAcceptParked }: ConversationProps) {
   const pmName = usePmName();
   const [text, setText] = useState("");
   const [mode, setMode] = useState<PlanMode>("update");
@@ -177,7 +194,11 @@ export function Conversation({ messages, pending, onSend, onStart, error, curren
           <ol className="flex flex-col gap-4" aria-live="polite">
             {thread.open.map((m) => (
               <Message key={m.id} m={m} pmName={pmName}
-                onFix={m.id === fixableId && !pending ? () => void fix(m.problems ?? []) : undefined} />
+                onFix={m.id === fixableId && !pending ? () => void fix(m.problems ?? []) : undefined}
+                onAccept={m.id === fixableId && !pending && onAcceptParked
+                  ? (pid) => void onAcceptParked(m.id, pid).catch((e: unknown) =>
+                    setFailure(e instanceof Error ? e.message : String(e)))
+                  : undefined} />
             ))}
           </ol>
         </div>

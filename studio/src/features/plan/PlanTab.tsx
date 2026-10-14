@@ -6,6 +6,7 @@ import {
   useDiscardDraft,
   useEditSpec,
   usePlan,
+  useAcceptParked,
   useSendMessage,
   useSpec,
   useStartPlan,
@@ -29,6 +30,7 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
   const spec = useSpec(projectId);
   const start = useStartPlan(projectId);
   const send = useSendMessage(projectId);
+  const accept = useAcceptParked(projectId);
   const tick = useTickChange(projectId);
   const approve = useApproveDraft(projectId);
   const discard = useDiscardDraft(projectId);
@@ -64,6 +66,7 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
           setApprovedVersion(null);
           return start.mutateAsync();
         }}
+        onAcceptParked={(messageId, parkedId) => accept.mutateAsync({ messageId, parkedId })}
         onSend={(text, mode) => {
           setApprovedVersion(null);
           return send.mutateAsync({ text, mode });

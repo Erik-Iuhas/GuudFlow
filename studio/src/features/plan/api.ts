@@ -202,6 +202,16 @@ export interface PlanMessageWire {
   status?: "" | "complete" | "partial" | "failed";
   /** Why changes were left out of the draft (a partial or failed turn). */
   problems?: string[];
+  /** Changes the turn left out, each with the fix GuudFlow computed (when there is one). */
+  parked?: ParkedChangeWire[];
+}
+
+export interface ParkedChangeWire {
+  id: number;
+  code: string;
+  problem: string;
+  change: ChangeWire;
+  suggestion: { change: ChangeWire; label: string } | null;
 }
 
 export interface PlanWire {
@@ -281,6 +291,9 @@ export const planApi = {
     send<ApproveResult>("POST", `/api/projects/${enc(projectId)}/spec/edit`, { change }),
   discard: (projectId: string) =>
     send<Record<string, never>>("POST", `/api/projects/${enc(projectId)}/plan/draft/discard`, {}),
+  acceptParked: (projectId: string, messageId: number, parkedId: number) =>
+    send<PlanTurnWire>(
+      "POST", `/api/projects/${enc(projectId)}/plan/messages/${messageId}/parked/${parkedId}/accept`, {}),
 };
 
 export function useSpec(projectId: string, enabled = true): UseQueryResult<SpecWire> {
@@ -312,6 +325,17 @@ export function useSendMessage(
   return useMutation({
     mutationFn: (v) => planApi.message(projectId, v.text, v.mode),
     onSuccess: (turn) => qc.setQueryData<PlanWire>(planKeys.plan(projectId), (p) => mergeTurn(p, turn)),
+  });
+}
+
+/** "Accept the suggestion": a left-out change goes into the draft with its computed fix. */
+export function useAcceptParked(
+  projectId: string,
+): UseMutationResult<PlanTurnWire, Error, { messageId: number; parkedId: number }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v) => planApi.acceptParked(projectId, v.messageId, v.parkedId),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: planKeys.plan(projectId) }),
   });
 }
 

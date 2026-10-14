@@ -418,3 +418,21 @@ def test_pm_spend_sums_calls_and_waste(tmp_path: Path) -> None:
     (tmp_path / "pm_costs.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\nbad\n")
     assert pm_spend(tmp_path, now=200_000.0 + 3600) == {
         "calls": 3, "total_usd": 1.0, "last_24h_usd": 0.8, "wasted_usd": 0.3}
+
+
+async def test_a_left_out_change_is_parked_with_a_computed_fix(tmp_path: Path) -> None:
+    bad = {**dec(), "serves": ["R99"]}
+    manager, llm = pm(tmp_path, call("plan", [req(), bad]), call("same", [bad]))
+    out = await manager.turn("plan", mode="update")
+    assert out.status == "partial"
+    parked = out.messages[-1]["parked"]
+    assert len(parked) == 1 and parked[0]["code"] == "unknown_requirement"
+    assert parked[0]["suggestion"]["label"] == "stop serving R99"
+    assert parked[0]["suggestion"]["change"]["serves"] == []
+
+    done = await manager.accept_parked(out.messages[-1]["id"], parked[0]["id"])
+    assert any(c.change.get("op") == "add_decision" and c.change["serves"] == []
+               for c in done.draft.changes)
+    assert manager.drafts.db.get_plan_message(out.messages[-1]["id"])["parked"] == []
+    with pytest.raises(Exception, match="no parked change"):
+        await manager.accept_parked(out.messages[-1]["id"], parked[0]["id"])

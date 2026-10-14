@@ -10,6 +10,7 @@ spot, which also records the edited fields as pinned so the PM cannot overwrite 
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import Collection, Mapping, Sequence
@@ -17,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from core.backlog import BacklogError, _check_deps, add_to_doc, update_in_doc
 from core.harness.capabilities import ROLE_TYPES, Capabilities, CapabilityError
@@ -838,6 +839,8 @@ class Problem:
     change: int | None = None   # 1-based index into the turn's changes; None: the turn itself
     target: tuple[str, ...] | None = None  # what the change acts on (`change_target`)
     change_json: str = ""       # the left-out change, shown back to the model for repair
+    change_data: dict[str, Any] | None = None  # Any: JSON; the left-out change itself
+    group_data: dict[str, Any] | None = None   # Any: JSON; the reason it was proposed under
 
 
 # validate_turn words each problem for the model; this table gives each wording its code.
@@ -867,6 +870,50 @@ def classify_problem(message: str) -> Problem:
         if pattern.search(message):
             return Problem(message, code, severity, index)
     return Problem(message, "invalid", "block", index)
+
+
+_BAD_REF = (re.compile(r"unknown (?:requirement|item) (\S+)$"),
+            re.compile(r"serves (\S+), which is not"),
+            re.compile(r"depends_on (\S+) is not"))
+_PINNED = re.compile(r"has human-set (.+); do not change it")
+_CHANGE_META = frozenset({"op", "id", "ref", "group", "reason"})
+
+
+def suggest_fix(problem: Problem, change: Mapping[str, Any]  # Any: JSON change
+                ) -> tuple[dict[str, Any], str] | None:  # Any: JSON change
+    """A computed fix for a left-out change, and its label for a person; None when there is
+    no fix that keeps the change's meaning (docs/PM_SELF_REPAIR_PLAN.md §4, J5).
+
+    An unknown or not-yet-added id in `serves` / `depends_on` is dropped from the list, and a
+    field a person pinned is dropped from an edit that also sets other fields. The fixed
+    change must still parse; whether it fits the draft is checked when it is accepted.
+    """
+    fixed: dict[str, Any] = json.loads(json.dumps(dict(change)))  # Any: JSON change
+    label = ""
+    if problem.code in ("unknown_requirement", "unknown_item", "ref_not_in_draft"):
+        bad = next((m.group(1) for rx in _BAD_REF if (m := rx.search(problem.message))), None)
+        for key, words in (("serves", "stop serving"), ("depends_on", "drop the dependency on")):
+            values = fixed.get(key)
+            if bad and isinstance(values, list) and bad in values:
+                fixed[key] = [v for v in values if v != bad]
+                label = f"{words} {bad}"
+                break
+    elif problem.code == "pinned_field":
+        m = _PINNED.search(problem.message)
+        hit = [f.strip() for f in m.group(1).split(",")] if m else []
+        dropped = [f for f in hit if f in fixed and f not in _CHANGE_META]
+        if dropped and any(k not in _CHANGE_META and fixed.get(k) is not None
+                           for k in fixed if k not in dropped):
+            for f in dropped:
+                fixed.pop(f)
+            label = "leave " + ", ".join(dropped) + " as the person set it"
+    if not label:
+        return None
+    try:
+        parse_change(fixed)
+    except ValidationError:
+        return None
+    return fixed, label
 
 
 def draft_refs(draft: Draft | None) -> dict[str, str]:
@@ -1245,10 +1292,13 @@ class PlanDrafts:
     def add_message(self, author: str, text: str, draft_id: str | None = None,
                     mode: str = "", cost_usd: float | None = None,
                     tokens: int | None = None, status: str = "",
-                    problems: list[str] | None = None) -> dict[str, Any]:  # Any: JSON row
-        """Append a message to the plan conversation (a PM turn's status and open problems)."""
+                    problems: list[str] | None = None,
+                    parked: list[dict[str, Any]] | None = None  # Any: JSON rows
+                    ) -> dict[str, Any]:  # Any: JSON row
+        """Append a message to the plan conversation (a PM turn's status, open problems and
+        the changes they kept out)."""
         return self.db.add_plan_message(author, text, draft_id, mode, cost_usd, tokens,
-                                        status, problems)
+                                        status, problems, parked)
 
     def messages(self, limit: int = 100) -> list[dict[str, Any]]:  # Any: JSON rows
         """The latest messages, oldest first."""

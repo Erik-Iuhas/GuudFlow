@@ -361,3 +361,20 @@ async def test_direct_edit_refuses_team_ops(client, auth_header) -> None:
     r = await client.post("/api/projects/p1/spec/edit", headers=auth_header,
                           json={"change": ADD_ROLE})
     assert r.status_code == 422
+
+
+async def test_accept_a_parked_change_with_its_computed_fix(client, auth_header, app) -> None:
+    await _project(client, auth_header)
+    bad = _call("bad", [REQ, {"op": "add_decision", "ref": "new:2", "title": "Storage",
+                              "choice": "SQLite", "serves": ["R99"], "binding": True,
+                              "reason": "boring and testable, no server to run"}])
+    _llm(app, bad, bad)
+    r = await client.post("/api/projects/p1/plan/messages", headers=auth_header,
+                          json={"text": "go", "mode": "update"})
+    msg = r.json()["messages"][-1]
+    assert msg["parked"][0]["suggestion"]["label"] == "stop serving R99"
+    url = f"/api/projects/p1/plan/messages/{msg['id']}/parked/{msg['parked'][0]['id']}/accept"
+    r = await client.post(url, headers=auth_header)
+    assert r.status_code == 200, r.text
+    assert any(c["change"]["op"] == "add_decision" for c in r.json()["draft"]["changes"])
+    assert (await client.post(url, headers=auth_header)).status_code == 404

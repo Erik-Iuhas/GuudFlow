@@ -174,7 +174,11 @@ Order: J1 → J2 → J7 (for J1/J2) → J3 → J4 → J5 → J6.
 - **J5 partly done.** The Plan tab shows each PM turn's cost and status, warnings on cards, and
   "Ask Jack to fix these" on the latest partial or failed turn. Still to do: "Accept the
   suggestion" (needs suggestions as data, not only in the message).
-- **J6, J7 open.** J7 has unit tests for every F10 failure shape, but no replay of the real
+- **J5 done.** A turn's left-out changes are stored on its message (`parked`), each with a fix
+  `plan_drafts.suggest_fix` computes (drop an unknown id from `serves`/`depends_on`, leave a
+  pinned field alone). `POST /plan/messages/{id}/parked/{pid}/accept` checks the fixed change
+  and puts it in the draft; Studio shows *Accept the suggestion: …* on the latest turn.
+- **J6 done. J7 open.** J7 has unit tests for every F10 failure shape, but no replay of the real
   session yet. J1 and J2 alone stop the money disappearing.
 J3 and J4 make the repair cheap.
 

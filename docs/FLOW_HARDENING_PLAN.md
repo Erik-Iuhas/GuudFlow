@@ -197,7 +197,7 @@ also runs the escape suite (CLAUDE.md).
   brief's rule ("run the allowed part alone") replaces that.
 - **§7:** J4 (a worked example per problem code in repair calls), J6 (problem codes as
   tagged episodes in Jack's memory) and the planning-spend line in the Plan tab are done.
-  J5 (*Accept the suggestion*) is open.
+  J5 (*Accept the suggestion*) is done (PM_SELF_REPAIR_PLAN J5).
 - **§8 partly done:** the retrospective's per-role `friction` (blocked, asked a person,
   refused, model) and three new playbook metrics. The shorter brief for small models is open.
 - **§9 done:** `tests/harness/test_session5_replay.py` (owner check, block on the finished

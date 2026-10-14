@@ -196,6 +196,24 @@ async def post_message(request: Request, project_id: str,
     return await _run_turn(request, project_id, body.meta_model, body.text, body.mode)
 
 
+@router.post("/{project_id}/plan/messages/{message_id}/parked/{parked_id}/accept")
+async def accept_parked(request: Request, project_id: str, message_id: int,
+                        parked_id: int) -> dict[str, Any]:  # Any: JSON
+    """Accept the computed fix for a change Jack's turn left out: it goes into the draft
+    undecided. 404 for an unknown message or change, 409 when the fix has no valid form."""
+    pm = await _manager(request, project_id, None)
+    try:
+        outcome = await pm.accept_parked(message_id, parked_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc.args[0])) from None
+    except ProjectManagerError as exc:
+        missing = "no parked change" in str(exc)
+        raise HTTPException(status_code=404 if missing else 409, detail=str(exc)) from None
+    except PlanDraftError as exc:
+        raise _draft_error(exc) from None
+    return _outcome_json(outcome)
+
+
 @router.patch("/{project_id}/plan/draft/{cid}")
 async def tick_change(request: Request, project_id: str, cid: str,
                       body: TickBody) -> dict[str, Any]:  # Any: JSON

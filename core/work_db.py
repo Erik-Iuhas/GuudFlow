@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS spec_items (
 CREATE TABLE IF NOT EXISTS plan_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, author TEXT NOT NULL,
     text TEXT NOT NULL, draft_id TEXT, mode TEXT NOT NULL DEFAULT '',
-    cost_usd REAL, tokens INTEGER, status TEXT, problems TEXT);
+    cost_usd REAL, tokens INTEGER, status TEXT, problems TEXT, parked TEXT);
 CREATE TABLE IF NOT EXISTS drafts (
     id TEXT PRIMARY KEY, base_version INTEGER NOT NULL, status TEXT NOT NULL,
     data TEXT NOT NULL);
@@ -348,30 +348,44 @@ class WorkDB:
     def add_plan_message(self, author: str, text: str, draft_id: str | None = None,
                          mode: str = "", cost_usd: float | None = None,
                          tokens: int | None = None, status: str = "",
-                         problems: list[str] | None = None) -> dict[str, Any]:  # Any: JSON row
+                         problems: list[str] | None = None,
+                         parked: list[dict[str, Any]] | None = None  # Any: JSON rows
+                         ) -> dict[str, Any]:  # Any: JSON row
         """Append one message to the plan conversation.
 
-        A PM message may carry its usage, its turn `status` (complete, partial, failed) and the
-        `problems` that kept changes out of the draft.
+        A PM message may carry its usage, its turn `status` (complete, partial, failed), the
+        `problems` that kept changes out of the draft and those changes themselves (`parked`,
+        each with a computed fix when there is one).
         """
         now = time.time()
         probs = list(problems or [])
+        held = list(parked or [])
         with self._write() as conn:
             cur = conn.execute("INSERT INTO plan_messages(at, author, text, draft_id, mode, "
-                               "cost_usd, tokens, status, problems) "
-                               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                               "cost_usd, tokens, status, problems, parked) "
+                               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                (now, author, text, draft_id, mode, cost_usd, tokens, status,
-                                json.dumps(probs) if probs else None))
+                                json.dumps(probs) if probs else None,
+                                json.dumps(held) if held else None))
             return {"id": cur.lastrowid, "at": now, "author": author, "text": text,
                     "draft_id": draft_id, "mode": mode, "cost_usd": cost_usd, "tokens": tokens,
-                    "status": status, "problems": probs}
+                    "status": status, "problems": probs, "parked": held}
+
+    def set_plan_message_parked(self, message_id: int,
+                                parked: list[dict[str, Any]]) -> None:  # Any: JSON rows
+        """Replace a message's parked changes (a person accepted or dismissed one)."""
+        with self._write() as conn:
+            cur = conn.execute("UPDATE plan_messages SET parked = ? WHERE id = ?",
+                               (json.dumps(parked) if parked else None, message_id))
+            if cur.rowcount == 0:
+                raise KeyError(f"unknown plan message {message_id}")
 
     def list_plan_messages(self, limit: int = 100) -> list[dict[str, Any]]:  # Any: JSON rows
         """The latest `limit` plan messages, oldest first (no lock)."""
         conn = self._connect()
         try:
             rows = conn.execute("SELECT id, at, author, text, draft_id, mode, "
-                                "cost_usd, tokens, status, problems FROM plan_messages "
+                                "cost_usd, tokens, status, problems, parked FROM plan_messages "
                                 "ORDER BY id DESC LIMIT ?", (max(0, limit),)).fetchall()
         finally:
             conn.close()
@@ -381,8 +395,23 @@ class WorkDB:
             row = dict(zip(keys, r[:8]))
             row["status"] = r[8] or ""
             row["problems"] = json.loads(r[9]) if r[9] else []
+            row["parked"] = json.loads(r[10]) if r[10] else []
             out.append(row)
         return out
+
+    def get_plan_message(self, message_id: int) -> dict[str, Any]:  # Any: JSON row
+        """One plan message by id (no lock); KeyError when there is none."""
+        conn = self._connect()
+        try:
+            r = conn.execute("SELECT id FROM plan_messages WHERE id = ?",
+                             (message_id,)).fetchone()
+            newer = conn.execute("SELECT COUNT(*) FROM plan_messages WHERE id >= ?",
+                                 (message_id,)).fetchone()[0] if r else 0
+        finally:
+            conn.close()
+        if r is None:
+            raise KeyError(f"unknown plan message {message_id}")
+        return next(m for m in self.list_plan_messages(newer) if m["id"] == message_id)
 
     # ── run states ──────────────────────────────────────────────────────────
     def read_runs_doc(self) -> dict[str, dict[str, Any]]:  # Any: JSON rows
@@ -415,7 +444,7 @@ class WorkDB:
     def _migrate(self, conn: sqlite3.Connection) -> None:
         columns = {r[1] for r in conn.execute("PRAGMA table_info(plan_messages)")}
         for name, kind in (("cost_usd", "REAL"), ("tokens", "INTEGER"), ("status", "TEXT"),
-                           ("problems", "TEXT")):
+                           ("problems", "TEXT"), ("parked", "TEXT")):
             if name not in columns:  # databases made before the PM reported usage
                 conn.execute(f"ALTER TABLE plan_messages ADD COLUMN {name} {kind}")
         backlog = self.project_dir / "backlog.json"
