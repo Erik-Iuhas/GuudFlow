@@ -22,18 +22,18 @@ case "${1:-}" in
     [ -f "$file" ] || { echo "$file not found" >&2; exit 1; }
     case "$file" in
       *.zip)  # the GitHub Actions artifact: a zip with studio-dist.tar.gz inside
-        tmp="$(mktemp -d)"
+        tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
         python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$file" "$tmp"
         inner="$(find "$tmp" -name '*.tar.gz' | head -1)"
         [ -n "$inner" ] || { rm -rf "$tmp"; echo "$file has no .tar.gz inside" >&2; exit 1; }
-        mv "$inner" studio-dist.tar.gz; rm -rf "$tmp"; file=studio-dist.tar.gz
-        echo "took studio-dist.tar.gz out of the artifact zip" ;;
+        file="$inner" ;;
     esac
     rm -rf studio/dist.new && mkdir -p studio/dist.new
     tar -xzf "$file" -C studio/dist.new
     src=studio/dist.new/dist; [ -d "$src" ] || src=studio/dist.new
     [ -f "$src/index.html" ] || { rm -rf studio/dist.new; echo "$file has no Studio build (index.html)" >&2; exit 1; }
     rm -rf studio/dist && mv "$src" studio/dist && rm -rf studio/dist.new
+    touch studio/dist/.unpacked   # studio_ensure.sh unpacks again only when an archive is newer
     built="$(cat studio/dist/BUILD_COMMIT 2>/dev/null || echo unknown)"
     here="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
     echo "Studio installed in studio/dist (built from $built; this checkout is $here)."

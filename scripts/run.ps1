@@ -5,7 +5,7 @@
 # GUUDFLOW_WINDOWS_MODE picks how GuudFlow runs on this Windows machine:
 #   wsl     (default) forward to scripts/run.sh inside WSL. Use this: agent sandboxes need Linux.
 #   native  run every task on Windows itself (prepare, setup, dev, stop, doctor, build, check,
-#           api, studio-*). Agents then run
+#           api, studio-*). Studio comes from prebuilt\ first (studio-ensure). Agents then run
 #           in host mode with no sandbox, so only for trusted work.
 # Set it in your environment or as a line in .env (GUUDFLOW_WINDOWS_MODE=native).
 param([Parameter(Position = 0)][string]$Command = "help",
@@ -50,7 +50,7 @@ function Studio-Deps {
         & npm install @na;                     if ($LASTEXITCODE -eq 0) { git checkout -q -- package-lock.json 2>$null; return $true }
         & npm install --legacy-peer-deps @na;  if ($LASTEXITCODE -eq 0) { git checkout -q -- package-lock.json 2>$null; return $true }
         Write-Warning ("Studio npm packages could not be installed. Set GUUDFLOW_NPM_REGISTRY to a mirror, " +
-                       "or unpack a prebuilt Studio: scripts\run.ps1 studio-unpack studio-dist.tar.gz")
+                       "or put a prebuilt Studio archive in prebuilt\ and run: scripts\run.ps1 studio-ensure")
         return $false
     } finally { Pop-Location }
 }
@@ -68,15 +68,15 @@ function Install-Opencode {
     } finally { Pop-Location }
 }
 function Studio-Unpack($file) {
-    if (-not $file) { $file = "studio-dist.tar.gz" }
-    if (-not (Test-Path $file)) { throw "$file not found (put the prebuilt Studio archive in the repo folder)" }
+    $tmp = $null
+    if (-not $file) { $file = "prebuilt\studio-dist.tar.gz" }
+    if (-not (Test-Path $file)) { throw "$file not found (put the prebuilt Studio archive in prebuilt\)" }
     if ($file -like "*.zip") {
         $tmp = Join-Path $env:TEMP ("studio-" + [guid]::NewGuid())
         Expand-Archive -Path $file -DestinationPath $tmp -Force
         $inner = Get-ChildItem -Path $tmp -Recurse -Filter "*.tar.gz" | Select-Object -First 1
         if (-not $inner) { Remove-Item -Recurse -Force $tmp; throw "$file has no .tar.gz inside" }
-        Move-Item -Force $inner.FullName "studio-dist.tar.gz"; Remove-Item -Recurse -Force $tmp
-        $file = "studio-dist.tar.gz"
+        $file = $inner.FullName
     }
     Remove-Item -Recurse -Force studio\dist.new -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force studio\dist.new | Out-Null
@@ -86,6 +86,8 @@ function Studio-Unpack($file) {
     Remove-Item -Recurse -Force studio\dist -ErrorAction SilentlyContinue
     Move-Item $src studio\dist
     Remove-Item -Recurse -Force studio\dist.new -ErrorAction SilentlyContinue
+    if ($tmp) { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+    Set-Content "studio\dist\.unpacked" ""   # Studio-Ensure unpacks again only when an archive is newer
     Write-Host "Studio installed in studio\dist"
 }
 function Doctor {
@@ -99,13 +101,31 @@ function Doctor {
     if (Get-Command npm -ErrorAction SilentlyContinue) { Ok "npm $(npm --version)" } else { Warn "npm not found: use a prebuilt Studio" }
     if (Test-Path $Py) { Ok "venv" } else { Bad "no venv (Setup)" }
     if ((Test-Path ".tools\opencode\node_modules\opencode-windows-x64") -or (Test-Path ".tools\opencode\node_modules\.bin\opencode.cmd")) { Ok "opencode installed" } else { Bad "opencode missing (scripts\run.ps1 install-opencode)" }
-    if (Test-Path "studio\dist\index.html") { Ok "Studio built (studio\dist)" } elseif (Test-Path "studio\node_modules") { Ok "Studio packages (dev server)" } else { Bad "no Studio: build it or studio-unpack an archive" }
+    if (Test-Path "studio\dist\index.html") { Ok "Studio built (studio\dist)" } elseif (Test-Path "studio\node_modules") { Ok "Studio packages (dev server)" } else { Bad "no Studio: put studio-dist.tar.gz in prebuilt\ and run studio-ensure" }
     if (Test-Path ".env") {
         Ok ".env exists"
         if (Select-String -Path ".env" -Pattern '^\s*GUUDFLOW_API_TOKEN=.+' -Quiet) { Ok "GUUDFLOW_API_TOKEN set" } else { Bad "GUUDFLOW_API_TOKEN empty in .env" }
         if (Select-String -Path ".env" -Pattern '^\s*GUUDFLOW_SANDBOX=host' -Quiet) { Ok "GUUDFLOW_SANDBOX=host" } else { Warn "set GUUDFLOW_SANDBOX=host in .env (no sandboxes on native Windows)" }
     } else { Bad ".env missing (Setup)" }
     if ($script:DoctorFail) { Write-Host "Fix the [XX] items, then run doctor again."; exit 1 } else { Write-Host "Ready." }
+}
+
+# The one Studio step (prepare, setup, dev): an archive in prebuilt\ wins and npm is never run,
+# then an existing studio\dist, then npm packages ($build also builds studio\dist).
+function Studio-Ensure([bool]$build = $false) {
+    $arch = Get-ChildItem -Path "prebuilt\*" -Include "studio-dist*.tar.gz", "studio-dist*.zip" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($arch) {
+        if (-not (Test-Path "studio\dist\.unpacked") -or $arch.LastWriteTime -gt (Get-Item "studio\dist\.unpacked").LastWriteTime) { Studio-Unpack $arch.FullName }
+        Write-Host "Studio: prebuilt from prebuilt\$($arch.Name) (npm skipped)"; return $true
+    }
+    if ((Test-Path "studio\dist\index.html") -and -not (Test-Path "studio\node_modules")) { Write-Host "Studio: using the existing build in studio\dist (npm skipped)"; return $true }
+    if ((Test-Path "studio\node_modules") -and -not $build) { Write-Host "Studio: npm packages already installed"; return $true }
+    if ($env:GUUDFLOW_SKIP_NPM -ne "1" -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+        try { if ($build) { Build-Studio } elseif (-not (Studio-Deps)) { throw "npm failed" }; return $true } catch { Write-Warning "$_" }
+    }
+    if (Test-Path "studio\dist\index.html") { Write-Host "Studio: npm failed; keeping the existing studio\dist"; return $true }
+    Write-Warning "Studio: not available. Put studio-dist.tar.gz (or the GitHub artifact zip) in $Repo\prebuilt\ and run this again."
+    return $false
 }
 
 switch ($Command) {
@@ -116,14 +136,10 @@ switch ($Command) {
         & "$PSScriptRoot\setup.ps1" @Rest
         $env:GUUDFLOW_SKIP_NPM = $null
         if (-not (Test-Path ".tools\opencode\node_modules")) { try { Install-Opencode } catch { Write-Warning "$_" } }
-        # A prebuilt archive in the folder wins (tar.gz, or the GitHub artifact zip), then npm, then download.
-        $archive = Get-ChildItem -Path ".\*" -Include "studio-dist*.tar.gz", "studio-dist*.zip" -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        $built = $false
-        if ($archive) { Studio-Unpack $archive.FullName; $built = $true; Write-Host "Studio installed from $($archive.Name) (npm skipped)" }
-        else { try { Build-Studio; $built = $true; Write-Host "Studio built from npm packages" } catch { Write-Warning "$_" } }
-        if (-not $built -and -not (Test-Path "studio\dist\index.html")) {
+        # The shared Studio step: prebuilt\ first, then npm, then a download into prebuilt\.
+        if (-not (Studio-Ensure $true)) {
             try { & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSCommandPath" studio-fetch }
-            catch { Write-Warning "No Studio yet: put studio-dist.tar.gz in this folder and run Prepare again." }
+            catch { Write-Warning "No Studio yet: put studio-dist.tar.gz in $Repo\prebuilt\ and run Prepare again." }
         }
         if (Test-Path ".env") {
             if (-not (Select-String -Path ".env" -Pattern '^\s*GUUDFLOW_SANDBOX=' -Quiet)) {
@@ -155,6 +171,7 @@ switch ($Command) {
     }
     "doctor"           { Doctor }
     "install-opencode" { Install-Opencode }
+    "studio-ensure"    { if (-not (Studio-Ensure ($Rest -contains "--build"))) { exit 1 } }
     "studio-deps"      { if (-not (Studio-Deps)) { exit 1 } }
     "studio-unpack"    { Studio-Unpack ($Rest | Select-Object -First 1) }
     "studio-fetch"     {
@@ -163,8 +180,9 @@ switch ($Command) {
         if (-not $slug) { $slug = ((git remote get-url origin) -replace '\.git$', '' -replace '^.*[:/]([^/]+/[^/]+)$', '$1') }
         $url = "https://github.com/$slug/releases/download/$tag/studio-dist.tar.gz"
         Write-Host "Downloading $url"
-        Invoke-WebRequest -Uri $url -OutFile "studio-dist.tar.gz" -UseBasicParsing
-        Studio-Unpack "studio-dist.tar.gz"
+        New-Item -ItemType Directory -Force prebuilt | Out-Null
+        Invoke-WebRequest -Uri $url -OutFile "prebuilt\studio-dist.tar.gz" -UseBasicParsing
+        Studio-Unpack "prebuilt\studio-dist.tar.gz"
     }
     "studio-pack"      {
         if (-not (Test-Path studio\dist\index.html)) { throw "no studio\dist: build it first (scripts\run.ps1 build studio)" }

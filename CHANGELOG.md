@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Prebuilt Studio has one drop folder, `prebuilt/`, and one Studio step (`studio-ensure`) shared by
+  Prepare, Setup and Run dev stack on Linux, WSL and native Windows: an archive there means npm is
+  never run. `studio-fetch` saves into `prebuilt/`.
 - Studio without npm trouble: `studio-deps` retries and relaxes versions, `GUUDFLOW_NPM_REGISTRY`
   for a mirror, prebuilt `studio-pack` / `studio-unpack`, CI keeps the build as an artifact, and the
   dev stack serves the prebuilt Studio when the npm packages are missing.

@@ -138,8 +138,8 @@ the task names are the same everywhere: **Install uv**, **Setup**, **Doctor**, *
 **Quickest start, any machine:** run the VS Code task **Prepare this machine** (or
 `bash scripts/run.sh prepare`). It detects Linux, macOS or WSL (and warns if the folder is on the
 slow Windows disk), whether Docker Engine can host sandboxes, and whether npm can reach its registry.
-It then installs uv, runs setup, builds Studio with npm or unpacks a `studio-dist.tar.gz` you put in
-the repo folder, sets `GUUDFLOW_SANDBOX=host` when there is no usable Docker, generates
+It then installs uv, runs setup, gets Studio (a `studio-dist.tar.gz` you put in `prebuilt/` first,
+with no npm at all; else an npm build; else the release download), sets `GUUDFLOW_SANDBOX=host` when there is no usable Docker, generates
 `GUUDFLOW_API_TOKEN` if it is empty, runs doctor and says what to do next. Re-run it any time; it
 skips what is done. With `GUUDFLOW_WINDOWS_MODE=native` it does the native-Windows version.
 
@@ -180,7 +180,7 @@ WSL must be installed. This is the default (`GUUDFLOW_WINDOWS_MODE=wsl`).
 1. Set `GUUDFLOW_WINDOWS_MODE=native` (environment, or a line in `.env`) and `GUUDFLOW_SANDBOX=host`.
 2. Install uv (**Install uv** runs the PowerShell installer) and Node 18+.
 3. Run **Prepare this machine**: uv, `setup.ps1` (uv when installed, else pip), opencode, Studio
-   (npm build, or a `studio-dist.tar.gz` you put in the folder), `GUUDFLOW_SANDBOX=host` and a token
+   (a `studio-dist.tar.gz` you put in `prebuilt\` first, else an npm build), `GUUDFLOW_SANDBOX=host` and a token
    in `.env`, then doctor.
 4. Every task has a native version: **Run dev stack** (`dev.ps1`: separate windows for the API
    and Studio; it serves the prebuilt Studio on :8000 when npm packages are missing), **Stop dev
@@ -203,14 +203,16 @@ WSL must be installed. This is the default (`GUUDFLOW_WINDOWS_MODE=wsl`).
   npm. The installer (`bash scripts/run.sh studio-deps`) retries, falls back from the exact
   lockfile versions to any version `package.json` allows, and uses `GUUDFLOW_NPM_REGISTRY` for a
   company mirror. If npm still fails, skip it with a prebuilt Studio (static files, the same on
-  every OS). The **Studio bundle** GitHub Action builds `studio-dist.tar.gz` on every push to `main`
-  and publishes it as the `studio-latest` release, so **Studio: download the prebuilt build** (or
-  `bash scripts/run.sh studio-fetch`) gets and unpacks it; **Prepare this machine** does this on
-  its own when npm fails. If GitHub is blocked too, download it from the Releases page elsewhere (or
-  have someone run `bash scripts/run.sh studio-pack`), copy it over and run
-  `bash scripts/run.sh studio-unpack studio-dist.tar.gz`. Private repo: set `GITHUB_TOKEN`. In VS Code these are the tasks **Studio: pack…**
-  and **Studio: unpack…** (it asks for the file; put it in the repo folder). **Run dev stack** then
-  serves it from the API on :8000 instead of the dev server on :3001.
+  every OS). **Put the archive in `prebuilt/`** (`studio-dist.tar.gz`, or the GitHub Actions artifact
+  zip `studio-dist-tar-gz.zip` as downloaded) and run **Prepare this machine**. Prepare, Setup and
+  Run dev stack all go through one Studio step (`bash scripts/run.sh studio-ensure`, task **Studio:
+  use the prebuilt archive in prebuilt/**) that checks `prebuilt/` first and then never runs npm.
+  The **Studio bundle** GitHub Action builds the archive on every push to `main` (artifact
+  `studio-dist-tar-gz`, release `studio-latest`); **Studio: download the prebuilt build**
+  (`studio-fetch`, needs `GITHUB_TOKEN` for a private repo) saves it into `prebuilt/` for you, and
+  Prepare tries that on its own when npm fails. A machine with npm can make one with
+  `bash scripts/run.sh studio-pack`. **Run dev stack** then serves it from the API on :8000
+  instead of the dev server on :3001.
 - **A proxy or company certificate.** Set `GUUDFLOW_CA_BUNDLE` to your CA's PEM file; TLS checks
   stay on ([SETUP §9](docs/SETUP.md)).
 - **Restart after editing `.env`.** The API reads it at start. After installing uv, open a new

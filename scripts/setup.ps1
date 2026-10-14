@@ -74,17 +74,10 @@ if ($env:GUUDFLOW_SKIP_PLAYWRIGHT -ne "1") {
     }
 }
 
-# 5. Studio (optional)
-$npm = Get-Command npm -ErrorAction SilentlyContinue
-if ($npm) {
-    if ($env:GUUDFLOW_SKIP_NPM -ne "1") {
-        Write-Host "Installing studio dependencies..."
-        Push-Location studio
-        & npm install --silent --no-audit --no-fund
-        Pop-Location
-    }
-} else {
-    Write-Host "INFO: npm not found - skipping studio. Install Node 18+ to run the frontend." -ForegroundColor Yellow
+# 5. Studio (optional): the shared step. An archive in prebuilt\ wins and npm is never run.
+if ($env:GUUDFLOW_SKIP_NPM -ne "1") {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "run.ps1") studio-ensure
+    if ($LASTEXITCODE -ne 0) { Write-Host "WARN: no Studio yet. Put studio-dist.tar.gz (or the artifact zip) in prebuilt\ and run: scripts\run.ps1 studio-ensure" -ForegroundColor Yellow }
 }
 
 # 6. .env

@@ -58,19 +58,12 @@ if (-not (Test-Path $activate)) {
 # Use PowerShell 7 when installed, else the built-in Windows PowerShell.
 $Shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
 
-# Studio: npm packages for the dev server, else a prebuilt studio\dist served by the API.
-$UseDist = $false
-if (-not (Test-Path (Join-Path $Repo "studio\node_modules"))) {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "run.ps1") studio-deps
-    if ($LASTEXITCODE -ne 0) {
-        if (Test-Path (Join-Path $Repo "studio\dist\index.html")) {
-            Write-Host "npm packages unavailable: serving the prebuilt studio\dist on :8000" -ForegroundColor Yellow
-            $UseDist = $true
-        } else {
-            throw "Studio needs its npm packages or a prebuilt studio\dist (scripts\run.ps1 studio-unpack <file>)"
-        }
-    }
-}
+# Studio: the shared step (prebuilt\ first, npm never run then). Without npm packages the API
+# serves the prebuilt studio\dist on :8000.
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "run.ps1") studio-ensure
+if ($LASTEXITCODE -ne 0) { throw "No Studio: put studio-dist.tar.gz (or the artifact zip) in prebuilt\ and run again" }
+$UseDist = -not (Test-Path (Join-Path $Repo "studio\node_modules"))
+if ($UseDist) { Write-Host "Studio: serving the prebuilt studio\dist on :8000" -ForegroundColor Yellow }
 $distEnv = if ($UseDist) { "`$env:GUUDFLOW_STUDIO_DIST='$Repo\studio\dist'; " } else { "" }
 
 # Backend

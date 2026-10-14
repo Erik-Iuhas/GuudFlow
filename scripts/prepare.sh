@@ -8,8 +8,8 @@
 # whether Docker Engine can host sandboxes, and whether npm can reach its registry, then:
 #   1. installs uv                     -> Python 3.11 and the packages
 #   2. runs setup                      -> venv, packages, Chromium, opencode, .env, seed data
-#   3. gets Studio                     -> studio-dist.tar.gz / artifact zip in the repo folder first,
-#                                         else an npm build, else a download of the release
+#   3. gets Studio                     -> the shared step (studio_ensure.sh): an archive in prebuilt/
+#                                         first, else an npm build, else a download of the release
 #   4. writes GUUDFLOW_SANDBOX=host to .env when there is no usable Docker Engine
 #   5. runs doctor and says what to do next
 set -uo pipefail
@@ -57,23 +57,17 @@ step "2/5 setup (Python packages, Chromium, opencode, .env)"
 GUUDFLOW_SKIP_NPM=1 bash scripts/setup.sh || NEXT+=("setup reported a problem above; fix it and run Prepare again")
 
 step "3/5 Studio"
-# Order: a prebuilt archive you put in the repo folder (tar.gz, or the GitHub artifact zip) wins,
-# then an npm build, then a download of the studio-latest release.
-ARCHIVE="$(ls -t studio-dist*.tar.gz studio-dist*.zip 2>/dev/null | head -1)"
-if [ -n "$ARCHIVE" ]; then
-  bash scripts/studio_bundle.sh unpack "$ARCHIVE" && note "Studio installed from $ARCHIVE (npm skipped)"
-elif [ -f studio/dist/index.html ] && [ "$NPM_OK" = 0 ]; then
-  note "a Studio build is already in studio/dist"
-elif [ "$NPM_OK" = 1 ] && bash scripts/studio_deps.sh && (cd studio && npm run build); then
-  note "Studio built from npm packages"
-elif [ -f studio/dist/index.html ]; then
-  note "npm failed; keeping the existing build in studio/dist"
+# The shared step: an archive in prebuilt/ (tar.gz, or the GitHub artifact zip) wins and npm is
+# never run; then an existing build; then npm (only when the registry answered); then a download.
+SKIP=0; [ "$NPM_OK" = 1 ] || SKIP=1
+if GUUDFLOW_SKIP_NPM=$SKIP bash scripts/studio_ensure.sh --build; then
+  :
 elif bash scripts/studio_fetch.sh; then
-  note "Studio downloaded from the repo's studio-latest release (built by the Studio bundle action)"
+  note "Studio downloaded from the repo's studio-latest release into prebuilt/"
 else
-  note "No Studio yet: no archive here, npm is not usable, and the download failed."
+  note "No Studio yet: nothing in prebuilt/, npm is not usable, and the download failed."
   NEXT+=("download studio-dist.tar.gz (or the studio-dist-tar-gz artifact zip) from GitHub,"
-         "put it in $ROOT and run Prepare again")
+         "put it in $ROOT/prebuilt/ and run Prepare again")
 fi
 
 step "4/5 sandbox mode"

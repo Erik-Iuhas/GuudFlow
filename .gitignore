@@ -35,3 +35,7 @@ data/personas/
 
 # A prebuilt Studio moved between machines (scripts/studio_bundle.sh).
 studio-dist.tar.gz
+
+# Drop folder for a prebuilt Studio (scripts/studio_ensure.sh); only its README is tracked.
+prebuilt/*
+!prebuilt/README.md

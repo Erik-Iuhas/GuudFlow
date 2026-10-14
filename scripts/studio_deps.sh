@@ -9,7 +9,7 @@
 #   3. npm install --legacy-peer-deps
 # Each with retries. GUUDFLOW_NPM_REGISTRY points npm at a company mirror (otherwise npm's own
 # config applies, e.g. ~/.npmrc). If all fail, use a prebuilt Studio instead: no npm needed
-# (bash scripts/run.sh studio-unpack <file>, see README "Behind a proxy").
+# (put studio-dist.tar.gz in prebuilt/, see README "Quirks").
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/studio"
@@ -32,6 +32,6 @@ ERROR: Studio's npm packages could not be installed.
     and, for a private certificate, GUUDFLOW_CA_BUNDLE.
   - Or skip npm: get a prebuilt Studio (studio-dist.tar.gz) from someone who can build it
     (bash scripts/run.sh studio-pack) or from the repo's CI artifacts, then:
-      bash scripts/run.sh studio-unpack studio-dist.tar.gz
+      put it in prebuilt/ and run Prepare (or: bash scripts/run.sh studio-ensure)
 MSG
 exit 1

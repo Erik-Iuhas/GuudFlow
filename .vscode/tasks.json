@@ -445,13 +445,12 @@
       "problemMatcher": []
     },
     {
-      "label": "Studio: unpack a prebuilt studio-dist.tar.gz",
+      "label": "Studio: use the prebuilt archive in prebuilt/ (else npm)",
       "type": "process",
       "command": "bash",
       "args": [
         "scripts/run.sh",
-        "studio-unpack",
-        "${input:studioArchive}"
+        "studio-ensure"
       ],
       "windows": {
         "command": "powershell.exe",
@@ -461,8 +460,7 @@
           "Bypass",
           "-File",
           "scripts/run.ps1",
-          "studio-unpack",
-          "${input:studioArchive}"
+          "studio-ensure"
         ]
       },
       "problemMatcher": []
@@ -487,14 +485,6 @@
         ]
       },
       "problemMatcher": []
-    }
-  ],
-  "inputs": [
-    {
-      "id": "studioArchive",
-      "type": "promptString",
-      "description": "Path to the prebuilt Studio archive (relative to the repo, or absolute)",
-      "default": "studio-dist.tar.gz"
     }
   ]
 }

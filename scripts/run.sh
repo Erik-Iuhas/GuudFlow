@@ -7,6 +7,7 @@
 #   bash scripts/run.sh build <studio|opencode|sandbox|docker|native>
 #   bash scripts/run.sh check [all|backend|studio|escape]
 #   bash scripts/run.sh api        # the API with the built Studio on :8000
+#   bash scripts/run.sh studio-ensure          # Studio from prebuilt/ (drop the archive there), else npm
 #   bash scripts/run.sh studio-deps | studio-pack [out] | studio-unpack <file> | studio-fetch [tag]   # npm trouble
 #
 # On Windows, VS Code runs scripts/run.ps1 instead, which forwards here through WSL (default)
@@ -27,6 +28,7 @@ case "$cmd" in
   install-uv)       exec bash scripts/install_uv.sh "$@" ;;
   install-opencode) exec bash scripts/install_opencode.sh "$@" ;;
   build)            exec bash scripts/build.sh "$@" ;;
+  studio-ensure)    exec bash scripts/studio_ensure.sh "$@" ;;
   studio-deps)      exec bash scripts/studio_deps.sh "$@" ;;
   studio-pack)      exec bash scripts/studio_bundle.sh pack "$@" ;;
   studio-unpack)    exec bash scripts/studio_bundle.sh unpack "$@" ;;
@@ -35,5 +37,5 @@ case "$cmd" in
   api)
     [ -f venv/bin/activate ] && source venv/bin/activate
     GUUDFLOW_STUDIO_DIST=studio/dist exec uvicorn api.main:app --port "${GUUDFLOW_PORT:-8000}" ;;
-  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; [ "$cmd" = help ] || exit 2 ;;
+  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; [ "$cmd" = help ] || exit 2 ;;
 esac

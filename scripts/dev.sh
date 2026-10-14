@@ -91,16 +91,11 @@ fi
 
 # ── frontend deps ──────────────────────────────────────────────────────────
 USE_DIST=0
+# The shared Studio step: an archive in prebuilt/ or an existing studio/dist means no npm at all.
+bash scripts/studio_ensure.sh || die "No Studio: put studio-dist.tar.gz (or the artifact zip) in prebuilt/ and run again"
 if [ ! -d studio/node_modules ]; then
-    info "→ Installing studio deps..."
-    if ! bash scripts/studio_deps.sh; then
-        if [ -f studio/dist/index.html ]; then
-            warn "  npm packages unavailable: serving the prebuilt studio/dist from the API on :8000 instead"
-            USE_DIST=1
-        else
-            die "Studio needs its npm packages or a prebuilt studio/dist (bash scripts/run.sh studio-unpack <file>)"
-        fi
-    fi
+    info "  Studio: serving the prebuilt studio/dist from the API on :8000"
+    USE_DIST=1
 fi
 
 # ── launch ─────────────────────────────────────────────────────────────────

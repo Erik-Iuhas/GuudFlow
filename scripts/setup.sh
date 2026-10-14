@@ -81,14 +81,9 @@ if [ "${GUUDFLOW_SKIP_PLAYWRIGHT:-0}" != "1" ]; then
     }
 fi
 
-# 5. Studio (optional)
-if command -v npm >/dev/null 2>&1; then
-    if [ "${GUUDFLOW_SKIP_NPM:-0}" != "1" ]; then
-        echo "Installing studio dependencies..."
-        bash scripts/studio_deps.sh || echo "WARN: Studio packages missing. Studio still works from a prebuilt studio/dist (see README: Behind a proxy)."
-    fi
-else
-    echo "INFO: npm not found — skipping studio. Install Node 18+ to run the frontend."
+# 5. Studio (optional): the shared step. An archive in prebuilt/ wins and npm is never run.
+if [ "${GUUDFLOW_SKIP_NPM:-0}" != "1" ]; then
+    bash scripts/studio_ensure.sh || echo "WARN: no Studio yet. Put studio-dist.tar.gz (or the artifact zip) in prebuilt/ and run: bash scripts/run.sh studio-ensure"
 fi
 
 # The agent runtime: every role runs in opencode. Without it no agent can start.
