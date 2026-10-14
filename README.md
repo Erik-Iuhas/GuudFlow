@@ -117,7 +117,7 @@ GUUDFLOW_STUDIO_DIST=studio/dist uvicorn api.main:app --port 8000
 
 By hand, without the scripts: `uv venv venv && uv pip install -r requirements.txt`, then
 `python -m playwright install chromium` (with the venv active) and `cd studio && npm ci && npm run build`.
-Windows without WSL: `scripts/setup.ps1` (still pip-based; WSL2 is the better route on Windows).
+On Windows, see [Running modes](#running-modes).
 
 For development, `scripts/dev.sh` starts the API with reload on :8000 and the Studio dev server on
 :3001. Use `scripts/dev.sh --no-reload` while agents are running, so a code edit does not restart
@@ -125,6 +125,78 @@ the worker under them.
 
 [docs/SETUP.md](docs/SETUP.md) is the full guide: WSL, keys, configuration, security and
 troubleshooting.
+
+---
+
+## Running modes
+
+Pick the row that matches your machine, then follow its steps. Every VS Code task and script goes
+through one entry point (`bash scripts/run.sh <task>`, or `scripts/run.ps1 <task>` on Windows), so
+the task names are the same everywhere: **Install uv**, **Setup**, **Doctor**, **Run dev stack**,
+**Stop dev stack**, **Build…**, **Check…**.
+
+| Mode | Use it when | Agent sandboxes |
+|---|---|---|
+| **Docker Compose** | You only want to use GuudFlow, on Linux or in WSL2 with Docker Engine | Yes |
+| **Linux / macOS, native** | You develop GuudFlow on Linux or a Mac | Yes with Docker Engine, else host mode |
+| **WSL2 (recommended on Windows)** | You are on Windows | Yes with Docker Engine inside WSL, else host mode |
+| **Windows VS Code, forwarding to WSL** | You open the folder from Windows VS Code | Same as WSL |
+| **Windows native** | No WSL at all | No: host mode only, trusted work only |
+
+### Docker Compose
+1. `cp .env.example .env` and set `GUUDFLOW_API_TOKEN`.
+2. `docker compose up -d --build` (or the task **Docker Compose up**). Logs: **Docker Compose logs**.
+3. Open <http://localhost:8000>, paste the token, add a model key in Settings.
+
+### Linux / macOS, native
+1. Install uv (**Install uv**, or `bash scripts/run.sh install-uv`) and Node 18+.
+2. **Setup** (`bash scripts/run.sh setup`): venv and packages with uv, Chromium, Studio packages,
+   opencode, `.env`, seed data.
+3. Edit `.env`: `GUUDFLOW_API_TOKEN`; add `GUUDFLOW_SANDBOX=host` if you have no Docker.
+4. **Doctor**, then **Run dev stack** (API :8000, Studio :3001). Use **Run dev stack (no reload)**
+   while agents are running.
+
+### WSL2 (recommended on Windows)
+1. In a WSL terminal, clone into the Linux file system: `cd ~ && git clone … && cd GuudFlow`.
+   Do not work from `/mnt/c/...` (see quirks).
+2. Open it with `code .` (VS Code connects through the **WSL** extension).
+3. Follow the Linux steps. Studio opens in your Windows browser at <http://localhost:3001>.
+4. For sandboxes, install Docker Engine inside the WSL distro (not Docker Desktop).
+
+### Windows VS Code, forwarding to WSL
+If you open the folder from Windows (a `C:\…` folder or `\\wsl.localhost\…`), the tasks run
+`scripts/run.ps1`, which forwards each task into WSL with `wsl.exe --cd <folder>`. Same steps as WSL;
+WSL must be installed. This is the default (`GUUDFLOW_WINDOWS_MODE=wsl`).
+
+### Windows native
+1. Set `GUUDFLOW_WINDOWS_MODE=native` (environment, or a line in `.env`) and `GUUDFLOW_SANDBOX=host`.
+2. Install uv (**Install uv** runs the PowerShell installer) and Node 18+.
+3. **Setup** runs `scripts/setup.ps1` (uv when installed, else pip), **Run dev stack** runs
+   `scripts/dev.ps1`, **Stop dev stack** frees ports 8000 and 3001.
+4. Only setup, dev, stop and install-uv exist natively; builds and checks say to use WSL.
+
+### Quirks to look out for
+- **`/mnt/c` is slow and drops execute bits.** A project under the Windows disk in WSL makes every
+  install and every agent start slow, and copied scripts lose their execute bit. Tasks start
+  scripts with `bash`, so they still run, but clone into `~/` for speed.
+- **First agent start can be slow.** Each agent's opencode server must answer within 180 s
+  (`GUUDFLOW_OPENCODE_STARTUP_S`). If a run shows `turn crashed: opencode serve not healthy`, the
+  error includes the end of opencode's log; raise the timeout on slow disks.
+- **Docker Desktop cannot host sandboxes.** Use Docker Engine (Linux, or inside WSL2), or host mode.
+- **Host mode has no isolation.** Agents run as your user. Fine for trusted demos, not for untrusted
+  goals.
+- **A proxy or company certificate.** Set `GUUDFLOW_CA_BUNDLE` to your CA's PEM file; TLS checks
+  stay on ([SETUP §9](docs/SETUP.md)).
+- **Restart after editing `.env`.** The API reads it at start. After installing uv, open a new
+  terminal (the scripts find it either way).
+- **Port 3001 already in use.** Studio's dev server will not move to another port; run **Stop dev
+  stack**, then start again.
+- **Code edits restart the API** in the reload mode, cancelling running agents. Use the no-reload
+  task during runs.
+- **Line endings.** `.gitattributes` keeps scripts LF. If you copied files rather than cloning and see
+  `$'\r': command not found`, re-clone, or run `sed -i 's/\r$//' scripts/*.sh`.
+- **Something did not start?** Open the run's **Console** tab: it shows why each role never started
+  or crashed, and each agent's server log.
 
 ---
 
@@ -141,20 +213,7 @@ troubleshooting.
 
 Run `scripts/check.sh escape` too when you touch `core/harness/`, `worker/`, `sandbox/` or `gateway/`.
 
-**Where it runs.** Every task goes through one entry point, so it works the same whichever way you
-opened the folder:
-
-| You opened the folder… | What the tasks do |
-|---|---|
-| Linux, macOS, or VS Code connected to WSL (Remote - WSL) | `bash scripts/run.sh <task>` |
-| Windows VS Code on a Windows or `\\wsl.localhost\…` folder | `scripts/run.ps1 <task>`, which forwards to WSL by default |
-
-`GUUDFLOW_WINDOWS_MODE` (in your environment or `.env`) picks the Windows behaviour: `wsl` (default,
-needs WSL; agent sandboxes need Linux anyway) or `native` (runs `setup.ps1` / `dev.ps1` on Windows
-itself, with agents in host mode, so trusted work only). Scripts are always started with `bash`, so a
-copy that lost its execute bits (copied from a Windows disk, unpacked from a zip) still runs, and
-`.gitattributes` keeps them LF so a Windows checkout does not break them. Tip: keep the project in the
-WSL file system (`~/GuudFlow`), not under `/mnt/c`, which is much slower.
+Which entry point a task uses on your machine is explained in [Running modes](#running-modes).
 
 **VS Code:** run **Tasks: Run Task**. The tasks in `.vscode/tasks.json` cover
 setup, doctor, the dev stack, Compose up/logs/down, builds, and each check. `.vscode/launch.json` debugs the API, the current pytest file, and a one-shot run.
@@ -242,6 +301,9 @@ These environment variables matter most. The full list is in
 | `GUUDFLOW_ENV` | unset | `production` refuses host mode (Docker required) |
 | `GUUDFLOW_DATA_DIR` | `./data` | Projects, runs, personas, model config |
 | `GUUDFLOW_STUDIO_DIST` | unset | Serve the built Studio from the API on one port |
+| `GUUDFLOW_WINDOWS_MODE` | `wsl` | Windows only: tasks forward to WSL, or `native` runs the PowerShell scripts |
+| `GUUDFLOW_OPENCODE_STARTUP_S` | `180` | Seconds each agent's opencode server may take to start |
+| `GUUDFLOW_CA_BUNDLE` | unset | Extra CA certificate (PEM) to trust, for proxies and internal endpoints |
 
 ## Project layout
 
