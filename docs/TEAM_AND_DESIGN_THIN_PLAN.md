@@ -50,14 +50,16 @@ avoided this run.
 | S3 | **Overseer in the graph.** A small node beside the team: asleep, woke N times, last decision and why, and a "Wake overseer" button that posts a manual wake with the operator's text. The comment box on a stopped run offers "Continue this run" in place of the dead-end error. | `studio/src/features/cockpit/`, `core/harness/run.py` (manual wake), run view |
 | S5 | **Don't skip a ready backlog silently.** *Run on the goal only* with open items present asks "B1–B5 are open and ready. Run them?" (items ticked by default, the goal-only path one click away). The review card for a `no_changes` session says which items were not run. | `studio/src/features/work/`, `studio/src/views/Studio.tsx` |
 | S6 | **Jack's repair note repeats his reply.** The first plan message in the record says the same summary twice (the original text, then "Repairs: I've drafted the first spec…"). When a repair only re-sends corrected changes, append one line ("Fixed 2 changes"), not a second full summary. | `core/project_manager.py` (`repairs` reply assembly) |
+| S7 | **Jack owns a minimum viable team.** Jack's first plan (`/plan/start`) never built one: Excuse-o-matic kept a developer and a reviewer and nothing planned the session. Three parts: (a) **prompt:** a "Minimum team" block in `pm_prompts.py`, stated as a rule and not as advice: a plan-owning role (`planner`, or a `tech_lead` when the kind has one), at least one builder after it, and a reviewer checking the builders; Jack checks the *Current team* section against it on every first draft and in `update` turns, and proposes `add_role` / `edit_role` ops for what is missing, with the reason; (b) **context:** `_team_context` ends with a computed line, "Minimum team: missing a role that plans sessions", from the same check as S1, so Jack is told, not left to notice; (c) **validation:** the turn validator already runs `team_problems` on team ops; with S1 it blocks a final team that has builders and no planner, so a draft that removes or never adds the planner is repaired (or parked with a suggestion) instead of accepted. | `core/pm_prompts.py`, `core/project_manager.py` (`_team_context`), `core/plan_drafts.py` |
 | S4 | **Honest status.** Replace "Waiting for the first agent…" with the live state: "No cards yet, waiting for the planner", and after a stop the `RUN_STOPPED` reason. | `studio/src/features/cockpit/` |
 
 Done when: starting a builder-and-reviewer team is refused with the reason and a fix button; a
 run that still ends with no cards says why; the overseer is visible on the graph with its wake
 count and can be woken by hand. Add `tests/harness/test_flow_hardening.py` cases for the empty
-board stop, and a `team_problems` case for the planner-less team.
+board stop, a `team_problems` case for the planner-less team, and a scripted-LLM test that
+Jack's first draft for a project whose team has no planner contains an `add_role` for one.
 
-**Order:** S1, S2 and S5 first (they stop the failure), then S3, S4 and S6. These come before the
+**Order:** S1, S2, S5 and S7 first (they stop the failure), then S3, S4 and S6. These come before the
 Team and Design steps below, because a new project's default team should never fail like this.
 
 ## 1. The team belongs to Jack
@@ -95,7 +97,7 @@ approved design.
 
 | Order | Steps | Size | Risk |
 |---|---|---|---|
-| 0 | S1–S6 (planner-less team, skipped backlog, empty-board stop, overseer node, repair note) | M | S1 changes what `team_problems` refuses: check existing team fixtures |
+| 0 | S1–S7 (planner-less team, skipped backlog, empty-board stop, overseer node, repair note, Jack's minimum team) | M | S1 changes what `team_problems` refuses: check existing team fixtures |
 | 1 | T1, T4 | S | none: UI wiring and a default name |
 | 2 | T2, T3 | M | the diff view is new UI; no backend |
 | 3 | D1, D2 | M | the shared turn loop refactor must not change Jack: run `tests/core/test_project_manager.py` unchanged before and after |
