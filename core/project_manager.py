@@ -29,6 +29,7 @@ from core.harness.brief import wrap_untrusted
 from core.harness.results import result_json_schema, validate_result
 from core.llm.client import LLMClient, LLMMessage, LLMResponse
 from core.plan_drafts import (
+    TEAM_OPS,
     Draft,
     PlanDrafts,
     PlanTurn,
@@ -379,6 +380,13 @@ class ProjectManager:
             problems = list(asked.failure)
         else:
             reply = turn.reply.strip()
+            team_ops = [c for c in turn.changes if c.op in TEAM_OPS]
+            if team_ops:
+                # Team changes never apply on their own (hard rule 24): say so, whatever the
+                # reply's wording ("I fixed the team" reads as done).
+                reply += (f"\n\n{len(team_ops)} team change{'s' if len(team_ops) != 1 else ''} "
+                          "proposed in the draft. The team changes only when you tick "
+                          f"{'them' if len(team_ops) != 1 else 'it'} and approve the draft.")
             if turn.questions:
                 reply += "\n\n" + "\n".join(f"Question: {q.strip()}" for q in turn.questions)
             if repairs:

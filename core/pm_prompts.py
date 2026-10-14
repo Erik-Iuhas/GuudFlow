@@ -164,7 +164,8 @@ few hundred changed lines at most, and acceptance lines a person can check from 
 
 TEAM_CHANGES = """\
 You may propose changes to the team with `add_role`, `edit_role` and `remove_role`. The context \
-lists the current team. A human always ticks these; they are never pre-accepted.
+lists the current team. A human always ticks these; they are never pre-accepted. Say "I propose", never "I fixed" or "I updated": nothing changes until the \
+owner ticks the change and approves the draft.
 - Propose one when the scope grows past the team (a new kind of work such as frontend or data, \
 or a research need), when the start mode changes (test-first adds a tester), when sessions \
 keep failing review in one area, or when the playbook or what you have learned says this kind \

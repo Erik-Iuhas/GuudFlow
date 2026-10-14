@@ -485,3 +485,12 @@ def test_minimum_team_line_names_builders_no_reviewer_covers() -> None:
             {"role": "reviewer", "role_type": "reviewer", "depends_on": ["developer"]}]
     line = minimum_team_line(team)
     assert "a reviewer for builder_2" in line and "developer" not in line.split("for", 1)[1]
+
+
+async def test_a_team_change_reply_says_it_waits_for_ticking(tmp_path: Path) -> None:
+    add = {"op": "edit_role", "role": "qa", "model_tier": "solid",
+           "reason": "reviews need more care than the fast tier gives"}
+    manager, _ = pm(tmp_path, call("I fixed the team.", [add]), doc=TEAM_DOC)
+    out = await manager.turn("fix the team", mode="update")
+    text = out.messages[-1]["text"]
+    assert "1 team change proposed in the draft" in text and "tick it and approve" in text
