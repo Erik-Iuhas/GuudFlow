@@ -243,6 +243,25 @@ def _parked(left_out: list[Problem]) -> list[dict[str, Any]]:  # Any: JSON rows
     return rows
 
 
+def minimum_team_line(team: list[dict[str, Any]]) -> str:  # Any: agent rows
+    """What the team lacks against the minimum team (pm_prompts.MINIMUM_TEAM), in one line, so
+    Jack is told rather than left to notice. A team without a planner still runs (plain roles,
+    the goal goes to the builders in one turn), but backlog items are not split into cards."""
+    from core.harness.capabilities import infer_role_type
+    types = [infer_role_type(str(a["role"]), is_reviewer=bool(a.get("is_reviewer")),
+                             declared=str(a.get("role_type") or "")) for a in team]
+    gaps = []
+    if not any(t in ("planner", "architect") for t in types):
+        gaps.append("a role that plans sessions (planner, or a tech lead)")
+    if not any(t in ("builder", "frontend_builder", "tester") for t in types):
+        gaps.append("a builder")
+    if "reviewer" not in types:
+        gaps.append("a reviewer")
+    if not gaps:
+        return "Minimum team: complete."
+    return "Minimum team: missing " + ", ".join(gaps) + ". Propose them with `add_role`."
+
+
 class ProjectManager:
     """The plan conversation of one project."""
 
@@ -300,6 +319,7 @@ class ProjectManager:
         for p in left_out:
             seen_codes.setdefault(p.code, []).append(p.message)
         repairs: list[str] = []
+        fixed = 0  # changes a repair round put into the draft
         dropped: list[Problem] = []
         seen = {(p.code, p.target) for p in left_out}
         budget = self._turn_budget()
@@ -316,7 +336,10 @@ class ProjectManager:
             notes += fix.notes
             if fix.turn is None:
                 break
-            if fix.turn.reply.strip():
+            # A repair that re-sends changes is summed up in one line; its reply usually
+            # repeats the turn's summary. A repair with no changes explains a drop: keep it.
+            fixed += len(fix.turn.changes)
+            if not fix.turn.changes and fix.turn.reply.strip():
                 repairs.append(fix.turn.reply.strip())
             if not fix.turn.changes and not fix.left_out:
                 dropped, left_out = left_out, []
@@ -344,6 +367,8 @@ class ProjectManager:
                 reply += "\n\n" + "\n".join(f"Question: {q.strip()}" for q in turn.questions)
             if repairs:
                 reply += "\n\nRepairs: " + " ".join(repairs)
+            if fixed:
+                reply += f"\n\nFixed {fixed} change{'s' if fixed != 1 else ''} in a repair round."
             if dropped:
                 reply += ("\n\nLeft out on purpose:\n"
                           + "\n".join(f"- {p.message}" for p in dropped))
@@ -657,7 +682,7 @@ class ProjectManager:
             lines.append(f"- {role} ({role_type}, {a.get('model_tier') or 'solid'}, contract "
                          f"{contract_id_for(a, role_type)}); after: {after}; "
                          f"reviews: {reviews}")
-        return "Current team:\n" + "\n".join(lines)
+        return "Current team:\n" + "\n".join(lines) + "\n" + minimum_team_line(team)
 
     def _team_contracts(self) -> list[str]:
         """The contract id of each role on the team (role type default when unnamed)."""

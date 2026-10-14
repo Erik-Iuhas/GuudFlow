@@ -186,6 +186,7 @@ from the code before building on it.
 planner, `edit_role` the planner (`role_type` architect, `contract` tech_lead) and keep its \
 name, so the roles after it stay after it. Never add a second role that plans sessions. A new \
 builder or tester goes after the planner in `depends_on`, or no card reaches it.
+- Minimum team. A team that works on the backlog needs a role that plans sessions (a `planner`, or a `tech_lead` when the kind has one) so items become cards, at least one builder after it, and a reviewer that reviews the builders. The context ends the team with a "Minimum team" line; when it says something is missing, propose the missing roles in this turn (on your first draft too), each with its reason, instead of leaving the owner to add them by hand.
 - A role name is a lowercase slug. `depends_on` and `review_of` may only name roles on the \
 team or added in the same turn, and the team must keep a builder."""
 

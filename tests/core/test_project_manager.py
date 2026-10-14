@@ -102,7 +102,8 @@ async def test_one_retry_on_invalid_output(tmp_path: Path) -> None:
     repair = user_text(llm, 1)
     assert "Repair round 1" in repair and "R99" in repair and "it was:" in repair
     assert "how to fix: serve a requirement that exists" in repair
-    assert out.messages[-1]["text"].endswith("Repairs: Fixed.")
+    text = out.messages[-1]["text"]
+    assert text.endswith("Fixed 1 change in a repair round.") and "Repairs:" not in text
 
 
 async def test_a_style_problem_is_a_warning_not_a_retry(tmp_path: Path) -> None:
@@ -436,3 +437,20 @@ async def test_a_left_out_change_is_parked_with_a_computed_fix(tmp_path: Path) -
     assert manager.drafts.db.get_plan_message(out.messages[-1]["id"])["parked"] == []
     with pytest.raises(Exception, match="no parked change"):
         await manager.accept_parked(out.messages[-1]["id"], parked[0]["id"])
+
+
+def test_minimum_team_line_names_what_is_missing() -> None:
+    from core.project_manager import minimum_team_line
+    team = [{"role": "bram", "role_type": "builder"},
+            {"role": "uma", "role_type": "reviewer", "is_reviewer": True}]
+    assert minimum_team_line(team).startswith("Minimum team: missing a role that plans sessions")
+    assert minimum_team_line([{"role": "planner", "role_type": "planner"}, *team]) == \
+        "Minimum team: complete."
+    assert "a builder" in minimum_team_line([{"role": "uma", "role_type": "reviewer"}])
+
+
+async def test_the_context_and_prompt_carry_the_minimum_team(tmp_path: Path) -> None:
+    manager, llm = pm(tmp_path, call("a"), doc=TEAM_DOC)
+    await manager.turn("hi", mode="discuss")
+    assert "Minimum team: missing a role that plans sessions" in user_text(llm)
+    assert "Minimum team. A team that works on the backlog" in llm.calls[0]["system"]
