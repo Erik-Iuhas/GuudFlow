@@ -24,8 +24,14 @@ echo "Python: ${PY} (${PY_VERSION})"
 
 # 2. Virtualenv + 3. Python deps. uv is used when present (much faster); set GUUDFLOW_NO_UV=1
 # to force python -m venv + pip.
-USE_UV=0
-if command -v uv >/dev/null 2>&1 && [ "${GUUDFLOW_NO_UV:-0}" != "1" ]; then USE_UV=1; fi
+# uv manages the Python packages. GUUDFLOW_NO_UV=1 falls back to python -m venv + pip.
+USE_UV=1
+if [ "${GUUDFLOW_NO_UV:-0}" = "1" ]; then USE_UV=0
+elif ! command -v uv >/dev/null 2>&1; then
+    echo "ERROR: uv not found. Install it: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    echo "       (or set GUUDFLOW_NO_UV=1 to use pip)"
+    exit 1
+fi
 
 if [ ! -d "venv" ]; then
     echo "Creating virtualenv at ./venv ..."

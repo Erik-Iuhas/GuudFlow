@@ -19,11 +19,6 @@
     { "label": "Check: everything fast", "type": "shell", "command": "scripts/check.sh", "group": { "kind": "test", "isDefault": true }, "problemMatcher": [] },
     { "label": "Check: backend", "type": "shell", "command": "scripts/check.sh backend", "group": "test", "problemMatcher": [] },
     { "label": "Check: Studio", "type": "shell", "command": "scripts/check.sh studio", "group": "test", "problemMatcher": [] },
-    { "label": "Check: escape suite (Docker, root)", "type": "shell", "command": "scripts/check.sh escape", "group": "test", "problemMatcher": [] },
-    { "label": "Git: merge this branch to main (checks, asks first)", "type": "shell", "command": "scripts/to-main.sh", "problemMatcher": [] },
-    { "label": "Git: merge to main and tag", "type": "shell", "command": "scripts/to-main.sh --tag ${input:tag}", "problemMatcher": [] }
-  ],
-  "inputs": [
-    { "id": "tag", "type": "promptString", "description": "Tag name", "default": "v0.1.0" }
+    { "label": "Check: escape suite (Docker, root)", "type": "shell", "command": "scripts/check.sh escape", "group": "test", "problemMatcher": [] }
   ]
 }

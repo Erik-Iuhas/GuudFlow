@@ -60,8 +60,8 @@ The laundry list. `scripts/doctor.sh` checks all of it and tells you what to fix
 - [ ] A few GB of disk for the image and per-run containers.
 
 **For the uv / Python path**
-- [ ] **Python 3.11+** (uv can install it: `uv python install 3.11`).
-- [ ] **[uv](https://docs.astral.sh/uv/)** (optional, much faster than pip; setup uses it when present).
+- [ ] **[uv](https://docs.astral.sh/uv/)** installs the Python packages (and Python itself if you
+      lack 3.11+: `uv python install 3.11`). Install: `curl -LsSf https://astral.sh/uv/install.sh | sh`.
 - [ ] **Node 18+ and npm**, to build Studio once.
 - [ ] **Docker Engine** if you want sandboxed agents. Without it, set `GUUDFLOW_SANDBOX=host` (agents
       then run as your user, so use it only for work you trust).
@@ -92,7 +92,7 @@ Update with `git pull && docker compose up -d --build`.
 
 ```bash
 git clone https://github.com/Erik-Iuhas/GuudFlow.git && cd GuudFlow
-scripts/setup.sh                # venv with uv (or pip), packages, Studio packages, .env, seed data
+scripts/setup.sh                # venv + packages via uv, Chromium, Studio packages, .env, seed data
 scripts/install_opencode.sh     # the pinned agent runtime into .tools/opencode
 scripts/build.sh studio         # build Studio into studio/dist
 $EDITOR .env                    # set GUUDFLOW_API_TOKEN (and GUUDFLOW_SANDBOX=host if no Docker)
@@ -102,9 +102,9 @@ source venv/bin/activate
 GUUDFLOW_STUDIO_DIST=studio/dist uvicorn api.main:app --port 8000
 ```
 
-By hand, without the scripts: `uv venv venv && uv pip install -r requirements.txt` (or
-`python -m venv venv && pip install -r requirements.txt`), then `python -m playwright install chromium`
-and `cd studio && npm ci && npm run build`. Windows without WSL: `scripts/setup.ps1`.
+By hand, without the scripts: `uv venv venv && uv pip install -r requirements.txt`, then
+`python -m playwright install chromium` (with the venv active) and `cd studio && npm ci && npm run build`.
+Windows without WSL: `scripts/setup.ps1` (pip-based).
 
 For development, `scripts/dev.sh` starts the API with reload on :8000 and the Studio dev server on
 :3001. Use `scripts/dev.sh --no-reload` while agents are running, so a code edit does not restart
@@ -120,19 +120,15 @@ troubleshooting.
 | Script | What it does |
 |---|---|
 | `scripts/doctor.sh` | Checks tools, Docker, `.env`, built pieces and the port |
-| `scripts/setup.sh` | First-time install (uv when present) |
+| `scripts/setup.sh` | First-time install (packages via uv) |
 | `scripts/dev.sh [--no-reload]` | API on :8000 and Studio dev server on :3001 |
 | `scripts/build.sh studio\|opencode\|sandbox\|docker\|all` | Build one piece or everything |
 | `scripts/check.sh [backend\|studio\|escape]` | Tests: pytest, Studio typecheck and vitest, or the sandbox escape suite |
-| `scripts/to-main.sh [--tag vX.Y.Z]` | Checks, then fast-forwards `main` from your branch (asks first) |
 
-`scripts/to-main.sh` only fast-forwards. It refuses with uncommitted changes, when `main` has
-commits your branch lacks, or when a commit adds something that looks like a key. Run
-`scripts/check.sh escape` too when you touch `core/harness/`, `worker/`, `sandbox/` or `gateway/`.
+Run `scripts/check.sh escape` too when you touch `core/harness/`, `worker/`, `sandbox/` or `gateway/`.
 
 **VS Code:** open the folder and run **Tasks: Run Task**. The tasks in `.vscode/tasks.json` cover
-setup, doctor, the dev stack, Compose up/logs/down, builds, each check, and merging to main (with an
-optional tag). `.vscode/launch.json` debugs the API, the current pytest file, and a one-shot run.
+setup, doctor, the dev stack, Compose up/logs/down, builds, and each check. `.vscode/launch.json` debugs the API, the current pytest file, and a one-shot run.
 Run **Tasks: Run Test Task** for the fast checks.
 
 ---

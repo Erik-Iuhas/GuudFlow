@@ -25,8 +25,8 @@ else
   bad "Python is $("$PY" --version 2>&1 | awk '{print $2}'); 3.11+ is required"
 fi
 have git && ok "git $(git --version | awk '{print $3}')" || bad "git not found"
-if have uv; then ok "uv $(uv --version | awk '{print $2}') (used by setup when present)"
-else warn "uv not found; setup falls back to python -m venv + pip (install: https://docs.astral.sh/uv/)"; fi
+if have uv; then ok "uv $(uv --version | awk '{print $2}') (installs the Python packages)"
+else bad "uv not found (curl -LsSf https://astral.sh/uv/install.sh | sh)"; fi
 if have node && have npm; then
   major="$(node -p 'process.versions.node.split(".")[0]')"
   [ "$major" -ge 18 ] && ok "Node $(node --version) / npm $(npm --version)" \
