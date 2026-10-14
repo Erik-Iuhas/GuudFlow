@@ -113,7 +113,8 @@ switch ($Command) {
         try { Build-Studio; $built = $true; Write-Host "Studio built from npm packages" } catch { Write-Warning "$_" }
         if (-not $built -and $archive) { Studio-Unpack $archive.FullName }
         elseif (-not $built -and -not (Test-Path "studio\dist\index.html")) {
-            Write-Warning "No Studio yet: put studio-dist.tar.gz in this folder and run Prepare again."
+            try { & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSCommandPath" studio-fetch }
+            catch { Write-Warning "No Studio yet: put studio-dist.tar.gz in this folder and run Prepare again." }
         }
         if (Test-Path ".env") {
             if (-not (Select-String -Path ".env" -Pattern '^\s*GUUDFLOW_SANDBOX=' -Quiet)) {
@@ -147,6 +148,15 @@ switch ($Command) {
     "install-opencode" { Install-Opencode }
     "studio-deps"      { if (-not (Studio-Deps)) { exit 1 } }
     "studio-unpack"    { Studio-Unpack ($Rest | Select-Object -First 1) }
+    "studio-fetch"     {
+        $tag = if ($Rest) { $Rest[0] } else { "studio-latest" }
+        $slug = $env:GUUDFLOW_REPO
+        if (-not $slug) { $slug = ((git remote get-url origin) -replace '\.git$', '' -replace '^.*[:/]([^/]+/[^/]+)$', '$1') }
+        $url = "https://github.com/$slug/releases/download/$tag/studio-dist.tar.gz"
+        Write-Host "Downloading $url"
+        Invoke-WebRequest -Uri $url -OutFile "studio-dist.tar.gz" -UseBasicParsing
+        Studio-Unpack "studio-dist.tar.gz"
+    }
     "studio-pack"      {
         if (-not (Test-Path studio\dist\index.html)) { throw "no studio\dist: build it first (scripts\run.ps1 build studio)" }
         $out = if ($Rest) { $Rest[0] } else { "studio-dist.tar.gz" }

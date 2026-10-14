@@ -121,11 +121,3 @@ jobs:
 
       - name: Build
         run: npm run build
-
-      # A prebuilt Studio for machines that cannot reach npm (README: Behind a proxy).
-      - name: Keep the Studio build
-        uses: actions/upload-artifact@v4
-        with:
-          name: studio-dist
-          path: studio/dist
-          retention-days: 30

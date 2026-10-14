@@ -1,0 +1,66 @@
+name: Studio bundle
+
+# Builds Studio and packs it as studio-dist.tar.gz (scripts/studio_bundle.sh), for machines that
+# cannot install Studio's npm packages. Every push to main refreshes the rolling release
+# "studio-latest", so the archive has a fixed download URL:
+#   https://github.com/<owner>/<repo>/releases/download/studio-latest/studio-dist.tar.gz
+# (bash scripts/run.sh studio-fetch downloads and unpacks it). A version tag (v*) also attaches
+# the archive to that version's release. Every run keeps it as a workflow artifact too.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to update the studio-latest release
+
+concurrency:
+  group: studio-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: studio/package-lock.json
+
+      - name: Build Studio
+        working-directory: studio
+        run: npm ci && npm run build
+
+      - name: Pack studio-dist.tar.gz
+        run: bash scripts/studio_bundle.sh pack studio-dist.tar.gz
+
+      - name: Keep it as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-dist-tar-gz
+          path: studio-dist.tar.gz
+          retention-days: 30
+
+      - name: Refresh the studio-latest release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete studio-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create studio-latest studio-dist.tar.gz --prerelease \
+            --title "Studio (latest main build)" \
+            --notes "Prebuilt Studio from ${GITHUB_SHA::7}. Unpack with: bash scripts/run.sh studio-unpack studio-dist.tar.gz (or studio-fetch)."
+
+      - name: Attach to the version release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "See CHANGELOG.md."
+          gh release upload "$GITHUB_REF_NAME" studio-dist.tar.gz --clobber

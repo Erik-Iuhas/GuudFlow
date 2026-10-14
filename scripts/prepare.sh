@@ -66,8 +66,10 @@ elif [ -n "$ARCHIVE" ]; then
   bash scripts/studio_bundle.sh unpack "$ARCHIVE" && note "Studio installed from $ARCHIVE"
 elif [ -f studio/dist/index.html ]; then
   note "npm failed; keeping the existing build in studio/dist"
+elif bash scripts/studio_fetch.sh; then
+  note "Studio downloaded from the repo's studio-latest release (built by the Studio bundle action)"
 else
-  note "No Studio yet: npm is not usable and there is no studio-dist.tar.gz in the repo folder."
+  note "No Studio yet: npm is not usable, there is no studio-dist.tar.gz here, and the download failed."
   NEXT+=("get studio-dist.tar.gz (task 'Studio: pack…' on a machine with npm, or the CI artifact),"
          "put it in $ROOT and run Prepare again")
 fi

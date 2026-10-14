@@ -466,6 +466,27 @@
         ]
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Studio: download the prebuilt build (GitHub Action release)",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "scripts/run.sh",
+        "studio-fetch"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "studio-fetch"
+        ]
+      },
+      "problemMatcher": []
     }
   ],
   "inputs": [
