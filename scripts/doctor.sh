@@ -46,8 +46,11 @@ if have docker && docker info >/dev/null 2>&1; then
 else
   warn "Docker not reachable; agents would run in host mode (GUUDFLOW_SANDBOX=host, trusted work only)"
 fi
-[ -x .tools/opencode ] && ok "opencode binary at .tools/opencode" \
-  || warn "opencode not installed locally (scripts/install_opencode.sh); Compose bundles it"
+if _oc="$(venv/bin/python -c "from core.harness.server import find_opencode_binary as f; print(f())" 2>&1)"; then
+  ok "opencode binary: $_oc"
+else
+  warn "opencode not usable here: $(printf '%s' "$_oc" | tail -1) (scripts/install_opencode.sh); Compose bundles it"
+fi
 
 echo "Project"
 if venv_ok; then ok "Python environment ./venv ($(venv/bin/python --version 2>&1))"

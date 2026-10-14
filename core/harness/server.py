@@ -84,11 +84,24 @@ def find_opencode_binary() -> Path:
         if path.is_file():
             return path
         raise OpencodeNotInstalled(f"OPENCODE_BIN={env_bin} does not exist")
-    if _DEFAULT_BIN.exists() and os.name != "nt":
-        return _DEFAULT_BIN
-    if os.name == "nt":
+    modules = _DEFAULT_BIN.parents[1]
+    if os.name != "nt":
+        try:
+            return native_opencode_binary()
+        except OpencodeNotInstalled:
+            pass
+        # A checkout shared with Windows (WSL on /mnt/c) can hold an install made by Windows
+        # npm: its shim runs opencode.exe through WSL interop, as a Windows process that gets
+        # none of the locked environment (no config, no password, the user's own home) and
+        # listens where WSL cannot reach it.
+        if (modules / "opencode-ai" / "bin" / "opencode.exe").exists():
+            raise OpencodeNotInstalled(
+                f"{modules.parent} holds a Windows opencode (installed by Windows npm); "
+                "run scripts/install_opencode.sh on this machine to add the Linux binary")
+        if _DEFAULT_BIN.exists():
+            return _DEFAULT_BIN
+    else:
         # npm on Windows leaves a .cmd shim, not a runnable `opencode`: use the native exe.
-        modules = _DEFAULT_BIN.parents[1]
         for pkg in ("opencode-windows-x64", "opencode-windows-x64-baseline", "opencode-windows-arm64"):
             exe = modules / pkg / "bin" / "opencode.exe"
             if exe.is_file():
@@ -203,7 +216,29 @@ class OpencodeServer:
         finally:
             log.close()
         await self._wait_healthy()
+        await self._check_providers()
         return self
+
+    async def _check_providers(self) -> None:
+        """Refuse a server that offers a provider outside the config's `enabled_providers`.
+
+        opencode's own hosted models (provider `opencode`) must never be callable. If the
+        config did not reach the process, it falls back to its defaults; such a server is
+        stopped before it gets a prompt.
+        """
+        allowed = self.config.get("enabled_providers")
+        if allowed is None:
+            return
+        auth = httpx.BasicAuth("opencode", self.password)
+        async with httpx.AsyncClient(auth=auth, timeout=self.startup_timeout,
+                                     trust_env=False) as client:
+            resp = await client.get(f"{self.base_url}/config/providers")
+        resp.raise_for_status()
+        extra = sorted({p["id"] for p in resp.json()["providers"]} - set(allowed))
+        if extra:
+            await self.stop()
+            raise RuntimeError(f"opencode serve offers providers outside GuudFlow's {allowed}: "
+                               f"{extra}; refusing it (its config did not apply)")
 
     async def _wait_healthy(self) -> None:
         deadline = asyncio.get_running_loop().time() + self.startup_timeout

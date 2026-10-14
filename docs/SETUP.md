@@ -91,7 +91,8 @@ cd GuudFlow
 # and the default personas (first run only).
 ./scripts/setup.sh                 # Windows PowerShell: ./scripts/setup.ps1
 
-# The pinned opencode binary, into .tools/opencode (git-ignored). Needs npm.
+# The pinned opencode binary, into .tools/opencode (git-ignored). Uses npm; on Linux (and WSL)
+# without npm it fetches the opencode-linux-<arch> package from the registry (sha512-checked).
 scripts/install_opencode.sh
 ```
 
@@ -461,7 +462,9 @@ Then restart the API.
 | Studio shows 401 / "Unauthorized" | Paste `GUUDFLOW_API_TOKEN` into the token field at the top right. |
 | Studio loads but every request fails (dev) | Vite proxies to `localhost:8000` by default. Start the API there or set `GUUDFLOW_API_URL`. |
 | Provider **Test** says "no key", or runs fail with 401 from the provider | No key reached the host: put it in `.env`, or delete the empty `ANTHROPIC_API_KEY=` line and save the key in Studio. An exported shell variable is overridden by `.env` (§4). Anthropic keys must belong to the default workspace. |
-| "opencode not installed" | Run `scripts/install_opencode.sh` (needs npm), or set `OPENCODE_BIN` to the pinned version. |
+| "opencode not installed" | Run `scripts/install_opencode.sh`, or set `OPENCODE_BIN` to the pinned version. |
+| "holds a Windows opencode (installed by Windows npm)" (WSL) | The checkout was set up from Windows, so `.tools/opencode` has only `opencode.exe`. GuudFlow refuses it: run through WSL interop it would start a Windows process without GuudFlow's config, password or providers, which WSL cannot reach (runs hang at "opencode serve not healthy"). Run `scripts/install_opencode.sh` inside WSL to add the Linux binary; Windows keeps working. |
+| opencode refused: "offers providers outside GuudFlow's" | The server did not get its config, so opencode's own hosted models were available. It is stopped before any prompt. Check nothing rewrites the server's environment. |
 | Runs log `DEV MODE: opencode agent running on host` | Docker is not reachable, so the run fell back to host mode. Check `docker info` works for the API's user, then restart the API. |
 | "Docker is required for sandboxed agents but is not available" | Production refuses host mode. Start Docker, or don't set `GUUDFLOW_ENV=production` for local trials. |
 | Sandboxed runs fail to start on Docker Desktop | Not supported (§2). On Windows, install Docker Engine inside WSL2; otherwise set `GUUDFLOW_SANDBOX=host`. |
