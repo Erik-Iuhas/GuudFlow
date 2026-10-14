@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `GUUDFLOW_CA_BUNDLE`: trust a custom certificate authority (public roots kept, verification
+  never off) in GuudFlow's HTTP calls, git, npm and opencode.
+- Plan tab streams Jack's changes while he drafts.
 - Run console: each run keeps GuudFlow's own log lines (`console.jsonl`), explains at the end who
   ran and who never started and why, and returns each role's server log; Studio's run view has a
   Console tab.

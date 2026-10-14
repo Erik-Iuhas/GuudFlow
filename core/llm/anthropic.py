@@ -48,7 +48,9 @@ class AnthropicClient:
             # anthropic 0.39 builds its default httpx client with `proxies=`, which
             # httpx 0.28 removed; an explicit client avoids that (proxy settings
             # still come from the environment through httpx's trust_env).
-            http_client = httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0))
+            from core.tls import httpx_verify
+            http_client = httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0),
+                                            verify=httpx_verify())
             self._client = (
                 AsyncAnthropic(api_key=self._api_key, http_client=http_client)
                 if self._api_key

@@ -49,6 +49,9 @@ services:
       BRAVE_API_KEY: ${BRAVE_API_KEY:-}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       GUUDFLOW_GIT_TOKEN: ${GUUDFLOW_GIT_TOKEN:-}
+      # Optional custom CA (PEM). Put the file under the data directory so the mount below
+      # carries it, e.g. GUUDFLOW_CA_BUNDLE=${PWD}/data/tls/corp-ca.pem in .env.
+      GUUDFLOW_CA_BUNDLE: ${GUUDFLOW_CA_BUNDLE:-}
     volumes:
       - ${GUUDFLOW_HOST_DATA:-${PWD}/data}:${GUUDFLOW_HOST_DATA:-${PWD}/data}
       # Sibling containers: talk to the host's Docker daemon.

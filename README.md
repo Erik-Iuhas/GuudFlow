@@ -69,6 +69,7 @@ The laundry list. `scripts/doctor.sh` checks all of it and tells you what to fix
 **Optional**
 - [ ] `BRAVE_API_KEY` or `TAVILY_API_KEY` for the researcher role's web search.
 - [ ] `GUUDFLOW_GIT_TOKEN` to push accepted runs to a real remote.
+- [ ] `GUUDFLOW_CA_BUNDLE` if your network uses its own certificate authority ([SETUP §9](docs/SETUP.md)).
 - [ ] Playwright Chromium for screenshots (setup installs it; `GUUDFLOW_SKIP_PLAYWRIGHT=1` skips it).
 
 ### Installing uv

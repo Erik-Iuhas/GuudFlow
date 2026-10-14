@@ -32,6 +32,10 @@ except ImportError:
     # whatever's already in the process env. Better than crashing.
     pass
 
+# A custom CA (GUUDFLOW_CA_BUNDLE) reaches git, npm and opencode through the environment.
+from core.tls import apply_env as _apply_tls_env  # noqa: E402
+_apply_tls_env(__import__("pathlib").Path(__import__("os").environ.get("GUUDFLOW_DATA_DIR", "./data")))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

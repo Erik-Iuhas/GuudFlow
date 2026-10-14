@@ -280,8 +280,10 @@ class Gateway:
         self._upstreams = dict(upstreams)
         self._prices = prices
         self._cost_log = cost_log
+        from core.tls import httpx_verify
         self._client = httpx.AsyncClient(transport=transport, follow_redirects=False,
-                                         timeout=httpx.Timeout(600.0, connect=15.0))
+                                         timeout=httpx.Timeout(600.0, connect=15.0),
+                                         verify=httpx_verify())
         self._keys: dict[str, VirtualKey] = {}
         self._run_budgets: dict[str, float] = dict(run_budget_usd or {})
         self._records: dict[str, list[UsageRecord]] = {}

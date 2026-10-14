@@ -66,7 +66,8 @@ class OpenAIClient:
     ) -> LLMResponse:
         if self._client is None:
             import httpx
-            self._client = httpx.AsyncClient(timeout=self._timeout)
+            from core.tls import httpx_verify
+            self._client = httpx.AsyncClient(timeout=self._timeout, verify=httpx_verify())
 
         oai_messages: list[dict[str, Any]] = []
         if system:

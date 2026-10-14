@@ -132,7 +132,8 @@ async def test_provider(request: Request, name: str) -> dict[str, Any]:
     elif key:
         headers = {"authorization": f"Bearer {key}"}
     try:
-        async with httpx.AsyncClient(timeout=TEST_TIMEOUT) as http:
+        from core.tls import httpx_verify
+        async with httpx.AsyncClient(timeout=TEST_TIMEOUT, verify=httpx_verify()) as http:
             r = await http.get(f"{base}/models", headers=headers)
     except httpx.HTTPError as e:
         return {"ok": False, "detail": f"could not reach {base}: {type(e).__name__}", "models": []}

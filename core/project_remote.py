@@ -239,7 +239,8 @@ def open_pull_request(cfg: RemoteConfig, *, head: str, title: str, body: str,
     if match is None or not token:
         raise RemoteError("opening a pull request needs a GitHub url and a token")
     owner, name = match.group(1), match.group(2)
-    client = http or httpx.Client(timeout=30)
+    from core.tls import httpx_verify
+    client = http or httpx.Client(timeout=30, verify=httpx_verify())
     try:
         resp = client.post(f"https://api.github.com/repos/{owner}/{name}/pulls",
                            headers={"Authorization": f"Bearer {token}",

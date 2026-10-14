@@ -332,8 +332,10 @@ class _WebTools:
 
     # ── shared plumbing ─────────────────────────────────────────────────────
     def _client(self) -> httpx.AsyncClient:
+        from core.tls import httpx_verify
         return httpx.AsyncClient(transport=self.transport, timeout=self.cfg.timeout_s,
-                                 follow_redirects=False, headers={"User-Agent": USER_AGENT})
+                                 follow_redirects=False, headers={"User-Agent": USER_AGENT},
+                                 verify=httpx_verify())
 
     def _spend(self, role: str) -> None:
         """Charge one cache miss to the run and role budgets, or raise `_Refused`."""

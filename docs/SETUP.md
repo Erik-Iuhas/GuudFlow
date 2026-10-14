@@ -410,6 +410,24 @@ even when the data directory is the repo's `data/`.
   - the API reachable only by people you trust;
   - backups of the data directory.
 
+### Custom certificates (TLS behind a company proxy or an internal endpoint)
+
+Some networks re-sign TLS traffic with their own certificate authority, or serve models from an
+internal endpoint with a private certificate. Do not turn verification off: give GuudFlow the CA.
+
+1. Save the CA certificate(s) as one PEM file.
+2. Set `GUUDFLOW_CA_BUNDLE=/path/to/corp-ca.pem` in `.env`. With Docker Compose, keep the file
+   under the data directory (for example `data/tls/corp-ca.pem`), since only that directory is
+   mounted, and use its absolute path.
+3. Restart the API.
+
+The CA is trusted **in addition to** the public roots by GuudFlow's own HTTP calls (model
+providers, the LLM gateway, web search and fetch, MCP servers, GitHub), and by git, npm and
+opencode on the host through the usual variables (`SSL_CERT_FILE`, `GIT_SSL_CAINFO`,
+`NPM_CONFIG_CAFILE`, `NODE_EXTRA_CA_CERTS`, pointing at a combined bundle written to
+`<data>/tls/ca-bundle.pem`). Variables you set yourself win. Sandboxes reach the internet only
+through the host, so they need nothing.
+
 ## 10. Updating
 
 ```bash

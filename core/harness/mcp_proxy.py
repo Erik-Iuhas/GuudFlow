@@ -213,8 +213,9 @@ class _HttpConnection(_Connection):
         self._url = url
         self._headers = {"Accept": "application/json, text/event-stream",
                          "Content-Type": "application/json", **headers}
+        from core.tls import httpx_verify
         self._client = httpx.AsyncClient(timeout=timeout, transport=transport,
-                                         follow_redirects=False)
+                                         follow_redirects=False, verify=httpx_verify())
         self._session_id: str | None = None
 
     async def start(self) -> None:
