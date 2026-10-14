@@ -677,9 +677,14 @@ class AgentRunner:
         try:
             run_obj = OpencodeRun(self, self.harness_settings)
             result = await run_obj.run()
+            last: dict[str, str] = {}
+            for sig in self.workspace.board:
+                if sig.type in (SignalType.AGENT_RESULT, SignalType.FAILED) and sig.from_agent:
+                    last[sig.from_agent] = f"{sig.type.value}: {sig.summary}"[:300]
             run_console.note(self.run_root, "runner", run_console.describe_end(
-                list(self.project.agents), result.status.value, dict(result.spawn_counts),
-                len(getattr(run_obj, "backlog", []) or []), run_obj.flow is not None))
+                list(run_obj.agents), result.status.value, dict(result.spawn_counts),
+                len(getattr(run_obj, "backlog", []) or []), run_obj.flow is not None,
+                last, len(self.workspace.tasks)))
         except BaseException as exc:
             run_console.note(self.run_root, "runner",
                              f"run failed: {type(exc).__name__}: {exc}", "error")

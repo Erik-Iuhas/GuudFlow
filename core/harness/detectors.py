@@ -36,7 +36,7 @@ from core.workspace import Task
 
 Detector = Literal["no_progress", "same_review_issue", "blocked_chain", "burn_without_output",
                    "permission_thrash", "validation_failures", "needs_attention", "card_aging",
-                   "escalation", "time_limit"]
+                   "escalation", "time_limit", "no_plan"]
 # Wakes caused only by these do not count against the per-run wake cap.
 FREE_DETECTORS: frozenset[str] = frozenset({"time_limit"})
 # These fire once per subject, never again after their cooldown.
@@ -286,8 +286,23 @@ def time_limit(view: RunView, cfg: DetectorConfig) -> list[Stall]:
     return []
 
 
+def no_plan(view: RunView, cfg: DetectorConfig) -> list[Stall]:
+    """A role has run, nothing is running, and the board has no card at all: the planner
+    finished without a plan, so the run would end stuck before any work started."""
+    if view.cards or view.running:
+        return []
+    ran = [s for s in view.signals
+           if s.type in (SignalType.AGENT_RESULT, SignalType.FAILED, SignalType.COMPLETE)]
+    if not ran:
+        return []
+    last = "; ".join(f"{s.from_agent}: {s.summary}"[:200] for s in ran[-3:])
+    return [Stall("no_plan", "", "no card was created and nothing is running (the planner "
+                  f"finished without a plan). Last results: {last}. Restart or rebrief the "
+                  "planner with what is missing.")]
+
+
 DETECTORS: tuple[Callable[[RunView, DetectorConfig], list[Stall]], ...] = (
-    needs_attention, escalation, same_review_issue, blocked_chain, validation_failures,
+    no_plan, needs_attention, escalation, same_review_issue, blocked_chain, validation_failures,
     permission_thrash, burn_without_output, card_aging, no_progress, time_limit)
 
 

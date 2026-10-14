@@ -110,15 +110,24 @@ def read_console(run_root: Path, tail: int = 400, role_tail: int = 40) -> dict[s
 
 
 def describe_end(agents: list[Any], status: str, spawn_counts: dict[str, int],  # Any: AgentConfig
-                 backlog_items: int, task_mode: bool) -> str:
+                 backlog_items: int, task_mode: bool,
+                 last_results: dict[str, str] | None = None, cards: int | None = None) -> str:
     """Why the run ended the way it did, in one block: who ran, who never did and what each
     waited on, so a run that stopped before its first call is explained."""
     lines = [f"run ended: {status}; mode: {'task cards' if task_mode else 'plain roles'}; "
-             f"backlog items taken: {backlog_items}"]
+             f"backlog items taken: {backlog_items}"
+             + (f"; cards created: {cards}" if cards is not None else "")]
+    last_results = last_results or {}
     for a in agents:
         n = spawn_counts.get(a.role, 0)
         deps = ", ".join(a.depends_on or []) or "nothing"
-        lines.append(f"- {a.role}: spawned {n}x" + ("" if n else f", never started (waits on {deps})"))
+        line = f"- {a.role}: spawned {n}x" + ("" if n else f", never started (waits on {deps})")
+        if a.role in last_results:
+            line += f"; last result: {last_results[a.role]}"
+        lines.append(line)
+    if task_mode and cards == 0 and any(spawn_counts.values()):
+        lines.append("the planner ran but created no cards, so no builder could start: its "
+                     "last result above says why (see also its server log in the source list)")
     if not any(spawn_counts.get(a.role, 0) for a in agents):
         lines.append("no role was ever spawned: look above for spawn errors, a missing model key, "
                      "or a team with nothing runnable")

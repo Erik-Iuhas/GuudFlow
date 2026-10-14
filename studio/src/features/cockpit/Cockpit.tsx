@@ -371,7 +371,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
         </div>
       )}
       <OverseerBar runId={runId}
-        present={allSpecs.some((r) => r.role.includes("overseer"))}
+        present={[...allSpecs.map((r) => r.role), ...Object.keys(names)].some((r) => r.includes("overseer"))}
         active={!["complete", "failed", "stuck", "stopped", "max_iterations"].includes(String(status))} />
 
       {desktop && panelOpen && (

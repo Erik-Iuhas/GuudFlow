@@ -39,3 +39,24 @@ def test_a_run_that_never_spawned_says_so() -> None:
     text = run_console.describe_end(agents, "stuck", {}, 0, False)
     assert "bram: spawned 0x, never started" in text and "uma" in text
     assert "no role was ever spawned" in text and "plain roles" in text
+
+
+def test_the_end_report_names_the_planner_that_made_no_cards() -> None:
+    agents = [SimpleNamespace(role="tech_lead", depends_on=[]),
+              SimpleNamespace(role="developer", depends_on=["tech_lead"])]
+    text = run_console.describe_end(agents, "stuck", {"tech_lead": 1}, 3, True,
+                                    {"tech_lead": "FAILED: no plan submitted"}, 0)
+    assert "cards created: 0" in text and "last result: FAILED: no plan submitted" in text
+    assert "the planner ran but created no cards" in text
+
+
+def test_no_plan_detector_fires_when_a_role_ran_and_the_board_is_empty() -> None:
+    from core.harness.detectors import RunView, no_plan, DetectorConfig
+    from core.signals import Signal, SignalType
+    ran = Signal(type=SignalType.FAILED, from_agent="tech_lead", summary="no valid plan")
+    view = RunView(signals=[ran], cards=[], role_states={}, running=[])
+    (stall,) = no_plan(view, DetectorConfig())
+    assert stall.detector == "no_plan" and "tech_lead: no valid plan" in stall.detail
+    assert no_plan(RunView(signals=[], cards=[], role_states={}, running=[]), DetectorConfig()) == []
+    assert no_plan(RunView(signals=[ran], cards=[], role_states={}, running=["tech_lead"]),
+                   DetectorConfig()) == []
