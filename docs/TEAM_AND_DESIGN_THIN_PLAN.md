@@ -19,7 +19,18 @@ Design tab (`api/routes/design.py`, `studio/src/features/design/`); Jack's promp
 2 signals, no cards and $0.00. Comments then failed with "This run is no longer active". The
 overseer did not appear in the graph and never woke.
 
-**Causes (read from the code, not yet reproduced with the run's board).**
+**What the project record adds** (`Excuser-o-matic-record.md`). The session line reads
+`run_85824de61c no_changes (0 commits, items none)`, while B1–B5 are all still `open`. So the run
+was started **on the goal only, with no backlog items selected**, even though the spec and backlog
+were fully drafted and approved (9 requirements, 4 decisions, 5 items, spec v7, plan cost $0.08).
+That makes two independent faults: nothing told the owner that open items were being skipped, and
+a team without a planner cannot turn even a goal into cards. Fixing either one alone would have
+avoided this run.
+
+**Causes (read from the code and the record).**
+0. **Run started with open items unselected.** "Run on the goal only" and "Start a run with N
+   items" sit side by side; with five open, spec-linked items and none ticked, the run quietly
+   used neither.
 1. **Nobody creates the cards.** Cards come from the role that owns `session_plan` (a planner or
    tech lead). `team_problems` returns early when the team has *no* planner
    (`core/team_changes.py`: `if not planners: return problems`), so a builder-and-reviewer team
@@ -37,6 +48,8 @@ overseer did not appear in the graph and never woke.
 | S1 | **A team that builds needs a planner.** `team_problems` reports "no role plans the session, so no builder gets cards" when there are builders and no `session_plan` owner. The start-run check refuses (it is a blocker like the cycle case), and the Approve-the-team screen shows it with a one-click "Add a planner" (adds a `planner` after nothing and before the builders; a tech lead when the kind has one). Jack's plan prompt gets the same line. | `core/team_changes.py`, `core/runner.py`, `studio/src/views/Studio.tsx` and the approve screen |
 | S2 | **Empty board is a stop with a reason.** When the scheduler is about to end `STUCK` with zero cards ever created, post `RUN_STOPPED` with "no card was created: no role plans the session" (or "the planner finished without a plan"), not a silent `stuck`. This reuses `run_stop.py`. | `core/harness/run_stop.py`, `core/runner.py` |
 | S3 | **Overseer in the graph.** A small node beside the team: asleep, woke N times, last decision and why, and a "Wake overseer" button that posts a manual wake with the operator's text. The comment box on a stopped run offers "Continue this run" in place of the dead-end error. | `studio/src/features/cockpit/`, `core/harness/run.py` (manual wake), run view |
+| S5 | **Don't skip a ready backlog silently.** *Run on the goal only* with open items present asks "B1–B5 are open and ready. Run them?" (items ticked by default, the goal-only path one click away). The review card for a `no_changes` session says which items were not run. | `studio/src/features/work/`, `studio/src/views/Studio.tsx` |
+| S6 | **Jack's repair note repeats his reply.** The first plan message in the record says the same summary twice (the original text, then "Repairs: I've drafted the first spec…"). When a repair only re-sends corrected changes, append one line ("Fixed 2 changes"), not a second full summary. | `core/project_manager.py` (`repairs` reply assembly) |
 | S4 | **Honest status.** Replace "Waiting for the first agent…" with the live state: "No cards yet, waiting for the planner", and after a stop the `RUN_STOPPED` reason. | `studio/src/features/cockpit/` |
 
 Done when: starting a builder-and-reviewer team is refused with the reason and a fix button; a
@@ -44,7 +57,7 @@ run that still ends with no cards says why; the overseer is visible on the graph
 count and can be woken by hand. Add `tests/harness/test_flow_hardening.py` cases for the empty
 board stop, and a `team_problems` case for the planner-less team.
 
-**Order:** S1 and S2 first (they stop the failure), then S3 and S4. These come before the
+**Order:** S1, S2 and S5 first (they stop the failure), then S3, S4 and S6. These come before the
 Team and Design steps below, because a new project's default team should never fail like this.
 
 ## 1. The team belongs to Jack
@@ -82,7 +95,7 @@ approved design.
 
 | Order | Steps | Size | Risk |
 |---|---|---|---|
-| 0 | S1–S4 (planner-less team, empty-board stop, overseer node) | M | S1 changes what `team_problems` refuses: check existing team fixtures |
+| 0 | S1–S6 (planner-less team, skipped backlog, empty-board stop, overseer node, repair note) | M | S1 changes what `team_problems` refuses: check existing team fixtures |
 | 1 | T1, T4 | S | none: UI wiring and a default name |
 | 2 | T2, T3 | M | the diff view is new UI; no backend |
 | 3 | D1, D2 | M | the shared turn loop refactor must not change Jack: run `tests/core/test_project_manager.py` unchanged before and after |
