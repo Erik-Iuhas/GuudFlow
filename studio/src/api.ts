@@ -767,13 +767,13 @@ export interface RunConsole { lines: ConsoleLine[]; roles: { role: string; lines
 
 /** The run's host-side console and each role's server log tail (`GET /api/runs/{id}/console`). */
 export async function getConsole(runId: string): Promise<RunConsole> {
-  const res = await request<RunConsole>("GET", `/api/runs/${encodeURIComponent(runId)}/console`);
+  const res = await request<RunConsole>("GET", `/api/runs/${encodeURIComponent(runId)}/console`, undefined, true);
   return res ?? { lines: [], roles: [] };
 }
 
 /** Wake the overseer by hand (`POST /api/runs/{id}/overseer/wake`). */
 export async function wakeOverseer(runId: string, text: string): Promise<void> {
-  await request("POST", `/api/runs/${encodeURIComponent(runId)}/overseer/wake`, { text });
+  await request("POST", `/api/runs/${encodeURIComponent(runId)}/overseer/wake`, { text }, true);
 }
 
 /** Body of `POST /api/runs/{id}/cards` (human adds a card). */
