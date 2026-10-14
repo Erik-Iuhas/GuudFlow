@@ -301,7 +301,17 @@ export function Studio() {
               onRemoveAgent={removeAgent}
             />
           )}
-          <Button variant="outline" className="mt-2" onClick={addAgent}>+ Add agent</Button>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <Button variant="outline" onClick={addAgent}>+ Add agent</Button>
+            <Link to="?tab=plan" data-testid="ask-jack-team" className="text-sm">
+              Ask Jack to change the team
+            </Link>
+          </div>
+          <p className="m-0 mt-1 text-xs text-muted-foreground">
+            In the Plan tab, tell Jack what you want (for example &ldquo;add a researcher before the builder&rdquo; or
+            &ldquo;have Uma review Bram&rdquo;). He proposes the team changes in the draft, you tick them,
+            and they apply from the next session.
+          </p>
         </>
       ) : tab === "plan" ? (
         id && (
