@@ -144,6 +144,7 @@ More detail:
 - [docs/OPENCODE_HARNESS_PLAN.md](docs/OPENCODE_HARNESS_PLAN.md): the design.
 - [DESIGN.md](DESIGN.md): the original intent and rationale.
 - [ROADMAP.md](ROADMAP.md): what's next.
+- [CHANGELOG.md](CHANGELOG.md): what is in each release and its known limits.
 
 ## Configuration
 
