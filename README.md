@@ -179,9 +179,15 @@ WSL must be installed. This is the default (`GUUDFLOW_WINDOWS_MODE=wsl`).
 ### Windows native
 1. Set `GUUDFLOW_WINDOWS_MODE=native` (environment, or a line in `.env`) and `GUUDFLOW_SANDBOX=host`.
 2. Install uv (**Install uv** runs the PowerShell installer) and Node 18+.
-3. **Setup** runs `scripts/setup.ps1` (uv when installed, else pip), **Run dev stack** runs
-   `scripts/dev.ps1`, **Stop dev stack** frees ports 8000 and 3001.
-4. Only setup, dev, stop and install-uv exist natively; builds and checks say to use WSL.
+3. Run **Prepare this machine**: uv, `setup.ps1` (uv when installed, else pip), opencode, Studio
+   (npm build, or a `studio-dist.tar.gz` you put in the folder), `GUUDFLOW_SANDBOX=host` and a token
+   in `.env`, then doctor.
+4. Every task has a native version: **Run dev stack** (`dev.ps1`: separate windows for the API
+   and Studio; it serves the prebuilt Studio on :8000 when npm packages are missing), **Stop dev
+   stack**, **Doctor**, **Build** (studio, opencode, native; docker if Docker is installed),
+   **Check** (backend, studio), the **Studio:** tasks, and `scripts\run.ps1 api`. Only the sandbox
+   image and the escape suite need Linux.
+5. Scripts are plain ASCII so Windows PowerShell 5.1 reads them correctly; PowerShell 7 works too.
 
 ### Quirks to look out for
 - **`/mnt/c` is slow and drops execute bits.** A project under the Windows disk in WSL makes every

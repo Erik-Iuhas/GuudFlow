@@ -55,6 +55,24 @@ if (-not (Test-Path $activate)) {
     python -m pip install --quiet -r requirements.txt
 }
 
+# Use PowerShell 7 when installed, else the built-in Windows PowerShell.
+$Shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
+
+# Studio: npm packages for the dev server, else a prebuilt studio\dist served by the API.
+$UseDist = $false
+if (-not (Test-Path (Join-Path $Repo "studio\node_modules"))) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "run.ps1") studio-deps
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-Path (Join-Path $Repo "studio\dist\index.html")) {
+            Write-Host "npm packages unavailable: serving the prebuilt studio\dist on :8000" -ForegroundColor Yellow
+            $UseDist = $true
+        } else {
+            throw "Studio needs its npm packages or a prebuilt studio\dist (scripts\run.ps1 studio-unpack <file>)"
+        }
+    }
+}
+$distEnv = if ($UseDist) { "`$env:GUUDFLOW_STUDIO_DIST='$Repo\studio\dist'; " } else { "" }
+
 # Backend
 $reloadArgs = if ($NoReload) {
     Write-Host "Starting backend  -> http://localhost:8000  [NO RELOAD - safe for agent testing]" -ForegroundColor Yellow
@@ -67,27 +85,22 @@ $reloadArgs = if ($NoReload) {
     # That's how src/constants.py writes were killing the worker mid-run.
     "--reload --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker --reload-exclude *.pyc --reload-exclude __pycache__/*"
 }
-Start-Process pwsh -ArgumentList @(
+Start-Process $Shell -ArgumentList @(
     "-NoExit", "-Command",
-    "Set-Location '$Repo'; & '$activate'; uvicorn api.main:app $reloadArgs --port 8000"
+    "Set-Location '$Repo'; $distEnv& '$activate'; uvicorn api.main:app $reloadArgs --port 8000"
 )
 
 # Frontend
 $studioPath = Join-Path $Repo "studio"
-if (-not (Test-Path (Join-Path $studioPath "node_modules"))) {
-    Write-Host "Installing studio deps..." -ForegroundColor Yellow
-    Push-Location $studioPath
-    npm install --silent --no-audit --no-fund
-    Pop-Location
+if (-not $UseDist) {
+    Write-Host "Starting frontend -> http://localhost:3001" -ForegroundColor Cyan
+    Start-Process $Shell -ArgumentList @(
+        "-NoExit", "-Command",
+        "Set-Location '$studioPath'; npm run dev"
+    )
 }
-
-Write-Host "Starting frontend -> http://localhost:3001" -ForegroundColor Cyan
-Start-Process pwsh -ArgumentList @(
-    "-NoExit", "-Command",
-    "Set-Location '$studioPath'; npm run dev"
-)
 
 Write-Host ""
 Write-Host "Both servers launching in separate windows." -ForegroundColor Green
 Write-Host "  Backend:  http://localhost:8000"
-Write-Host "  Frontend: http://localhost:3001"
+if ($UseDist) { Write-Host "  Studio:   http://localhost:8000 (prebuilt)" } else { Write-Host "  Frontend: http://localhost:3001" }

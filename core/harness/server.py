@@ -74,8 +74,15 @@ def find_opencode_binary() -> Path:
         if path.is_file():
             return path
         raise OpencodeNotInstalled(f"OPENCODE_BIN={env_bin} does not exist")
-    if _DEFAULT_BIN.exists():
+    if _DEFAULT_BIN.exists() and os.name != "nt":
         return _DEFAULT_BIN
+    if os.name == "nt":
+        # npm on Windows leaves a .cmd shim, not a runnable `opencode`: use the native exe.
+        modules = _DEFAULT_BIN.parents[1]
+        for pkg in ("opencode-windows-x64", "opencode-windows-x64-baseline", "opencode-windows-arm64"):
+            exe = modules / pkg / "bin" / "opencode.exe"
+            if exe.is_file():
+                return exe
     raise OpencodeNotInstalled(
         f"opencode {OPENCODE_VERSION} not found; run scripts/install_opencode.sh"
     )
