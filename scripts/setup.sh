@@ -82,6 +82,12 @@ else
     echo "INFO: npm not found — skipping studio. Install Node 18+ to run the frontend."
 fi
 
+# The agent runtime: every role runs in opencode. Without it no agent can start.
+if [ ! -x .tools/opencode ] && [ "${GUUDFLOW_SKIP_OPENCODE:-0}" != "1" ]; then
+    echo "Installing the pinned opencode agent runtime (scripts/install_opencode.sh)..."
+    scripts/install_opencode.sh || echo "WARN: opencode install failed: agents cannot start until scripts/install_opencode.sh succeeds"
+fi
+
 # 6. .env
 FRESH_INSTALL=0
 if [ ! -f ".env" ]; then
@@ -114,7 +120,7 @@ echo
 echo "Next steps:"
 echo "  1. Edit .env and add your ANTHROPIC_API_KEY"
 echo "  2. Activate the venv:    source venv/bin/activate"
-echo "  3. Install opencode:     scripts/install_opencode.sh   (then: scripts/doctor.sh)"
+echo "  3. Check everything:     scripts/doctor.sh"
 echo "  4. Start the backend:    uvicorn api.main:app --port 8000"
 echo "  5. Start the frontend:   cd studio && npm run dev"
 echo "  6. Open the studio:      http://localhost:3001"
