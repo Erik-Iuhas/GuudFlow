@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Studio without npm trouble: `studio-deps` retries and relaxes versions, `GUUDFLOW_NPM_REGISTRY`
+  for a mirror, prebuilt `studio-pack` / `studio-unpack`, CI keeps the build as an artifact, and the
+  dev stack serves the prebuilt Studio when the npm packages are missing.
 - opencode telemetry explicitly off for every agent: `experimental.openTelemetry: false` in its
   config and `OTEL_SDK_DISABLED=true` (with sharing, auto-update and model-list fetching already off).
 - Tasks and scripts across setups: one entry point (`scripts/run.sh`, `scripts/run.ps1` on Windows),

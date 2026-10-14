@@ -185,6 +185,14 @@ WSL must be installed. This is the default (`GUUDFLOW_WINDOWS_MODE=wsl`).
 - **Docker Desktop cannot host sandboxes.** Use Docker Engine (Linux, or inside WSL2), or host mode.
 - **Host mode has no isolation.** Agents run as your user. Fine for trusted demos, not for untrusted
   goals.
+- **npm packages unavailable (proxy, mirror missing a version).** Studio is the only part that needs
+  npm. The installer (`bash scripts/run.sh studio-deps`) retries, falls back from the exact
+  lockfile versions to any version `package.json` allows, and uses `GUUDFLOW_NPM_REGISTRY` for a
+  company mirror. If npm still fails, skip it with a prebuilt Studio (static files, the same on
+  every OS): someone who can build runs `bash scripts/run.sh studio-pack` (or downloads the
+  `studio-dist` artifact from the repo's CI run), you copy `studio-dist.tar.gz` over and run
+  `bash scripts/run.sh studio-unpack studio-dist.tar.gz`. **Run dev stack** then serves it from the
+  API on :8000 instead of the dev server on :3001.
 - **A proxy or company certificate.** Set `GUUDFLOW_CA_BUNDLE` to your CA's PEM file; TLS checks
   stay on ([SETUP §9](docs/SETUP.md)).
 - **Restart after editing `.env`.** The API reads it at start. After installing uv, open a new
