@@ -135,6 +135,14 @@ through one entry point (`bash scripts/run.sh <task>`, or `scripts/run.ps1 <task
 the task names are the same everywhere: **Install uv**, **Setup**, **Doctor**, **Run dev stack**,
 **Stop dev stack**, **Build…**, **Check…**.
 
+**Quickest start, any machine:** run the VS Code task **Prepare this machine** (or
+`bash scripts/run.sh prepare`). It detects Linux, macOS or WSL (and warns if the folder is on the
+slow Windows disk), whether Docker Engine can host sandboxes, and whether npm can reach its registry.
+It then installs uv, runs setup, builds Studio with npm or unpacks a `studio-dist.tar.gz` you put in
+the repo folder, sets `GUUDFLOW_SANDBOX=host` when there is no usable Docker, generates
+`GUUDFLOW_API_TOKEN` if it is empty, runs doctor and says what to do next. Re-run it any time; it
+skips what is done. With `GUUDFLOW_WINDOWS_MODE=native` it does the native-Windows version.
+
 | Mode | Use it when | Agent sandboxes |
 |---|---|---|
 | **Docker Compose** | You only want to use GuudFlow, on Linux or in WSL2 with Docker Engine | Yes |

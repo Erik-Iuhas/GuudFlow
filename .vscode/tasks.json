@@ -2,6 +2,27 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Prepare this machine (detects Linux / WSL / Windows, Docker, npm)",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "scripts/run.sh",
+        "prepare"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "prepare"
+        ]
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Install uv",
       "type": "process",
       "command": "bash",

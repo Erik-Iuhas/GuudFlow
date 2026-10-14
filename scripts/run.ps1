@@ -31,6 +31,21 @@ if ($mode -eq "wsl") {
 }
 
 switch ($Command) {
+    "prepare" {
+        # Native Windows: uv, then setup.ps1; agents run in host mode (no sandbox here).
+        & "$PSCommandPath" install-uv
+        $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+        & "$PSScriptRoot\setup.ps1" @Rest
+        if ((Test-Path ".env") -and -not (Select-String -Path ".env" -Pattern '^\s*GUUDFLOW_SANDBOX=' -Quiet)) {
+            Add-Content ".env" "`nGUUDFLOW_SANDBOX=host"
+            Write-Host "wrote GUUDFLOW_SANDBOX=host to .env (no sandboxes on native Windows)"
+        }
+        if (-not (Test-Path "studio\dist\index.html")) {
+            $arch = Get-ChildItem -Filter "studio-dist*.tar.gz" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($arch) { New-Item -ItemType Directory -Force studio\dist | Out-Null; tar -xzf $arch.FullName -C studio; Write-Host "Studio installed from $($arch.Name)" }
+            else { Write-Host "No Studio build yet: build it (npm) or put studio-dist.tar.gz in this folder and run Prepare again." }
+        }
+    }
     "setup"  { & "$PSScriptRoot\setup.ps1" @Rest }
     "dev"    { & "$PSScriptRoot\dev.ps1" @Rest }
     "stop"   {
