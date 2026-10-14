@@ -351,7 +351,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           current card, last result and cost, and opens its tool calls on click. */}
       {!anyStarted && (
         <div className="rounded-md border border-dashed border-border px-3 py-1.5 text-sm text-muted-foreground" data-testid="waiting">
-          {socket.status === "error" ? "The live feed is not connected." : "Waiting for the first agent…"}
+          {socket.status === "error" ? "The live feed is not connected." : "Waiting for the first agent… If this stays empty, the Console tab shows why."}
         </div>
       )}
       {nodeView === "team" && (

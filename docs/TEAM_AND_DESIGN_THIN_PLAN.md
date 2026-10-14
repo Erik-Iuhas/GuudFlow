@@ -38,8 +38,11 @@ itself.
 | C4 | **Studio Console tab** on the run view: log lines by source, errors in red, a source picker that includes each role's server log, polling every 3 s while open. | done |
 
 With this, the stuck Excuse-o-matic run would have shown either a spawn error or "no role was ever
-spawned" with the reason beside it. Still open from this plan: S3 (overseer node and wake
-button), S4 (honest status line), S5 (ask before running goal-only with open items), S6, S7.
+spawned" with the reason beside it.
+
+Also done: **S5** (Run on the goal only asks first when backlog items are open) and a small **S4**
+(the waiting line points to the Console tab). Still open: S3 (overseer node and wake button), S6
+(repair note repeats the reply), S7 (Jack proposes a minimum team).
 
 ### Original notes: A run with nobody to plan it just sits there (found on the first live run)
 

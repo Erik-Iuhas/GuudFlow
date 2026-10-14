@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { normalizeTab } from "../projectTabs";
 import { detailKey, useDetailLevel } from "../useDetailLevel";
@@ -84,11 +85,13 @@ describe("useDetailLevel", () => {
 
 function renderStudio(url: string) {
   return render(
-    <MemoryRouter initialEntries={[url]}>
-      <Routes>
-        <Route path="/projects/:id" element={<Studio />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={[url]}>
+        <Routes>
+          <Route path="/projects/:id" element={<Studio />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 

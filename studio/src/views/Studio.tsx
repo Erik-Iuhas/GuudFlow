@@ -24,6 +24,7 @@ import { DesignTab } from "../features/design/DesignTab";
 import { useDetailLevel, type DetailLevel } from "../features/project/useDetailLevel";
 import { ProjectWork, type RunRequest } from "../features/work/ProjectWork";
 import { WorkSettings } from "../features/work/WorkSettings";
+import { useBacklog } from "../features/work/api";
 import { Inputs } from "./Inputs";
 import { SessionTimeCard } from "../features/project/SessionTimeCard";
 import { PlanTab } from "../features/plan/PlanTab";
@@ -155,6 +156,8 @@ export function Studio() {
   // What the run should take on (backlog items, a pending run to continue);
   // kept across the cost-preview round trip.
   const [runRequest, setRunRequest] = useState<RunRequest>({});
+  const backlog = useBacklog(id ?? "");
+  const openItems = (backlog.data ?? []).filter((i) => i.status === "open").length;
   const [starting, setStarting] = useState(false);
 
   async function runNow(confirm = false, request: RunRequest = runRequest) {
@@ -207,7 +210,12 @@ export function Studio() {
             {saving ? "Saving…" : "Save"}
           </Button>
           {/* Backlog runs start from the Work tab; this runs on the project goal alone. */}
-          <Button variant="outline" onClick={() => void runNow(false, {})}>Run on the goal only</Button>
+          <Button variant="outline" onClick={() => {
+            if (openItems > 0 && !window.confirm(
+              `${openItems} backlog item${openItems === 1 ? " is" : "s are"} open and ready. `
+              + "Running on the goal only skips them. Continue? (Cancel, then use Start a run on the Work tab.)")) return;
+            void runNow(false, {});
+          }}>Run on the goal only</Button>
         </div>
       </div>
 
