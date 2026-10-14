@@ -378,6 +378,81 @@
           "docker"
         ]
       }
+    },
+    {
+      "label": "Studio: install npm packages (retries, mirror, relaxed versions)",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "scripts/run.sh",
+        "studio-deps"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "studio-deps"
+        ]
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Studio: pack the build into studio-dist.tar.gz",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "scripts/run.sh",
+        "studio-pack",
+        "studio-dist.tar.gz"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "studio-pack",
+          "studio-dist.tar.gz"
+        ]
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Studio: unpack a prebuilt studio-dist.tar.gz",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "scripts/run.sh",
+        "studio-unpack",
+        "${input:studioArchive}"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "studio-unpack",
+          "${input:studioArchive}"
+        ]
+      },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "studioArchive",
+      "type": "promptString",
+      "description": "Path to the prebuilt Studio archive (relative to the repo, or absolute)",
+      "default": "studio-dist.tar.gz"
     }
   ]
 }

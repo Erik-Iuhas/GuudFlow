@@ -32,3 +32,6 @@ data/personas/
 !.vscode/extensions.json
 .tools/
 .claude/worktrees/
+
+# A prebuilt Studio moved between machines (scripts/studio_bundle.sh).
+studio-dist.tar.gz
