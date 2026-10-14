@@ -12,6 +12,41 @@ panel; the typed design ops and `validate_design_turn` (`core/design.py`); desig
 Design tab (`api/routes/design.py`, `studio/src/features/design/`); Jack's prompt already says
 "no tech lead: propose one".
 
+## 0. A run with nobody to plan it just sits there (found on the first live run)
+
+**Seen (Excuse-o-matic, `run_85824de61c`).** The team was a developer (Bram) and a reviewer
+(Uma) and nothing else. The run showed "Waiting for the first agent…", then `stuck` at 1:03 with
+2 signals, no cards and $0.00. Comments then failed with "This run is no longer active". The
+overseer did not appear in the graph and never woke.
+
+**Causes (read from the code, not yet reproduced with the run's board).**
+1. **Nobody creates the cards.** Cards come from the role that owns `session_plan` (a planner or
+   tech lead). `team_problems` returns early when the team has *no* planner
+   (`core/team_changes.py`: `if not planners: return problems`), so a builder-and-reviewer team
+   passes every check and starts. With no cards, nothing is spawnable, and the scheduler ends
+   `STUCK` within a minute.
+2. **The overseer has nothing to watch.** Its detectors need cards, a blocked chain or ten idle
+   minutes (`no_progress_minutes`), and the scheduler returns `STUCK` first. An empty board is
+   the one stall no detector covers. The overseer is also event-driven and not a team node, so
+   the graph never shows it, which reads as "it was never created".
+3. **The status text is wrong for the case.** "Waiting for the first agent…" stays on screen
+   after the run has stopped, and a stopped run only says comments can't land.
+
+| Step | Work | Where |
+|---|---|---|
+| S1 | **A team that builds needs a planner.** `team_problems` reports "no role plans the session, so no builder gets cards" when there are builders and no `session_plan` owner. The start-run check refuses (it is a blocker like the cycle case), and the Approve-the-team screen shows it with a one-click "Add a planner" (adds a `planner` after nothing and before the builders; a tech lead when the kind has one). Jack's plan prompt gets the same line. | `core/team_changes.py`, `core/runner.py`, `studio/src/views/Studio.tsx` and the approve screen |
+| S2 | **Empty board is a stop with a reason.** When the scheduler is about to end `STUCK` with zero cards ever created, post `RUN_STOPPED` with "no card was created: no role plans the session" (or "the planner finished without a plan"), not a silent `stuck`. This reuses `run_stop.py`. | `core/harness/run_stop.py`, `core/runner.py` |
+| S3 | **Overseer in the graph.** A small node beside the team: asleep, woke N times, last decision and why, and a "Wake overseer" button that posts a manual wake with the operator's text. The comment box on a stopped run offers "Continue this run" in place of the dead-end error. | `studio/src/features/cockpit/`, `core/harness/run.py` (manual wake), run view |
+| S4 | **Honest status.** Replace "Waiting for the first agent…" with the live state: "No cards yet, waiting for the planner", and after a stop the `RUN_STOPPED` reason. | `studio/src/features/cockpit/` |
+
+Done when: starting a builder-and-reviewer team is refused with the reason and a fix button; a
+run that still ends with no cards says why; the overseer is visible on the graph with its wake
+count and can be woken by hand. Add `tests/harness/test_flow_hardening.py` cases for the empty
+board stop, and a `team_problems` case for the planner-less team.
+
+**Order:** S1 and S2 first (they stop the failure), then S3 and S4. These come before the
+Team and Design steps below, because a new project's default team should never fail like this.
+
 ## 1. The team belongs to Jack
 
 | Step | Work | Where |
@@ -47,6 +82,7 @@ approved design.
 
 | Order | Steps | Size | Risk |
 |---|---|---|---|
+| 0 | S1–S4 (planner-less team, empty-board stop, overseer node) | M | S1 changes what `team_problems` refuses: check existing team fixtures |
 | 1 | T1, T4 | S | none: UI wiring and a default name |
 | 2 | T2, T3 | M | the diff view is new UI; no backend |
 | 3 | D1, D2 | M | the shared turn loop refactor must not change Jack: run `tests/core/test_project_manager.py` unchanged before and after |
