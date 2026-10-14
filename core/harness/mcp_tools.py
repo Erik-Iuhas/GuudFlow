@@ -47,6 +47,33 @@ _NPM_NAME = re.compile(r"^(@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._
 _VERSION = re.compile(r"^[0-9][0-9A-Za-z.+-]*$")
 
 
+_KNOWN_ANSWERS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\b(allowed|permitted|blocked|denied|refused|permission)\b.*\b(command|bash|shell|"
+                r"bun|npm|test|sed|grep|echo|pipe|redirect)|\b(command|bash|shell)\b.*\b"
+                r"(allowed|permitted|denied|refused)", re.I | re.S),
+     "Do not ask a person about shell permissions. A refused command line usually has one part "
+     "that is not allowed: run each command on its own (plain `bun test`, then `grep`/`head`/`tail` "
+     "only), with no redirection, `echo` or `sed`. The brief lists the allowed commands."),
+    (re.compile(r"\bwhich (card|task)\b.*\b(mine|my|own|assigned)|\b(is|are) (t|card )\d+.*\b"
+                r"(mine|my card|assigned to me)", re.I | re.S),
+     "Do not ask which card is yours. Your current card is the one in your brief; cards listed there "
+     "as parked or queued are not yours to work on now."),
+    (re.compile(r"\b(playtest|play-test|screenshot|in (a|the) browser|browser check|manual(ly)? "
+                r"(check|verif|test))", re.I),
+     "Do not ask a person for a playtest, screenshot or browser check. Those are the owner's checks "
+     "at acceptance: finish the code and tests, submit `done`, and list them in `owner_checks`."),
+)
+
+
+def answerable_without_human(question: str) -> str | None:
+    """A reply when the question is one the brief already answers (shell permissions, which card
+    is yours, owner checks), so a small model does not pause the whole run for it."""
+    for pattern, reply in _KNOWN_ANSWERS:
+        if pattern.search(question):
+            return reply
+    return None
+
+
 def tools(ctx: RunToolContext, *, installer: Installer | None = None) -> list[McpTool]:
     """Build the board-facing tools for one run.
 
@@ -85,6 +112,9 @@ def tools(ctx: RunToolContext, *, installer: Installer | None = None) -> list[Mc
         question = args.get("question")
         if not isinstance(question, str) or not question.strip():
             return ToolResult("question must be a non-empty string", is_error=True)
+        known = answerable_without_human(question)
+        if known:
+            return ToolResult(known, is_error=True)
         timeout = _timeout(args)
         if isinstance(timeout, ToolResult):
             return timeout

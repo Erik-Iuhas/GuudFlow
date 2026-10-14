@@ -202,3 +202,8 @@ also runs the escape suite (CLAUDE.md).
   refused, model) and three new playbook metrics. The shorter brief for small models is open.
 - **§9 done:** `tests/harness/test_session5_replay.py` (owner check, block on the finished
   tech lead, stop report and continuation), plus `tests/harness/test_flow_hardening.py`.
+- **§6 `ask_human` guard done:** a worker's question that the brief already answers (shell
+  permissions, which card is its own, a playtest or screenshot) is turned back with the answer
+  instead of pausing the run (`mcp_tools.answerable_without_human`). Spec questions are not
+  guarded: they stay `blocked_on: planner`. Still not done: the shorter brief for small models,
+  naming the refused shell segment (opencode's text), and the plan-check warning for manual lines.

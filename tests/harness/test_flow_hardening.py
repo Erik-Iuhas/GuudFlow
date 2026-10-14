@@ -105,3 +105,11 @@ def test_the_shell_section_names_what_is_allowed() -> None:
     text = shell_summary(perm)
     assert text is not None and "`bun test`" in text and "`sed`" in text
     assert "never a reason to block" in text
+
+
+def test_questions_the_brief_answers_do_not_reach_a_person() -> None:
+    from core.harness.mcp_tools import answerable_without_human as known
+    assert "one part" in known("Is `bun test` allowed? The sed command was denied by permission.")
+    assert "current card" in known("Which card is mine, T5 or T7?")
+    assert "owner_checks" in known("Can someone do a playtest in the browser?")
+    assert known("Should the boss level be harder than level 4?") is None
