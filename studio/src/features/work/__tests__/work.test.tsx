@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { BacklogItemWire, RunBranchWire } from "../api";
 import { BacklogList } from "../BacklogList";
@@ -175,7 +176,9 @@ describe("plan 14 additions", () => {
   it("settings: remote clears when the url is emptied; auto-accept warns without a check", async () => {
     const { WorkSettings } = await import("../WorkSettings");
     const onChange = vi.fn();
-    const { rerender } = render(<WorkSettings gates={{}} onChange={onChange} />);
+    const qc = new QueryClient();
+    const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+    const { rerender } = render(<WorkSettings gates={{}} onChange={onChange} />, { wrapper });
     fireEvent.change(screen.getByLabelText("URL"), { target: { value: "/srv/git/app.git" } });
     expect(onChange).toHaveBeenLastCalledWith({ project_remote: { url: "/srv/git/app.git", branch: "main", publish: "none" } });
     rerender(<WorkSettings gates={{ project_remote: { url: "/srv/git/app.git" } }} onChange={onChange} />);

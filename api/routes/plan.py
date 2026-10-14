@@ -103,8 +103,19 @@ async def _manager(request: Request, project_id: str,
 
     data_root, doc = await _project(request, project_id)
     tier = meta_model or "heavy"
-    llm = _build_meta_llm(request, meta_model=tier)
     gates = (doc or {}).get("approval_gates") or {}
+    chosen = str(gates.get("pm_model") or "").strip()   # Jack's own model (project setting)
+    if chosen and getattr(request.app.state, "meta_llm", None) is None:
+        from core.llm.registry import ModelRegistry
+        registry = (getattr(request.app.state, "model_registry", None)
+                    or ModelRegistry.for_data_root(data_root))
+        info = registry.get(chosen)
+        if info is None:
+            raise HTTPException(status_code=422, detail=f"Jack's model {chosen!r} is not in "
+                                "Settings → Models & providers; pick another in the project settings")
+        return ProjectManager(registry.get_client(info), data_root, project_id, doc, model=info.id,
+                              effort=info.effort_param(gates.get("pm_effort") or None))
+    llm = _build_meta_llm(request, meta_model=tier)
     model_id, effort = _pm_model(request, data_root, tier, gates.get("pm_effort") or None)
     return ProjectManager(llm, data_root, project_id, doc, model=model_id, effort=effort)
 

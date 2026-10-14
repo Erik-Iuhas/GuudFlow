@@ -225,6 +225,10 @@ export interface ApprovalGates {
   working_context_tokens?: number | null;
   /** Effort level for roles that do not set their own ("low" … "max"); null: each model's default. */
   effort?: "low" | "medium" | "high" | "xhigh" | "max" | null;
+  /** Jack's own model id (from Settings → Models & providers); empty: the heavy tier's model. */
+  pm_model?: string | null;
+  /** Jack's effort level; null: the model's default. */
+  pm_effort?: "low" | "medium" | "high" | "xhigh" | "max" | null;
   project_remote?: ProjectRemote | null;
   autopilot?: AutopilotSettings | null;
 }

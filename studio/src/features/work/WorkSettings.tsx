@@ -2,13 +2,13 @@ import { Card } from "../../components/ui/card";
 import { Input, Label, Select } from "../../components/ui/form-controls";
 import { Switch } from "../../components/ui/switch";
 import type { ApprovalGates, AutopilotSettings, ProjectRemote } from "../../types";
-import { EFFORT_LEVELS, type EffortLevel } from "../models/api";
+import { EFFORT_LEVELS, useModelConfig, type EffortLevel } from "../models/api";
 
 export const DEFAULT_AUTOPILOT: AutopilotSettings = {
   enabled: false, every_hours: 24, take: 2, max_usd_per_run: 5, max_usd_per_week: 20, auto_accept: false,
 };
 
-type WorkGates = Pick<ApprovalGates, "check_command" | "project_remote" | "autopilot" | "working_context_tokens" | "effort">;
+type WorkGates = Pick<ApprovalGates, "check_command" | "project_remote" | "autopilot" | "working_context_tokens" | "effort" | "pm_model" | "pm_effort">;
 
 /**
  * Settings for the project as ongoing work (plan §14): the check run before review,
@@ -20,6 +20,7 @@ export function WorkSettings({
   gates: Partial<ApprovalGates>;
   onChange: (patch: Partial<WorkGates>) => void;
 }) {
+  const models = useModelConfig();
   const remote: ProjectRemote | null = gates.project_remote ?? null;
   const pilot: AutopilotSettings = { ...DEFAULT_AUTOPILOT, ...(gates.autopilot ?? {}) };
   const setRemote = (patch: Partial<ProjectRemote>) => {
@@ -67,6 +68,31 @@ export function WorkSettings({
           <p className="m-0 mt-1 text-xs text-muted-foreground">
             How hard agents think, for roles that do not set their own. Higher levels are slower and
             spend more tokens; a model that lacks a level uses the next lower one it has.
+          </p>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-[1fr_10rem]">
+          <div>
+            <Label htmlFor="pm-model">Jack's model</Label>
+            <Select id="pm-model" value={gates.pm_model ?? ""}
+              onChange={(e) => onChange({ pm_model: e.target.value || null })}>
+              <option value="">heavy tier (set in Settings)</option>
+              {(models.data?.models ?? []).filter((m) => m.supports_tools).map((m) => (
+                <option key={m.id} value={m.id}>{m.id} ({m.provider})</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="pm-effort">Jack's effort</Label>
+            <Select id="pm-effort" value={gates.pm_effort ?? ""}
+              onChange={(e) => onChange({ pm_effort: (e.target.value || null) as EffortLevel | null })}>
+              <option value="">model default</option>
+              {EFFORT_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </Select>
+          </div>
+          <p className="m-0 text-xs text-muted-foreground sm:col-span-2">
+            The model Jack, the project manager, uses to plan. Needs an API key for its provider.
+            Add keys and models under Settings → Models &amp; providers.
           </p>
         </div>
 
