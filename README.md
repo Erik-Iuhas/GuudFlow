@@ -60,8 +60,8 @@ The laundry list. `scripts/doctor.sh` checks all of it and tells you what to fix
 - [ ] A few GB of disk for the image and per-run containers.
 
 **For the uv / Python path**
-- [ ] **[uv](https://docs.astral.sh/uv/)** installs the Python packages (and Python itself if you
-      lack 3.11+: `uv python install 3.11`). Install: `curl -LsSf https://astral.sh/uv/install.sh | sh`.
+- [ ] **[uv](https://docs.astral.sh/uv/)** installs the Python packages, and Python itself if you
+      lack 3.11+ (see [Installing uv](#installing-uv)).
 - [ ] **Node 18+ and npm**, to build Studio once.
 - [ ] **Docker Engine** if you want sandboxed agents. Without it, set `GUUDFLOW_SANDBOX=host` (agents
       then run as your user, so use it only for work you trust).
@@ -70,6 +70,18 @@ The laundry list. `scripts/doctor.sh` checks all of it and tells you what to fix
 - [ ] `BRAVE_API_KEY` or `TAVILY_API_KEY` for the researcher role's web search.
 - [ ] `GUUDFLOW_GIT_TOKEN` to push accepted runs to a real remote.
 - [ ] Playwright Chromium for screenshots (setup installs it; `GUUDFLOW_SKIP_PLAYWRIGHT=1` skips it).
+
+### Installing uv
+
+| Platform | Command |
+|---|---|
+| Linux, macOS, WSL | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| macOS (Homebrew) | `brew install uv` |
+| Windows (PowerShell) | `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
+| Any (pipx or pip) | `pipx install uv` or `pip install uv` |
+
+Open a new terminal afterwards so `uv` is on your `PATH`, then check with `uv --version`. No
+Python 3.11 on the machine is fine: `uv venv` downloads one. Details: <https://docs.astral.sh/uv/getting-started/installation/>.
 
 ## Get started
 
@@ -80,7 +92,7 @@ your model key under **Settings → Models & providers**.
 
 ```bash
 git clone https://github.com/Erik-Iuhas/GuudFlow.git && cd GuudFlow
-cp .env.example .env            # set GUUDFLOW_API_TOKEN; ANTHROPIC_API_KEY is optional here
+cp .env.example .env            # set GUUDFLOW_API_TOKEN (openssl rand -hex 24); ANTHROPIC_API_KEY is optional here
 docker compose up -d --build
 docker compose logs -f          # wait for "Application startup complete"
 ```
@@ -104,7 +116,7 @@ GUUDFLOW_STUDIO_DIST=studio/dist uvicorn api.main:app --port 8000
 
 By hand, without the scripts: `uv venv venv && uv pip install -r requirements.txt`, then
 `python -m playwright install chromium` (with the venv active) and `cd studio && npm ci && npm run build`.
-Windows without WSL: `scripts/setup.ps1` (pip-based).
+Windows without WSL: `scripts/setup.ps1` (still pip-based; WSL2 is the better route on Windows).
 
 For development, `scripts/dev.sh` starts the API with reload on :8000 and the Studio dev server on
 :3001. Use `scripts/dev.sh --no-reload` while agents are running, so a code edit does not restart
