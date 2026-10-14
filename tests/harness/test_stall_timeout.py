@@ -47,3 +47,23 @@ async def test_absolute_cap_still_applies_when_set() -> None:
     client = FakeClient(beats=50, gap=0.05, then_idle=True)         # busy for 2.5 s
     stats = await drive_turn(client, "s", "hi", timeout=0.3, stall=1.0)  # type: ignore[arg-type]
     assert stats.timed_out and "exceeded" in stats.errors[-1]
+
+
+class RetryingClient(FakeClient):
+    """opencode retrying a failing model call: each retry is an event, so no stall."""
+
+    async def events(self) -> AsyncIterator[dict[str, Any]]:
+        yield {"type": "server.connected", "properties": {}}
+        for n in range(1, 20):
+            await asyncio.sleep(0.01)
+            yield {"type": "session.status", "properties": {"sessionID": "s", "status": {
+                "type": "retry", "attempt": n, "message": "upstream 'mistral' unreachable: ConnectError"}}}
+        await asyncio.sleep(3600)
+
+
+async def test_a_model_call_that_keeps_failing_stops_the_turn_with_the_reason(monkeypatch) -> None:
+    monkeypatch.setenv("GUUDFLOW_MODEL_RETRIES", "3")
+    client = RetryingClient(beats=0, gap=0, then_idle=False)
+    stats = await drive_turn(client, "s", "hi", timeout=None, stall=5.0)  # type: ignore[arg-type]
+    assert client.aborted and stats.retries == 3 and not stats.timed_out
+    assert "model call kept failing (3 tries)" in stats.errors[-1] and "ConnectError" in stats.errors[-1]

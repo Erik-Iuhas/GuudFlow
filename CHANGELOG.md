@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A team run no longer sits silent when model calls fail: opencode's retries are logged in the
+  run console with the provider's message, and after `GUUDFLOW_MODEL_RETRIES` (default 4) failed
+  tries in a row the turn stops with that reason. The gateway logs what the provider answered for
+  any error (status and message) and the full reason when it cannot reach it.
 - Certificate: `GUUDFLOW_CA_BUNDLE` takes a PEM or a binary `.cer`, and an intermediate CA works
   as the trust anchor. Studio's Settings has a **Certificate** field as a backup: used when `.env`
   has no path or its file is not found, applied from the next connection without a restart. The

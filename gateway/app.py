@@ -451,7 +451,19 @@ class Gateway:
             log.warning("gateway: upstream %s unreachable: %s", upstream.name, exc)
             self._record(call, 502, _Usage())
             return _error(502, "bad_gateway",
-                          f"upstream {upstream.name!r} unreachable: {type(exc).__name__}")
+                          f"upstream {upstream.name!r} unreachable: {type(exc).__name__}: {str(exc)[:200]}")
+
+        if response.status_code >= 400:
+            # Say what the provider answered (bad key, unknown model, unsupported option, rate
+            # limit): opencode only retries or reports a generic error.
+            body = await response.aread()
+            await response.aclose()
+            log.warning("gateway: %s answered %s for %s: %s", upstream.name, response.status_code,
+                        call.model or "?", body[:400].decode("utf-8", "replace"))
+            self._record(call, response.status_code, _Usage())
+            out = {k: v for k, v in response.headers.items()
+                   if k.lower() not in _RESPONSE_DROP and k.lower() != "content-length"}
+            return Response(content=body, status_code=response.status_code, headers=out)
 
         sse = "text/event-stream" in response.headers.get("content-type", "")
         parser = _UsageParser(upstream.kind, sse)

@@ -48,6 +48,8 @@ class TurnStats:
     permission_asks: int = 0
     errors: list[str] = field(default_factory=list)
     timed_out: bool = False
+    # Model calls opencode retried after a failure (429, 5xx, unreachable).
+    retries: int = 0
     # Context size of the last model call (input + cache read): what a session carries on.
     last_context: int = 0
 
@@ -125,6 +127,12 @@ async def drive_turn(
                 _consume(client, events, session_id, tracker, stats, on_event, on_permission,
                          stall),
                 timeout)
+        except _RetriesExhausted:
+            log.error("turn stopped: %s", stats.errors[-1])
+            try:
+                await client.abort(session_id)
+            except OpencodeError:
+                log.warning("abort of %s failed", session_id)
         except _Stalled:
             stats.timed_out = True
             stats.errors.append(f"turn made no progress for {stall:g}s and was aborted")
@@ -158,6 +166,21 @@ class _Stalled(Exception):
     """No event arrived within the stall window."""
 
 
+class _RetriesExhausted(Exception):
+    """opencode kept retrying a failing model call."""
+
+
+def _max_retries() -> int:
+    """How many failed model calls in a row a turn tolerates (GUUDFLOW_MODEL_RETRIES, default 4).
+    opencode retries with growing waits and each retry is an event, so without this a turn whose
+    model calls keep failing would sit silently until the turn's time limit."""
+    import os
+    try:
+        return max(1, int(os.environ.get("GUUDFLOW_MODEL_RETRIES") or 4))
+    except ValueError:
+        return 4
+
+
 async def _consume(client: OpencodeClient, events: Any, session_id: str,
                    tracker: _UsageTracker, stats: TurnStats, on_event: EventHook | None,
                    on_permission: PermissionHook, stall: float | None = None) -> None:
@@ -182,5 +205,15 @@ async def _consume(client: OpencodeClient, events: Any, session_id: str,
             err = props.get("error") or {}
             stats.errors.append(str((err.get("data") or {}).get("message") or err.get("name")
                                     or "session error"))
+        elif kind == "session.status" and props.get("sessionID") == session_id:
+            status = props.get("status") or {}
+            if status.get("type") == "retry":
+                stats.retries += 1
+                msg = str(status.get("message") or "model call failed")
+                log.warning("model call failed (attempt %s): %s; opencode is retrying",
+                            status.get("attempt") or stats.retries, msg[:300])
+                if stats.retries >= _max_retries():
+                    stats.errors.append(f"model call kept failing ({stats.retries} tries): {msg[:300]}")
+                    raise _RetriesExhausted()
         elif kind == "session.idle" and props.get("sessionID") == session_id:
             return

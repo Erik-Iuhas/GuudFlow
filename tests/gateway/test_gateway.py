@@ -486,3 +486,14 @@ def test_long_prompts_use_the_long_context_price() -> None:
     assert long.cache_write_per_1k == pytest.approx(0.0001 * 1.25 * 5)
     flat = Price(input_per_1k=0.003, output_per_1k=0.015)
     assert flat.for_prompt(900_000) is flat
+
+
+async def test_an_upstream_error_is_passed_through_and_logged(
+        client: httpx.AsyncClient, gateway: Gateway, upstream: Upstreams, caplog) -> None:
+    upstream.respond(httpx.Response(400, json={"error": {"message": "unknown parameter: effort"}}))
+    key = gateway.issue_key("run1", "dev", [CLAUDE])
+    with caplog.at_level("WARNING", logger="gateway.app"):
+        r = await client.post("/anthropic/messages", json=_anthropic_body(),
+                              headers=_anthropic_headers(key))
+    assert r.status_code == 400 and r.json()["error"]["message"] == "unknown parameter: effort"
+    assert any("answered 400" in m and "unknown parameter: effort" in m for m in caplog.messages)
