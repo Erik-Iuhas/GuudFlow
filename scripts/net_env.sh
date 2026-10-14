@@ -22,7 +22,10 @@ if [ -f .env ]; then
 fi
 
 if [ -n "${GUUDFLOW_CA_BUNDLE:-}" ]; then
-  case "$GUUDFLOW_CA_BUNDLE" in   # C:\x\y.pem or C:/x/y.pem -> /mnt/c/x/y.pem
+  case "$GUUDFLOW_CA_BUNDLE" in   # C:\x\y.pem -> /mnt/c/x/y.pem; \\wsl.localhost\Ubuntu\home\x -> /home/x
+    \\\\wsl.localhost\\*|\\\\wsl\$\\*|//wsl.localhost/*|//wsl\$/*)
+      _d="$(printf '%s' "$GUUDFLOW_CA_BUNDLE" | tr '\\' '/')"
+      GUUDFLOW_CA_BUNDLE="/$(printf '%s' "$_d" | cut -d/ -f5-)" ;;
     [A-Za-z]:[\\/]*)
       _d="$(printf '%s' "${GUUDFLOW_CA_BUNDLE:0:1}" | tr 'A-Z' 'a-z')"
       GUUDFLOW_CA_BUNDLE="/mnt/$_d/$(printf '%s' "${GUUDFLOW_CA_BUNDLE:3}" | tr '\\' '/')" ;;

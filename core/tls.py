@@ -30,6 +30,9 @@ def _native_path(raw: str) -> str:
     """A Windows path (`C:\\certs\\corp.pem`) means the same file under /mnt/c on WSL/Linux, so
     one .env works from both sides."""
     raw = raw.strip().strip('"').strip("'")
+    unc = re.match(r"^[\\/]{2}wsl(?:\.localhost|\$)[\\/][^\\/]+(.*)$", raw, re.IGNORECASE)
+    if os.name != "nt" and unc:  # \\wsl.localhost\Ubuntu\home\x\ca.pem -> /home/x/ca.pem
+        return unc.group(1).replace("\\", "/") or "/"
     if os.name != "nt" and re.match(r"^[A-Za-z]:[\\/]", raw):
         return f"/mnt/{raw[0].lower()}/" + raw[3:].replace("\\", "/")
     return raw

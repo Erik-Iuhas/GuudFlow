@@ -50,3 +50,5 @@ def test_a_windows_path_means_the_wsl_mount(monkeypatch: pytest.MonkeyPatch) -> 
     assert tls._native_path("C:\\certs\\corp.pem") == "/mnt/c/certs/corp.pem"
     assert tls._native_path('"D:/x/ca.pem"') == "/mnt/d/x/ca.pem"
     assert tls._native_path("/etc/ssl/corp.pem") == "/etc/ssl/corp.pem"
+    assert tls._native_path("\\\\wsl.localhost\\Ubuntu\\home\\me\\ca.pem") == "/home/me/ca.pem"
+    assert tls._native_path("//wsl$/Ubuntu-22.04/etc/ssl/ca.pem") == "/etc/ssl/ca.pem"
