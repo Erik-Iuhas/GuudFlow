@@ -442,7 +442,7 @@ async def test_a_left_out_change_is_parked_with_a_computed_fix(tmp_path: Path) -
 def test_minimum_team_line_names_what_is_missing() -> None:
     from core.project_manager import minimum_team_line
     team = [{"role": "bram", "role_type": "builder"},
-            {"role": "uma", "role_type": "reviewer", "is_reviewer": True}]
+            {"role": "uma", "role_type": "reviewer", "is_reviewer": True, "review_of": ["bram"]}]
     assert minimum_team_line(team).startswith("Minimum team: missing a role that plans sessions")
     assert minimum_team_line([{"role": "planner", "role_type": "planner"}, *team]) == \
         "Minimum team: complete."
@@ -475,3 +475,13 @@ async def test_streamed_changes_reach_the_preview_and_the_draft_is_unchanged(
     assert seen == [1, 2]
     assert out.draft is not None and [c.op for c in out.draft.changes] == \
         ["add_requirement", "add_decision"]
+
+
+def test_minimum_team_line_names_builders_no_reviewer_covers() -> None:
+    from core.project_manager import minimum_team_line
+    team = [{"role": "tech_lead", "role_type": "architect"},
+            {"role": "developer", "role_type": "builder", "depends_on": ["tech_lead"]},
+            {"role": "builder_2", "role_type": "builder", "depends_on": ["tech_lead"]},
+            {"role": "reviewer", "role_type": "reviewer", "depends_on": ["developer"]}]
+    line = minimum_team_line(team)
+    assert "a reviewer for builder_2" in line and "developer" not in line.split("for", 1)[1]

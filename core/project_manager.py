@@ -257,6 +257,18 @@ def minimum_team_line(team: list[dict[str, Any]]) -> str:  # Any: agent rows
         gaps.append("a builder")
     if "reviewer" not in types:
         gaps.append("a reviewer")
+    else:
+        # A reviewer reviews its `review_of` roles, else the roles it depends on
+        # (TaskFlow.build); a builder outside every reviewer's set ships unreviewed.
+        covered: set[str] = set()
+        for a, t in zip(team, types):
+            if t == "reviewer":
+                covered |= set(a.get("review_of") or a.get("depends_on") or [])
+        unreviewed = [str(a["role"]) for a, t in zip(team, types)
+                      if t in ("builder", "frontend_builder", "tester") and str(a["role"]) not in covered]
+        if unreviewed:
+            gaps.append("a reviewer for " + ", ".join(unreviewed)
+                        + " (add them to a reviewer's review_of)")
     if not gaps:
         return "Minimum team: complete."
     return "Minimum team: missing " + ", ".join(gaps) + ". Propose them with `add_role`."
