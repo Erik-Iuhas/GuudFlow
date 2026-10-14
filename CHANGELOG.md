@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- WSL mode: tasks drop the Windows folders WSL adds to `PATH` (`/mnt/c/...`), so a Windows npm,
+  node or Python never runs in place of the Linux one (the cause of "'vite' is not recognized";
+  `GUUDFLOW_KEEP_WINDOWS_PATH=1` keeps them). Studio's dev server is used only with a Linux npm and
+  a `node_modules` made for this OS; otherwise the prebuilt Studio on :8000.
 - Run dev stack on native Windows: the API window starts the venv's Python directly (a new window
   could block `Activate.ps1` and fall back to a Python without uvicorn), and Studio's dev server is
   used only when vite is installed; a partial `node_modules` from a failed npm install now means

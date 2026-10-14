@@ -79,7 +79,8 @@ fi
 USE_DIST=0
 # The shared Studio step: an archive in prebuilt/ or an existing studio/dist means no npm at all.
 bash scripts/studio_ensure.sh || die "No Studio: put studio-dist.tar.gz (or the artifact zip) in prebuilt/ and run again"
-if [ ! -x studio/node_modules/.bin/vite ]; then   # a failed npm install leaves node_modules without vite
+source scripts/studio_dev_ok.sh
+if ! studio_dev_ok; then   # no npm, no vite, or node_modules made by Windows npm
     [ -f studio/dist/index.html ] || die "No Studio: npm packages are incomplete and there is no studio/dist. Put the Studio archive in prebuilt/ and run again."
     info "  Studio: serving the prebuilt studio/dist from the API on :8000"
     USE_DIST=1

@@ -213,6 +213,10 @@ WSL must be installed. This is the default (`GUUDFLOW_WINDOWS_MODE=wsl`).
   Prepare tries that on its own when npm fails. A machine with npm can make one with
   `bash scripts/run.sh studio-pack`. **Run dev stack** then serves it from the API on :8000
   instead of the dev server on :3001.
+- **WSL sees Windows programs.** WSL adds the Windows `PATH`, so a Windows npm or Python can run
+  inside WSL and fail with "'vite' is not recognized". Tasks remove those folders
+  (`GUUDFLOW_KEEP_WINDOWS_PATH=1` to keep them) and use only Linux tools; with no Linux Node,
+  Studio comes from `prebuilt/`. A `studio/node_modules` installed from Windows is not used in WSL.
 - **Python packages behind a proxy.** One step makes `./venv` and installs the packages for every
   task: **Python environment** (`bash scripts/run.sh python-env`, `scripts\run.ps1 python-env`).
   Run it on its own first when setup trips; it says what failed. It uses `HTTPS_PROXY`, trusts

@@ -53,7 +53,8 @@ echo "Project"
 if venv_ok; then ok "Python environment ./venv ($(venv/bin/python --version 2>&1))"
 elif [ -d venv ]; then bad "./venv uses $(venv/bin/python --version 2>&1 || echo a broken Python); run Setup to rebuild it with 3.11"
 else warn "no ./venv yet (Setup)"; fi
-[ -x studio/node_modules/.bin/vite ] && ok "Studio packages installed" || warn "Studio npm packages missing or incomplete (fine with a prebuilt studio/dist)"
+source scripts/studio_dev_ok.sh
+studio_dev_ok && ok "Studio packages installed" || warn "Studio npm packages missing or incomplete (fine with a prebuilt studio/dist)"
 [ -f studio/dist/index.html ] && ok "Studio built (studio/dist)" \
   || warn "Studio not built (scripts/build.sh studio); the dev server on :3001 works without it"
 

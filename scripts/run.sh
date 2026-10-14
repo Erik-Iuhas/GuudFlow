@@ -17,6 +17,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+# WSL adds the Windows PATH, so a Windows npm/node/python (under /mnt/c) can run instead of the
+# Linux one and fail with "'vite' is not recognized ...". Keep tasks on Linux tools only
+# (GUUDFLOW_KEEP_WINDOWS_PATH=1 to opt out).
+if grep -qi microsoft /proc/version 2>/dev/null && [ "${GUUDFLOW_KEEP_WINDOWS_PATH:-0}" != "1" ]; then
+  PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/mnt/[a-zA-Z]/' | paste -sd: -)"
+  export PATH
+fi
 chmod +x scripts/*.sh 2>/dev/null || true   # best effort: restore lost execute bits
 
 cmd="${1:-help}"; [ $# -gt 0 ] && shift

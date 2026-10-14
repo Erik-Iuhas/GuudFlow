@@ -90,7 +90,8 @@ bash scripts/doctor.sh || true
 
 step "Next"
 if [ ${#NEXT[@]} -gt 0 ]; then for n in "${NEXT[@]}"; do note "- $n"; done; fi
-if [ -x studio/node_modules/.bin/vite ]; then
+source scripts/studio_dev_ok.sh
+if studio_dev_ok; then
   note "- run the task 'Run dev stack' and open http://localhost:3001"
 else
   note "- run the task 'Run dev stack' and open http://localhost:8000 (prebuilt Studio)"
