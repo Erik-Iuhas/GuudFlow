@@ -139,7 +139,7 @@ troubleshooting.
 
 Run `scripts/check.sh escape` too when you touch `core/harness/`, `worker/`, `sandbox/` or `gateway/`.
 
-**VS Code:** open the folder and run **Tasks: Run Task**. The tasks in `.vscode/tasks.json` cover
+**VS Code:** the tasks run through `bash`, so open the folder in WSL (Remote - WSL) or have Git Bash on your PATH. Then run **Tasks: Run Task**. The tasks in `.vscode/tasks.json` cover
 setup, doctor, the dev stack, Compose up/logs/down, builds, and each check. `.vscode/launch.json` debugs the API, the current pytest file, and a one-shot run.
 Run **Tasks: Run Test Task** for the fast checks.
 

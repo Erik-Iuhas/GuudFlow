@@ -1,24 +1,125 @@
 {
   "version": "2.0.0",
   "tasks": [
-    { "label": "Setup (venv, packages, Studio, .env)", "type": "shell", "command": "scripts/setup.sh", "problemMatcher": [] },
-    { "label": "Doctor (is this machine ready?)", "type": "shell", "command": "scripts/doctor.sh", "problemMatcher": [] },
-    { "label": "Run dev stack (API :8000 + Studio :3001)", "type": "shell", "command": "scripts/dev.sh", "isBackground": true,
-      "problemMatcher": [], "presentation": { "panel": "dedicated" } },
-    { "label": "Run dev stack (no reload, safe for agent runs)", "type": "shell", "command": "scripts/dev.sh --no-reload",
-      "isBackground": true, "problemMatcher": [], "presentation": { "panel": "dedicated" } },
-    { "label": "Run API (built Studio on :8000)", "type": "shell",
+    {
+      "label": "Setup (venv, packages, Studio, .env)",
+      "type": "shell",
+      "command": "scripts/setup.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Doctor (is this machine ready?)",
+      "type": "shell",
+      "command": "scripts/doctor.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run dev stack (API :8000 + Studio :3001)",
+      "type": "shell",
+      "command": "scripts/dev.sh",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Run dev stack (no reload, safe for agent runs)",
+      "type": "shell",
+      "command": "scripts/dev.sh --no-reload",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Run API (built Studio on :8000)",
+      "type": "shell",
       "command": "source venv/bin/activate && GUUDFLOW_STUDIO_DIST=studio/dist uvicorn api.main:app --port 8000",
-      "dependsOn": ["Build Studio"], "isBackground": true, "problemMatcher": [] },
-    { "label": "Docker Compose up", "type": "shell", "command": "docker compose up -d --build", "problemMatcher": [] },
-    { "label": "Docker Compose logs", "type": "shell", "command": "docker compose logs -f --tail=100", "isBackground": true, "problemMatcher": [] },
-    { "label": "Docker Compose down", "type": "shell", "command": "docker compose down", "problemMatcher": [] },
-    { "label": "Build Studio", "type": "shell", "command": "scripts/build.sh studio", "problemMatcher": ["$tsc"] },
-    { "label": "Build all (Studio, opencode, Docker image)", "type": "shell", "command": "scripts/build.sh all", "problemMatcher": [] },
-    { "label": "Install opencode", "type": "shell", "command": "scripts/install_opencode.sh", "problemMatcher": [] },
-    { "label": "Check: everything fast", "type": "shell", "command": "scripts/check.sh", "group": { "kind": "test", "isDefault": true }, "problemMatcher": [] },
-    { "label": "Check: backend", "type": "shell", "command": "scripts/check.sh backend", "group": "test", "problemMatcher": [] },
-    { "label": "Check: Studio", "type": "shell", "command": "scripts/check.sh studio", "group": "test", "problemMatcher": [] },
-    { "label": "Check: escape suite (Docker, root)", "type": "shell", "command": "scripts/check.sh escape", "group": "test", "problemMatcher": [] }
-  ]
+      "dependsOn": [
+        "Build Studio"
+      ],
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker Compose up",
+      "type": "shell",
+      "command": "docker compose up -d --build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker Compose logs",
+      "type": "shell",
+      "command": "docker compose logs -f --tail=100",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker Compose down",
+      "type": "shell",
+      "command": "docker compose down",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Studio",
+      "type": "shell",
+      "command": "scripts/build.sh studio",
+      "problemMatcher": [
+        "$tsc"
+      ]
+    },
+    {
+      "label": "Build all (Studio, opencode, Docker image)",
+      "type": "shell",
+      "command": "scripts/build.sh all",
+      "problemMatcher": []
+    },
+    {
+      "label": "Install opencode",
+      "type": "shell",
+      "command": "scripts/install_opencode.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Check: everything fast",
+      "type": "shell",
+      "command": "scripts/check.sh",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Check: backend",
+      "type": "shell",
+      "command": "scripts/check.sh backend",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Check: Studio",
+      "type": "shell",
+      "command": "scripts/check.sh studio",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Check: escape suite (Docker, root)",
+      "type": "shell",
+      "command": "scripts/check.sh escape",
+      "group": "test",
+      "problemMatcher": []
+    }
+  ],
+  "options": {
+    "shell": {
+      "executable": "bash",
+      "args": [
+        "-c"
+      ]
+    }
+  }
 }
