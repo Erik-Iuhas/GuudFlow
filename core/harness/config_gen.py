@@ -163,6 +163,9 @@ def build_config(*, role: str, agent: dict[str, Any], binding: ProviderBinding,
         "small_model": small.model_ref,
         "default_agent": role,
         "provider": providers,
+        # Only GuudFlow's providers exist in this server: opencode's built-in catalogue (and its
+        # own hosted models) can never be picked, listed or called.
+        "enabled_providers": sorted(providers),
         # Top-level deny-all so opencode's built-in agents (build, plan, general) are locked too.
         "permission": {"*": "deny", "read": "allow", "glob": "allow",
                        "grep": "allow", "list": "allow"},

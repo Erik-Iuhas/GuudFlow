@@ -476,7 +476,7 @@ class SandboxManager:
         deadline = loop.time() + timeout
         auth = httpx.BasicAuth("opencode", sandbox.password)
         url = f"{sandbox.base_url}/global/health"
-        async with httpx.AsyncClient(auth=auth, timeout=2.0) as client:
+        async with httpx.AsyncClient(auth=auth, timeout=2.0, trust_env=False) as client:
             while True:
                 try:
                     resp = await client.get(url)

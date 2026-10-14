@@ -40,7 +40,17 @@ _DEFAULT_BIN = _REPO_ROOT / ".tools" / "opencode" / "node_modules" / ".bin" / "o
 
 # Env vars copied from the host. Nothing else is inherited.
 _HOST_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE",
-                       "NODE_EXTRA_CA_CERTS", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY")
+                       "NODE_EXTRA_CA_CERTS", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+                       "https_proxy", "http_proxy", "no_proxy")
+# opencode reaches GuudFlow's gateway and MCP server on this machine; a proxy must never carry
+# those calls (a company proxy cannot reach them and the turn hangs).
+_LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def _no_proxy(env: dict[str, str]) -> str:
+    """NO_PROXY with the local hosts always in it."""
+    have = [h.strip() for h in (env.get("NO_PROXY") or env.get("no_proxy") or "").split(",") if h.strip()]
+    return ",".join(have + [h for h in _LOCAL_HOSTS if h not in have])
 
 # Flags from plan §5.2. All are verified to exist in the pinned binary.
 LOCKED_FLAGS: dict[str, str] = {
@@ -128,6 +138,7 @@ def locked_env(
         "OPENCODE_CONFIG_CONTENT": json.dumps(config),
         "OPENCODE_SERVER_PASSWORD": password,
     })
+    env["NO_PROXY"] = env["no_proxy"] = _no_proxy(env)
     env.update(LOCKED_FLAGS)
     if extra_env:
         env.update(extra_env)

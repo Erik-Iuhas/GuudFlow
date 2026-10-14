@@ -133,6 +133,9 @@ class OpencodeClient:
             timeout=timeout,
             transport=transport,
             params={"directory": directory},
+            # The server is local: an HTTP(S)_PROXY from the environment must not carry these
+            # calls to a company proxy that cannot reach this machine (the turn would hang).
+            trust_env=False,
         )
 
     async def __aenter__(self) -> OpencodeClient:

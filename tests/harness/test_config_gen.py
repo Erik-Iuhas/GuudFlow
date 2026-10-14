@@ -103,11 +103,12 @@ def test_build_config_shape_and_order() -> None:
     agent = agent_entry(_compiled(), model_ref=ANTHROPIC.model_ref, prompt="p")
     config = build_config(role="builder", agent=agent, binding=ANTHROPIC)
     assert list(config) == ["$schema", "share", "autoupdate", "experimental", "model", "small_model",
-                            "default_agent", "provider", "permission", "agent",
+                            "default_agent", "provider", "enabled_providers", "permission", "agent",
                             "subagent_depth", "compaction", "attachment"]
     assert config["share"] == "disabled" and config["autoupdate"] is False
     assert config["model"] == config["small_model"] == "anthropic/claude-x"
     assert config["default_agent"] == "builder"
+    assert config["enabled_providers"] == ["anthropic"]  # nothing of opencode's own catalogue
     assert config["permission"] == {"*": "deny", "read": "allow", "glob": "allow",
                                     "grep": "allow", "list": "allow"}
     assert list(config["agent"]) == ["builder", "explore"]
@@ -345,3 +346,13 @@ def test_telemetry_is_off() -> None:
     assert config["experimental"]["openTelemetry"] is False and config["share"] == "disabled"
     assert LOCKED_FLAGS["OTEL_SDK_DISABLED"] == "true"
     assert LOCKED_FLAGS["OPENCODE_DISABLE_SHARE"] == "1"
+
+
+
+def test_opencode_never_sends_local_calls_through_a_proxy(monkeypatch, tmp_path) -> None:
+    from core.harness.server import locked_env
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.corp:8080")
+    monkeypatch.setenv("NO_PROXY", ".corp.example")
+    env = locked_env(tmp_path, {}, "pw")
+    assert env["HTTPS_PROXY"] == "http://proxy.corp:8080"
+    assert env["NO_PROXY"] == env["no_proxy"] == ".corp.example,localhost,127.0.0.1,::1"

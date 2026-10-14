@@ -293,3 +293,11 @@ async def test_events_non_2xx_raises() -> None:
             async for _ in client.events():
                 pass
     assert ei.value.status_code == 401 and ei.value.body == "unauth"
+
+
+def test_the_client_ignores_proxy_settings(monkeypatch) -> None:
+    """opencode runs on this machine: a company proxy must never carry these calls."""
+    from core.harness.opencode_client import OpencodeClient
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.corp:8080")
+    client = OpencodeClient("http://127.0.0.1:4096", "/work")
+    assert client._http._trust_env is False
