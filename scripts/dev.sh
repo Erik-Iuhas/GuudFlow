@@ -56,25 +56,22 @@ kill_port 3001
 kill_leftover_uvicorn
 sleep 0.3
 
-# ── python / venv ──────────────────────────────────────────────────────────
-PY="$(command -v python3 || command -v python || die 'python3 not found')"
+# ── python / venv (uv; fetches Python 3.11 if the system one is older) ───────
+command -v uv >/dev/null 2>&1 || die "uv not found: curl -LsSf https://astral.sh/uv/install.sh | sh  (then open a new terminal)"
 
-# Detect a Windows-built venv (has Scripts/ but not bin/)
-if [ -d venv ] && [ ! -f venv/bin/activate ]; then
-    warn "  venv was built by Windows Python — rebuilding for Linux..."
+# A venv left by an earlier failed attempt, or built by Windows or with a Python older than 3.11.
+if [ -d venv ] && { [ ! -x venv/bin/python ] || ! venv/bin/python -c 'import sys;sys.exit(sys.version_info<(3,11))' 2>/dev/null; }; then
+    warn "  venv is unusable (broken, Windows-built or Python < 3.11) — rebuilding with uv..."
     rm -rf venv
 fi
 
 if [ ! -d venv ]; then
-    info "→ Creating venv with ${PY}..."
-    "${PY}" -m venv venv
-    source venv/bin/activate
+    info "→ Creating venv with uv..."
+    uv venv --python 3.11 venv
     info "→ Installing Python deps..."
-    pip install --quiet --upgrade pip
-    pip install --quiet -r requirements.txt
-else
-    source venv/bin/activate
+    uv pip install --quiet --python venv/bin/python -r requirements.txt
 fi
+source venv/bin/activate
 
 # ── .env sanity check ──────────────────────────────────────────────────────
 if [ ! -f .env ]; then
