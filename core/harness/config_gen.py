@@ -18,6 +18,9 @@ from core.harness.capabilities import READONLY_BASH, CompiledCapabilities
 from core.harness.permissions import build_permission
 from core.llm.registry import ModelInfo
 
+# opencode's default agents, switched off in every GuudFlow server.
+BUILTIN_AGENTS = ("build", "plan", "general")
+
 _NPM_BY_CLIENT = {
     "anthropic": "@ai-sdk/anthropic",
     "openai_compatible": "@ai-sdk/openai-compatible",
@@ -169,7 +172,11 @@ def build_config(*, role: str, agent: dict[str, Any], binding: ProviderBinding,
         # Top-level deny-all so opencode's built-in agents (build, plan, general) are locked too.
         "permission": {"*": "deny", "read": "allow", "glob": "allow",
                        "grep": "allow", "list": "allow"},
-        "agent": {role: agent, "explore": EXPLORE_OVERRIDE},
+        # The role's agent and the read-only explore helper only: opencode's own agents (build,
+        # plan, general) are removed, so the server is purely GuudFlow's harness. Its internal
+        # helpers (compaction, summary, title) stay; they use the role's model.
+        "agent": {**{name: {"disable": True} for name in BUILTIN_AGENTS if name != role},
+                  role: agent, "explore": EXPLORE_OVERRIDE},
         "subagent_depth": 1,
         # Compact near the working context and drop old tool output first (prune), so a long
         # turn stays inside it instead of growing toward the model's full window.

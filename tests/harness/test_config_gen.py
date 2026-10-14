@@ -109,9 +109,11 @@ def test_build_config_shape_and_order() -> None:
     assert config["model"] == config["small_model"] == "anthropic/claude-x"
     assert config["default_agent"] == "builder"
     assert config["enabled_providers"] == ["anthropic"]  # nothing of opencode's own catalogue
+    assert {n: a for n, a in config["agent"].items() if a == {"disable": True}} == {
+        "build": {"disable": True}, "plan": {"disable": True}, "general": {"disable": True}}
     assert config["permission"] == {"*": "deny", "read": "allow", "glob": "allow",
                                     "grep": "allow", "list": "allow"}
-    assert list(config["agent"]) == ["builder", "explore"]
+    assert list(config["agent"]) == ["build", "plan", "general", "builder", "explore"]
     assert config["agent"]["explore"] == EXPLORE_OVERRIDE
     assert config["subagent_depth"] == 1 and config["compaction"] == {"auto": True, "prune": True}
     assert config["attachment"]["image"] == {
