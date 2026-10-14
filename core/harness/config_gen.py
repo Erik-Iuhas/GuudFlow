@@ -157,6 +157,8 @@ def build_config(*, role: str, agent: dict[str, Any], binding: ProviderBinding,
         "$schema": "https://opencode.ai/config.json",
         "share": "disabled",
         "autoupdate": False,
+        # Telemetry off, explicitly (it is opt-in in opencode; this keeps it off).
+        "experimental": {"openTelemetry": False},
         "model": binding.model_ref,
         "small_model": small.model_ref,
         "default_agent": role,

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- opencode telemetry explicitly off for every agent: `experimental.openTelemetry: false` in its
+  config and `OTEL_SDK_DISABLED=true` (with sharing, auto-update and model-list fetching already off).
 - Tasks and scripts across setups: one entry point (`scripts/run.sh`, `scripts/run.ps1` on Windows),
   `GUUDFLOW_WINDOWS_MODE=wsl|native`, scripts always run through bash, LF line endings enforced.
 - Agent turns that crash are logged and posted (were silent); opencode startup waits 180 s, ignores

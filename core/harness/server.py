@@ -51,6 +51,10 @@ LOCKED_FLAGS: dict[str, str] = {
     "OPENCODE_DISABLE_SHARE": "1",
     "OPENCODE_DISABLE_MODELS_FETCH": "1",
     "OPENCODE_DISABLE_LSP_DOWNLOAD": "1",
+    # No telemetry: opencode's OpenTelemetry export is opt-in (config
+    # `experimental.openTelemetry`, set false in config_gen); this also stops the OTel SDK
+    # from exporting even if some OTEL_* variable were present.
+    "OTEL_SDK_DISABLED": "true",
 }
 
 

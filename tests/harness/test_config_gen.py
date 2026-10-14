@@ -102,7 +102,7 @@ def test_explore_override_is_read_only() -> None:
 def test_build_config_shape_and_order() -> None:
     agent = agent_entry(_compiled(), model_ref=ANTHROPIC.model_ref, prompt="p")
     config = build_config(role="builder", agent=agent, binding=ANTHROPIC)
-    assert list(config) == ["$schema", "share", "autoupdate", "model", "small_model",
+    assert list(config) == ["$schema", "share", "autoupdate", "experimental", "model", "small_model",
                             "default_agent", "provider", "permission", "agent",
                             "subagent_depth", "compaction", "attachment"]
     assert config["share"] == "disabled" and config["autoupdate"] is False
@@ -336,3 +336,12 @@ def test_a_cards_item_effort_becomes_the_turn_variant() -> None:
     assert OpencodeRun._turn_variant(role, TurnPlan(model=AgentResult, effort="xhigh")) == "high"
     assert OpencodeRun._turn_variant(role, TurnPlan(model=AgentResult)) is None
     assert OpencodeRun._turn_variant(role, None) is None
+
+
+def test_telemetry_is_off() -> None:
+    """opencode's OpenTelemetry export stays off: config flag and the OTel SDK switch."""
+    from core.harness.server import LOCKED_FLAGS
+    config = build_config(role="r", agent={}, binding=ANTHROPIC)
+    assert config["experimental"]["openTelemetry"] is False and config["share"] == "disabled"
+    assert LOCKED_FLAGS["OTEL_SDK_DISABLED"] == "true"
+    assert LOCKED_FLAGS["OPENCODE_DISABLE_SHARE"] == "1"
