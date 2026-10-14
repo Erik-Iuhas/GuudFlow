@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="dark">
+  <title>R6.9 preview</title>
+  <style>
+    html, body { margin: 0; background: #000; }
+    body { display: flex; gap: 8px; padding: 8px; }
+    canvas { display: block; image-rendering: pixelated; }
+    #cracked, #rush { display: none; }
+    #boss { width: 960px; height: 1152px; }
+    #report { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="cracked" width="480" height="576"></canvas>
+  <canvas id="rush" width="480" height="576"></canvas>
+  <canvas id="boss" width="480" height="576"></canvas>
+  <script type="module">
+    import { createGame } from './src/logic/game.js';
+    import { generateLevel } from './src/logic/levels/generate.js';
+    import { drawFrame } from './src/render/draw.js';
+
+    const cases = [
+      { id: 'cracked', family: 'cracked', level: 1, seed: 11 },
+      { id: 'rush', family: 'rush', level: 2, seed: 7 },
+      { id: 'boss', family: 'boss', level: 5, seed: 5 },
+    ];
+    const report = {};
+    for (const c of cases) {
+      const level = generateLevel({ seed: c.seed, family: c.family, level: c.level });
+      const game = createGame({ template: level.maze, config: { ...level.config, lives: 3 }, seed: c.seed, abilities: [] });
+      const ctx = document.getElementById(c.id).getContext('2d');
+      const view = {
+        maze: game.maze,
+        phase: 'playing',
+        score: 0,
+        pops: [],
+        fx: null,
+        hud: { level: c.level, levels: 5, family: c.family, held: [] },
+      };
+      drawFrame(ctx, game.state, view);
+      const pellets = game.state.pellets;
+      let power = 0; let dots = 0;
+      for (const p of pellets) { if (p === 2) power++; else if (p === 1) dots++; }
+      const cracked = game.maze.tiles.filter((t) => t === 3).length;
+      const boss = game.state.boss;
+      report[c.id] = { power, dots, cracked, family: level.family, config: level.config, boss: boss ? { size: boss.size, hp: boss.hp, maxHp: boss.maxHp } : null };
+    }
+    window.REPORT = report;
+    const pre = document.createElement('pre');
+    pre.id = 'report';
+    pre.style.cssText = 'color:#fff;font:11px monospace;margin:0;width:260px;white-space:pre-wrap;overflow:hidden';
+    pre.textContent = JSON.stringify(report, null, 1);
+    document.body.appendChild(pre);
+  </script>
+</body>
+</html>
