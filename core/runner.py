@@ -667,9 +667,25 @@ class AgentRunner:
             pump = QuipPump(self.quip_engine, self.workspace)  # type: ignore[arg-type]
             unsubscribe = self.workspace.subscribe(pump.on_signal)
             pump_task = asyncio.create_task(pump.run())
+        from core.harness import run_console
+        console = run_console.capture(self.run_root)
+        console.__enter__()
+        run_console.note(self.run_root, "runner",
+                         "run started; team: " + ", ".join(
+                             f"{c.role} ({c.role_type or 'role'}, {c.model_tier})"
+                             for c in self.project.agents))
         try:
-            result = await OpencodeRun(self, self.harness_settings).run()
+            run_obj = OpencodeRun(self, self.harness_settings)
+            result = await run_obj.run()
+            run_console.note(self.run_root, "runner", run_console.describe_end(
+                list(self.project.agents), result.status.value, dict(result.spawn_counts),
+                len(getattr(run_obj, "backlog", []) or []), run_obj.flow is not None))
+        except BaseException as exc:
+            run_console.note(self.run_root, "runner",
+                             f"run failed: {type(exc).__name__}: {exc}", "error")
+            raise
         finally:
+            console.__exit__(None, None, None)
             if pump is not None:
                 unsubscribe()
                 pump.close()

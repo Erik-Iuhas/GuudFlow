@@ -24,6 +24,23 @@ Design tab (`api/routes/design.py`, `studio/src/features/design/`); Jack's promp
 > with a spec but no items, or the scheduler finding nothing runnable. S3 (overseer visible),
 > S4 (honest status), S5 (don't skip a ready backlog) and S7 (Jack proposes a sensible team) stand.
 
+### Reframed: the goal is visibility (done)
+
+The first live run ended `stuck` with $0.00 and no explanation, and the code reading did not
+settle why. So the first step is not another guess; it is making the next such run explain
+itself.
+
+| Step | Work | Status |
+|---|---|---|
+| C1 | **Run console.** `core/harness/run_console.py`: while a run is active, host-side log lines (core, gateway, worker, api loggers, with tracebacks) are written to the run's `console.jsonl`. The runner also writes the team at start and, at the end, `describe_end`: mode (task cards or plain roles), backlog items taken, and for every role how often it spawned or why it never started (what it waits on). | done |
+| C2 | **Role server logs.** `read_console` also returns the tail of each role's `opencode_home/<role>/opencode-serve.log`. | done |
+| C3 | **`GET /api/runs/{id}/console`** | done |
+| C4 | **Studio Console tab** on the run view: log lines by source, errors in red, a source picker that includes each role's server log, polling every 3 s while open. | done |
+
+With this, the stuck Excuse-o-matic run would have shown either a spawn error or "no role was ever
+spawned" with the reason beside it. Still open from this plan: S3 (overseer node and wake
+button), S4 (honest status line), S5 (ask before running goal-only with open items), S6, S7.
+
 ### Original notes: A run with nobody to plan it just sits there (found on the first live run)
 
 **Seen (Excuse-o-matic, `run_85824de61c`).** The team was a developer (Bram) and a reviewer

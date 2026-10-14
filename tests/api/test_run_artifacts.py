@@ -191,3 +191,17 @@ def test_artifact_cookie_expires(monkeypatch) -> None:
     assert not artifact_cookie_valid("r", value, now=1000 + ARTIFACT_TTL_SECONDS + 1)
     monkeypatch.delenv("GUUDFLOW_API_TOKEN")
     assert issue_artifact_cookie("r") is None   # dev mode: open, nothing to sign
+
+
+async def test_console_route_returns_lines_and_role_logs(client, auth_header, data_root) -> None:
+    from core.harness import run_console
+    run_root = data_root / "runs" / "run_console1"
+    (run_root / "opencode_home" / "bram").mkdir(parents=True)
+    (run_root / "opencode_home" / "bram" / "opencode-serve.log").write_text("boom\n")
+    run_console.note(run_root, "runner", "run started")
+    r = await client.get("/api/runs/run_console1/console", headers=auth_header)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["lines"][0]["text"] == "run started"
+    assert body["roles"] == [{"role": "bram", "lines": ["boom"]}]
+    assert (await client.get("/api/runs/nope/console", headers=auth_header)).status_code == 404

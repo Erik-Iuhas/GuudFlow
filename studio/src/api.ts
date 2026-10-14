@@ -762,6 +762,15 @@ export async function getCards(runId: string): Promise<CardWire[]> {
   return res?.cards ?? [];
 }
 
+export interface ConsoleLine { t: number; source: string; level: string; text: string }
+export interface RunConsole { lines: ConsoleLine[]; roles: { role: string; lines: string[] }[] }
+
+/** The run's host-side console and each role's server log tail (`GET /api/runs/{id}/console`). */
+export async function getConsole(runId: string): Promise<RunConsole> {
+  const res = await request<RunConsole>("GET", `/api/runs/${encodeURIComponent(runId)}/console`);
+  return res ?? { lines: [], roles: [] };
+}
+
 /** Body of `POST /api/runs/{id}/cards` (human adds a card). */
 export interface NewCardBody {
   owner: string;

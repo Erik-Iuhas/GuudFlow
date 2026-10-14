@@ -26,6 +26,7 @@ import { HumanAnswerBox } from "./HumanAnswerBox";
 import { LimitsControl } from "./LimitsControl";
 import { ArtifactGallery } from "../artifacts/ArtifactGallery";
 import { TaskBoard } from "../board";
+import { ConsolePanel } from "./ConsolePanel";
 import { formatElapsed, mergeRoles, parseTimestamp, roleSpecs } from "./model";
 import { OverseerPanel } from "./OverseerPanel";
 import { PipelineGraph } from "./PipelineGraph";
@@ -40,7 +41,7 @@ const NODE_VIEW_OPTIONS: { value: NodeView; label: string }[] = [
   { value: "graph", label: "Graph" },
 ];
 
-type PanelTab = "board" | "quips" | "overseer" | "cards" | "artifacts";
+type PanelTab = "board" | "quips" | "overseer" | "cards" | "artifacts" | "console";
 
 // ── Data wrapper ─────────────────────────────────────────────────────────────
 
@@ -456,6 +457,7 @@ function SidePanel({
         <TabsTrigger value="overseer">Overseer{interventionCount > 0 ? ` (${interventionCount})` : ""}</TabsTrigger>
         <TabsTrigger value="cards">Cards{cardCount > 0 ? ` (${cardCount})` : ""}</TabsTrigger>
         <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
+        <TabsTrigger value="console">Console</TabsTrigger>
       </TabsList>
       <TabsContent value="board" className="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
         <VirtualBoardFeed />
@@ -471,6 +473,9 @@ function SidePanel({
       </TabsContent>
       <TabsContent value="artifacts" className="mt-0 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
         <ArtifactGallery runId={runId} />
+      </TabsContent>
+      <TabsContent value="console" className="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+        {tab === "console" && <ConsolePanel runId={runId} live />}
       </TabsContent>
     </Tabs>
   );

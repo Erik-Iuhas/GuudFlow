@@ -1300,6 +1300,17 @@ async def get_iteration_metrics(request: Request, run_id: str) -> list[dict]:
     return _read_jsonl(run_root / "iteration_metrics.jsonl")
 
 
+@router.get("/{run_id}/console", dependencies=[Depends(require_bearer)])
+async def get_console(request: Request, run_id: str, tail: int = 400) -> dict:
+    """The run's host-side console (scheduler, spawns, errors) and each role's opencode
+    server log tail: why something did not happen. 404 if the run does not exist."""
+    from core.harness.run_console import read_console
+    run_root = Path(request.app.state.data_root) / "runs" / run_id
+    if not run_root.exists():
+        raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+    return read_console(run_root, tail=max(1, min(tail, 2000)))
+
+
 @router.get("/{run_id}/context_log", dependencies=[Depends(require_bearer)])
 async def get_context_log(request: Request, run_id: str) -> list[dict]:
     """Return all ContextSnapshot rows for a run (Track 1).
