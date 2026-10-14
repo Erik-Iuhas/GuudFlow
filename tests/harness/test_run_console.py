@@ -60,3 +60,16 @@ def test_no_plan_detector_fires_when_a_role_ran_and_the_board_is_empty() -> None
     assert no_plan(RunView(signals=[], cards=[], role_states={}, running=[]), DetectorConfig()) == []
     assert no_plan(RunView(signals=[ran], cards=[], role_states={}, running=["tech_lead"]),
                    DetectorConfig()) == []
+
+
+async def test_a_server_that_never_gets_healthy_reports_its_log(tmp_path) -> None:
+    import pytest
+
+    from core.harness.server import OpencodeServer
+    srv = OpencodeServer.__new__(OpencodeServer)
+    srv._log_path = tmp_path / "opencode-serve.log"
+    srv._log_path.write_text("starting\nError: cannot fetch models.dev\n")
+    assert "cannot fetch models.dev" in srv._log_tail()
+    srv._log_path.write_text("")
+    assert "log is empty" in srv._log_tail()
+    del pytest

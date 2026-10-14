@@ -152,3 +152,21 @@ async def test_mutations_post_signals_for_websocket(client, app, auth_header) ->
     await client.post("/api/runs/run_c/cards/T1/comments", json={"text": "hi"},
                       headers=auth_header)
     assert any(s.type.value == "TASK_THREAD" for s in seen)
+
+
+async def test_a_card_can_go_to_a_team_role_that_has_not_started(client, auth_header, app) -> None:
+    import json as _json
+
+    from core.signals import Signal, SignalType
+    ws = _register(app, "run_team")
+    ws.post_signal(Signal(type=SignalType.TEAM, from_agent="runner", summary="the team",
+                          detail=_json.dumps({"members": [
+                              {"role": "developer", "role_type": "builder"},
+                              {"role": "overseer", "role_type": "overseer"}]})))
+    body = {"owner": "developer", "title": "Check directory", "acceptance": ["runs ls"],
+            "kind": "code", "size": "S"}
+    r = await client.post("/api/runs/run_team/cards", headers=auth_header, json=body)
+    assert r.status_code in (200, 201), r.text
+    r = await client.post("/api/runs/run_team/cards", headers=auth_header,
+                          json={**body, "owner": "overseer"})
+    assert r.status_code == 400

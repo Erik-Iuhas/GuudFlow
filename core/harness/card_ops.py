@@ -12,12 +12,14 @@ no async. They validate, mutate through :class:`~core.harness.task_board.TaskBoa
 """
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Sequence
 from typing import Any
 
 from core.harness.task_board import TaskBoard
 from core.harness.tasks import ThreadEntry
+from core.signals import SignalType
 from core.workspace import Task, Workspace
 
 __all__ = [
@@ -64,7 +66,16 @@ def _known_owner_roles(ws: Workspace) -> set[str]:
     scheduler will ever pick up.
     """
     owners = {t.assigned_to for t in TaskBoard(ws).cards() if t.assigned_to}
-    return owners | set(ws.agent_states)
+    # The team from the TEAM signal too, so a card can go to a role that has not started yet.
+    team: set[str] = set()
+    for sig in ws.board:
+        if sig.type is SignalType.TEAM:
+            try:
+                team = {str(m["role"]) for m in json.loads(sig.detail or "{}").get("members", [])
+                        if m.get("role") and m.get("role_type") != "overseer"}
+            except (ValueError, TypeError, AttributeError):
+                pass
+    return owners | set(ws.agent_states) | team
 
 
 def _clean_items(items: Sequence[str]) -> list[str]:

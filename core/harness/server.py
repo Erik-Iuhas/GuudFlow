@@ -139,7 +139,10 @@ class OpencodeServer:
     hostname: str = "127.0.0.1"
     port: int = 0
     password: str = field(default_factory=lambda: secrets.token_urlsafe(24))
-    startup_timeout: float = 60.0
+    # The first start in a fresh home unpacks and indexes; on a slow disk (WSL on /mnt/c) that
+    # can take well over a minute. GUUDFLOW_OPENCODE_STARTUP_S overrides it.
+    startup_timeout: float = field(default_factory=lambda: float(
+        os.environ.get("GUUDFLOW_OPENCODE_STARTUP_S") or 180.0))
     _proc: asyncio.subprocess.Process | None = field(default=None, init=False, repr=False)
     _log_path: Path | None = field(default=None, init=False, repr=False)
     _tmp: Path | None = field(default=None, init=False, repr=False)
@@ -183,11 +186,14 @@ class OpencodeServer:
     async def _wait_healthy(self) -> None:
         deadline = asyncio.get_running_loop().time() + self.startup_timeout
         auth = httpx.BasicAuth("opencode", self.password)
-        async with httpx.AsyncClient(auth=auth, timeout=2.0) as client:
+        # trust_env=False: the server is on localhost, and an HTTP(S)_PROXY from the environment
+        # would send the health check to the proxy, so it never sees the server.
+        async with httpx.AsyncClient(auth=auth, timeout=2.0, trust_env=False) as client:
             while True:
                 if self._proc is not None and self._proc.returncode is not None:
                     raise RuntimeError(
                         f"opencode serve exited with {self._proc.returncode}; see {self._log_path}"
+                        + self._log_tail()
                     )
                 try:
                     resp = await client.get(f"{self.base_url}/global/health")
@@ -196,9 +202,21 @@ class OpencodeServer:
                 except httpx.HTTPError:
                     pass
                 if asyncio.get_running_loop().time() > deadline:
+                    tail = self._log_tail()
                     await self.stop()
-                    raise TimeoutError(f"opencode serve not healthy; see {self._log_path}")
+                    raise TimeoutError(f"opencode serve not healthy after "
+                                       f"{self.startup_timeout:g}s; see {self._log_path}" + tail)
                 await asyncio.sleep(0.25)
+
+    def _log_tail(self, lines: int = 15) -> str:
+        """The end of the server log, for an error message."""
+        try:
+            text = (self._log_path.read_text(errors="replace") if self._log_path else "")
+        except OSError:
+            return ""
+        tail = "\n".join(text.strip().splitlines()[-lines:])
+        return f"\n--- last lines of the opencode log ---\n{tail}" if tail else \
+            "\n(the opencode log is empty: the binary may not have started at all)"
 
     async def stop(self) -> None:
         """Terminate the server (SIGTERM, then SIGKILL after 5s)."""
