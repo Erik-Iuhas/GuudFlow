@@ -12,7 +12,19 @@ panel; the typed design ops and `validate_design_turn` (`core/design.py`); desig
 Design tab (`api/routes/design.py`, `studio/src/features/design/`); Jack's prompt already says
 "no tech lead: propose one".
 
-## 0. A run with nobody to plan it just sits there (found on the first live run)
+## 0. A run that never started (found on the first live run)
+
+> **Correction (after trying to build S1).** `TaskFlow.build` returns `None` when the team has no
+> planner, which means *plain dependency mode*: the developer runs straight from the goal, with no
+> cards. A planner-less team is therefore **valid** (the full-journey test runs one to
+> completion), so "no planner means no cards" is not the cause of the stall below, and S1 as
+> written (refuse such teams) would break legitimate simple teams. S1 and S2 are on hold until
+> the run's `board.jsonl` shows why Bram never spawned: candidates are the model or key (no
+> Mistral key reaching the gateway, a spawn error before any call), the run having been started
+> with a spec but no items, or the scheduler finding nothing runnable. S3 (overseer visible),
+> S4 (honest status), S5 (don't skip a ready backlog) and S7 (Jack proposes a sensible team) stand.
+
+### Original notes: A run with nobody to plan it just sits there (found on the first live run)
 
 **Seen (Excuse-o-matic, `run_85824de61c`).** The team was a developer (Bram) and a reviewer
 (Uma) and nothing else. The run showed "Waiting for the first agent…", then `stuck` at 1:03 with
