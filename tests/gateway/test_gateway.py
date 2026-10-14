@@ -249,6 +249,48 @@ async def test_openai_streaming_usage(client: httpx.AsyncClient, gateway: Gatewa
     assert sent["stream_options"] == {"include_usage": True}
 
 
+# Mistral streams `content` as a list of parts (seen live: a `reference` part, then text);
+# opencode's OpenAI-compatible SDK only accepts a string and failed the turn.
+MISTRAL_SSE = _sse(
+    (None, {"id": "c1", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {
+        "role": "assistant",
+        "content": [{"type": "reference", "reference_ids": []}, {"type": "text", "text": '{"f'}]}}]}),
+    (None, {"id": "c1", "choices": [{"index": 0, "delta": {"content": 'oo"}'}}]}),
+    (None, {"id": "c1", "choices": [], "usage": {"prompt_tokens": 30, "completion_tokens": 4}}),
+    (None, "[DONE]"),
+)
+
+
+async def test_list_content_in_an_openai_compatible_stream_becomes_text(
+        client: httpx.AsyncClient, gateway: Gateway, upstream: Upstreams) -> None:
+    upstream.respond(httpx.Response(200, content=_chunked(MISTRAL_SSE, 5),
+                                    headers={"content-type": "text/event-stream"}))
+    key = gateway.issue_key("run1", "dev", [GPT])
+    r = await client.post("/openai/chat/completions", headers={"authorization": f"Bearer {key}"},
+                          json={"model": GPT, "stream": True, "messages": []})
+    chunks = [json.loads(line[5:]) for line in r.text.splitlines() if line.startswith("data: {")]
+    assert [c["choices"][0]["delta"]["content"] for c in chunks[:2]] == ['{"f', 'oo"}']
+    assert chunks[0]["choices"][0]["delta"]["role"] == "assistant"
+    assert r.text.endswith("data: [DONE]\n\n")
+    (rec,) = gateway.usage("run1")
+    assert (rec.input_tokens, rec.output_tokens) == (30, 4)
+
+
+async def test_list_content_in_an_openai_compatible_reply_becomes_text(
+        client: httpx.AsyncClient, gateway: Gateway, upstream: Upstreams) -> None:
+    upstream.respond(httpx.Response(200, json={"choices": [{"index": 0, "message": {
+        "role": "assistant", "content": [
+            {"type": "thinking", "thinking": [{"type": "text", "text": "hmm"}]},
+            {"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}}],
+        "usage": {"prompt_tokens": 7, "completion_tokens": 2}}))
+    key = gateway.issue_key("run1", "dev", [GPT])
+    r = await client.post("/openai/chat/completions", headers={"authorization": f"Bearer {key}"},
+                          json={"model": GPT, "messages": []})
+    assert r.json()["choices"][0]["message"]["content"] == "ab"
+    (rec,) = gateway.usage("run1")
+    assert (rec.input_tokens, rec.output_tokens) == (7, 2)
+
+
 async def test_non_stream_json_usage(client: httpx.AsyncClient, gateway: Gateway,
                                      upstream: Upstreams) -> None:
     key = gateway.issue_key("run1", "dev", [CLAUDE, GPT])

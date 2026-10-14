@@ -247,6 +247,55 @@ class _UsageParser:
                             output_tokens=completion)
 
 
+def _text_content(obj: object) -> bool:
+    """Make every `choices[].delta|message.content` a string, in place; True if one changed.
+
+    OpenAI's schema has `content` as a string, but some OpenAI-compatible providers (Mistral)
+    send a list of parts. opencode's SDK rejects those chunks and the turn fails, so the text
+    parts are joined and the rest (references, thinking) dropped.
+    """
+    changed = False
+    choices = obj.get("choices") if isinstance(obj, dict) else None
+    for choice in choices if isinstance(choices, list) else ():
+        for key in ("delta", "message"):
+            part = choice.get(key) if isinstance(choice, dict) else None
+            if isinstance(part, dict) and isinstance(part.get("content"), list):
+                part["content"] = "".join(
+                    p["text"] for p in part["content"]
+                    if isinstance(p, dict) and p.get("type") == "text" and isinstance(p.get("text"), str))
+                changed = True
+    return changed
+
+
+class _SseTextContent:
+    """Applies `_text_content` to an SSE body line by line; other lines pass through unchanged."""
+
+    def __init__(self) -> None:
+        self._buf = b""
+
+    def feed(self, chunk: bytes) -> bytes:
+        self._buf += chunk
+        *lines, self._buf = self._buf.split(b"\n")
+        return b"".join(self._line(line) + b"\n" for line in lines)
+
+    def finish(self) -> bytes:
+        rest, self._buf = self._buf, b""
+        return self._line(rest) if rest else b""
+
+    @staticmethod
+    def _line(line: bytes) -> bytes:
+        text = line.rstrip(b"\r")
+        if not text.startswith(b"data:"):
+            return line
+        try:
+            obj = json.loads(text[5:])
+        except ValueError:
+            return line
+        if not _text_content(obj):
+            return line
+        return b"data: " + json.dumps(obj).encode() + line[len(text):]
+
+
 def _count_images(body: dict[str, Any]) -> int:
     """Image parts in the request's messages (Anthropic `image` blocks, OpenAI `image_url` parts)."""
     def walk(node: object) -> int:
@@ -469,11 +518,30 @@ class Gateway:
         parser = _UsageParser(upstream.kind, sse)
         out_headers = {k: v for k, v in response.headers.items() if k.lower() not in _RESPONSE_DROP}
 
+        if upstream.kind == "openai_compatible" and not sse:
+            try:
+                body = await response.aread()
+            finally:
+                await response.aclose()
+            parser.feed(body)
+            self._record(call, response.status_code, parser.finish())
+            obj = _UsageParser._load(body)
+            if _text_content(obj):
+                body = json.dumps(obj).encode()
+            out_headers.pop("content-length", None)
+            return Response(content=body, status_code=response.status_code, headers=out_headers)
+
+        fix = _SseTextContent() if upstream.kind == "openai_compatible" else None
+
         async def stream() -> AsyncIterator[bytes]:
             try:
                 async for chunk in response.aiter_bytes():
                     parser.feed(chunk)
-                    yield chunk
+                    out = fix.feed(chunk) if fix else chunk
+                    if out:
+                        yield out
+                if fix:
+                    yield fix.finish()
             finally:
                 # Runs on completion, upstream failure and client disconnect alike.
                 self._record(call, response.status_code, parser.finish())
