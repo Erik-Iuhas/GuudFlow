@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Run console: each run keeps GuudFlow's own log lines (`console.jsonl`), explains at the end who
+  ran and who never started and why, and returns each role's server log; Studio's run view has a
+  Console tab.
+- Overseer bar under the run graph with a Wake overseer button, or the reason a run has none.
+- Jack: picks his model and effort per project, sees a "Minimum team" line and proposes missing
+  roles, parks left-out changes with computed fixes (*Accept the suggestion*), and repair rounds
+  no longer repeat his summary. Fixed: host-side calls ignored the configured models and always
+  used Anthropic.
+- Studio: confirm before a goal-only run skips open backlog items; Ask Jack to change the team.
+- Setup: uv for the Python packages, `install_uv.sh`, `doctor.sh`, `stop.sh`, `build.sh`,
+  `check.sh`, VS Code tasks (run through bash; on Windows that is WSL).
+
 ## 0.1.0
 
 First tagged release. GuudFlow runs a named team of agents on an ongoing project: you plan with

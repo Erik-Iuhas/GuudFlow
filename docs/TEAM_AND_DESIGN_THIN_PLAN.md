@@ -40,9 +40,22 @@ itself.
 With this, the stuck Excuse-o-matic run would have shown either a spawn error or "no role was ever
 spawned" with the reason beside it.
 
-Also done: **S5** (Run on the goal only asks first when backlog items are open) and a small **S4**
-(the waiting line points to the Console tab). Still open: S3 (overseer node and wake button), S6
-(repair note repeats the reply), S7 (Jack proposes a minimum team).
+Also done:
+- **S3.** Under the graph, an overseer bar: "watching" with a **Wake overseer** button
+  (`POST /runs/{id}/overseer/wake` posts an owner ESCALATION, which the escalation detector turns
+  into a wake), or, when the run has none, why: the overseer only starts when the team has a
+  planner (task cards). The console notes the same at run start. This is what the stuck
+  Excuse-o-matic run lacked: a builder-and-reviewer team runs in plain-roles mode, which has no
+  overseer at all.
+- **S4** (small): the waiting line points to the Console tab.
+- **S5.** *Run on the goal only* asks first when backlog items are open.
+- **S6.** A repair round that re-sends changes adds "Fixed N changes in a repair round", not a
+  second copy of the summary.
+- **S7.** Jack's team context ends with a computed "Minimum team" line (planner, builder,
+  reviewer), and his prompt tells him to propose what is missing in the same turn.
+
+Not done: S1/S2 (dropped: planner-less teams are valid), and sections 1 and 2 below (team graph
+diff, design conversation).
 
 ### Original notes: A run with nobody to plan it just sits there (found on the first live run)
 

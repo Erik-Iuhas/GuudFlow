@@ -708,6 +708,33 @@ async def post_user_comment(
     }
 
 
+class WakeBody(BaseModel):
+    """Body of POST /{run_id}/overseer/wake."""
+
+    text: str = Field(default="The owner asked you to look at the run.", max_length=2000)
+
+
+@router.post("/{run_id}/overseer/wake", dependencies=[Depends(require_bearer)])
+async def wake_overseer(request: Request, run_id: str, body: WakeBody | None = None) -> dict:
+    """Wake the overseer by hand: posts an ESCALATION from the owner, which the escalation
+    detector turns into an overseer wake at the next watchdog pass. 410 if the run is not
+    active, 409 if the run has no overseer (plain-roles runs have none)."""
+    workspace = await request.app.state.run_registry.get(run_id)
+    if workspace is None:
+        raise HTTPException(status_code=410, detail=f"run {run_id!r} is not active")
+    roles = {s.from_agent for s in workspace.board} | set(getattr(workspace, "agent_roles", []) or [])
+    team = next((s for s in reversed(workspace.board) if s.type is SignalType.TEAM), None)
+    team_text = f"{team.summary} {team.detail or ''}" if team is not None else ""
+    if "overseer" not in team_text and not any("overseer" in r for r in roles if r):
+        raise HTTPException(status_code=409, detail="this run has no overseer: it only runs "
+                            "when the team has a planner (task cards)")
+    text = ((body.text if body else "") or "The owner asked you to look at the run.").strip()
+    signal = Signal(type=SignalType.ESCALATION, summary=f"owner: {text}"[:300], detail=text,
+                    from_agent="owner", iteration=workspace.iteration)
+    workspace.post_signal(signal)
+    return {"ok": True, "signal_id": str(signal.id)}
+
+
 class RespondBody(BaseModel):
     """Body of POST /{run_id}/respond."""
 

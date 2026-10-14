@@ -452,6 +452,11 @@ class OpencodeRun:
         """Add the overseer role when the settings call for one (plan §11.1)."""
         mode = self.settings.overseer
         if mode == "off" or (mode == "auto" and self.flow is None):
+            from core.harness import run_console
+            run_console.note(self.runner.run_root, "runner", "no overseer on this run: " + (
+                "the overseer setting is off" if mode == "off" else
+                "the team has no role that plans sessions, so the run uses plain roles and "
+                "the overseer (which watches task cards) is not started"), "warning")
             return
         name = next((n for n, r in self._roles.items() if r.role_type == "overseer"), None)
         if name is None:

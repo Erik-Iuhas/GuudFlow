@@ -27,6 +27,7 @@ import { LimitsControl } from "./LimitsControl";
 import { ArtifactGallery } from "../artifacts/ArtifactGallery";
 import { TaskBoard } from "../board";
 import { ConsolePanel } from "./ConsolePanel";
+import { OverseerBar } from "./OverseerBar";
 import { formatElapsed, mergeRoles, parseTimestamp, roleSpecs } from "./model";
 import { OverseerPanel } from "./OverseerPanel";
 import { PipelineGraph } from "./PipelineGraph";
@@ -369,6 +370,9 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           <PipelineGraph specs={allSpecs} selectedRole={selectedRole} onSelectRole={selectRole} direction="LR" fitHeight />
         </div>
       )}
+      <OverseerBar runId={runId}
+        present={allSpecs.some((r) => r.role.includes("overseer"))}
+        active={!["complete", "failed", "stuck", "stopped", "max_iterations"].includes(String(status))} />
 
       {desktop && panelOpen && (
         <aside className="flex h-[30rem] flex-col overflow-hidden rounded-lg border border-border bg-card" aria-label="Run panels">

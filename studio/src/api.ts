@@ -771,6 +771,11 @@ export async function getConsole(runId: string): Promise<RunConsole> {
   return res ?? { lines: [], roles: [] };
 }
 
+/** Wake the overseer by hand (`POST /api/runs/{id}/overseer/wake`). */
+export async function wakeOverseer(runId: string, text: string): Promise<void> {
+  await request("POST", `/api/runs/${encodeURIComponent(runId)}/overseer/wake`, { text });
+}
+
 /** Body of `POST /api/runs/{id}/cards` (human adds a card). */
 export interface NewCardBody {
   owner: string;

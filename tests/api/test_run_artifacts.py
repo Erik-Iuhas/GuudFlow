@@ -205,3 +205,27 @@ async def test_console_route_returns_lines_and_role_logs(client, auth_header, da
     assert body["lines"][0]["text"] == "run started"
     assert body["roles"] == [{"role": "bram", "lines": ["boom"]}]
     assert (await client.get("/api/runs/nope/console", headers=auth_header)).status_code == 404
+
+
+async def test_wake_overseer_needs_an_active_run(client, auth_header) -> None:
+    r = await client.post("/api/runs/not_running/overseer/wake", headers=auth_header,
+                          json={"text": "look"})
+    assert r.status_code == 410
+
+
+async def test_wake_overseer_posts_an_escalation_or_says_there_is_none(client, auth_header,
+                                                                        app) -> None:
+    from core.signals import Signal, SignalType
+    from core.workspace import Workspace
+    ws = Workspace(run_id="run_w", goal="x")
+    app.state.run_registry.runs["run_w"] = ws
+    r = await client.post("/api/runs/run_w/overseer/wake", headers=auth_header, json={"text": "x"})
+    assert r.status_code == 409 and "no overseer" in r.json()["detail"]
+    ws.post_signal(Signal(type=SignalType.TEAM, summary="team: bram, uma, overseer",
+                          from_agent="runner"))
+    r = await client.post("/api/runs/run_w/overseer/wake", headers=auth_header,
+                          json={"text": "it is stuck"})
+    assert r.status_code == 200, r.text
+    last = ws.board[-1]
+    assert last.type is SignalType.ESCALATION and last.from_agent == "owner"
+    assert "it is stuck" in last.summary
