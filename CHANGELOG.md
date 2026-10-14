@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Run dev stack on native Windows: the API window starts the venv's Python directly (a new window
+  could block `Activate.ps1` and fall back to a Python without uvicorn), and Studio's dev server is
+  used only when vite is installed; a partial `node_modules` from a failed npm install now means
+  the prebuilt Studio on :8000 instead of "vite is not recognized".
 - One Python step (`python-env`, task **Python environment**) shared by Prepare, Setup, Run dev
   stack, api and check on Linux, WSL and native Windows: it makes `./venv` and installs the
   packages, does nothing when they are already there, and stops with a clear message instead of

@@ -184,7 +184,7 @@ function Doctor {
     if (Get-Command npm -ErrorAction SilentlyContinue) { Ok "npm $(npm --version)" } else { Warn "npm not found: use a prebuilt Studio" }
     if (Test-Path $Py) { Ok "venv" } else { Bad "no venv (Setup)" }
     if ((Test-Path ".tools\opencode\node_modules\opencode-windows-x64") -or (Test-Path ".tools\opencode\node_modules\.bin\opencode.cmd")) { Ok "opencode installed" } else { Bad "opencode missing (scripts\run.ps1 install-opencode)" }
-    if (Test-Path "studio\dist\index.html") { Ok "Studio built (studio\dist)" } elseif (Test-Path "studio\node_modules") { Ok "Studio packages (dev server)" } else { Bad "no Studio: put studio-dist.tar.gz in prebuilt\ and run studio-ensure" }
+    if (Test-Path "studio\dist\index.html") { Ok "Studio built (studio\dist)" } elseif (Test-Path "studio\node_modules\.bin\vite.cmd") { Ok "Studio packages (dev server)" } else { Bad "no Studio: put studio-dist.tar.gz in prebuilt\ and run studio-ensure" }
     if (Test-Path ".env") {
         Ok ".env exists"
         if (Select-String -Path ".env" -Pattern '^\s*GUUDFLOW_API_TOKEN=.+' -Quiet) { Ok "GUUDFLOW_API_TOKEN set" } else { Bad "GUUDFLOW_API_TOKEN empty in .env" }
@@ -203,8 +203,9 @@ function Studio-Ensure([bool]$build = $false) {
         if (-not (Test-Path "studio/dist/.unpacked") -or $arch.LastWriteTime -gt (Get-Item -Force "studio/dist/.unpacked").LastWriteTime) { Studio-Unpack $arch.FullName }
         Write-Host "Studio: prebuilt from prebuilt\$($arch.Name) (npm skipped)"; return $true
     }
-    if ((Test-Path "studio/dist/index.html") -and -not (Test-Path "studio/node_modules")) { Write-Host "Studio: using the existing build in studio\dist (npm skipped)"; return $true }
-    if ((Test-Path "studio/node_modules") -and -not $build) { Write-Host "Studio: npm packages already installed"; return $true }
+    $vite = (Test-Path "studio/node_modules/.bin/vite.cmd") -or (Test-Path "studio/node_modules/.bin/vite")
+    if ((Test-Path "studio/dist/index.html") -and -not $vite) { Write-Host "Studio: using the existing build in studio\dist (npm skipped)"; return $true }
+    if ($vite -and -not $build) { Write-Host "Studio: npm packages already installed"; return $true }
     if ($env:GUUDFLOW_SKIP_NPM -ne "1" -and (Get-Command npm -ErrorAction SilentlyContinue)) {
         try { if ($build) { Npm-Build-Studio } elseif (-not (Studio-Deps)) { throw "npm failed" }; return $true } catch { Write-Warning "$_" }
     }

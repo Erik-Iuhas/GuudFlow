@@ -79,7 +79,8 @@ fi
 USE_DIST=0
 # The shared Studio step: an archive in prebuilt/ or an existing studio/dist means no npm at all.
 bash scripts/studio_ensure.sh || die "No Studio: put studio-dist.tar.gz (or the artifact zip) in prebuilt/ and run again"
-if [ ! -d studio/node_modules ]; then
+if [ ! -x studio/node_modules/.bin/vite ]; then   # a failed npm install leaves node_modules without vite
+    [ -f studio/dist/index.html ] || die "No Studio: npm packages are incomplete and there is no studio/dist. Put the Studio archive in prebuilt/ and run again."
     info "  Studio: serving the prebuilt studio/dist from the API on :8000"
     USE_DIST=1
 fi
@@ -91,13 +92,13 @@ LOG_FRONT="${ROOT}/.dev-frontend.log"
 [ "${USE_DIST}" -eq 1 ] && export GUUDFLOW_STUDIO_DIST="${ROOT}/studio/dist"
 if [ "${NO_RELOAD}" -eq 1 ]; then
     info "→ Starting backend  → http://localhost:8000  [NO RELOAD — safe for agent testing]"
-    uvicorn api.main:app --port 8000 > "${LOG_BACK}" 2>&1 &
+    python -m uvicorn api.main:app --port 8000 > "${LOG_BACK}" 2>&1 &
 else
     info "→ Starting backend  → http://localhost:8000  [reload watches api/core/agents/worker]"
     # NOTE: do NOT pass --reload-include — it OVERRIDES --reload-dir scoping
     # and makes watchfiles see *.py files anywhere in the project, including
     # data/runs/<id>/workspace/working/**/*.py written by agents.
-    uvicorn api.main:app --reload \
+    python -m uvicorn api.main:app --reload \
         --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker \
         --reload-exclude '*.pyc' --reload-exclude '__pycache__/*' \
         --port 8000 > "${LOG_BACK}" 2>&1 &
@@ -116,7 +117,7 @@ fi
 
 ok "
   Backend  pid ${BACK_PID}  →  http://localhost:8000
-  Frontend pid ${FRONT_PID}  →  http://localhost:3001
+$([ "${USE_DIST}" -eq 1 ] && echo "  Studio (prebuilt)  →  http://localhost:8000" || echo "  Frontend pid ${FRONT_PID}  →  http://localhost:3001")
   Logs: tail -f .dev-backend.log .dev-frontend.log
 
   Ctrl-C to stop both.

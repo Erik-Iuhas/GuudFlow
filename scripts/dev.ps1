@@ -59,8 +59,12 @@ $Shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "
 # serves the prebuilt studio\dist on :8000.
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "run.ps1") studio-ensure
 if ($LASTEXITCODE -ne 0) { throw "No Studio: put studio-dist.tar.gz (or the artifact zip) in prebuilt\ and run again" }
-$UseDist = -not (Test-Path (Join-Path $Repo "studio\node_modules"))
-if ($UseDist) { Write-Host "Studio: serving the prebuilt studio\dist on :8000" -ForegroundColor Yellow }
+# The dev server needs vite itself, not just a node_modules folder (a failed npm install leaves one).
+$UseDist = -not (Test-Path (Join-Path $Repo "studio\node_modules\.bin\vite.cmd"))
+if ($UseDist) {
+    if (-not (Test-Path (Join-Path $Repo "studio\dist\index.html"))) { throw "No Studio: npm packages are incomplete and there is no studio\dist. Put the Studio zip in prebuilt\ and run again." }
+    Write-Host "Studio: serving the prebuilt studio\dist on :8000 (no vite here)" -ForegroundColor Yellow
+}
 $distEnv = if ($UseDist) { "`$env:GUUDFLOW_STUDIO_DIST='$Repo\studio\dist'; " } else { "" }
 
 # Backend
@@ -76,8 +80,8 @@ $reloadArgs = if ($NoReload) {
     "--reload --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker --reload-exclude *.pyc --reload-exclude __pycache__/*"
 }
 Start-Process $Shell -ArgumentList @(
-    "-NoExit", "-Command",
-    "Set-Location '$Repo'; $distEnv& '$activate'; python -m uvicorn api.main:app $reloadArgs --port 8000"
+    "-NoExit", "-ExecutionPolicy", "Bypass", "-Command",
+    "Set-Location '$Repo'; $distEnv& '$Repo\venv\Scripts\python.exe' -m uvicorn api.main:app $reloadArgs --port 8000"
 )
 
 # Frontend
@@ -85,7 +89,7 @@ $studioPath = Join-Path $Repo "studio"
 if (-not $UseDist) {
     Write-Host "Starting frontend -> http://localhost:3001" -ForegroundColor Cyan
     Start-Process $Shell -ArgumentList @(
-        "-NoExit", "-Command",
+        "-NoExit", "-ExecutionPolicy", "Bypass", "-Command",
         "Set-Location '$studioPath'; npm run dev"
     )
 }

@@ -22,10 +22,11 @@ if [ -n "$ARCH" ]; then
   fi
   echo "Studio: prebuilt from $ARCH (npm skipped)"; exit 0
 fi
-if [ -f studio/dist/index.html ] && [ ! -d studio/node_modules ]; then
+# npm packages count only when vite is there (a failed install leaves a partial node_modules)
+if [ -f studio/dist/index.html ] && [ ! -x studio/node_modules/.bin/vite ]; then
   echo "Studio: using the existing build in studio/dist (npm skipped)"; exit 0
 fi
-if [ -d studio/node_modules ] && [ "$BUILD" = 0 ]; then
+if [ -x studio/node_modules/.bin/vite ] && [ "$BUILD" = 0 ]; then
   echo "Studio: npm packages already installed"; exit 0
 fi
 if [ "${GUUDFLOW_SKIP_NPM:-0}" != "1" ] && command -v npm >/dev/null 2>&1 && bash scripts/studio_deps.sh; then
