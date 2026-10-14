@@ -16,6 +16,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+source scripts/net_env.sh   # proxy, mirror and certificate settings from .env
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 # WSL adds the Windows PATH, so a Windows npm/node/python (under /mnt/c) can run instead of the
 # Linux one and fail with "'vite' is not recognized ...". Keep tasks on Linux tools only

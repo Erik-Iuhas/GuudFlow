@@ -15,6 +15,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+source scripts/net_env.sh   # proxy, mirror and certificate settings from .env
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 step() { printf '\n\033[36m== %s\033[0m\n' "$*"; }
 note() { printf '   %s\n' "$*"; }

@@ -9,13 +9,14 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+source scripts/net_env.sh   # proxy, mirror and certificate settings from .env
 mkdir -p prebuilt
 OUT=prebuilt/studio-dist.tar.gz
 TAG="${1:-studio-latest}"
 SLUG="${GUUDFLOW_REPO:-$(git remote get-url origin 2>/dev/null | sed -E 's#(\.git)?$##; s#.*[:/]([^/]+/[^/]+)$#\1#')}"
 [ -n "$SLUG" ] || { echo "cannot tell the GitHub repo; set GUUDFLOW_REPO=owner/repo" >&2; exit 1; }
 URL="https://github.com/${SLUG}/releases/download/${TAG}/studio-dist.tar.gz"
-CA=(); [ -n "${GUUDFLOW_CA_BUNDLE:-}" ] && CA=(--cacert "$GUUDFLOW_CA_BUNDLE")
+CA=()   # curl reads CURL_CA_BUNDLE (set by net_env.sh from GUUDFLOW_CA_BUNDLE)
 AUTH=(); [ -n "${GITHUB_TOKEN:-}" ] && AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 echo "Downloading $URL"
 if curl -fL --retry 4 "${CA[@]}" -o "$OUT" "$URL" 2>/dev/null; then

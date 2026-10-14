@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import ssl
 from functools import lru_cache
 from pathlib import Path
@@ -25,9 +26,18 @@ log = logging.getLogger(__name__)
 ENV = "GUUDFLOW_CA_BUNDLE"
 
 
+def _native_path(raw: str) -> str:
+    """A Windows path (`C:\\certs\\corp.pem`) means the same file under /mnt/c on WSL/Linux, so
+    one .env works from both sides."""
+    raw = raw.strip().strip('"').strip("'")
+    if os.name != "nt" and re.match(r"^[A-Za-z]:[\\/]", raw):
+        return f"/mnt/{raw[0].lower()}/" + raw[3:].replace("\\", "/")
+    return raw
+
+
 def custom_bundle() -> Path | None:
     """The extra CA file, or None when none is configured. A missing file is an error."""
-    raw = os.environ.get(ENV, "").strip()
+    raw = _native_path(os.environ.get(ENV, ""))
     if not raw:
         return None
     path = Path(raw).expanduser()

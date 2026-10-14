@@ -225,7 +225,9 @@ WSL must be installed. This is the default (`GUUDFLOW_WINDOWS_MODE=wsl`).
   With no PyPI at all, download the **Python wheels** Action's artifact for your machine
   (`python-wheels-windows-py311`, or `-linux-` for Linux and WSL), put the zip in `prebuilt/` and
   run it again: it installs with no network.
-- **A proxy or company certificate.** Set `GUUDFLOW_CA_BUNDLE` to your CA's PEM file; TLS checks
+- **A proxy or company certificate.** Put `GUUDFLOW_CA_BUNDLE=<your CA's PEM file>` (and
+  `HTTPS_PROXY` if needed) in `.env`: the API and every setup task read it from there (a
+  `C:\...` path works in WSL too). TLS checks
   stay on ([SETUP §9](docs/SETUP.md)).
 - **Restart after editing `.env`.** The API reads it at start. After installing uv, open a new
   terminal (the scripts find it either way).

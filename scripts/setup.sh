@@ -7,6 +7,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${ROOT}"
+source scripts/net_env.sh   # proxy, mirror and certificate settings from .env
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"   # where the uv installer puts uv
 
 echo "GuudFlow setup"

@@ -12,6 +12,8 @@
 # (put studio-dist.tar.gz in prebuilt/, see README "Quirks").
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+source scripts/net_env.sh   # proxy, mirror and certificate settings from .env
 cd "$ROOT/studio"
 command -v npm >/dev/null 2>&1 || { echo "npm not found (Node 18+), or use a prebuilt Studio" >&2; exit 1; }
 

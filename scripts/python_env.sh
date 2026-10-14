@@ -15,14 +15,12 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+source scripts/net_env.sh   # proxy, mirror and certificate settings from .env
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fail() { echo "Python env: $*" >&2; exit 1; }
 
 # Proxy-friendly settings for uv and pip.
 export UV_NATIVE_TLS="${UV_NATIVE_TLS:-1}"   # trust the system certificate store (company CAs)
-if [ -n "${GUUDFLOW_CA_BUNDLE:-}" ]; then
-  export SSL_CERT_FILE="$GUUDFLOW_CA_BUNDLE" PIP_CERT="$GUUDFLOW_CA_BUNDLE" REQUESTS_CA_BUNDLE="$GUUDFLOW_CA_BUNDLE"
-fi
 if [ -n "${GUUDFLOW_PIP_INDEX:-}" ]; then
   export UV_DEFAULT_INDEX="$GUUDFLOW_PIP_INDEX" PIP_INDEX_URL="$GUUDFLOW_PIP_INDEX"
 fi

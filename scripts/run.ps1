@@ -35,6 +35,41 @@ if ($mode -eq "wsl") {
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 $Py = Join-Path $Repo "venv\Scripts\python.exe"
 
+# Network settings from .env reach every tool these tasks run (uv, pip, npm, node, Invoke-WebRequest),
+# like they reach the API: proxy and mirror lines, and GUUDFLOW_CA_BUNDLE trusted on top of the
+# usual roots. Variables you set yourself win.
+if (Test-Path ".env") {
+    $netKeys = "GUUDFLOW_CA_BUNDLE", "GUUDFLOW_PIP_INDEX", "GUUDFLOW_NPM_REGISTRY", "GUUDFLOW_PYTHON", "GUUDFLOW_NO_UV",
+               "GUUDFLOW_DATA_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"
+    foreach ($l in Get-Content ".env") {
+        if ($l -match '^\s*([A-Za-z_]+)\s*=\s*(.+?)\s*$' -and $netKeys -contains $Matches[1].ToUpper()) {
+            Set-Item "env:$($Matches[1].ToUpper())" $Matches[2].Trim('"', "'")
+        }
+    }
+}
+if ($env:GUUDFLOW_CA_BUNDLE) {
+    if (-not (Test-Path $env:GUUDFLOW_CA_BUNDLE)) {
+        Write-Warning "GUUDFLOW_CA_BUNDLE=$($env:GUUDFLOW_CA_BUNDLE) is not a file; downloads will not trust it"
+    } else {
+        $ca = (Resolve-Path $env:GUUDFLOW_CA_BUNDLE).Path
+        if (-not $env:NODE_EXTRA_CA_CERTS) { $env:NODE_EXTRA_CA_CERTS = $ca }   # npm, node, opencode: added to their roots
+        # Python tools replace their roots with a cert file, so give them public roots + yours.
+        $roots = $null
+        if (Test-Path $Py) { $roots = & $Py -c "import certifi; print(certifi.where())" 2>$null }
+        if ($roots -and (Test-Path "$roots")) {
+            $dataDir = if ($env:GUUDFLOW_DATA_DIR) { $env:GUUDFLOW_DATA_DIR } else { "data" }
+            New-Item -ItemType Directory -Force (Join-Path $dataDir "tls") | Out-Null
+            $combined = Join-Path (Resolve-Path $dataDir).Path "tls\ca-bundle.pem"
+            Set-Content -Path $combined -Value ((Get-Content -Raw "$roots") + "`n" + (Get-Content -Raw $ca)) -Encoding ascii
+            foreach ($v in "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "PIP_CERT") {
+                if (-not (Get-Item "env:$v" -ErrorAction SilentlyContinue)) { Set-Item "env:$v" $combined }
+            }
+        }
+        # Before the venv exists uv and pip use the Windows certificate store (UV_NATIVE_TLS below);
+        # import the certificate there if the first install fails.
+    }
+}
+
 # The one Python step (prepare, setup, dev, api, check): a working venv with requirements.txt.
 # Does nothing when the venv is already good. Behind a proxy: HTTPS_PROXY as is, GUUDFLOW_CA_BUNDLE
 # (company certificate), GUUDFLOW_PIP_INDEX (PyPI mirror), GUUDFLOW_PYTHON (an installed 3.11/3.12),
@@ -60,9 +95,6 @@ function Find-Python {
 function Python-Env {
     $ErrorActionPreference = "Continue"   # native tools write to stderr; judge them by exit code
     if (-not $env:UV_NATIVE_TLS) { $env:UV_NATIVE_TLS = "1" }   # trust the Windows certificate store
-    if ($env:GUUDFLOW_CA_BUNDLE) {
-        $env:SSL_CERT_FILE = $env:GUUDFLOW_CA_BUNDLE; $env:PIP_CERT = $env:GUUDFLOW_CA_BUNDLE; $env:REQUESTS_CA_BUNDLE = $env:GUUDFLOW_CA_BUNDLE
-    }
     if ($env:GUUDFLOW_PIP_INDEX) { $env:UV_DEFAULT_INDEX = $env:GUUDFLOW_PIP_INDEX; $env:PIP_INDEX_URL = $env:GUUDFLOW_PIP_INDEX }
     $wdir = Join-Path $Repo "prebuilt/wheels"; $wstamp = Join-Path $wdir ".unpacked"
     $zip = Get-ChildItem -LiteralPath (Join-Path $Repo "prebuilt") -File -ErrorAction SilentlyContinue |

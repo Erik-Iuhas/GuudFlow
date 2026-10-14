@@ -43,3 +43,10 @@ def test_a_missing_file_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GUUDFLOW_CA_BUNDLE", "/no/such/ca.pem")
     with pytest.raises(FileNotFoundError, match="GUUDFLOW_CA_BUNDLE"):
         tls.httpx_verify()
+
+
+def test_a_windows_path_means_the_wsl_mount(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tls.os, "name", "posix")
+    assert tls._native_path("C:\\certs\\corp.pem") == "/mnt/c/certs/corp.pem"
+    assert tls._native_path('"D:/x/ca.pem"') == "/mnt/d/x/ca.pem"
+    assert tls._native_path("/etc/ssl/corp.pem") == "/etc/ssl/corp.pem"

@@ -416,10 +416,12 @@ Some networks re-sign TLS traffic with their own certificate authority, or serve
 internal endpoint with a private certificate. Do not turn verification off: give GuudFlow the CA.
 
 1. Save the CA certificate(s) as one PEM file.
-2. Set `GUUDFLOW_CA_BUNDLE=/path/to/corp-ca.pem` in `.env`. With Docker Compose, keep the file
+2. Set `GUUDFLOW_CA_BUNDLE=/path/to/corp-ca.pem` in `.env` (a Windows path such as
+   `C:\certs\corp-ca.pem` works from WSL too). The setup tasks read it from `.env` as well, so
+   uv, pip, npm, curl and git trust it while installing. With Docker Compose, keep the file
    under the data directory (for example `data/tls/corp-ca.pem`), since only that directory is
    mounted, and use its absolute path.
-3. Restart the API.
+3. Re-run the task that failed, or restart the API.
 
 The CA is trusted **in addition to** the public roots by GuudFlow's own HTTP calls (model
 providers, the LLM gateway, web search and fetch, MCP servers, GitHub), and by git, npm and

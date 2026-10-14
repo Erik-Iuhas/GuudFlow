@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `GUUDFLOW_CA_BUNDLE` (and `HTTPS_PROXY`, `NO_PROXY`, `GUUDFLOW_PIP_INDEX`, ...) in `.env` now
+  reach the setup tasks too, not just the API: uv, pip, npm, curl and git trust the certificate on
+  top of the system roots (`scripts/net_env.sh`, and the same in `run.ps1`). A Windows path like
+  `C:\certs\corp.pem` works from WSL. The Python step no longer replaces the public roots with
+  the certificate alone.
 - WSL mode: tasks drop the Windows folders WSL adds to `PATH` (`/mnt/c/...`), so a Windows npm,
   node or Python never runs in place of the Linux one (the cause of "'vite' is not recognized";
   `GUUDFLOW_KEEP_WINDOWS_PATH=1` keeps them). Studio's dev server is used only with a Linux npm and
