@@ -1,0 +1,54 @@
+name: Python wheels
+
+# Builds every package in requirements.txt as wheels, per OS and Python version, for machines whose
+# proxy blocks PyPI. Download the artifact that matches the machine (python-wheels-windows-py311,
+# python-wheels-linux-py311, ...; Linux also covers WSL), put the zip in prebuilt/ and run the
+# "Python environment" task (or Prepare): packages then install with no network.
+
+on:
+  push:
+    branches: [main]
+    paths: [requirements.txt, .github/workflows/python-wheels.yml]
+  workflow_dispatch:
+
+jobs:
+  wheels:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Build the wheels
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip wheel -r requirements.txt -w wheels
+
+      - name: Check they install with no network
+        shell: bash
+        run: |
+          python -m venv /tmp/check
+          PY=/tmp/check/bin/python; [ -x "$PY" ] || PY=/tmp/check/Scripts/python.exe
+          "$PY" -m pip install --no-index --find-links wheels -r requirements.txt
+          "$PY" -c "import uvicorn, fastapi"
+
+      - name: Name
+        id: name
+        shell: bash
+        run: |
+          os=linux; [ "${{ runner.os }}" = Windows ] && os=windows
+          echo "name=python-wheels-${os}-py$(echo ${{ matrix.python }} | tr -d .)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: wheels/*.whl
+          retention-days: 90

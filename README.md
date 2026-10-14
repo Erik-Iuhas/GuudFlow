@@ -213,6 +213,14 @@ WSL must be installed. This is the default (`GUUDFLOW_WINDOWS_MODE=wsl`).
   Prepare tries that on its own when npm fails. A machine with npm can make one with
   `bash scripts/run.sh studio-pack`. **Run dev stack** then serves it from the API on :8000
   instead of the dev server on :3001.
+- **Python packages behind a proxy.** One step makes `./venv` and installs the packages for every
+  task: **Python environment** (`bash scripts/run.sh python-env`, `scripts\run.ps1 python-env`).
+  Run it on its own first when setup trips; it says what failed. It uses `HTTPS_PROXY`, trusts
+  the system certificate store (and `GUUDFLOW_CA_BUNDLE`), takes a PyPI mirror in
+  `GUUDFLOW_PIP_INDEX`, and an installed Python in `GUUDFLOW_PYTHON` so uv does not download one.
+  With no PyPI at all, download the **Python wheels** Action's artifact for your machine
+  (`python-wheels-windows-py311`, or `-linux-` for Linux and WSL), put the zip in `prebuilt/` and
+  run it again: it installs with no network.
 - **A proxy or company certificate.** Set `GUUDFLOW_CA_BUNDLE` to your CA's PEM file; TLS checks
   stay on ([SETUP §9](docs/SETUP.md)).
 - **Restart after editing `.env`.** The API reads it at start. After installing uv, open a new

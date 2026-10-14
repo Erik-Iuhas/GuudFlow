@@ -55,22 +55,8 @@ info "→ Stopping existing servers..."
 bash "${ROOT}/scripts/stop.sh" >/dev/null 2>&1 || true
 sleep 0.3
 
-# ── python / venv (uv; fetches Python 3.11 if the system one is older) ───────
-command -v uv >/dev/null 2>&1 || die "uv not found: curl -LsSf https://astral.sh/uv/install.sh | sh  (then open a new terminal)"
-
-# A venv left by an earlier failed attempt, or built by Windows or with a Python older than 3.11.
-source scripts/pick_python.sh
-if [ -d venv ] && ! venv_ok; then
-    warn "  venv is unusable (broken, Windows-built or Python < 3.11) — rebuilding with uv..."
-    rm -rf venv
-fi
-
-if [ ! -d venv ]; then
-    info "→ Creating venv with uv..."
-    uv venv --python "$(pick_python || echo 3.11)" venv
-    info "→ Installing Python deps..."
-    uv pip install --quiet --python venv/bin/python -r requirements.txt
-fi
+# ── python / venv: the shared step (proxy settings, offline wheels in prebuilt/) ──
+bash scripts/python_env.sh || die "no working Python environment (see the line above; VS Code task: Python environment)"
 source venv/bin/activate
 
 # The agent runtime: every role runs in opencode. Without it no agent can start.

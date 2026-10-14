@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- One Python step (`python-env`, task **Python environment**) shared by Prepare, Setup, Run dev
+  stack, api and check on Linux, WSL and native Windows: it makes `./venv` and installs the
+  packages, does nothing when they are already there, and stops with a clear message instead of
+  "uvicorn: command not found". Behind a proxy: `GUUDFLOW_CA_BUNDLE`, `GUUDFLOW_PIP_INDEX`,
+  `GUUDFLOW_PYTHON`, uv trusts the system certificate store, and the **Python wheels** GitHub Action
+  builds wheels per OS to drop in `prebuilt/` for installs with no network. Prepare goes on when uv
+  cannot be installed.
 - Prebuilt Studio has one drop folder, `prebuilt/`, and one Studio step (`studio-ensure`) shared by
   Prepare, Setup and Run dev stack on Linux, WSL and native Windows: an archive there means npm is
   never run. The Build tasks (`build studio`, `build native`) use it too. Any `.tar.gz` or `.zip`

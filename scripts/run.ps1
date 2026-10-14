@@ -4,7 +4,7 @@
 #
 # GUUDFLOW_WINDOWS_MODE picks how GuudFlow runs on this Windows machine:
 #   wsl     (default) forward to scripts/run.sh inside WSL. Use this: agent sandboxes need Linux.
-#   native  run every task on Windows itself (prepare, setup, dev, stop, doctor, build, check,
+#   native  run every task on Windows itself (prepare, python-env, setup, dev, stop, doctor, build, check,
 #           api, studio-*). Studio comes from prebuilt\ first (studio-ensure). Agents then run
 #           in host mode with no sandbox, so only for trusted work.
 # Set it in your environment or as a line in .env (GUUDFLOW_WINDOWS_MODE=native).
@@ -35,8 +35,91 @@ if ($mode -eq "wsl") {
 $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
 $Py = Join-Path $Repo "venv\Scripts\python.exe"
 
+# The one Python step (prepare, setup, dev, api, check): a working venv with requirements.txt.
+# Does nothing when the venv is already good. Behind a proxy: HTTPS_PROXY as is, GUUDFLOW_CA_BUNDLE
+# (company certificate), GUUDFLOW_PIP_INDEX (PyPI mirror), GUUDFLOW_PYTHON (an installed 3.11/3.12),
+# or the python-wheels artifact zip in prebuilt\ for no network at all.
+function Py-Minor($exe, [string[]]$pre = @()) {
+    $v = & $exe @pre -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>&1
+    if ($LASTEXITCODE -eq 0) { return "$v".Trim() } else { return "" }
+}
+function Find-Python {
+    if ($env:GUUDFLOW_PYTHON) { return $env:GUUDFLOW_PYTHON }
+    foreach ($want in "3.11", "3.12") {
+        if (Get-Command py -ErrorAction SilentlyContinue) {
+            $exe = & py "-$want" -c "import sys; print(sys.executable)" 2>&1
+            if ($LASTEXITCODE -eq 0) { return "$exe".Trim() }
+        }
+        foreach ($name in "python3", "python") {
+            $c = Get-Command $name -ErrorAction SilentlyContinue
+            if ($c -and $c.Source -notlike "*WindowsApps*" -and (Py-Minor $c.Source) -eq $want) { return $c.Source }
+        }
+    }
+    return ""
+}
+function Python-Env {
+    $ErrorActionPreference = "Continue"   # native tools write to stderr; judge them by exit code
+    if (-not $env:UV_NATIVE_TLS) { $env:UV_NATIVE_TLS = "1" }   # trust the Windows certificate store
+    if ($env:GUUDFLOW_CA_BUNDLE) {
+        $env:SSL_CERT_FILE = $env:GUUDFLOW_CA_BUNDLE; $env:PIP_CERT = $env:GUUDFLOW_CA_BUNDLE; $env:REQUESTS_CA_BUNDLE = $env:GUUDFLOW_CA_BUNDLE
+    }
+    if ($env:GUUDFLOW_PIP_INDEX) { $env:UV_DEFAULT_INDEX = $env:GUUDFLOW_PIP_INDEX; $env:PIP_INDEX_URL = $env:GUUDFLOW_PIP_INDEX }
+    $wdir = Join-Path $Repo "prebuilt/wheels"; $wstamp = Join-Path $wdir ".unpacked"
+    $zip = Get-ChildItem -LiteralPath (Join-Path $Repo "prebuilt") -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "python-wheels*.zip" } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($zip -and (-not (Test-Path $wstamp) -or $zip.LastWriteTime -gt (Get-Item -Force $wstamp).LastWriteTime)) {
+        Remove-Item -Recurse -Force $wdir -ErrorAction SilentlyContinue
+        Expand-Archive -Path $zip.FullName -DestinationPath $wdir -Force
+        Set-Content $wstamp ""
+        Write-Host "Python env: wheels from prebuilt\$($zip.Name)"
+    }
+    $offline = @()
+    $whl = Get-ChildItem -LiteralPath $wdir -Recurse -Filter "*.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($whl) { $offline = @("--no-index", "--find-links", $whl.DirectoryName); $env:UV_OFFLINE = "1"; Write-Host "Python env: installing from $($whl.DirectoryName) (no network)" }
+
+    $hash = (Get-FileHash (Join-Path $Repo "requirements.txt") -Algorithm SHA256).Hash
+    $reqStamp = Join-Path $Repo "venv/.guudflow-req"
+    $minor = if (Test-Path $Py) { Py-Minor $Py } else { "" }
+    if ($minor -in @("3.11", "3.12") -and (Test-Path $reqStamp) -and ((Get-Content $reqStamp -Raw).Trim() -eq $hash)) {
+        & $Py -c "import uvicorn, fastapi" 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { Write-Host "Python env: venv is ready (Python $minor)"; return $true }
+    }
+    $uv = (Get-Command uv -ErrorAction SilentlyContinue) -and $env:GUUDFLOW_NO_UV -ne "1"
+    $found = Find-Python
+    if (-not $found -and -not $uv) {
+        Write-Warning "Python env: no Python 3.11/3.12 and no uv. Install uv (scripts\run.ps1 install-uv) or Python 3.11 (python.org), or set GUUDFLOW_PYTHON."
+        return $false
+    }
+    if ((Test-Path "venv") -and $minor -notin @("3.11", "3.12")) {
+        Write-Host "Python env: venv is broken or not Python 3.11/3.12: rebuilding"
+        Remove-Item -Recurse -Force "venv"
+    }
+    if (-not (Test-Path "venv")) {
+        $want = if ($found) { $found } else { "3.11" }
+        Write-Host "Python env: creating venv (Python $want)"
+        if ($uv) { & uv venv --python $want venv | Out-Host } else { & $found -m venv venv | Out-Host }
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Py)) {
+            Write-Warning ("Python env: could not create the venv. If uv was downloading Python and the proxy blocked it, " +
+                           "install Python 3.11 (python.org) and set GUUDFLOW_PYTHON, or set UV_PYTHON_INSTALL_MIRROR.")
+            return $false
+        }
+    }
+    Write-Host "Python env: installing requirements.txt"
+    if ($uv) { & uv pip install --python $Py @offline -r requirements.txt | Out-Host }
+    else { & $Py -m pip install @offline -r requirements.txt | Out-Host }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning ("Python env: package install failed. Behind a proxy: set GUUDFLOW_CA_BUNDLE (company certificate) or " +
+                       "GUUDFLOW_PIP_INDEX (a PyPI mirror), or put the python-wheels artifact zip in prebuilt\ (README: Quirks).")
+        return $false
+    }
+    & $Py -c "import uvicorn, fastapi" 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Python env: packages installed but uvicorn/fastapi do not import"; return $false }
+    Set-Content $reqStamp $hash
+    Write-Host "Python env: venv is ready (Python $(Py-Minor $Py))"
+    return $true
+}
 function Need-Venv {
-    if (-not (Test-Path $Py)) { throw "No venv yet: run 'scripts\run.ps1 setup' (or the Setup task) first." }
+    if (-not (Python-Env)) { throw "No working Python environment (see above; task: Python environment)." }
 }
 function Npm-Args { $a = @("--no-audit", "--no-fund", "--fetch-retries=5", "--fetch-retry-maxtimeout=120000")
     if ($env:GUUDFLOW_NPM_REGISTRY) { $a += @("--registry", $env:GUUDFLOW_NPM_REGISTRY) }; return $a }
@@ -115,7 +198,7 @@ function Doctor {
 function Studio-Ensure([bool]$build = $false) {
     # Any .tar.gz / .tgz / .zip in prebuilt\ counts (browsers rename downloads).
     $arch = Get-ChildItem -LiteralPath (Join-Path $Repo "prebuilt") -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match '\.(tar\.gz|tgz|zip)$' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        Where-Object { $_.Name -match '\.(tar\.gz|tgz|zip)$' -and $_.Name -notlike "python-wheels*" } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($arch) {
         if (-not (Test-Path "studio/dist/.unpacked") -or $arch.LastWriteTime -gt (Get-Item -Force "studio/dist/.unpacked").LastWriteTime) { Studio-Unpack $arch.FullName }
         Write-Host "Studio: prebuilt from prebuilt\$($arch.Name) (npm skipped)"; return $true
@@ -158,6 +241,7 @@ switch ($Command) {
         }
         Doctor
     }
+    "python-env" { if (-not (Python-Env)) { exit 1 } }
     "setup"  { & "$PSScriptRoot\setup.ps1" @Rest }
     "dev"    { & "$PSScriptRoot\dev.ps1" @Rest }
     "stop"   {

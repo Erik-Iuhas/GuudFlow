@@ -15,7 +15,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 BUILD=0; [ "${1:-}" = "--build" ] && BUILD=1
 
-ARCH="$(ls -t prebuilt/*.tar.gz prebuilt/*.tgz prebuilt/*.zip 2>/dev/null | head -1)"  # any name: browsers rename downloads
+ARCH="$(ls -t prebuilt/*.tar.gz prebuilt/*.tgz prebuilt/*.zip 2>/dev/null | grep -v "/python-wheels" | head -1)"  # any name: browsers rename downloads
 if [ -n "$ARCH" ]; then
   if [ ! -f studio/dist/.unpacked ] || [ "$ARCH" -nt studio/dist/.unpacked ]; then
     bash scripts/studio_bundle.sh unpack "$ARCH" || exit 1

@@ -50,7 +50,8 @@ else
 fi
 
 step "1/5 uv"
-bash scripts/install_uv.sh || { echo "uv could not be installed; see README: Installing uv"; exit 1; }
+# Not fatal: without uv the Python step uses pip with an installed Python 3.11/3.12.
+bash scripts/install_uv.sh || NEXT+=("uv could not be installed (README: Installing uv); Python packages used pip instead")
 
 step "2/5 setup (Python packages, Chromium, opencode, .env)"
 # Studio is handled in step 3, so setup skips npm here.

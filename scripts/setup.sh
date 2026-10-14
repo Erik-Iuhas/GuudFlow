@@ -14,56 +14,15 @@ echo "==============="
 echo "Repo: ${ROOT}"
 echo
 
-# 1. Python 3.11+ (a system python3 can be older: Ubuntu 22.04 / WSL ships 3.10)
-source scripts/pick_python.sh
-USE_UV=1
-if [ "${GUUDFLOW_NO_UV:-0}" = "1" ]; then USE_UV=0
-elif ! command -v uv >/dev/null 2>&1; then
-    echo "ERROR: uv not found. Install it: bash scripts/run.sh install-uv"
-    echo "       (or set GUUDFLOW_NO_UV=1 to use pip with a Python 3.11+ you installed)"
-    exit 1
-fi
-PY="$(pick_python || true)"
-if [ "$PY" = "3.11" ]; then
-    echo "No Python 3.11 or 3.12 installed: uv will download 3.11."
-elif [ -n "$PY" ]; then
-    echo "Python: $PY ($("$PY" --version 2>&1))"
-else
-    echo "ERROR: Python 3.11 not found (set GUUDFLOW_PYTHON=/path/to/python3.11, or use uv)"; exit 1
-fi
-if [ "${USE_UV}" = "0" ] && [ "$PY" = "3.11" ]; then
-    echo "ERROR: without uv, install Python 3.11 (or set GUUDFLOW_PYTHON)"; exit 1
-fi
-
-# 2. Virtualenv. An existing one that is broken or older than 3.11 is rebuilt.
-if [ -d venv ] && ! venv_ok; then
-    echo "./venv is missing Python or is not 3.11/3.12 ($(venv/bin/python --version 2>&1 || echo broken)): rebuilding"
-    rm -rf venv
-fi
-if [ ! -d "venv" ]; then
-    echo "Creating virtualenv at ./venv ..."
-    if [ "${USE_UV}" = "1" ]; then
-        uv venv --python "${PY:-3.11}" venv || { echo "ERROR: uv could not create a Python 3.11 venv (downloads blocked? set GUUDFLOW_PYTHON to an installed python3.11)"; exit 1; }
-    else
-        "$PY" -m venv venv
-    fi
-else
-    echo "Virtualenv already exists at ./venv ($(venv/bin/python --version 2>&1))"
-fi
-
+# 1-3. Python 3.11, ./venv and the packages: the shared step (proxy settings, offline wheels in
+# prebuilt/; see scripts/python_env.sh). Nothing below works without it, so stop if it fails.
+bash scripts/python_env.sh || { echo "ERROR: no working Python environment; fix the line above and run setup again"; exit 1; }
 # shellcheck disable=SC1091
 source venv/bin/activate
-PY_VENV="$(command -v python)"
-echo "Activated: ${PY_VENV}"
-
-echo "Installing Python dependencies$([ "${USE_UV}" = "1" ] && echo ' (uv)')..."
-if [ "${USE_UV}" = "1" ]; then
-    uv pip install --quiet -r requirements.txt
-    pip_install() { uv pip install --quiet "$@"; }
+if command -v uv >/dev/null 2>&1 && [ "${GUUDFLOW_NO_UV:-0}" != "1" ]; then
+    pip_install() { uv pip install --quiet --python venv/bin/python "$@"; }
 else
-    pip install --quiet --upgrade pip
-    pip install --quiet -r requirements.txt
-    pip_install() { pip install --quiet "$@"; }
+    pip_install() { python -m pip install --quiet "$@"; }
 fi
 
 # Optional embeddings (heavy — pulls PyTorch). Off by default; opt in with

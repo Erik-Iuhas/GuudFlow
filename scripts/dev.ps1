@@ -45,15 +45,12 @@ Kill-Port 3001
 Kill-LeftoverUvicorn
 Start-Sleep -Milliseconds 500
 
-# Ensure venv exists
+# Python: the shared step (proxy settings, offline wheels in prebuilt\). Stop here if it fails,
+# instead of opening an API window that says "uvicorn is not recognized".
+$env:GUUDFLOW_WINDOWS_MODE = "native"   # this script is the native launcher; keep run.ps1 here too
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "run.ps1") python-env
+if ($LASTEXITCODE -ne 0) { throw "No working Python environment (see above; task: Python environment)" }
 $activate = Join-Path $Repo "venv\Scripts\Activate.ps1"
-if (-not (Test-Path $activate)) {
-    Write-Host "No venv found - creating one..." -ForegroundColor Yellow
-    python -m venv venv
-    & $activate
-    python -m pip install --quiet --upgrade pip
-    python -m pip install --quiet -r requirements.txt
-}
 
 # Use PowerShell 7 when installed, else the built-in Windows PowerShell.
 $Shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
@@ -80,7 +77,7 @@ $reloadArgs = if ($NoReload) {
 }
 Start-Process $Shell -ArgumentList @(
     "-NoExit", "-Command",
-    "Set-Location '$Repo'; $distEnv& '$activate'; uvicorn api.main:app $reloadArgs --port 8000"
+    "Set-Location '$Repo'; $distEnv& '$activate'; python -m uvicorn api.main:app $reloadArgs --port 8000"
 )
 
 # Frontend

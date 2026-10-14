@@ -23,6 +23,27 @@
       "problemMatcher": []
     },
     {
+      "label": "Python environment (venv + packages; proxy aware, offline wheels in prebuilt/)",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "scripts/run.sh",
+        "python-env"
+      ],
+      "windows": {
+        "command": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/run.ps1",
+          "python-env"
+        ]
+      },
+      "problemMatcher": []
+    },
+    {
       "label": "Install uv",
       "type": "process",
       "command": "bash",

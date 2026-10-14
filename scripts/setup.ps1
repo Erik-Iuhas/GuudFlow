@@ -16,46 +16,12 @@ Write-Host "===============" -ForegroundColor Cyan
 Write-Host "Repo: $Repo"
 Write-Host ""
 
-# 1. Python check
-$python = Get-Command python -ErrorAction SilentlyContinue
-if (-not $python) {
-    $python = Get-Command py -ErrorAction SilentlyContinue
-}
-$uv = Get-Command uv -ErrorAction SilentlyContinue
-if (-not $python -and -not $uv) {
-    Write-Error "Neither uv nor python (3.11+) found. Install uv (it brings Python): scripts\run.ps1 install-uv"
-    exit 1
-}
-if ($python) {
-    $pyVersion = & $python.Source --version
-    Write-Host "Python: $($python.Source) ($pyVersion)"
-} else {
-    Write-Host "No python on PATH: uv will download Python 3.11 for the venv."
-}
-
-# 2. Virtualenv (uv when installed: it also fetches Python 3.11 if this machine lacks it)
-if (-not (Test-Path "venv")) {
-    Write-Host "Creating virtualenv at .\venv ..."
-    if ($uv) { & uv venv --python 3.11 venv } else { & $python.Source -m venv venv }
-} else {
-    Write-Host "Virtualenv already exists at .\venv"
-}
-
-# Activate for this script
-$activate = Join-Path $Repo "venv\Scripts\Activate.ps1"
-if (Test-Path $activate) {
-    & $activate
-}
-$pyVenv = Get-Command python -ErrorAction Stop
-Write-Host "Activated: $($pyVenv.Source)"
-
-# 3. Python deps
-Write-Host "Installing Python dependencies..."
-if ($uv) { & uv pip install --quiet --python venv\Scripts\python.exe -r requirements.txt }
-else {
-    & python -m pip install --quiet --upgrade pip
-    & python -m pip install --quiet -r requirements.txt
-}
+# 1-3. Python 3.11, venv and packages: the shared step in run.ps1 (proxy settings, offline wheels
+# in prebuilt\). Nothing below works without it, so stop if it fails.
+$env:GUUDFLOW_WINDOWS_MODE = "native"   # this script is the native setup; keep run.ps1 here too
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "run.ps1") python-env
+if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: no working Python environment; fix the message above and run setup again" -ForegroundColor Red; exit 1 }
+& (Join-Path $Repo "venv\Scripts\Activate.ps1")
 
 # Optional embeddings (heavy - pulls PyTorch). Off by default; opt in
 # with $env:GUUDFLOW_WITH_EMBEDDINGS=1.
