@@ -410,7 +410,7 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
         default); a level a model lacks is lowered to the next one it has. Where a provider uses
         other words (Mistral: none/high, Groq Qwen: none/default), map them, e.g. “low=none”.
       </p>
-      <Table aria-label="Models">
+      <Table aria-label="Models" className="min-w-max">
         <thead>
           <tr>
             <Th>Model</Th>
@@ -426,7 +426,7 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
         <tbody>
           {doc.models.map((m, i) => (
             <tr key={m.id} data-testid={`model-${m.id}`} className={m.deprecated ? "opacity-60" : undefined}>
-              <Td className="font-mono text-xs">
+              <Td className="whitespace-nowrap font-mono text-xs">
                 {m.id}{m.deprecated ? " (deprecated)" : ""}
                 {m.long_context_threshold && (
                   <span className="block font-sans text-[11px] text-muted-foreground">
@@ -436,13 +436,13 @@ function Models({ doc, onChange }: { doc: ConfigDoc; onChange: (models: ModelWir
                 )}
               </Td>
               <Td>
-                <Select aria-label={`Provider for ${m.id}`} value={m.provider} className="h-8 py-0 text-xs"
+                <Select aria-label={`Provider for ${m.id}`} value={m.provider} className="h-8 min-w-[10rem] py-0 pr-8 text-xs"
                   onChange={(e) => set(i, { provider: e.target.value })}>
                   {providers.map((p) => <option key={p} value={p}>{p}</option>)}
                 </Select>
               </Td>
               <Td>
-                <Select aria-label={`Tier for ${m.id}`} value={m.tier} className="h-8 py-0 text-xs"
+                <Select aria-label={`Tier for ${m.id}`} value={m.tier} className="h-8 min-w-[6.5rem] py-0 pr-8 text-xs"
                   onChange={(e) => set(i, { tier: e.target.value as Tier })}>
                   {TIERS.map((t) => <option key={t} value={t}>{t}</option>)}
                 </Select>
