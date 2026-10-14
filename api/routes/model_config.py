@@ -136,7 +136,8 @@ async def test_provider(request: Request, name: str) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=TEST_TIMEOUT, verify=httpx_verify()) as http:
             r = await http.get(f"{base}/models", headers=headers)
     except httpx.HTTPError as e:
-        return {"ok": False, "detail": f"could not reach {base}: {type(e).__name__}", "models": []}
+        from core.tls import describe_error
+        return {"ok": False, "detail": f"could not reach {base}: {describe_error(e)}", "models": []}
     if r.status_code != 200:
         return {"ok": False, "detail": f"{base}/models answered {r.status_code}", "models": []}
     try:

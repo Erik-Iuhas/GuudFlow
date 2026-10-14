@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Certificate: `GUUDFLOW_CA_BUNDLE` takes a PEM or a binary `.cer`, and an intermediate CA works
+  as the trust anchor. Studio's Settings has a **Certificate** field as a backup: used when `.env`
+  has no path or its file is not found, applied from the next connection without a restart. The
+  provider test shows the real TLS error and what to do.
 - `GUUDFLOW_CA_BUNDLE` (and `HTTPS_PROXY`, `NO_PROXY`, `GUUDFLOW_PIP_INDEX`, ...) in `.env` now
   reach the setup tasks too, not just the API: uv, pip, npm, curl and git trust the certificate on
   top of the system roots (`scripts/net_env.sh`, and the same in `run.ps1`). A Windows path like

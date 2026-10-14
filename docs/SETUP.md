@@ -423,6 +423,11 @@ internal endpoint with a private certificate. Do not turn verification off: give
    mounted, and use its absolute path.
 3. Re-run the task that failed, or restart the API.
 
+As a backup, Studio's **Settings → Certificate** takes the same path. It is used when `.env` has
+no `GUUDFLOW_CA_BUNDLE` or its file is not found, shows which file is in use and the certificates
+in it, and applies from the next connection. The file may be PEM or a binary `.cer`; use the
+company's root CA (an intermediate also works).
+
 The CA is trusted **in addition to** the public roots by GuudFlow's own HTTP calls (model
 providers, the LLM gateway, web search and fetch, MCP servers, GitHub), and by git, npm and
 opencode on the host through the usual variables (`SSL_CERT_FILE`, `GIT_SSL_CAINFO`,

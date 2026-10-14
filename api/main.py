@@ -69,6 +69,7 @@ from api.routes import example_projects as example_projects_router
 from api.routes import models as models_router
 from api.routes import mcp as mcp_router
 from api.routes import model_config as model_config_router
+from api.routes import tls as tls_router
 from api.routes import settings as settings_router
 from api.routes import tools as tools_router
 from api.routes import training as training_router
@@ -209,6 +210,15 @@ async def lifespan(app: FastAPI):
         data_root = Path("./data").resolve()
         data_root.mkdir(parents=True, exist_ok=True)
 
+    # The CA path saved in Studio lives under the data root (a backup for GUUDFLOW_CA_BUNDLE).
+    from core import tls as _tls
+    _tls.set_data_root(data_root)
+    try:
+        _apply_tls_env(data_root)
+    except (FileNotFoundError, ValueError) as e:
+        import logging
+        logging.error("certificate: %s", e)
+
     # Track 4: in in-directory mode, ensure the .flow/ scaffold exists.
     # init_flow_dir is idempotent — safe to call every startup.
     # ANY failure here MUST NOT crash the lifespan — log and continue with
@@ -328,6 +338,7 @@ def create_app() -> FastAPI:
     app.include_router(example_projects_router.router)
     app.include_router(models_router.router)
     app.include_router(model_config_router.router)
+    app.include_router(tls_router.router)
     app.include_router(mcp_router.router)
     app.include_router(harness_router.router)
     app.include_router(settings_router.router)

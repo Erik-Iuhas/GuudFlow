@@ -8,6 +8,7 @@ import { Alert, Page, Skeleton } from "../components/ui/form-controls";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { ModelSettings } from "../features/models/ModelSettings";
 import { McpSettings } from "../features/mcp/McpSettings";
+import { CertSettings } from "../features/tls/CertSettings";
 
 export function Settings() {
   const [settings, setSettings] = useState<SettingsState | null>(null);
@@ -37,6 +38,10 @@ export function Settings() {
 
       <div className="mb-8 max-w-5xl">
         <McpSettings />
+      </div>
+
+      <div className="mb-8 max-w-5xl">
+        <CertSettings />
       </div>
 
       {loading && (
