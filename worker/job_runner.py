@@ -944,6 +944,11 @@ async def _amain() -> None:
     from worker.queue import InMemoryJobQueue
 
     data_root = Path(os.environ.get("GUUDFLOW_DATA_DIR", "./data")).resolve()
+    # Same certificate setup as the API: GUUDFLOW_CA_BUNDLE from .env, else the path saved in
+    # Studio, for the gateway's model calls and the tools this worker starts.
+    from core import tls
+    tls.set_data_root(data_root)
+    tls.apply_env(data_root)
     queue = InMemoryJobQueue()
     store = ProjectStore(data_root)
 
@@ -960,4 +965,9 @@ async def _amain() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    try:  # a standalone worker reads .env like the API does
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+    except ImportError:
+        pass
     asyncio.run(_amain())
