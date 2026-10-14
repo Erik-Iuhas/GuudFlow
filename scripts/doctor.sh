@@ -19,9 +19,9 @@ env_value() { grep -E "^$1=" .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '
 echo "Tools"
 source scripts/pick_python.sh
 PY="$(pick_python || true)"
-if [ -n "$PY" ]; then ok "Python 3.11+: $PY ($("$PY" --version 2>&1 | awk '{print $2}'))"
-elif have uv; then warn "no Python 3.11+ installed; uv downloads one for the venv"
-else bad "Python 3.11+ not found (bash scripts/run.sh install-uv, then Setup)"; fi
+if [ "$PY" = "3.11" ]; then warn "no Python 3.11/3.12 installed; uv downloads 3.11 for the venv"
+elif [ -n "$PY" ]; then ok "Python for the venv: $PY ($("$PY" --version 2>&1 | awk '{print $2}'))"
+else bad "Python 3.11 not found (bash scripts/run.sh install-uv, then Setup)"; fi
 have git && ok "git $(git --version | awk '{print $3}')" || bad "git not found"
 if have uv; then ok "uv $(uv --version | awk '{print $2}') (installs the Python packages)"
 else bad "uv not found (curl -LsSf https://astral.sh/uv/install.sh | sh)"; fi
@@ -51,7 +51,7 @@ fi
 
 echo "Project"
 if venv_ok; then ok "Python environment ./venv ($(venv/bin/python --version 2>&1))"
-elif [ -d venv ]; then bad "./venv uses $(venv/bin/python --version 2>&1 || echo a broken Python); run Setup to rebuild it with 3.11+"
+elif [ -d venv ]; then bad "./venv uses $(venv/bin/python --version 2>&1 || echo a broken Python); run Setup to rebuild it with 3.11"
 else warn "no ./venv yet (Setup)"; fi
 [ -d studio/node_modules ] && ok "Studio packages installed" || warn "studio/node_modules missing (scripts/setup.sh)"
 [ -f studio/dist/index.html ] && ok "Studio built (studio/dist)" \

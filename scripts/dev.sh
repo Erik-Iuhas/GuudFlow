@@ -59,14 +59,15 @@ sleep 0.3
 command -v uv >/dev/null 2>&1 || die "uv not found: curl -LsSf https://astral.sh/uv/install.sh | sh  (then open a new terminal)"
 
 # A venv left by an earlier failed attempt, or built by Windows or with a Python older than 3.11.
-if [ -d venv ] && { [ ! -x venv/bin/python ] || ! venv/bin/python -c 'import sys;sys.exit(sys.version_info<(3,11))' 2>/dev/null; }; then
+source scripts/pick_python.sh
+if [ -d venv ] && ! venv_ok; then
     warn "  venv is unusable (broken, Windows-built or Python < 3.11) — rebuilding with uv..."
     rm -rf venv
 fi
 
 if [ ! -d venv ]; then
     info "→ Creating venv with uv..."
-    uv venv --python 3.11 venv
+    uv venv --python "$(pick_python || echo 3.11)" venv
     info "→ Installing Python deps..."
     uv pip install --quiet --python venv/bin/python -r requirements.txt
 fi

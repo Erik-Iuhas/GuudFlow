@@ -24,23 +24,26 @@ elif ! command -v uv >/dev/null 2>&1; then
     exit 1
 fi
 PY="$(pick_python || true)"
-if [ -n "$PY" ]; then
+if [ "$PY" = "3.11" ]; then
+    echo "No Python 3.11 or 3.12 installed: uv will download 3.11."
+elif [ -n "$PY" ]; then
     echo "Python: $PY ($("$PY" --version 2>&1))"
-elif [ "${USE_UV}" = "1" ]; then
-    echo "No Python 3.11+ on this machine: uv will download one."
 else
-    echo "ERROR: Python 3.11+ not found (set GUUDFLOW_PYTHON=/path/to/python3.11, or use uv)"; exit 1
+    echo "ERROR: Python 3.11 not found (set GUUDFLOW_PYTHON=/path/to/python3.11, or use uv)"; exit 1
+fi
+if [ "${USE_UV}" = "0" ] && [ "$PY" = "3.11" ]; then
+    echo "ERROR: without uv, install Python 3.11 (or set GUUDFLOW_PYTHON)"; exit 1
 fi
 
 # 2. Virtualenv. An existing one that is broken or older than 3.11 is rebuilt.
 if [ -d venv ] && ! venv_ok; then
-    echo "./venv is missing Python or is older than 3.11 ($(venv/bin/python --version 2>&1 || echo broken)): rebuilding"
+    echo "./venv is missing Python or is not 3.11/3.12 ($(venv/bin/python --version 2>&1 || echo broken)): rebuilding"
     rm -rf venv
 fi
 if [ ! -d "venv" ]; then
     echo "Creating virtualenv at ./venv ..."
     if [ "${USE_UV}" = "1" ]; then
-        uv venv --python "${PY:-3.11}" venv || { echo "ERROR: uv could not create a Python 3.11 venv (downloads blocked? set GUUDFLOW_PYTHON to an installed 3.11+)"; exit 1; }
+        uv venv --python "${PY:-3.11}" venv || { echo "ERROR: uv could not create a Python 3.11 venv (downloads blocked? set GUUDFLOW_PYTHON to an installed python3.11)"; exit 1; }
     else
         "$PY" -m venv venv
     fi
