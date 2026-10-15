@@ -21,6 +21,8 @@ import {
   splitCheckLine,
 } from "./boardModel";
 import { useCommentOnCard } from "./useCardMutations";
+import { RoleChanges } from "../cockpit/RoleChanges";
+import { DiffText } from "../report/DiffViewer";
 import type { SpecWire } from "../plan/api";
 import type { CardView } from "../../stores/runEvents";
 
@@ -147,6 +149,10 @@ function DrawerBody({ runId, cardId, spec }: { runId: string; cardId: string; sp
   const signals = useRunStore((s) => s.signals);
   const artifacts = useRunStore((s) => s.artifacts);
   const live = useRunStore((s) => s.live);
+  const working = useRunStore((s) => {
+    const c = s.cards[cardId];
+    return Boolean(c && s.live && c.column === "in_progress" && s.agents[c.owner]?.state === "running");
+  });
   const checklist = useMemo(() => (card ? acceptanceState(card, signals) : []), [card, signals]);
   const related = useMemo(() => artifacts.filter((a) => a.taskId === cardId), [artifacts, cardId]);
   if (!card) return null;
@@ -240,6 +246,15 @@ function DrawerBody({ runId, cardId, spec }: { runId: string; cardId: string; sp
         )}
       </section>
 
+      {working && (
+        <section className={SECTION} aria-label="Live changes">
+          <h3 className={H}>Live changes</h3>
+          <div className="flex max-h-96 flex-col overflow-hidden rounded-md border border-border">
+            <RoleChanges role={card.owner} />
+          </div>
+        </section>
+      )}
+
       <section className={SECTION} aria-label="Diffs">
         <h3 className={H}>Diffs</h3>
         {merges.length === 0 ? (
@@ -311,19 +326,9 @@ function MergeDiff({ runId, base, head }: { runId: string; base: string; head: s
         <p role="alert" className="m-0 text-xs text-destructive">{state.message}</p>
       )}
       {state.kind === "ok" && (
-        <pre className="m-0 max-h-72 overflow-auto rounded-md border border-border bg-muted p-2 font-mono text-xs">
-          {state.diff.split("\n").map((line, i) => (
-            <div
-              key={i}
-              className={cn(
-                line.startsWith("+") && !line.startsWith("+++") && "text-status-complete",
-                line.startsWith("-") && !line.startsWith("---") && "text-status-failed",
-              )}
-            >
-              {line || " "}
-            </div>
-          ))}
-        </pre>
+        <div className="max-h-96 overflow-auto rounded-md border border-border">
+          <DiffText text={state.diff} />
+        </div>
       )}
     </li>
   );

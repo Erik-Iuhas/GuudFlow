@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Badge, type BadgeProps } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Alert, Textarea } from "../../components/ui/form-controls";
-import { cn } from "../../lib/utils";
+import { DiffText } from "../report/DiffViewer";
 import type { CheckWire, PublishWire, RunBranchWire, RunState } from "./api";
 import { changeSummary } from "./model";
 import { COSIGN_WHY, Cosign, canAccept } from "./Cosign";
@@ -230,18 +230,8 @@ function Published({ result }: { result: PublishWire }) {
 
 function DiffBlock({ text }: { text: string }) {
   return (
-    <pre className="m-0 mt-2 max-h-80 overflow-auto rounded-md border border-border bg-muted p-2 font-mono text-xs" data-testid="review-diff">
-      {text.split("\n").map((line, i) => (
-        <div
-          key={i}
-          className={cn(
-            line.startsWith("+") && !line.startsWith("+++") && "text-status-complete",
-            line.startsWith("-") && !line.startsWith("---") && "text-status-failed",
-          )}
-        >
-          {line || " "}
-        </div>
-      ))}
-    </pre>
+    <div className="mt-2 max-h-[32rem] overflow-auto rounded-md border border-border" data-testid="review-diff">
+      <DiffText text={text} />
+    </div>
   );
 }

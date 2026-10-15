@@ -88,6 +88,49 @@ class CollectResult:
     set_aside: str | None = None    # tool-dir-relative patch of discarded commits
 
 
+@dataclass
+class ChangedFile:
+    """One file in a role's uncommitted-or-unmerged work."""
+
+    path: str
+    status: str         # "M" | "A" | "D" | "untracked"
+    added: int
+    removed: int
+
+
+@dataclass
+class WorkingChanges:
+    """A role's work in progress: its worktree against its local `main`."""
+
+    base: str
+    head: str
+    files: list[ChangedFile]
+    diff: str
+    truncated: bool
+
+
+_UNTRACKED_MAX_BYTES = 200_000
+
+
+def _new_file_patch(full: Path, path: str) -> tuple[str, int]:
+    """A unified new-file diff for an untracked file and its line count; ("", 0) for
+    symlinks, binaries and big files."""
+    try:
+        if full.is_symlink() or not full.is_file() or full.stat().st_size > _UNTRACKED_MAX_BYTES:
+            return "", 0
+        data = full.read_bytes()
+    except OSError:
+        return "", 0
+    if b"\0" in data:
+        return "", 0
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    if not lines:
+        return "", 0
+    body = "\n".join(f"+{line}" for line in lines)
+    return (f"diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n"
+            f"@@ -0,0 +1,{len(lines)} @@\n{body}\n"), len(lines)
+
+
 class RoleClones:
     """Owns the per-role checkouts of one run's repo."""
 
@@ -246,6 +289,41 @@ class RoleClones:
     def history(self, role: str, limit: int = 20) -> str:
         """Recent commits on the role's branch."""
         return self.git(role, "log", f"-{max(1, min(limit, 100))}", "--format=%h %an: %s")
+
+    def working_changes(self, role: str, limit: int = 200_000) -> WorkingChanges:
+        """The role's worktree against its local `main` (last synced at spawn), read-only.
+
+        Unlike `changes`, nothing is committed, fetched or locked (`--no-optional-locks`),
+        so Studio can poll it while the agent works. Protected paths are left out;
+        untracked text files are rendered as new-file diffs, symlinks and binaries are not read.
+        """
+        ro = ("--no-optional-locks",)
+        excludes = [f":(exclude,glob){p}" for p in PROTECTED_PATHS]
+        spec = ["--no-renames", "--no-ext-diff", "--no-textconv", "main", "--", ".", *excludes]
+        base = self.git(role, *ro, "rev-parse", "main")
+        head = self.git(role, *ro, "rev-parse", "HEAD")
+        counts: dict[str, tuple[int, int]] = {}
+        for line in self.git(role, *ro, "diff", "--numstat", *spec).splitlines():
+            added, removed, path = (line.split("\t", 2) + ["", "", ""])[:3]
+            counts[path] = (int(added) if added.isdigit() else 0, int(removed) if removed.isdigit() else 0)
+        files: list[ChangedFile] = []
+        for line in self.git(role, *ro, "diff", "--name-status", *spec).splitlines():
+            status, _, path = line.partition("\t")
+            added, removed = counts.get(path, (0, 0))
+            files.append(ChangedFile(path=path, status=status[:1], added=added, removed=removed))
+        parts = [self.git(role, *ro, "diff", *spec)]
+        work = self.path(role)
+        for path in self.git(role, *ro, "ls-files", "--others", "--exclude-standard").splitlines():
+            if is_protected(path):
+                continue
+            body, lines = _new_file_patch(work / path, path)
+            files.append(ChangedFile(path=path, status="untracked", added=lines, removed=0))
+            if body:
+                parts.append(body)
+        diff = "\n".join(p for p in parts if p)
+        truncated = len(diff) > limit
+        return WorkingChanges(base=base, head=head, files=files,
+                              diff=diff[:limit] if truncated else diff, truncated=truncated)
 
     def _unsafe_symlinks(self, branch: str, paths: list[str]) -> list[str]:
         """Committed symlinks on `branch` that are absolute or climb out of the repo.

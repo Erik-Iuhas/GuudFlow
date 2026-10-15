@@ -175,3 +175,25 @@ export function usePlaybook(projectId: string): UseQueryResult<PlaybookEntryWire
 export function fetchCommitDiff(runId: string, sha: string): Promise<{ sha: string; diff: string }> {
   return getJson(`/api/runs/${enc(runId)}/git/diff?ref=${enc(sha)}`);
 }
+
+export interface RoleChangedFile {
+  path: string;
+  status: "M" | "A" | "D" | "untracked" | string;
+  added: number;
+  removed: number;
+}
+
+/** A role's work in progress: its worktree against its local `main` (last synced at spawn). */
+export interface RoleChanges {
+  role: string;
+  base: string;
+  head: string;
+  files: RoleChangedFile[];
+  diff: string;
+  truncated: boolean;
+}
+
+/** `GET /api/runs/{id}/roles/{role}/changes` (read-only; nothing is committed). */
+export function fetchRoleChanges(runId: string, role: string): Promise<RoleChanges> {
+  return getJson(`/api/runs/${enc(runId)}/roles/${enc(role)}/changes`);
+}

@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 import { renderHarnessBody } from "../../components/harness/renderers";
 import { Badge } from "../../components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip";
 import type { CapabilitiesDetail, TaskColumn, TypedSignal } from "../../lib/runEvents.gen";
 import { cn } from "../../lib/utils";
 import type { RunState } from "../../stores/runEvents";
 import { useRunStore } from "../../stores/runStoreContext";
 import { formatUsd } from "./model";
+import { RoleChanges } from "./RoleChanges";
 import { VirtualFeed } from "./VirtualFeed";
 
 const EMPTY_FEED: readonly TypedSignal[] = [];
@@ -123,17 +125,27 @@ export function AgentDetail({ role }: { role: string }) {
           <span className="text-muted-foreground">No result yet.</span>
         )}
       </div>
-      <div className="px-3 pt-2 text-xs font-medium text-muted-foreground">Tool calls</div>
-      <VirtualFeed
-        className="min-h-0 flex-1"
-        label={`${role} tool calls`}
-        testId={`toolfeed-${role}`}
-        items={feed}
-        getKey={(s) => s.id}
-        renderRow={(s) => <ToolRow signal={s} />}
-        estimateSize={32}
-        empty="No tool calls yet."
-      />
+      <Tabs defaultValue="tools" className="flex min-h-0 flex-1 flex-col">
+        <TabsList className="mx-3 mt-2 self-start">
+          <TabsTrigger value="tools">Tool calls</TabsTrigger>
+          <TabsTrigger value="changes">Changes</TabsTrigger>
+        </TabsList>
+        <TabsContent value="tools" className="flex min-h-0 flex-1 flex-col">
+          <VirtualFeed
+            className="min-h-0 flex-1"
+            label={`${role} tool calls`}
+            testId={`toolfeed-${role}`}
+            items={feed}
+            getKey={(s) => s.id}
+            renderRow={(s) => <ToolRow signal={s} />}
+            estimateSize={32}
+            empty="No tool calls yet."
+          />
+        </TabsContent>
+        <TabsContent value="changes" className="flex min-h-0 flex-1 flex-col">
+          <RoleChanges role={role} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
