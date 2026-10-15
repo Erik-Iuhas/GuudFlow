@@ -13,6 +13,17 @@ afterEach(() => {
 
 const cell = (name: string) => screen.getByRole("list", { name });
 
+const DIFF = [
+  "diff --git a/src/app.ts b/src/app.ts",
+  "index 1111111..2222222 100644",
+  "--- a/src/app.ts",
+  "+++ b/src/app.ts",
+  "@@ -1 +1 @@",
+  "-removed line",
+  "+added line",
+  "",
+].join("\n");
+
 describe("TaskBoard layout", () => {
   it("puts cards in the right swimlane and column, with counts and the Review cap", async () => {
     mockBackend([
@@ -200,7 +211,7 @@ describe("CardDrawer", () => {
 
   it("shows the thread, the checklist met state, merge ranges and related artifacts", async () => {
     mockBackend([withThread()], (c) =>
-      c.url.includes("/git/diff") ? json({ sha: "bbbb2222bbbb", diff: "+added line\n-removed line" }) : undefined,
+      c.url.includes("/git/diff") ? json({ sha: "bbbb2222bbbb", diff: DIFF }) : undefined,
     );
     const { store } = renderBoard();
     await screen.findByTestId("card-T1");
@@ -230,7 +241,9 @@ describe("CardDrawer", () => {
     const diffs = within(drawer).getByRole("region", { name: "Diffs" });
     expect(within(diffs).getByText("aaaa1111..bbbb2222")).toBeInTheDocument();
     fireEvent.click(within(diffs).getByRole("button", { name: "View diff" }));
-    expect(await within(diffs).findByText("+added line")).toBeInTheDocument();
+    const viewer = await within(diffs).findByTestId("diff-viewer");
+    expect(within(viewer).getByRole("region", { name: "src/app.ts" })).toBeInTheDocument();
+    expect(viewer).toHaveTextContent("added line");
 
     const artifacts = within(drawer).getByRole("region", { name: "Artifacts" });
     expect(within(artifacts).getByText("docs/api.md")).toBeInTheDocument();
