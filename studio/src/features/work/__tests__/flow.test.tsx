@@ -179,6 +179,7 @@ const slice: SpecSlice = {
   rules: [
     { id: "ru1", text: "No new deps", source: "D1", applies_to: ["*"], strength: "binding", status: "active", verdicts: { met: 1, unmet: 0 } },
     { id: "ru2", text: "Tests for endpoints", source: "you", applies_to: ["*"], strength: "binding", status: "active", verdicts: { met: 0, unmet: 2 } },
+    { id: "ru3", text: "Use bun test", source: "you", applies_to: ["*"], strength: "binding", status: "active", verdicts: { met: 0, unmet: 0 } },
   ],
   checks: { "R4.3": { state: "met", run_id: "r2" } },
 };
@@ -208,6 +209,10 @@ describe("review and co-sign", () => {
     expect(panel.getByLabelText("rule met")).toBeInTheDocument();
     expect(panel.getByLabelText("rule broken")).toBeInTheDocument();
     expect(panel.getByText("0 met, 2 unmet")).toBeInTheDocument();
+    // A rule no review answered is not shown as met.
+    expect(panel.getByLabelText("rule not checked")).toBeInTheDocument();
+    expect(panel.getByText("not checked")).toBeInTheDocument();
+    expect(panel.getAllByLabelText("rule met")).toHaveLength(1);
   });
 
   it("keeps Accept disabled until co-signed, then accepts and asks the PM to review the session", async () => {
@@ -277,6 +282,7 @@ describe("FollowPanel", () => {
     expect(panel.getByText("SQLite")).toBeInTheDocument();
     expect(panel.getByLabelText("rule met")).toBeInTheDocument();
     expect(panel.getByLabelText("rule flagged")).toBeInTheDocument();
+    expect(panel.getByLabelText("rule not checked yet")).toBeInTheDocument();
     expect(panel.getByText("Tests for endpoints")).toBeInTheDocument();
     expect(panel.getByText("2 unmet")).toBeInTheDocument();
     expect(panel.getByText(/A flagged rule goes back to the builder as a review issue/)).toBeInTheDocument();
