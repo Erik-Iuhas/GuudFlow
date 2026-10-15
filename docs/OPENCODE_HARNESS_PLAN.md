@@ -1290,6 +1290,57 @@ Decisions made while building §14 (so nobody re-derives them):
 10. **Real-model validation (H10, you).** Run one project through two or three backlog runs
     with an accept in between, on a real model.
 
+## 15. The Code tab: watch the codebase grow
+
+Until now code was visible only as diffs after a merge (card drawer, review panel). The
+Code tab is a read-only file browser over three sources, picked at the top:
+
+- **Project (accepted):** the project's `main` (`data/projects/{id}/code`, §13).
+- **This session:** the run's `main`, which grows as turns merge.
+- **A worker:** one role's worktree, unmerged edits included, live while it works.
+
+Layout: a file tree (files the session or worker changed marked A/M/D with line counts; a
+"changed only" filter) and the open file with a **File | Diff** toggle. Diff is against the
+session's base (project `main` when the run began, `project_run.json`). In a live run the
+tree and file refresh after each of the worker's file-changing tool calls ("Follow edits"),
+the same trigger the role Changes tab uses. The tab sits on the project page and in the Run
+view; a card's files open it.
+
+Backend: two read-only endpoints per source, `tree` and `file` (`?source=project|run|role`,
+`role=`, `path=`, `diff=1`). They never write, never take git's optional locks, refuse
+protected paths and paths outside the source, skip binaries and cap file size.
+
+Later, separately: download a source as a zip, and an app preview that serves a web folder
+in a sandboxed frame on its own origin (scripts on, no network, no access to Studio or the
+token), dev mode only.
+
+## 16. Shared project dependencies
+
+Before: `request_package` installed one package into one role's host-only tool directory
+for one run. Nothing was shared, nothing declared it in the repo, every run started clean.
+
+Now the repo's manifest is the source of truth, and one environment per lockfile is shared:
+
+1. A worker declares a dependency the normal way, in `package.json` or
+   `requirements.txt` on its branch, then calls the MCP tool `sync_dependencies`.
+2. The host compares the manifest with the project's current environment. Allow-listed
+   packages (exact pins, the existing `package_allow`) go through; anything else becomes one
+   approval request listing every new package. A rejection returns the names refused.
+3. The host installs into `data/projects/{id}/deps/<manager>-<hash of the manifest>/` with
+   the same rules as before: no install scripts (`npm --ignore-scripts`), binary wheels only
+   (`pip --only-binary=:all:`), a fixed registry, no shell. The sandbox still has no network.
+4. The environment is mounted read-only into every role (`/deps`, or its host path in host
+   mode) and named in each role's environment (`NODE_PATH`, `PYTHONPATH`, `PATH` gains its
+   `bin`). The worker that synced gets it from its next command; other roles from their next
+   spawn, when `main` with the new manifest is merged into their branch. An environment for an
+   unchanged manifest is reused, never rebuilt.
+5. Every sync, approval and rejection is a `PACKAGE_*` signal; the Code tab lists the
+   project's dependencies (name, version, who added it, who approved it, which session).
+6. Out of scope here: packages that need install scripts (to come: per-package human
+   approval and a throwaway Docker build container, never the host) and runtimes such as
+   `bun` or a Node version (they belong to the sandbox image or a runtimes setting checked
+   before a session; run findings F3).
+
 ## Appendix: how the research was done
 
 1. `npm i opencode-ai@1.18.34`; `opencode serve`; dumped `GET /doc` (OpenAPI, ~479 KB).
