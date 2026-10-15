@@ -326,7 +326,9 @@ def playbook_diff(retro: Retrospective, playbook: Playbook) -> PlaybookDiff:
     - a review issue that recurred on a card → `known_pitfalls`
     - a rebrief that unstuck its target → `brief_addenda` for that role
     - an edge that needed every round it had → `review_rounds` (+1)
-    - a run where every card finished → `task_templates` (the card titles)
+    A finished session's card titles are not recorded: the project manager plans each
+    session from the spec and backlog, so they never recurred and only piled up as
+    one-off "emerging" entries.
     Entries that already exist are reinforced instead of duplicated.
     """
     proposals: list[tuple[str, str, Any]] = []  # Any: playbook values are JSON
@@ -342,8 +344,6 @@ def playbook_diff(retro: Retrospective, playbook: Playbook) -> PlaybookDiff:
             edge = f"{iv.detail.get('author_role')}->{iv.detail.get('reviewer_role')}"
             used = retro.review_rounds_used.get(edge, 0)
             proposals.append(("review_rounds", edge, max(used, 1) + 1))
-    if retro.cards and all(c.column == "done" for c in retro.cards):
-        proposals.append(("task_templates", "", [c.title for c in retro.cards]))
 
     from core.playbook import make_entry_id
 

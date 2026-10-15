@@ -86,8 +86,12 @@ export interface PlaybookGroup {
   entries: PlaybookEntryWire[];
 }
 
+/** Old per-session card lists; no longer written and not worth showing. */
+const HIDDEN_SECTIONS = new Set(["task_templates"]);
+
 /** Entries grouped by section in a fixed order; within a section live states first, then by confidence. */
-export function groupPlaybook(entries: readonly PlaybookEntryWire[]): PlaybookGroup[] {
+export function groupPlaybook(all: readonly PlaybookEntryWire[]): PlaybookGroup[] {
+  const entries = all.filter((e) => !HIDDEN_SECTIONS.has(e.section));
   const known = new Set<string>(SECTION_ORDER);
   const order = [...SECTION_ORDER, ...[...new Set(entries.map((e) => e.section))].filter((s) => !known.has(s)).sort()];
   const groups: PlaybookGroup[] = [];

@@ -89,11 +89,11 @@ def test_playbook_diff_is_evidence_backed_and_reinforces(tmp_path: Path) -> None
     playbook = Playbook("p", path=tmp_path / "pb.json")
     diff = playbook_diff(retro, playbook)
     sections = sorted(e.section for e in diff.added)
-    assert sections == ["brief_addenda", "known_pitfalls", "task_templates"]
+    assert sections == ["brief_addenda", "known_pitfalls"]   # no per-session card lists
     assert all(e.evidence_runs == ["run_a"] for e in diff.added)
     diff.apply(playbook, "run_a")
     again = playbook_diff(retro, playbook)
-    assert not again.added and len(again.reinforced) == 3
+    assert not again.added and len(again.reinforced) == 2
 
 
 def test_carry_forward_attributes_done_work_and_keeps_open_cards(tmp_path: Path) -> None:

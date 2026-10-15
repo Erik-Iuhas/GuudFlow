@@ -258,7 +258,7 @@ export function Projects() {
                     {p.project_id}
                   </Link>
                 </Td>
-                <Td>{p.goal}</Td>
+                <Td className="max-w-xl"><GoalText goal={p.goal} /></Td>
                 <Td className="text-xs">
                   {(p.agents ?? []).map((a) => a.role).join(", ") || "—"}
                 </Td>
@@ -572,5 +572,26 @@ function ExampleTemplateModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+/** A project's goal in two lines, with "more" to read the rest in place. */
+function GoalText({ goal }: { goal: string }) {
+  const [open, setOpen] = useState(false);
+  const long = goal.length > 160;
+  return (
+    <div className="text-sm">
+      <p className={cn("m-0", !open && "line-clamp-2")} title={open ? undefined : goal}>{goal}</p>
+      {long && (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="mt-0.5 border-0 bg-transparent p-0 text-xs text-muted-foreground underline hover:text-foreground"
+        >
+          {open ? "less" : "more"}
+        </button>
+      )}
+    </div>
   );
 }

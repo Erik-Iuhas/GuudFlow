@@ -78,11 +78,12 @@ describe("playbook", () => {
     entry({ id: "c", section: "known_pitfalls", value: "Old lesson", confidence: 0.9, state: "archived" }),
     entry({ id: "d", section: "known_pitfalls", value: "Best lesson", confidence: 0.75, state: "active" }),
     entry({ id: "f", section: "custom_future", value: "x" }),
+    entry({ id: "t", section: "task_templates", value: "Implement A; Write tests for B; Verify C" }),
   ];
 
   it("groups by section in a fixed order, live states first then confidence", () => {
     const groups = groupPlaybook(entries);
-    expect(groups.map((g) => g.section)).toEqual(["brief_addenda", "known_pitfalls", "custom_future"]);
+    expect(groups.map((g) => g.section)).toEqual(["brief_addenda", "known_pitfalls", "custom_future"]); // no task_templates
     expect(groups[1]!.entries.map((e) => e.id)).toEqual(["d", "a", "c"]);
   });
 
