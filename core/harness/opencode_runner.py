@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -52,6 +53,20 @@ class TurnStats:
     retries: int = 0
     # Context size of the last model call (input + cache read): what a session carries on.
     last_context: int = 0
+    # Programs a shell call in this turn could not find ("bun: command not found").
+    missing_programs: set[str] = field(default_factory=set)
+
+
+# "bash: bun: command not found", "/bin/sh: 1: bun: not found"; zsh: "command not found: bun"
+_NOT_FOUND = re.compile(r"(?:^|[\s:])([\w.+-]+): (?:command )?not found\b")
+_ZSH_NOT_FOUND = re.compile(r"command not found: ([\w.+-]+)")
+
+
+def missing_programs(output: str) -> set[str]:
+    """Program names a shell output says were not found."""
+    text = output or ""
+    found = set(_NOT_FOUND.findall(text)) | set(_ZSH_NOT_FOUND.findall(text))
+    return found - {"bash", "sh", "zsh", "1"}
 
 
 class _UsageTracker:
@@ -61,6 +76,7 @@ class _UsageTracker:
         self.messages: dict[str, dict[str, Any]] = {}
         self.tool_order: list[str] = []
         self.tools: dict[str, tuple[str, str]] = {}
+        self.missing: set[str] = set()
 
     def observe(self, event: dict[str, Any]) -> None:
         props = event.get("properties") or {}
@@ -74,8 +90,11 @@ class _UsageTracker:
             if part.get("type") == "tool" and part.get("id"):
                 if part["id"] not in self.tools:
                     self.tool_order.append(part["id"])
-                status = (part.get("state") or {}).get("status", "")
+                state = part.get("state") or {}
+                status = state.get("status", "")
                 self.tools[part["id"]] = (str(part.get("tool", "")), str(status))
+                if part.get("tool") == "bash" and status in ("completed", "error"):
+                    self.missing |= missing_programs(str(state.get("output") or state.get("error") or ""))
 
     def fill(self, stats: TurnStats) -> None:
         stats.cost = sum(float(m.get("cost") or 0.0) for m in self.messages.values())
@@ -86,6 +105,7 @@ class _UsageTracker:
             stats.tokens["reasoning"] += int(tok.get("reasoning") or 0)
             stats.tokens["cache_read"] += int((tok.get("cache") or {}).get("read") or 0)
         stats.tool_calls = [self.tools[i] for i in self.tool_order]
+        stats.missing_programs |= self.missing
         if self.messages:
             tok = list(self.messages.values())[-1].get("tokens") or {}
             stats.last_context = (int(tok.get("input") or 0)

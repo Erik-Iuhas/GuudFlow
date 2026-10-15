@@ -4,6 +4,7 @@ Replaces the free-text ``[COMMIT]/[VERIFY]/[ASK]`` protocol blocks. See
 docs/OPENCODE_HARNESS_PLAN.md sections 4.2 and 4.3.
 """
 import json
+import re
 from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -43,6 +44,35 @@ class AcceptanceCheck(BaseModel):
         if self.met and len(self.evidence) < 10:
             raise ValueError("evidence: at least 10 characters required when met is true; say how you know")
         return self
+
+
+# Programs that run tests; a turn that could not find one cannot have run its tests.
+TEST_PROGRAMS = frozenset({"bun", "pytest", "npm", "npx", "node", "python", "python3", "vitest",
+                           "jest", "deno", "go", "cargo", "dotnet", "mvn", "gradle"})
+_TESTISH = re.compile(r"\btest|\bspec\b|\bpass(?:es|ed)?\b|\bgreen\b", re.IGNORECASE)
+
+
+def unverified_claims(result: "AgentResult", missing: set[str]) -> tuple["AgentResult", list[str]]:
+    """Turn 'met' acceptance claims that rest on tests into unmet ones when the turn's shell
+    could not find a test runner (run findings F15: a model wrote 'tests verify it' after
+    `bun: command not found`). Not a prompt: the reviewer and Studio see the claim as unmet,
+    with the reason. Returns the result and the items changed."""
+    runners = sorted(missing & TEST_PROGRAMS)
+    if not runners:
+        return result, []
+    names = ", ".join(runners)
+    changed: list[str] = []
+    checks = []
+    for c in result.acceptance:
+        text = f"{c.item} {c.evidence}"
+        if c.met and (_TESTISH.search(text) or any(re.search(rf"\b{re.escape(r)}\b", text) for r in runners)):
+            changed.append(c.item)
+            checks.append(AcceptanceCheck(item=c.item, met=False, evidence=(
+                f"Not verified: {names} was not available in this turn ({names}: command not "
+                f"found), so the tests behind this claim did not run. Claimed: {c.evidence}")[:2000]))
+        else:
+            checks.append(c)
+    return (result.model_copy(update={"acceptance": checks}) if changed else result), changed
 
 
 class ItemVerdict(BaseModel):

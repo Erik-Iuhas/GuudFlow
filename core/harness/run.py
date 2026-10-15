@@ -73,7 +73,7 @@ from core.harness.artifacts import ArtifactRegistry
 from core.harness.persona_prompt import PromptLayers, build_agent_prompt
 from core.harness.opencode_runner import EventHook, PermissionHook, PermissionReply, TurnStats, drive_turn
 from core.harness.result_inbox import ResultInbox
-from core.harness.results import AgentResult, ReviewResult
+from core.harness.results import TEST_PROGRAMS, AgentResult, ReviewResult, unverified_claims
 from core.harness.server import OpencodeServer
 from core import project_runs
 from core.backlog import BacklogItem
@@ -1058,6 +1058,12 @@ class OpencodeRun:
             _merge_stats(stats, more)
             return self.inbox.take(self.run_id, role_name)
 
+        if isinstance(result, AgentResult) and stats.missing_programs:
+            result, unverified = unverified_claims(result, stats.missing_programs)
+            if unverified:
+                log.warning("%s: %d acceptance claim(s) marked unmet: the tests could not run (%s "
+                            "not found in this turn)", role_name, len(unverified),
+                            ", ".join(sorted(stats.missing_programs & TEST_PROGRAMS)))
         await self._finish(role, result, stats, plan, resolve=resolve)
         if result is not None:
             role.turns_done += 1
@@ -1613,6 +1619,7 @@ def _merge_stats(into: TurnStats, more: TurnStats) -> None:
     into.errors += more.errors
     into.timed_out = into.timed_out or more.timed_out
     into.last_context = more.last_context or into.last_context
+    into.missing_programs |= more.missing_programs
 
 
 def cleanup_role_homes(run_root: Path) -> None:
