@@ -290,12 +290,19 @@ class StudioFiles(StaticFiles):
 
     async def get_response(self, path: str, scope: Scope) -> Response:
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             last = path.rsplit("/", 1)[-1]
             if exc.status_code != 404 or path.startswith("api") or "." in last:
                 raise
-            return await super().get_response("index.html", scope)
+            response = await super().get_response("index.html", scope)
+        else:
+            if path not in ("", ".", "index.html"):
+                return response
+        # index.html names the current bundle: revalidate it so a new build shows up (without
+        # this the browser's heuristic cache kept the old Studio). Hashed assets stay cacheable.
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def create_app() -> FastAPI:

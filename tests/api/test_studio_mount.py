@@ -33,3 +33,11 @@ def test_deep_link_gets_index(client: TestClient) -> None:
 def test_missing_files_and_api_paths_still_404(client: TestClient) -> None:
     assert client.get("/assets/missing.js").status_code == 404
     assert client.get("/api/does-not-exist").status_code == 404
+
+
+def test_index_is_revalidated_so_a_new_build_shows_up(client: TestClient) -> None:
+    """Seen live: after a rebuild the browser kept the old index.html (no Cache-Control, so
+    heuristic caching) and with it the old bundle. Hashed assets may still be cached."""
+    for path in ("/", "/runs/run_x"):
+        assert client.get(path).headers["cache-control"] == "no-cache"
+    assert "cache-control" not in client.get("/assets/app.js").headers
