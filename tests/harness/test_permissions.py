@@ -76,6 +76,13 @@ def test_builder_edit_and_bash() -> None:
     assert decide(p["bash"], "git push origin main") == "deny"
     assert decide(p["bash"], "pytest -q") == "allow"
     assert decide(p["bash"], "rm -rf /") == "deny"
+    # Files inside the clone can be removed, moved and copied; nothing outside it.
+    assert decide(p["bash"], "rm web/src/old.js") == "allow"
+    assert decide(p["bash"], "mv web/a.js web/b.js") == "allow"
+    for bad in ("rm -rf /etc", "rm /etc/passwd", "rm -rf ~", "rm -rf ../x", "mv a.js /tmp/a.js",
+                "cp $HOME/.ssh/id_rsa x", "find . -exec rm {} ;", "find . -delete"):
+        assert decide(p["bash"], bad) == "deny", bad
+    assert decide(p["bash"], "find web -name '*.js'") == "allow"
 
 
 def test_shell_ask() -> None:

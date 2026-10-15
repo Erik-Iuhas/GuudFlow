@@ -50,14 +50,20 @@ PROTECTED_PATHS = ("inputs/**", ".github/**", "opencode.json", ".opencode/**", "
                    ".git")
 
 READONLY_BASH = ("git status*", "git diff*", "git log*", "git show*", "git branch*",
-                 "ls*", "cat *", "head *", "tail *", "wc *", "pwd", "grep *", "cd *")
+                 "ls*", "cat *", "head *", "tail *", "wc *", "pwd", "grep *", "cd *",
+                 # Looking around: each refusal costs a model call (run findings F8).
+                 "find *", "which *", "diff *", "sort *", "uniq *", "tree*", "file *", "stat *")
+# Roles that edit also move, copy and delete files (opencode has no delete or rename tool).
 COMMIT_BASH = ("git add*", "git commit*", "git checkout -b *", "git switch *", "git restore *",
-               "mkdir *")
+               "mkdir *", "rm *", "mv *", "cp *", "touch *", "echo *")
 TEST_RUNNER_BASH = ("pytest*", "python -m pytest*", "python3 -m pytest*", "npm test*",
                     "npm run *", "node *", "python *", "python3 *", "npx vitest*", "npx tsc*",
                     "bun test*", "bun run *")
 # Always denied, rendered after the allows. Installs go through the IT agent.
-DENIED_BASH = ("git push*", "git remote*", "git config*", "pip *", "pip3 *", "python -m pip*",
+_OUTSIDE = tuple(f"{cmd} {pat}" for cmd in ("rm", "mv", "cp")
+                 for pat in ("/*", "* /*", "*~*", "*..*", "*$*"))
+DENIED_BASH = ("find *-exec*", "find *-execdir*", "find *-delete*", "find *-ok*",
+               "find *-fprint*", *_OUTSIDE, "git push*", "git remote*", "git config*", "pip *", "pip3 *", "python -m pip*",
                "python3 -m pip*", "npm install*", "npm i *", "npm ci*", "yarn *", "pnpm *",
                "uv *", "poetry *", "apt*", "curl *", "wget *", "ssh *", "scp *", "sudo *",
                "docker *", "nc *", "bun install*", "bun add*", "bun i *", "bun x *", "bunx *",

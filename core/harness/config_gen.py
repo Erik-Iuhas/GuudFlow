@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from core.harness.capabilities import READONLY_BASH, CompiledCapabilities
+from core.harness.capabilities import DENIED_BASH, READONLY_BASH, CompiledCapabilities
 from core.harness.permissions import build_permission
 from core.llm.registry import ModelInfo
 
@@ -122,7 +122,9 @@ EXPLORE_OVERRIDE: dict[str, Any] = {
     "permission": {
         "task": "deny",
         "edit": "deny",
-        "bash": {"*": "deny", **{pattern: "allow" for pattern in READONLY_BASH}},
+        # The read-only looks, then the denies (last match wins: no find -exec / -delete).
+        "bash": {"*": "deny", **{pattern: "allow" for pattern in READONLY_BASH},
+                 **{pattern: "deny" for pattern in DENIED_BASH}},
     }
 }
 

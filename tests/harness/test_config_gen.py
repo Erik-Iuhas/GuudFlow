@@ -97,6 +97,10 @@ def test_explore_override_is_read_only() -> None:
     assert perm["task"] == "deny" and perm["edit"] == "deny"
     assert perm["bash"]["*"] == "deny"
     assert all(perm["bash"][p] == "allow" for p in READONLY_BASH)
+    from tests.harness.test_permissions import decide
+    assert decide(perm["bash"], "find . -name x") == "allow"
+    assert decide(perm["bash"], "find . -exec rm {} ;") == "deny"
+    assert decide(perm["bash"], "rm notes.md") == "deny"
 
 
 def test_build_config_shape_and_order() -> None:
