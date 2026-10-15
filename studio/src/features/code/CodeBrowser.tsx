@@ -197,8 +197,8 @@ export function CodeBrowser({
           <DependencyList projectId={projectId} names={names} />
         </div>
       ) : (
-      <div className="flex min-h-0 flex-1 flex-wrap overflow-hidden rounded-md border border-border sm:flex-nowrap">
-        <nav aria-label="Files" className="max-h-72 w-full shrink-0 overflow-auto border-b border-border p-1 sm:max-h-none sm:w-60 sm:border-b-0 sm:border-r">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-border sm:flex-row">
+        <nav aria-label="Files" className="max-h-60 w-full shrink-0 overflow-auto border-b border-border p-1 sm:max-h-none sm:w-60 sm:border-b-0 sm:border-r">
           <p className="m-0 px-2 py-1 text-xs text-muted-foreground">
             {source.kind === "project" && "Accepted main"}
             {source.kind === "run" && `This session · ${changedCount} changed`}
@@ -222,7 +222,7 @@ export function CodeBrowser({
           {tree.data?.truncated && <p className="m-0 px-2 py-1 text-xs text-muted-foreground">Only the first 5000 files are listed.</p>}
         </nav>
 
-        <section aria-label="File" className="flex min-w-0 flex-1 flex-col">
+        <section aria-label="File" className="flex min-h-0 min-w-0 flex-1 flex-col">
           {selected ? (
             <>
               <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5">

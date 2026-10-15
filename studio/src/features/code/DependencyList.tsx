@@ -25,7 +25,7 @@ export function DependencyList({ projectId, names }: { projectId: string; names?
       {envs.map((env) => (
         <section key={env.manager} aria-label={`${env.manager} dependencies`}>
           <h3 className="m-0 mb-1 text-sm font-semibold">
-            {env.manager} <span className="font-normal text-muted-foreground">· from {MANIFEST[env.manager]} · {env.packages.length} packages</span>
+            {env.manager} <span className="font-normal text-muted-foreground">· from {MANIFEST[env.manager]} · {env.packages.length} package{env.packages.length === 1 ? "" : "s"}</span>
           </h3>
           <table className="w-full border-collapse text-xs">
             <thead>
