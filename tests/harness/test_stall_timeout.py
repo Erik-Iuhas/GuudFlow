@@ -67,3 +67,14 @@ async def test_a_model_call_that_keeps_failing_stops_the_turn_with_the_reason(mo
     stats = await drive_turn(client, "s", "hi", timeout=None, stall=5.0)  # type: ignore[arg-type]
     assert client.aborted and stats.retries == 3 and not stats.timed_out
     assert "model call kept failing (3 tries)" in stats.errors[-1] and "ConnectError" in stats.errors[-1]
+
+
+async def test_a_turn_ends_as_soon_as_done_says_so() -> None:
+    """Seen live: a model kept calling the notebook tool after its notebook was saved, so the
+    end of the run waited for it. `done` ends the turn without counting it as a timeout."""
+    client = FakeClient(beats=50, gap=0.02, then_idle=False)
+    seen: list[dict[str, Any]] = []
+    stats = await drive_turn(client, "s", "hi", timeout=None, stall=5.0,  # type: ignore[arg-type]
+                             on_event=seen.append, done=lambda: len(seen) >= 4)
+    assert client.aborted and not stats.timed_out and not stats.errors
+    assert len(seen) == 4

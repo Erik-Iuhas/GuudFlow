@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -191,6 +192,27 @@ async def test_roles_write_notebooks_at_the_end(tmp_path: Path, fake_llm: FakeLL
     assert (await runner.run()).status is SchedulerStatus.COMPLETE
     note = runner.run_root / "notebooks" / "builder.md"
     assert note.read_text().strip() == "- greet.py holds greet(); run pytest"
+
+
+async def test_a_notebook_turn_ends_once_the_notebook_is_saved(tmp_path: Path,
+                                                               fake_llm: FakeLLM) -> None:
+    """Seen live (Mistral): the model saved its notebook three times, each a paid call, while
+    Studio showed every role complete and the run still running."""
+    import time
+
+    def slow(n: int) -> Callable[[dict[str, Any]], ToolCall]:
+        def call(_body: dict[str, Any]) -> ToolCall:
+            time.sleep(2.0)   # a real model takes seconds; the fake answers instantly
+            return ToolCall("guudflow_notebook", {"text": f"- note {n}"})
+        return call
+
+    fake_llm.route("Write your notebook",
+                   ToolCall("guudflow_notebook", {"text": "- note 1"}), slow(2), slow(3))
+    fake_llm.route("Your turn: builder", _done("Implemented greet in greet.py."))
+    runner = _runner(tmp_path, [AgentConfig(role="builder")], fake_llm)
+    assert (await runner.run()).status is SchedulerStatus.COMPLETE
+    assert (runner.run_root / "notebooks" / "builder.md").read_text().strip() == "- note 1"
+    assert fake_llm.remaining("Write your notebook") >= 1   # never asked for the third
 
 
 @pytest.mark.parametrize("production", [True])

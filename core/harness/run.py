@@ -245,6 +245,7 @@ class OpencodeRun:
         self._started = 0.0
         self._carry_text = ""
         self._notebooks: dict[str, str] = {}
+        self._notebooks_saved: set[str] = set()   # roles whose end-of-run notebook is saved
         # Per role: (kept the session, why, context tokens carried in) for the current turn.
         self._session_choice: dict[str, tuple[bool, str, int]] = {}
         self._turn_seq = 0
@@ -1411,6 +1412,7 @@ class OpencodeRun:
             folder = self.runner.run_root / project_runs.NOTEBOOKS_DIR
             folder.mkdir(parents=True, exist_ok=True)
             (folder / f"{identity.role}.md").write_text(text + "\n", encoding="utf-8")
+            self._notebooks_saved.add(identity.role)
             self._post(SignalType.AGENT_MESSAGE, identity.role,
                        f"{self._label(identity.role)} wrote a notebook for the next session",
                        json.dumps({"kind": "notebook", "chars": len(text)}))
@@ -1449,7 +1451,10 @@ class OpencodeRun:
                                                 self._own_handoffs(name)), agent=name,
                                  on_event=self._event_hook(name),
                                  on_permission=self._permission_hook(name),
-                                 timeout=self.settings.notebook_timeout)
+                                 timeout=self.settings.notebook_timeout,
+                                 # Saved once is enough: a model that keeps calling the tool
+                                 # (seen with Mistral) would hold up the end of the run.
+                                 done=lambda name=name: name in self._notebooks_saved)
             except Exception:  # noqa: BLE001 — a notebook is a convenience, never a failure
                 log.exception("%s: writing the notebook failed in %s", name, self.run_id)
 
