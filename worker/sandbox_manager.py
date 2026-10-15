@@ -567,6 +567,18 @@ class SandboxManager:
         finally:
             container.remove(force=True)
 
+    def missing_programs(self, programs: list[str]) -> list[str] | None:
+        """Which of `programs` the sandbox image does not have (None: the image is not built
+        yet, so nothing can be said). Runs one throwaway container with no network."""
+        if not self._image_exists():
+            return None
+        script = 'for p in "$@"; do command -v "$p" >/dev/null 2>&1 || echo "$p"; done'
+        output = self.client.containers.run(
+            self.image, ["-c", script, "sh", *programs], entrypoint=["sh"], remove=True,
+            network_mode="none", environment={"PATH": _CONTAINER_PATH})
+        text = output.decode("utf-8", "replace") if isinstance(output, bytes) else str(output)
+        return [line.strip() for line in text.splitlines() if line.strip()]
+
     async def stop_run(self, run_id: str) -> None:
         """Remove every container labelled with the run, then the run's network."""
         await asyncio.to_thread(self._remove_run_containers, run_id)

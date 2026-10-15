@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { normalizeTab } from "../projectTabs";
 import { detailKey, useDetailLevel } from "../useDetailLevel";
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), runs: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), runs: vi.fn(), invoke: vi.fn() }));
 
 vi.mock("../../../api", () => {
   class ApiError extends Error {
@@ -15,12 +15,16 @@ vi.mock("../../../api", () => {
   }
   return {
     ApiError,
-    invokeApi: { invoke: vi.fn() },
+    invokeApi: { invoke: mocks.invoke },
     projectsApi: { get: mocks.get, update: vi.fn() },
     runsApi: { list: mocks.runs },
   };
 });
-vi.mock("../../work/ProjectWork", () => ({ ProjectWork: () => <div>work content</div> }));
+vi.mock("../../work/ProjectWork", () => ({
+  ProjectWork: ({ onStartRun }: { onStartRun: (r: object) => void }) => (
+    <div>work content<button onClick={() => onStartRun({})}>Start session</button></div>
+  ),
+}));
 vi.mock("../../../components/RoadmapTab", () => ({ RoadmapTab: () => <div>roadmap content</div> }));
 vi.mock("../../../views/Inputs", () => ({ Inputs: () => <div>inputs content</div> }));
 vi.mock("../ProjectInsights", () => ({ ProjectInsights: () => <div>insights content</div> }));
@@ -191,5 +195,23 @@ describe("Studio project page", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Technical" }).getAttribute("aria-pressed")).toBe("true"),
     );
+  });
+});
+
+describe("starting a session", () => {
+  it("says before the run which test runners agents cannot run, and can start anyway", async () => {
+    mocks.get.mockResolvedValue(PROJECT);
+    mocks.runs.mockResolvedValue([]);
+    mocks.invoke.mockResolvedValueOnce({
+      accepted: false, requires_approval: true, gate: "missing_runtime", project_id: "p1", message: "POST again",
+      missing_runtimes: [{ program: "bun", why: "spec rule rule-1: Use bun test", where: "this machine" }],
+    }).mockResolvedValueOnce({ accepted: true, run_id: "r9", job_id: "j", project_id: "p1", enqueued_at: "" });
+    renderStudio("/projects/p1");
+    fireEvent.click(await screen.findByRole("button", { name: "Start session" }));
+    const box = await screen.findByTestId("missing-runtimes");
+    expect(box.textContent).toMatch(/bun.*this machine.*spec rule rule-1: Use bun test/);
+    expect(screen.queryByText("Estimated worst-case cost")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and run" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenLastCalledWith("p1", { confirm: true }));
   });
 });

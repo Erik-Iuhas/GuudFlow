@@ -76,6 +76,50 @@ async def test_invoke_skips_preview_when_gate_disabled(client, auth_header):
     assert r.json()["accepted"] is True
 
 
+async def test_invoke_asks_first_when_a_test_runner_is_missing(client, auth_header,
+                                                                monkeypatch):
+    """Run findings F3: a runner the project names but agents cannot run is reported before
+    the run, even with the cost preview off; `confirm: true` starts anyway."""
+    from core.harness import runtime_check
+
+    seen: list[str] = []
+
+    def missing(data_root, project_id, check_command, sandbox=None):
+        seen.append(check_command)
+        return [runtime_check.MissingRuntime(program="bun", why="spec rule rule-1: Use bun test",
+                                             where="this machine")]
+
+    monkeypatch.setattr(runtime_check, "missing_runtimes", missing)
+    await client.post("/api/projects", json={
+        "project_id": "p_rt", "goal": "x",
+        "approval_gates": {"pre_run_cost_preview": False, "check_command": "bun test"},
+    }, headers=auth_header)
+    r = await client.post("/api/invoke/p_rt", json={}, headers=auth_header)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["accepted"] is False and body["gate"] == "missing_runtime"
+    assert body["missing_runtimes"] == [{"program": "bun", "why": "spec rule rule-1: Use bun test",
+                                         "where": "this machine"}]
+    assert "bun (this machine)" in body["message"]
+    assert seen == ["bun test"]
+    r = await client.post("/api/invoke/p_rt", json={"confirm": True}, headers=auth_header)
+    assert r.status_code == 202
+    assert seen == ["bun test"]
+
+
+async def test_cost_preview_lists_missing_runners_too(client, auth_header, monkeypatch):
+    from core.harness import runtime_check
+
+    monkeypatch.setattr(runtime_check, "missing_runtimes", lambda *a, **k: [
+        runtime_check.MissingRuntime(program="pytest", why="the check command `pytest`",
+                                     where="the sandbox image")])
+    await client.post("/api/projects", json={"project_id": "p_rt2", "goal": "x"},
+                      headers=auth_header)
+    body = (await client.post("/api/invoke/p_rt2", json={}, headers=auth_header)).json()
+    assert body["gate"] == "pre_run_cost_preview"
+    assert [m["program"] for m in body["missing_runtimes"]] == ["pytest"]
+
+
 async def test_invoke_requires_auth(client):
     r = await client.post("/api/invoke/p1", json={})
     assert r.status_code == 401

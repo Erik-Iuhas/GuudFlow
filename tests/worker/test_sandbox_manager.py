@@ -200,6 +200,38 @@ def test_remove_tolerates_a_removal_already_in_progress() -> None:
         SandboxManager(client=Client(Broken()))._remove_container("x")  # type: ignore[arg-type]
 
 
+def test_missing_programs_probes_the_image_once_without_network() -> None:
+    from docker.errors import ImageNotFound
+
+    calls: list[dict[str, Any]] = []
+
+    class Images:
+        def __init__(self, present: bool) -> None:
+            self.present = present
+
+        def get(self, _name: str) -> object:
+            if not self.present:
+                raise ImageNotFound("no image")
+            return object()
+
+    class Containers:
+        def run(self, image: str, command: list[str], **kwargs: Any) -> bytes:
+            calls.append({"image": image, "command": command, **kwargs})
+            return b"bun\npytest\n"
+
+    class Client:
+        def __init__(self, present: bool) -> None:
+            self.images = Images(present)
+            self.containers = Containers()
+
+    mgr = SandboxManager(client=Client(True), image="img:1")  # type: ignore[arg-type]
+    assert mgr.missing_programs(["bun", "git", "pytest"]) == ["bun", "pytest"]
+    (call,) = calls
+    assert call["image"] == "img:1" and call["command"][-3:] == ["bun", "git", "pytest"]
+    assert call["network_mode"] == "none" and call["remove"] is True
+    assert SandboxManager(client=Client(False)).missing_programs(["bun"]) is None  # type: ignore[arg-type]
+
+
 def test_sandbox_base_url() -> None:
     box = Sandbox(container_id="c", name="n", ip="172.30.0.2", password="p")
     assert box.base_url == f"http://172.30.0.2:{OPENCODE_PORT}"
