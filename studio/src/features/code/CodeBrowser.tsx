@@ -8,6 +8,7 @@ import {
   type CodeSource, type OpenCodeDetail,
 } from "./api";
 import { buildTree, parentsOf, type TreeNode } from "./model";
+import { DependencyList } from "./DependencyList";
 
 const POLL_MS = 5_000;
 const MIN_GAP_MS = 1_500;
@@ -45,6 +46,7 @@ export function CodeBrowser({
   const [changedOnly, setChangedOnly] = useState(false);
   const [follow, setFollow] = useState(true);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [showDeps, setShowDeps] = useState(false);
   const role = source.kind === "role" ? source.role : null;
   const polling = live && source.kind !== "project" ? POLL_MS : false;
 
@@ -155,6 +157,13 @@ export function CodeBrowser({
             </SourceButton>
           )}
         </div>
+        {projectId && (
+          <button type="button" aria-pressed={showDeps} onClick={() => setShowDeps((v) => !v)}
+                  className={cn("cursor-pointer rounded-md border border-border px-2.5 py-0.5 text-xs",
+                                showDeps ? "bg-accent text-foreground" : "bg-transparent text-muted-foreground hover:bg-accent")}>
+            Dependencies
+          </button>
+        )}
         {runId && workerRoles.length > 0 && (
           <select
             aria-label="Worker"
@@ -183,6 +192,11 @@ export function CodeBrowser({
         )}
       </div>
 
+      {showDeps && projectId ? (
+        <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border">
+          <DependencyList projectId={projectId} names={names} />
+        </div>
+      ) : (
       <div className="flex min-h-0 flex-1 flex-wrap overflow-hidden rounded-md border border-border sm:flex-nowrap">
         <nav aria-label="Files" className="max-h-72 w-full shrink-0 overflow-auto border-b border-border p-1 sm:max-h-none sm:w-60 sm:border-b-0 sm:border-r">
           <p className="m-0 px-2 py-1 text-xs text-muted-foreground">
@@ -230,6 +244,7 @@ export function CodeBrowser({
           )}
         </section>
       </div>
+      )}
     </div>
   );
 }

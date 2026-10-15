@@ -122,6 +122,17 @@ async def project_file(request: Request, project_id: str, path: str) -> dict[str
     return await asyncio.to_thread(_file_body, src, path, False)
 
 
+@router.get("/api/projects/{project_id}/deps")
+async def project_deps(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
+    """The project's shared dependencies (plan §16): each manager's current packages."""
+    from core.deps import ProjectDeps
+    _one_part(project_id)
+    if await request.app.state.project_store.get(project_id) is None:
+        raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
+    deps = ProjectDeps(Path(request.app.state.data_root) / "projects" / project_id / "deps")
+    return {"environments": [asdict(env) for env in deps.all()]}
+
+
 @router.get("/api/runs/{run_id}/code/roles")
 async def run_code_roles(request: Request, run_id: str) -> dict[str, Any]:  # Any: JSON
     """The roles of a run that have a checkout to look at."""

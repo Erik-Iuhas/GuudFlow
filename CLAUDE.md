@@ -71,6 +71,12 @@ commits and quips use the name, and a `TEAM` signal at run start tells Studio wh
 - **MCP.** Third-party MCP servers are proxied on the host (`core/mcp_registry.py`,
   `core/harness/mcp_proxy.py`; `docs/MCP_PLAN.md`).
 
+**Code tab and shared dependencies (plan §15, §16).** Studio's Code tab reads code read-only
+through `core/code_browser.py` (project `main`, the session's `main`, a worker's worktree).
+Workers share dependencies by pinning them in `package.json` / `requirements.txt` and calling
+`sync_dependencies`; the host installs each manifest once into `data/projects/{id}/deps/`
+(`core/deps.py`), mounted read-only at `/deps` in every role.
+
 **Models & providers.** Studio's Settings page edits providers, models, prices and each tier's
 model (`core/model_config.py`, `api/routes/model_config.py`). The install's choices live in
 `{data_root}/model_config.json` (the shipped `data/models.json` is the default); provider keys typed

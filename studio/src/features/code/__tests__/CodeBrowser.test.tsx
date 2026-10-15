@@ -88,3 +88,19 @@ describe("CodeBrowser", () => {
     await waitFor(() => expect(screen.getByTestId("diff-viewer")).toBeTruthy());
   });
 });
+
+describe("DependencyList", () => {
+  it("lists shared packages with who added and approved them", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.endsWith("/deps")
+        ? { environments: [{ manager: "npm", key: "npm-1", packages: [
+            { name: "vite", version: "5.4.1", added_by: "developer", approved_by: "human", run_id: "run_a", at: 1 }] }] }
+        : respond(url),
+    ))));
+    wrap(<CodeBrowser projectId="p1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Dependencies" }));
+    const list = await screen.findByTestId("dependency-list");
+    expect(list.textContent).toContain("vite");
+    expect(list.textContent).toContain("by a person");
+  });
+});

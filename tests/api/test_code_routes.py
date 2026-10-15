@@ -79,3 +79,20 @@ async def test_run_and_role_sources(client, auth_header, role_run) -> None:
 ])
 async def test_unknown_or_escaping_is_404(client, auth_header, role_run, path) -> None:
     assert (await client.get(path, headers=auth_header)).status_code == 404
+
+
+async def test_project_deps_lists_packages(client, auth_header, data_root: Path) -> None:
+    from core.deps import Package, ProjectDeps, env_key
+
+    r = await client.post("/api/projects", json={"project_id": "p2", "goal": "x"},
+                          headers=auth_header)
+    assert r.status_code in (200, 201)
+    empty = (await client.get("/api/projects/p2/deps", headers=auth_header)).json()
+    assert empty == {"environments": []}
+    deps = ProjectDeps(data_root / "projects" / "p2" / "deps")
+    deps.root.mkdir(parents=True)
+    (deps.root / env_key("npm", {"vite": "5.4.1"})).mkdir()
+    deps.activate("npm", [Package("vite", "5.4.1", "developer", "human", "run_a", 1.0)])
+    body = (await client.get("/api/projects/p2/deps", headers=auth_header)).json()
+    (env,) = body["environments"]
+    assert env["manager"] == "npm" and env["packages"][0]["added_by"] == "developer"

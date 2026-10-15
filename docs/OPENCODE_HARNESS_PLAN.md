@@ -1310,6 +1310,11 @@ Backend: two read-only endpoints per source, `tree` and `file` (`?source=project
 `role=`, `path=`, `diff=1`). They never write, never take git's optional locks, refuse
 protected paths and paths outside the source, skip binaries and cap file size.
 
+Built: `core/code_browser.py`; `api/routes/code.py` (`GET /api/projects/{id}/code/tree|file`,
+`GET /api/runs/{id}/code/tree|file[?role=]`, `GET /api/runs/{id}/code/roles`); Studio
+`features/code/` (project page tab "Code", Run view side-panel tab "Code"; a card's handoff
+files and its "Live changes" open it).
+
 Later, separately: download a source as a zip, and an app preview that serves a web folder
 in a sandboxed frame on its own origin (scripts on, no network, no access to Studio or the
 token), dev mode only.
@@ -1336,7 +1341,15 @@ Now the repo's manifest is the source of truth, and one environment per lockfile
    unchanged manifest is reused, never rebuilt.
 5. Every sync, approval and rejection is a `PACKAGE_*` signal; the Code tab lists the
    project's dependencies (name, version, who added it, who approved it, which session).
-6. Out of scope here: packages that need install scripts (to come: per-package human
+6. Built: `core/deps.py` (manifest pins, hashed environments, `<deps>/<manager>` link and
+   `state.json` with who added and approved each package), the MCP tool in
+   `core/harness/mcp_tools.py` (granted with `packages: via_it_agent`), the `/deps` mount and
+   environment in `worker/sandbox_manager.py` (host mode: the host path via the server's
+   environment), the `node_modules` link at spawn (`core/harness/run.py`, kept out of commits by
+   the role's `info/exclude`) and `GET /api/projects/{id}/deps` with the Code tab's
+   Dependencies list. Pins must be exact; ranges, URLs, paths and options are refused with
+   every problem listed.
+7. Out of scope here: packages that need install scripts (to come: per-package human
    approval and a throwaway Docker build container, never the host) and runtimes such as
    `bun` or a Node version (they belong to the sandbox image or a runtimes setting checked
    before a session; run findings F3).

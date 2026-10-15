@@ -74,3 +74,23 @@ export const OPEN_CODE_EVENT = "guudflow:open-code";
 export function openInCode(detail: OpenCodeDetail): void {
   window.dispatchEvent(new CustomEvent<OpenCodeDetail>(OPEN_CODE_EVENT, { detail }));
 }
+
+/** One shared dependency and where it came from (plan §16). */
+export interface DepPackage {
+  name: string;
+  version: string;
+  added_by: string;
+  approved_by: string;
+  run_id: string;
+  at: number;
+}
+
+export interface DepsEnvironment {
+  manager: "npm" | "pip";
+  key: string;
+  packages: DepPackage[];
+}
+
+export function fetchProjectDeps(projectId: string): Promise<{ environments: DepsEnvironment[] }> {
+  return getJson(`/api/projects/${enc(projectId)}/deps`);
+}
