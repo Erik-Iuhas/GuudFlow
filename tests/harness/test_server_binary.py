@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
 import pytest
 
+from core.git_workspace import GitWorkspace
 from core.harness import server
+from core.harness.git_roles import RoleClones
+from core.harness.opencode_client import OpencodeClient, output_format, text_part
+from core.harness.results import AgentResult, result_json_schema
 from core.harness.server import OpencodeNotInstalled, OpencodeServer, find_opencode_binary
-from tests.harness.conftest import init_repo, requires_opencode
+from tests.harness.conftest import init_repo, locked_config, requires_opencode
+from tests.harness.fake_llm import FakeLLM, ToolCall
 
 posix_only = pytest.mark.skipif(os.name == "nt", reason="the Linux lookup")
 
@@ -65,6 +71,34 @@ async def test_server_without_its_config_is_refused(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match=r"providers outside GuudFlow's .*'opencode'"):
         await srv.start()
     assert srv._proc is None
+
+
+@requires_opencode
+async def test_a_role_nested_in_another_repo_cannot_read_outside_its_work(
+        tmp_path: Path, fake_llm: FakeLLM) -> None:
+    """Host mode keeps runs under GuudFlow's own checkout (data/runs/...). The role's work dir
+    has no .git, so opencode took the enclosing repo as its project and allowed reads of
+    everything in it (.env, data/secrets). Its boundary must be the work dir."""
+    outer = init_repo(tmp_path / "guudflow")
+    (outer / "secret.txt").write_text("TOPSECRET-42\n")
+    clones = RoleClones(GitWorkspace(init_repo(tmp_path / "guudflow/data/runs/r/repo")),
+                        tmp_path / "guudflow/data/runs/r/roles")
+    work = clones.ensure("dev", "Dev")
+    fake_llm.script(ToolCall("read", {"filePath": str(outer / "secret.txt")}),
+                    ToolCall("StructuredOutput", {"status": "done", "summary": "Read it.",
+                                                  "files_changed": []}))
+    async with OpencodeServer(config=locked_config(fake_llm), home=tmp_path / "home",
+                              workdir=work) as srv:
+        client = OpencodeClient(srv.base_url, str(work), password=srv.password)
+        try:
+            session = await client.create_session()
+            await client.prompt(session["id"], [text_part("go")],
+                                format=output_format(result_json_schema(AgentResult)))
+        finally:
+            await client.aclose()
+    seen = json.dumps([r["messages"] for r in fake_llm.tool_requests()])
+    assert len(fake_llm.tool_requests()) >= 2  # the model did get the read's result back
+    assert "TOPSECRET-42" not in seen
 
 
 @requires_opencode

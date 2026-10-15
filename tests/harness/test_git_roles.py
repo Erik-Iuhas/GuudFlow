@@ -28,7 +28,9 @@ def test_is_protected() -> None:
 def test_worktree_has_no_git_dir_and_branch_lives_host_side(tmp_path: Path) -> None:
     _, clones, _ = _setup(tmp_path)
     work = clones.ensure("builder", "Sam")
-    assert not (work / ".git").exists()
+    # The worktree's .git is only a boundary: an empty repo, never the role's git dir.
+    assert (work / ".git").read_text() == "gitdir: ../boundary.git\n"
+    assert (work.parent / "boundary.git" / "HEAD").is_file()
     assert clones.git("builder", "rev-parse", "--abbrev-ref", "HEAD") == "agent/builder"
     assert clones.git_dir("builder").is_dir() and clones.tool_dir("builder").is_dir()
     assert not clones.git_dir("builder").is_relative_to(work)
@@ -40,6 +42,7 @@ def test_planted_git_config_hooks_and_filters_never_run_on_host(tmp_path: Path) 
     work = clones.ensure("builder", "Sam")
     pwn = tmp_path / "pwned"
     fake_git = work / ".git"
+    fake_git.unlink()  # an agent that replaced the boundary file with its own git dir
     (fake_git / "hooks").mkdir(parents=True)
     (fake_git / "config").write_text(
         f"[core]\n\tfsmonitor = touch {pwn}-fsmonitor\n\thooksPath = .git/hooks\n"

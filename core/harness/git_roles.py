@@ -3,8 +3,14 @@
 Layout per role (under `<run_root>/roles/<role>/`):
 
   work/      the role's worktree — the ONLY thing the agent can write
-             (bind-mounted at /work in its sandbox). It has no `.git`.
+             (bind-mounted at /work in its sandbox). Its `.git` is only a boundary:
+             a file pointing at `boundary.git`, never at `git/`.
   git/       the role's git directory, host-only, never mounted.
+  boundary.git/  an empty bare repo. Without a `.git` in `work/`, opencode (and the
+             agent's own git commands) walk up to the nearest enclosing repo; in host
+             mode the run lives inside GuudFlow's checkout, so that repo (its `.env`,
+             `data/secrets/`) became the agent's project and readable. Host git never
+             uses it: every host call names `git/` and `work/` explicitly.
   guudflow/  host-written tool output (screenshots, installed packages,
              diffs), mounted read-only at /work/.guudflow in the sandbox.
 
@@ -143,6 +149,10 @@ class RoleClones:
             exclude = gdir / "info" / "exclude"
             exclude.parent.mkdir(parents=True, exist_ok=True)
             exclude.write_text("".join(f"{p}\n" for p in LOCAL_EXCLUDES))
+        boundary = self.root / role / "boundary.git"
+        if not (boundary / "HEAD").exists():
+            _run(["git", "init", "--quiet", "--bare", str(boundary)], cwd=self.root)
+        (work / ".git").write_text("gitdir: ../boundary.git\n")
         return work
 
     def sync_from_main(self, role: str, keep_conflicts: bool = False) -> bool:
