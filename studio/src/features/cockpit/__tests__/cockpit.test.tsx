@@ -350,6 +350,26 @@ describe("CockpitView", () => {
     expect(screen.getByTestId("graph-node-overseer")).toBeInTheDocument();
   });
 
+  it("the Code button opens the code on the worker writing now, with the project too", async () => {
+    const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.includes("/code/roles") ? { roles: ["dev"] }
+        : url.includes("/code/tree") ? { source: "role", base: "main", truncated: false,
+            entries: [{ path: "src/app.ts", status: "M", added: 1, removed: 0 }],
+            last_edit: { path: "src/app.ts", at: 1 } }
+        : { path: "src/app.ts", text: "x\n", size: 2, binary: false, too_large: false, deleted: false, diff: null },
+    )));
+    vi.stubGlobal("fetch", fetchMock);
+    const store = createRunStore("r1");
+    store.getState().ingest(sig("STARTED", "dev"));
+    render(view(store, { meta: { run_id: "r1", project_id: "p1", status: "running" } }));
+    fireEvent.click(screen.getByRole("button", { name: "Code" }));
+    const browser = await screen.findByTestId("code-browser");
+    expect(within(browser).getByRole("button", { name: "Project · accepted" })).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u) === "/api/runs/r1/code/tree?role=dev")).toBe(true));
+    expect(await within(browser).findByText("● editing")).toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
   it("clicking a graph node opens its tool calls in a sheet", async () => {
     window.localStorage.setItem(NODE_VIEW_KEY, "graph");
     const store = createRunStore("r1");

@@ -34,7 +34,7 @@ import { PipelineGraph } from "./PipelineGraph";
 import { TeamView } from "./TeamView";
 import { useNodeView, type NodeView } from "./useNodeView";
 import { CodeBrowser } from "../code/CodeBrowser";
-import { OPEN_CODE_EVENT, type OpenCodeDetail } from "../code/api";
+import { OPEN_CODE_EVENT, type CodeSource, type OpenCodeDetail } from "../code/api";
 import { lastEditId } from "./RoleChanges";
 import { VirtualBoardFeed, VirtualQuipFeed, useQuipStream, type QuipStream } from "./VirtualFeeds";
 
@@ -275,6 +275,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
       interventionCount={interventionCount}
       cardCount={cardCount}
       codeFocus={codeFocus}
+      projectId={meta?.project_id}
     />
   );
 
@@ -303,6 +304,14 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Segmented label="Node view" value={nodeView} onChange={setNodeView} options={NODE_VIEW_OPTIONS} />
+          <Button size="sm" variant={tab === "code" ? "secondary" : "outline"} aria-pressed={tab === "code"}
+                  onClick={() => {
+                    setTab("code");
+                    if (desktop) setPanelOpen(true);
+                    else setDrawerOpen(true);
+                  }}>
+            Code
+          </Button>
           {!desktop && (
             <Button size="sm" variant="outline" onClick={() => setDrawerOpen(true)}>
               Board and feeds
@@ -391,7 +400,8 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
         active={!["complete", "failed", "stuck", "stopped", "max_iterations"].includes(String(status))} />
 
       {desktop && panelOpen && (
-        <aside className="flex h-[30rem] flex-col overflow-hidden rounded-lg border border-border bg-card" aria-label="Run panels">
+        <aside className={cn("flex flex-col overflow-hidden rounded-lg border border-border bg-card",
+                              tab === "code" ? "h-[80vh] min-h-[30rem]" : "h-[30rem]")} aria-label="Run panels">
           {sidePanel}
         </aside>
       )}
@@ -461,7 +471,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
 }
 
 function SidePanel({
-  runId, tab, onTab, quips, interventionCount, cardCount, codeFocus,
+  runId, tab, onTab, quips, interventionCount, cardCount, codeFocus, projectId,
 }: {
   runId: string;
   tab: PanelTab;
@@ -470,6 +480,7 @@ function SidePanel({
   interventionCount: number;
   cardCount: number;
   codeFocus: OpenCodeDetail | null;
+  projectId?: string;
 }) {
   return (
     <Tabs value={tab} onValueChange={(v) => onTab(v as PanelTab)} className="flex min-h-0 flex-1 flex-col">
@@ -495,7 +506,7 @@ function SidePanel({
         <TaskBoard runId={runId} />
       </TabsContent>
       <TabsContent value="code" className="mt-0 flex min-h-0 flex-1 flex-col p-2 data-[state=inactive]:hidden">
-        {tab === "code" && <RunCode runId={runId} focus={codeFocus} />}
+        {tab === "code" && <RunCode runId={runId} projectId={projectId} focus={codeFocus} />}
       </TabsContent>
       <TabsContent value="artifacts" className="mt-0 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
         <ArtifactGallery runId={runId} />
@@ -508,7 +519,11 @@ function SidePanel({
 }
 
 /** The Code tab of a run: this session's main and each worker's checkout, refreshed on edits. */
-function RunCode({ runId, focus }: { runId: string; focus: OpenCodeDetail | null }) {
+function RunCode({ runId, projectId, focus }: {
+  runId: string;
+  projectId?: string;
+  focus: OpenCodeDetail | null;
+}) {
   const live = useRunStore((s) => s.live);
   const names = useRunStore((s) => s.names);
   const toolFeed = useRunStore((s) => s.toolFeed);
@@ -521,8 +536,11 @@ function RunCode({ runId, focus }: { runId: string; focus: OpenCodeDetail | null
     () => Object.entries(agents).filter(([, a]) => a.state === "running").map(([r]) => r),
     [agents],
   );
+  // Opens on the worker who is writing code right now (following its edits), else the session.
+  const [initial] = useState<CodeSource>(() =>
+    live && working[0] ? { kind: "role", role: working[0] } : { kind: "run" });
   return (
-    <CodeBrowser runId={runId} projectId={undefined} live={live} editKeys={editKeys}
-                 names={names} working={working} focus={focus} />
+    <CodeBrowser runId={runId} projectId={projectId} live={live} editKeys={editKeys}
+                 names={names} working={working} focus={focus} initialSource={initial} />
   );
 }

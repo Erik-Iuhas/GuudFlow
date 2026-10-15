@@ -30,7 +30,7 @@ function sourceKey(s: CodeSource): string {
  * `focus` object opens that file (from a card).
  */
 export function CodeBrowser({
-  projectId, runId, live = false, editKeys, names, working, focus,
+  projectId, runId, live = false, editKeys, names, working, focus, initialSource,
 }: {
   projectId?: string;
   runId?: string;
@@ -39,11 +39,14 @@ export function CodeBrowser({
   names?: Record<string, string>;
   working?: readonly string[];
   focus?: OpenCodeDetail | null;
+  /** Where to start (default: the project when given, else this session). */
+  initialSource?: CodeSource;
 }) {
-  const [source, setSource] = useState<CodeSource>(projectId ? { kind: "project" } : { kind: "run" });
+  const [source, setSource] = useState<CodeSource>(
+    initialSource ?? (projectId ? { kind: "project" } : { kind: "run" }));
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<"file" | "diff">("file");
-  const [changedOnly, setChangedOnly] = useState(false);
+  const [changedOnly, setChangedOnly] = useState(initialSource?.kind === "role");
   const [follow, setFollow] = useState(true);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [showDeps, setShowDeps] = useState(false);
