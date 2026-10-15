@@ -46,6 +46,7 @@ from starlette.types import Scope
 from agents.builtin import register_builtins
 from api.routes import agents as agents_router
 from api.routes import cards as cards_router
+from api.routes import code as code_router
 from api.routes import fs as fs_router
 from api.routes import harness as harness_router
 from api.routes import inputs as inputs_router
@@ -356,6 +357,7 @@ def create_app() -> FastAPI:
     app.include_router(agents_router.router)
     app.include_router(runs_router.router)
     app.include_router(cards_router.router)
+    app.include_router(code_router.router)
     app.include_router(run_artifacts_router.router)
     app.include_router(run_report_router.router)
     app.include_router(personas_router.router)
