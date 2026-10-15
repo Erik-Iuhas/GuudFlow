@@ -107,6 +107,31 @@ all roles on `mistral-medium-latest` (provider `mistral`, client `openai_compati
 - $0.17 to the first finished build card including the tech lead (previous: ~$0.28 with the
   developer still on its first card).
 
+## F16 — FIXED (48abf65, f8fc61a): the run "doesn't stop" after all cards are done
+- All 6 cards done at ~00:25; the run stayed "running" until ~00:35. `shutdown()` first runs
+  the end-of-run notebook phase: each role that worked writes a notebook, one after another,
+  up to 120 s each, with nothing in Studio saying so.
+- Mistral's tech lead saved its notebook three times (paid calls) because the turn did not
+  end after the save. `drive_turn(done=...)` now ends a notebook turn once it is saved, and
+  the Console says "work finished; … each role writes its notebook …".
+
+## F17 — FIXED (d7d6510): no way to download an artifact
+- The artifact dialog had only View. Added `?download=1` (attachment, same allow-list,
+  sandbox CSP and cookie scope) and a Download link in the dialog. Verified live.
+- Not a GuudFlow bug: the HTML preview was blank in Claude's in-app browser pane
+  (`ERR_BLOCKED_BY_CLIENT` on the iframe). Agent HTML is sandboxed with no scripts, so an
+  app that builds its UI in JS will look empty there by design.
+- Open: an artifact is one file; there is no "download the session's code" (zip of the
+  run's main).
+
+## F18 — FIXED (da1fca1): browsers kept an old Studio after a rebuild
+- index.html had no Cache-Control; after rebuilding Studio the page still loaded the old
+  bundle until a forced reload. index.html now has `Cache-Control: no-cache`.
+
+## F19 — Studio burst of `GET /api/runs/{id}` around run end
+- ~27 identical requests in one burst near the end of the run (and 237 earlier 401s in the
+  console from before the token was set). Idle afterwards; not investigated further.
+
 ## Test hygiene
 - `tests/api/test_project_work.py::test_remote_sync_endpoint_and_summary` and
   `tests/api/test_runs.py::test_list_tags_returns_review_points` fail in WSL without a global
