@@ -590,6 +590,35 @@ async def get_git_diff(
     return {"sha": commit.hexsha, "diff": diff_text}
 
 
+@router.get("/{run_id}/roles/{role}/changes", dependencies=[Depends(require_bearer)])
+async def get_role_changes(request: Request, run_id: str, role: str) -> dict[str, Any]:
+    """A role's work in progress: its worktree against its local `main`, read-only.
+
+    `main` is the role's copy as of its last sync (each spawn starts with one), so
+    during a turn this is exactly what the turn has written so far. Nothing is
+    committed or fetched. 404 when the run or the role's checkout is missing.
+    """
+    from dataclasses import asdict
+
+    from core.git_workspace import GitWorkspace
+    from core.harness.artifacts import safe_resolve
+    from core.harness.git_roles import GitRoleError, RoleClones
+
+    data_root = Path(request.app.state.data_root)
+    run_root = safe_resolve(data_root / "runs", run_id)
+    if run_root is None or len(Path(run_id).parts) != 1 or len(Path(role).parts) != 1:
+        raise HTTPException(status_code=404, detail="not found")
+    clones = RoleClones(GitWorkspace(_run_working_dir(data_root, run_id)), run_root / "roles")
+    git_dir = safe_resolve(run_root, Path("roles") / role / "git")
+    if git_dir is None or not git_dir.is_dir() or not clones.path(role).is_dir():
+        raise HTTPException(status_code=404, detail=f"role {role!r} has no checkout in run {run_id!r}")
+    try:
+        changes = clones.working_changes(role)
+    except GitRoleError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"role": role, **asdict(changes)}
+
+
 @router.post("/{run_id}/approval/{approval_id}", dependencies=[Depends(require_bearer)])
 async def post_approval_decision(
     request: Request,

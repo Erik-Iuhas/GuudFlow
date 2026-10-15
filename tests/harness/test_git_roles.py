@@ -201,3 +201,53 @@ def test_markers_committed_outside_a_merge_are_refused(tmp_path: Path) -> None:
     result = clones.collect("builder", "oops")
     assert not result.merged and "conflict markers" in (result.problem or "")
     assert result.set_aside and not (main.working_dir / "x.py").exists()
+
+
+def _role_with_work(tmp_path: Path) -> tuple[RoleClones, Path]:
+    main, clones, _ = _setup(tmp_path)
+    (main.working_dir / "app.py").write_text("x = 1\n")
+    import subprocess
+    subprocess.run(["git", "add", "-A"], cwd=main.working_dir, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "app"],
+                   cwd=main.working_dir, check=True)
+    work = clones.ensure("builder", "Sam")
+    (work / "app.py").write_text("x = 2\n")
+    (work / "new.py").write_text("a = 1\nb = 2\n")
+    (work / "opencode.json").write_text('{"permission": "allow"}')
+    (work / "blob.bin").write_bytes(b"\0\1\2")
+    return clones, work
+
+
+def test_working_changes_is_read_only_and_shows_tracked_and_untracked(tmp_path: Path) -> None:
+    clones, _ = _role_with_work(tmp_path)
+    head = clones.git("builder", "rev-parse", "HEAD")
+    changes = clones.working_changes("builder")
+    by_path = {f.path: f for f in changes.files}
+    assert by_path["app.py"].status == "M" and (by_path["app.py"].added, by_path["app.py"].removed) == (1, 1)
+    assert by_path["new.py"].status == "untracked" and by_path["new.py"].added == 2
+    assert "opencode.json" not in by_path
+    assert by_path["blob.bin"].added == 0 and "blob.bin" not in changes.diff
+    assert "+x = 2" in changes.diff and "+++ b/new.py" in changes.diff and "+b = 2" in changes.diff
+    assert changes.head == head and not changes.truncated
+    # Nothing was committed or staged.
+    assert clones.git("builder", "rev-parse", "HEAD") == head
+    assert "?? new.py" in clones.git("builder", "status", "--porcelain")
+
+
+def test_working_changes_truncates(tmp_path: Path) -> None:
+    clones, _ = _role_with_work(tmp_path)
+    changes = clones.working_changes("builder", limit=20)
+    assert changes.truncated and len(changes.diff) == 20
+
+
+def test_working_changes_skips_symlinks(tmp_path: Path) -> None:
+    import os
+    import pytest
+    clones, work = _role_with_work(tmp_path)
+    secret = tmp_path / "host_secret.txt"
+    secret.write_text("TOPSECRET\n")
+    try:
+        os.symlink(secret, work / "link.txt")
+    except OSError:
+        pytest.skip("symlinks not available")
+    assert "TOPSECRET" not in clones.working_changes("builder").diff
