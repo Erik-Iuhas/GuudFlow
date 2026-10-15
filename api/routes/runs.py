@@ -591,8 +591,12 @@ async def get_git_diff(
 
 
 @router.get("/{run_id}/roles/{role}/changes", dependencies=[Depends(require_bearer)])
-async def get_role_changes(request: Request, run_id: str, role: str) -> dict[str, Any]:
+async def get_role_changes(request: Request, run_id: str, role: str,
+                           scope: str = "now") -> dict[str, Any]:
     """A role's work in progress: its worktree against its local `main`, read-only.
+
+    `scope=run`: instead, everything the role merged into the run's main since the run
+    started (its own commits), for a role whose turns are already merged.
 
     `main` is the role's copy as of its last sync (each spawn starts with one), so
     during a turn this is exactly what the turn has written so far. Nothing is
@@ -613,7 +617,15 @@ async def get_role_changes(request: Request, run_id: str, role: str) -> dict[str
     if git_dir is None or not git_dir.is_dir() or not clones.path(role).is_dir():
         raise HTTPException(status_code=404, detail=f"role {role!r} has no checkout in run {run_id!r}")
     try:
-        changes = clones.working_changes(role)
+        if scope == "run":
+            from core.project_runs import PROJECT_RUN_JSON
+            meta_file = run_root / PROJECT_RUN_JSON
+            meta = json.loads(meta_file.read_text()) if meta_file.is_file() else {}
+            base = str(meta.get("base") or "") or clones.main.repo.git.rev_list(
+                "--max-parents=0", "main").split()[0]
+            changes = clones.merged_by_role(role, base)
+        else:
+            changes = clones.working_changes(role)
     except GitRoleError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return {"role": role, **asdict(changes)}

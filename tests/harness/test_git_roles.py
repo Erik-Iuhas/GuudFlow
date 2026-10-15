@@ -254,3 +254,19 @@ def test_working_changes_skips_symlinks(tmp_path: Path) -> None:
     except OSError:
         pytest.skip("symlinks not available")
     assert "TOPSECRET" not in clones.working_changes("builder").diff
+
+
+def test_merged_by_role_lists_only_that_roles_commits_since_the_run_started(tmp_path: Path) -> None:
+    main, clones, _ = _setup(tmp_path)
+    base = main.repo.git.rev_parse("main")
+    for role, name, path, text in (("builder", "Sam", "app.js", "a\n"), ("tester", "Wren", "app.test.js", "t\n"),
+                                   ("builder", "Sam", "app.js", "a\nb\n")):
+        clone = clones.ensure(role, name)
+        clones.sync_from_main(role)
+        (clone / path).write_text(text)
+        assert clones.collect(role, f"{role} work").merged
+    got = clones.merged_by_role("builder", base)
+    assert [f.path for f in got.files] == ["app.js"] and got.files[0].added == 2
+    assert got.diff.count("\n# ") + got.diff.startswith("# ") == 2   # two commits, oldest first
+    assert "app.test.js" not in got.diff and "+b" in got.diff
+    assert clones.merged_by_role("reviewer", base).files == []

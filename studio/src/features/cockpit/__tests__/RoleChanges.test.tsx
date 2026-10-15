@@ -72,6 +72,18 @@ describe("AgentDetail Changes tab", () => {
     vi.unstubAllGlobals();
   });
 
+  it("shows what an idle role merged this run, and can switch to its unmerged work", async () => {
+    const store = createRunStore("r1");
+    store.getState().ingest([tool("edit")]);
+    wrap(store, <AgentDetail role="dev" />);
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Changes" }));
+    const panel = await screen.findByTestId("role-changes-dev");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/runs/r1/roles/dev/changes?scope=run");
+    expect(panel).toHaveTextContent("Everything dev merged this run");
+    fireEvent.click(screen.getByRole("button", { name: "Working now" }));
+    await waitFor(() => expect(fetchMock.mock.calls.at(-1)?.[0]).toBe("/api/runs/r1/roles/dev/changes"));
+  });
+
   it("shows the role's files and the rendered diff", async () => {
     wrap(runningDev(), <AgentDetail role="dev" />);
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Changes" }));

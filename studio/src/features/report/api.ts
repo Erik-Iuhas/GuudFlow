@@ -207,6 +207,10 @@ export interface RoleChanges {
 }
 
 /** `GET /api/runs/{id}/roles/{role}/changes` (read-only; nothing is committed). */
-export function fetchRoleChanges(runId: string, role: string): Promise<RoleChanges> {
-  return getJson(`/api/runs/${enc(runId)}/roles/${enc(role)}/changes`);
+/** `now`: the role's unmerged work in progress; `run`: everything it merged since the run began. */
+export type ChangesScope = "now" | "run";
+
+export function fetchRoleChanges(runId: string, role: string, scope: ChangesScope = "now"): Promise<RoleChanges> {
+  const q = scope === "run" ? "?scope=run" : "";
+  return getJson(`/api/runs/${enc(runId)}/roles/${enc(role)}/changes${q}`);
 }

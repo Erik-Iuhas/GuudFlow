@@ -37,26 +37,68 @@ const sheetVariants = cva(
 
 export interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
-    VariantProps<typeof sheetVariants> {}
+    VariantProps<typeof sheetVariants> {
+  /** Show a button that widens the panel to nearly the whole window (remembered per browser). */
+  expandable?: boolean;
+}
+
+const WIDE_KEY = "guudflow.sheet.wide";
+
+function readWide(): boolean {
+  try {
+    return window.localStorage.getItem(WIDE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 /** Edge-anchored panel (drawer). Built on the Radix dialog primitive. */
 export const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side, className, children, ...props }, ref) => (
-  <SheetPortal>
-    <SheetOverlay />
-    <SheetPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
-      {children}
-      <SheetPrimitive.Close
-        aria-label="Close"
-        className="absolute right-3 top-3 rounded-sm border-0 bg-transparent p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+>(({ side, className, children, expandable, ...props }, ref) => {
+  const [wide, setWide] = React.useState(readWide);
+  const toggle = () => {
+    setWide((w) => {
+      try {
+        window.localStorage.setItem(WIDE_KEY, w ? "0" : "1");
+      } catch {
+        /* storage off: the choice lasts for this page only */
+      }
+      return !w;
+    });
+  };
+  return (
+    <SheetPortal>
+      <SheetOverlay />
+      <SheetPrimitive.Content
+        ref={ref}
+        className={cn(sheetVariants({ side }), className, expandable && wide && "max-w-[min(1400px,96vw)]")}
+        {...props}
       >
-        <span aria-hidden>×</span>
-      </SheetPrimitive.Close>
-    </SheetPrimitive.Content>
-  </SheetPortal>
-));
+        {children}
+        {expandable && (
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={wide ? "Narrow the panel" : "Widen the panel"}
+            title={wide ? "Narrow the panel" : "Widen the panel"}
+            data-testid="sheet-expand"
+            className="absolute right-10 top-3 rounded-sm border-0 bg-transparent p-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span aria-hidden>{wide ? "⇥" : "⇤"}</span>
+          </button>
+        )}
+        <SheetPrimitive.Close
+          aria-label="Close"
+          className="absolute right-3 top-3 rounded-sm border-0 bg-transparent p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span aria-hidden>×</span>
+        </SheetPrimitive.Close>
+      </SheetPrimitive.Content>
+    </SheetPortal>
+  );
+});
 SheetContent.displayName = "SheetContent";
 
 export function SheetHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {

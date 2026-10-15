@@ -325,6 +325,37 @@ class RoleClones:
         return WorkingChanges(base=base, head=head, files=files,
                               diff=diff[:limit] if truncated else diff, truncated=truncated)
 
+    def merged_by_role(self, role: str, base: str, limit: int = 200_000) -> WorkingChanges:
+        """What `role` has merged into the run's main since `base` (the run's start), read-only.
+
+        The role's own commits (author email `{role}@guudflow.local`, no merge commits), oldest
+        first, each as a patch under a `# <sha> <subject>` line; files sum their line counts.
+        Studio shows this once the role's turns are merged and its worktree is clean again.
+        """
+        cwd = self.main.working_dir
+        ro = ("--no-optional-locks",)
+        excludes = [f":(exclude,glob){p}" for p in PROTECTED_PATHS]
+        head = _run(["git", *_SAFE_GIT, *ro, "rev-parse", "main"], cwd=cwd)
+        shas = _run(["git", *_SAFE_GIT, *ro, "log", "--no-merges", "--reverse", "--format=%H",
+                     f"--author=<{role}@guudflow.local>", f"{base}..main"], cwd=cwd).split()
+        counts: dict[str, list[int]] = {}
+        parts: list[str] = []
+        for sha in shas:
+            for line in _run(["git", *_SAFE_GIT, *ro, "show", "--numstat", "--format=", "--no-renames",
+                              sha, "--", ".", *excludes], cwd=cwd).splitlines():
+                added, removed, path = (line.split("\t", 2) + ["", "", ""])[:3]
+                if path:
+                    c = counts.setdefault(path, [0, 0])
+                    c[0] += int(added) if added.isdigit() else 0
+                    c[1] += int(removed) if removed.isdigit() else 0
+            parts.append(_run(["git", *_SAFE_GIT, *ro, "show", "--format=# %h %s", "--no-renames",
+                               "--no-ext-diff", "--no-textconv", sha, "--", ".", *excludes], cwd=cwd))
+        files = [ChangedFile(path=p, status="M", added=a, removed=r) for p, (a, r) in counts.items()]
+        diff = "\n\n".join(parts)
+        truncated = len(diff) > limit
+        return WorkingChanges(base=base, head=head, files=files,
+                              diff=diff[:limit] if truncated else diff, truncated=truncated)
+
     def _unsafe_symlinks(self, branch: str, paths: list[str]) -> list[str]:
         """Committed symlinks on `branch` that are absolute or climb out of the repo.
 

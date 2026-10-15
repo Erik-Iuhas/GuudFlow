@@ -1,9 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { TypedSignal } from "../../lib/runEvents.gen";
-import { cn } from "../../lib/utils";
 import { useRunStore } from "../../stores/runStoreContext";
-import { fetchRoleChanges } from "../report/api";
+import { Segmented } from "../../components/ui/segmented";
+import { fetchRoleChanges, type ChangesScope } from "../report/api";
 import { DiffText } from "../report/DiffViewer";
 
 /** opencode tools that can change files; a finished call of one refreshes the view. */
@@ -29,9 +29,12 @@ export function RoleChanges({ role }: { role: string }) {
   const running = useRunStore((s) => s.live && s.agents[role]?.state === "running");
   const name = useRunStore((s) => s.names[role]);
   const lastEdit = useRunStore((s) => lastEditId(s.toolFeed[role]));
+  // While the role works, its unmerged edits; otherwise everything it merged this run.
+  const [picked, setPicked] = useState<ChangesScope | null>(null);
+  const scope: ChangesScope = picked ?? (running ? "now" : "run");
   const q = useQuery({
-    queryKey: ["runs", runId, "role-changes", role] as const,
-    queryFn: () => fetchRoleChanges(runId, role),
+    queryKey: ["runs", runId, "role-changes", role, scope] as const,
+    queryFn: () => fetchRoleChanges(runId, role, scope),
     refetchInterval: running ? POLL_MS : false,
   });
 
@@ -46,26 +49,42 @@ export function RoleChanges({ role }: { role: string }) {
     return () => clearTimeout(t);
   }, [lastEdit, refetch, dataUpdatedAt]);
 
-  if (q.isPending) return <p className="m-0 p-3 text-sm text-muted-foreground" role="status">Loading changes…</p>;
+  const toggle = (
+    <Segmented
+      label="Which changes"
+      value={scope}
+      onChange={setPicked}
+      options={[{ value: "now", label: "Working now" }, { value: "run", label: "Whole run" }]}
+      className="mx-3 my-1 self-start"
+    />
+  );
+  if (q.isPending) return <div className="flex flex-col">{toggle}<p className="m-0 p-3 text-sm text-muted-foreground" role="status">Loading changes…</p></div>;
   if (q.isError) {
     return (
-      <p className="m-0 p-3 text-sm text-muted-foreground" role="status">
-        No working copy to show for {role} yet ({q.error.message}).
-      </p>
+      <div className="flex flex-col">
+        {toggle}
+        <p className="m-0 p-3 text-sm text-muted-foreground" role="status">
+          No working copy to show for {role} yet ({q.error.message}).
+        </p>
+      </div>
     );
   }
   const { files, diff, truncated } = q.data;
   const added = files.reduce((n, f) => n + f.added, 0);
   const removed = files.reduce((n, f) => n + f.removed, 0);
   return (
-    <div className={cn("min-h-0 flex-1 overflow-y-auto", !running && "opacity-70")} data-testid={`role-changes-${role}`}>
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid={`role-changes-${role}`}>
+      {toggle}
       <div className="px-3 py-1 text-xs text-muted-foreground">
-        Since {name ?? role} last synced with main · {files.length} file{files.length === 1 ? "" : "s"}{" "}
+        {scope === "run" ? `Everything ${name ?? role} merged this run` : `Since ${name ?? role} last synced with main`}
+        {" · "}{files.length} file{files.length === 1 ? "" : "s"}{" "}
         <span className="text-status-complete">+{added}</span> <span className="text-status-failed">−{removed}</span>
-        {!running && " · not working right now; merged turns are under the card's diffs"}
+        {scope === "now" && !running && " · not working right now"}
       </div>
       {files.length === 0 ? (
-        <p className="m-0 px-3 py-2 text-sm text-muted-foreground">No changes yet.</p>
+        <p className="m-0 px-3 py-2 text-sm text-muted-foreground">
+          {scope === "run" ? "Nothing merged by this role in this run." : "No unmerged changes right now."}
+        </p>
       ) : (
         <>
           <ul className="m-0 list-none border-y border-border px-3 py-1 font-mono text-xs">

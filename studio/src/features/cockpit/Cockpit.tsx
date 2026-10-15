@@ -401,7 +401,8 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
       >
         <SheetContent
           side="right"
-          className="flex w-full max-w-lg flex-col gap-0 p-0"
+          expandable
+          className="flex w-full max-w-3xl flex-col gap-0 p-0"
           // Focus the sheet itself, not its first control (that pops the capability tooltip).
           onOpenAutoFocus={(e) => {
             e.preventDefault();

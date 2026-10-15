@@ -137,7 +137,7 @@ export function CardDrawer({ runId, cardId, onClose, spec }: Props) {
   const card = useRunStore((s) => (cardId ? s.cards[cardId] : undefined));
   return (
     <Sheet open={Boolean(cardId && card)} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="max-w-xl overflow-y-auto" aria-describedby="card-drawer-desc">
+      <SheetContent expandable className="max-w-3xl overflow-y-auto" aria-describedby="card-drawer-desc">
         {card && <DrawerBody runId={runId} cardId={card.id} spec={spec} />}
       </SheetContent>
     </Sheet>
