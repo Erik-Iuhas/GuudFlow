@@ -72,7 +72,7 @@ interface RunState {
   cards: Record<string, CardView>;       // GET /api/runs/{id}/cards, then TASK_* signals
   approvals: ApprovalView[];             // APPROVAL_NEEDED minus GRANTED/DENIED
   interventions: InterventionView[];     // OVERSEER_INTERVENTION (+ the AGENT_RESULT of the overseer)
-  costs: Record<string, number>;         // role → USD, from AGENT_RESULT.cost (gateway-backed)
+  costs: Record<string, number>;         // role → USD: max of AGENT_RESULT.cost and the polled gateway total
   artifacts: ArtifactView[];             // ARTIFACT + SCREENSHOT_READY
   web: WebRequestView[];                 // WEB_REQUEST
   ingest(raw: RawSignal | RawSignal[]): void;   // parse detail once → TypedSignal.data
@@ -103,7 +103,7 @@ Rules:
 | STARTED / COMPLETE / FAILED / BLOCKED | `agents[role].state`, `spawns` |
 | CAPABILITIES | `agents[role].capabilities` |
 | TOOL_CALL | `agents[role].toolCalls++`; the role's tool feed (node details sheet) |
-| AGENT_RESULT | `agents[role].lastResult`, `costs[role] += cost` |
+| AGENT_RESULT | `agents[role].lastResult`, `costs[role] = max(costs[role], cost)` (cost is the role's running total) |
 | TASK_ASSIGNED | new card stub (refetch the card via the query cache) |
 | TASK_MOVED | `cards[id].column`, `round`, `since` |
 | TASK_THREAD | `cards[id].thread.push` |
@@ -112,6 +112,10 @@ Rules:
 | ARTIFACT / SCREENSHOT_READY | `artifacts` |
 | WEB_REQUEST | `web` |
 | HUMAN_NEEDED | a banner and the comment box focus |
+
+AGENT_RESULT only arrives at turn end, so while the run is live `useRunLive` also polls
+`GET /api/runs/{id}/costs` (gateway usage from `llm_costs.jsonl`) every 5 s and calls
+`seedCosts`, which only raises totals.
 
 ## 4. Run cockpit layout (U1, S24)
 
