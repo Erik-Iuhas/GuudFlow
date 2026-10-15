@@ -105,6 +105,26 @@ def test_the_shell_section_names_what_is_allowed() -> None:
     text = shell_summary(perm)
     assert text is not None and "`bun test`" in text and "`sed`" in text
     assert "never a reason to block" in text
+    assert "not installed" not in text
+
+
+def test_the_shell_section_names_runners_that_are_not_installed() -> None:
+    """Seen live: with no bun on the host the developer spent many paid turns on `which bun`,
+    `echo $PATH` and `find -name bun` (all refused) and asked to install bun@1.0.0."""
+    perm = PermissionInputs(edit_allow=("*",), edit_deny=(), bash_default="deny",
+                            bash_allow=("ls*", "bun test*", "bun run *", "python3 *"), bash_deny=(),
+                            task="deny", subagent_depth=None, attach_images=False)
+    text = shell_summary(perm, installed=lambda prog: prog == "python3")
+    assert text is not None and "Not installed here: `bun`." in text
+    assert "Do not look for" in text
+
+
+def test_missing_runners_come_from_the_allowed_commands_only() -> None:
+    from core.harness.capabilities import missing_runners
+    perm = PermissionInputs(edit_allow=(), edit_deny=(), bash_default="deny",
+                            bash_allow=("ls*", "git status*", "npx vitest*", "node *"),
+                            bash_deny=(), task="deny", subagent_depth=None, attach_images=False)
+    assert missing_runners(perm, lambda prog: prog == "git") == ["node", "npx"]
 
 
 def test_questions_the_brief_answers_do_not_reach_a_person() -> None:

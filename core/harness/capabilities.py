@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Any, Literal
 
@@ -264,18 +264,36 @@ HOST_DEV_WARNING = ("⚠️  DEV MODE: opencode agent running on host. "
                     "Do not use with untrusted input.")
 
 
-def shell_summary(perm: PermissionInputs) -> str | None:
+def missing_runners(perm: PermissionInputs, installed: Callable[[str], bool]) -> list[str]:
+    """Test-runner programs the role may run that `installed` says are absent."""
+    runners = {p.split()[0].rstrip("*") for p in TEST_RUNNER_BASH}
+    allowed = {p.split()[0].rstrip("*") for p in perm.bash_allow if p.strip("* ")}
+    return sorted(prog for prog in runners & allowed if not installed(prog))
+
+
+def shell_summary(perm: PermissionInputs,
+                  installed: Callable[[str], bool] | None = None) -> str | None:
     """The shell commands a role may run, for its brief (flow hardening §6). None: no shell
-    beyond the default ask/deny, nothing worth saying."""
+    beyond the default ask/deny, nothing worth saying.
+
+    `installed` (host mode) says whether a program exists where the role runs; allowed
+    runners that do not are named, so the role does not spend turns looking for them.
+    """
     if not perm.bash_allow:
         return None
     allowed = sorted({p.rstrip("*").strip() for p in perm.bash_allow if p.strip("* ")})
     default = ("asks a person first" if perm.bash_default == "ask" else "is refused")
-    return ("You may run: " + ", ".join(f"`{a}`" for a in allowed) + f". Anything else {default}, "
+    text = ("You may run: " + ", ".join(f"`{a}`" for a in allowed) + f". Anything else {default}, "
             "and every part of a pipe or `;` chain is checked on its own: `bun test | grep x` "
             "is fine, but `sed`, `awk`, `echo`, `>` redirection and package installs are not. "
             "If a command is refused, run its allowed part alone and read the output with the "
             "read and grep tools; a refusal is never a reason to block a card or ask a person.")
+    missing = missing_runners(perm, installed) if installed is not None else []
+    if missing:
+        text += (" Not installed here: " + ", ".join(f"`{m}`" for m in missing) + ". "
+                 "Do not look for them or ask to install them; write the code and tests anyway "
+                 "and mark the acceptance items you could not run as unmet, saying why.")
+    return text
 
 
 def _bash_allow(caps: Capabilities, role_type: str, runners: bool) -> tuple[str, ...]:

@@ -1277,7 +1277,9 @@ class OpencodeRun:
         if desk:
             sections.append(("Your desk notes", desk))
         compiled = getattr(self._roles.get(role), "compiled", None)
-        shell = (shell_summary(compiled.permission)
+        # Host mode: the role runs with the host's PATH, so the host says what is installed.
+        installed = (lambda prog: shutil.which(prog) is not None) if self.mode == "host" else None
+        shell = (shell_summary(compiled.permission, installed)
                  if compiled is not None and not self._is_overseer(role) else None)
         if shell:
             sections.append(("Shell commands", shell))
