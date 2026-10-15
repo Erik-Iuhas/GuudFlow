@@ -5,7 +5,8 @@ its backlog items `in_run` with a run id that no live run has, and no `meta.json
 does what the end of a session would have done, from the files on disk: work out each card's
 outcome from `tasks.jsonl` and `board.jsonl`, submit the run repo's `main` (everything that was
 merged) to the project for a human decision, and record the item outcomes. Cards that were not
-finished go back to the backlog as usual. Nothing runs again; no model is called.
+finished go back to the backlog as usual (a goal-only session's go to the project manager's
+after-session draft instead, `Backlog.record_outcomes`). Nothing runs again; no model is called.
 """
 from __future__ import annotations
 

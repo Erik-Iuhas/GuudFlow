@@ -93,6 +93,17 @@ def test_release_and_duplicate_leftovers(tmp_path: Path) -> None:
     assert b.get(item.id).status == "open"
 
 
+def test_a_goal_only_run_adds_no_items(tmp_path: Path) -> None:
+    """Run findings F13: a session that held no items restates the goal in its cards; they
+    go to the project manager's after-session draft, not straight onto the backlog."""
+    b = _backlog(tmp_path)
+    b.add("Dash ability", [])
+    created = b.record_outcomes("run_g", [CardOutcome("Implement the dash", "todo"),
+                                          CardOutcome("Score HUD", "in_progress")])
+    assert created == []
+    assert [i.title for i in b.items()] == ["Dash ability"]
+
+
 def test_card_outcomes_reads_board_cards() -> None:
     cards = [SimpleNamespace(task_id="T1", story_id="plan", title="Login", column="done",
                              backlog_id="B1", acceptance_criteria=["a"], kind="code"),

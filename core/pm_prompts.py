@@ -210,7 +210,9 @@ review notes and the work left over. Turn them into a draft:
 - spec suggestions: a requirement that turned out wrong, missing or too big, or a decision the \
 session had to make that should be recorded;
 - follow-up work items for what was left undone or found broken, small and with acceptance \
-lines;
+lines. Do not add an item whose intent an open item already covers: edit that item instead. A \
+session run on the goal alone adds no items itself, so its leftovers reach the backlog only \
+through you;
 - `drop_item` for open items the session made obsolete;
 - say in your reply which checks the session could not settle and why.
 Do not restate the report. Say what the owner needs to decide. Facts from the report are \

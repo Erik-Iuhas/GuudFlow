@@ -80,6 +80,31 @@ def test_a_goal_only_session_is_found_and_salvaged(tmp_path: Path) -> None:
     assert interrupted_runs(tmp_path, "p", live=set()) == []
 
 
+def test_a_salvaged_goal_only_session_leaves_its_cards_to_the_project_manager(
+        tmp_path: Path) -> None:
+    """Run findings F13: its unfinished cards are not added next to the open items with the
+    same intent; the session report lists them for the after-session draft."""
+    from core.spec_adherence import session_report
+
+    Backlog(tmp_path, "p").add("Dash ability", ["dash works"])
+    run_root = tmp_path / "runs" / "run_g"
+    working = run_root / "workspace" / "working"
+    prepare_run(tmp_path, "p", "run_g", run_root, working, {}, in_place=False)
+    (working / "app.js").write_text("export const x = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=working, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm",
+                    "feat: app"], cwd=working, check=True)
+    rows = [{"task_id": "T1", "story_id": "plan", "title": "App", "column": "done"},
+            {"task_id": "T2", "story_id": "plan", "title": "Dash", "column": "todo"},
+            {"task_id": "T2", "story_id": "plan", "title": "Dash", "column": "in_progress"}]
+    (run_root / "tasks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    assert salvage_run(tmp_path, "p", "run_g") == "pending"
+    assert [i.title for i in Backlog(tmp_path, "p").items()] == ["Dash ability"]
+    report = session_report(tmp_path, "p", "run_g")
+    leftovers = report.split("Leftovers:")[1].split("Unmet checks:")[0]
+    assert "- T2 Dash (ended in in_progress)" in leftovers and "App" not in leftovers
+
+
 def test_salvage_submits_merged_work_and_reopens_unfinished_items(tmp_path: Path) -> None:
     _run_root, (done_id, open_id) = _interrupted(tmp_path)
     assert salvage_run(tmp_path, "p", "run_x") == "pending"
