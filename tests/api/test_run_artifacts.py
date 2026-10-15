@@ -84,6 +84,17 @@ async def test_active_content_is_sandboxed(client, run_root, rel, ctype) -> None
     assert r.headers["x-content-type-options"] == "nosniff"
 
 
+async def test_download_sends_the_file_as_an_attachment(client, run_root) -> None:
+    """Studio's Download link: the same file, saved instead of shown, still sandboxed."""
+    r = await client.get("/api/runs/run_a/artifact-files/artifacts/backend/page.html",
+                         params={"download": "1"})
+    assert r.status_code == 200
+    assert r.headers["content-disposition"] == 'attachment; filename="page.html"'
+    assert r.headers["content-security-policy"].startswith("sandbox")
+    shown = await client.get("/api/runs/run_a/artifact-files/artifacts/backend/page.html")
+    assert "content-disposition" not in shown.headers
+
+
 @pytest.mark.parametrize("rel", [
     "artifacts/backend/notes.txt",      # extension not allow-listed
     "workspace/secret.png",             # folder not served

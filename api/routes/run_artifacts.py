@@ -62,8 +62,12 @@ async def grant_artifact_access(run_id: str, response: Response) -> dict[str, in
 
 @router.get("/{run_id}/artifact-files/{path:path}",
             dependencies=[Depends(require_bearer_or_artifact_cookie)])
-async def get_artifact_file(request: Request, run_id: str, path: str) -> FileResponse:
-    """Serve one visual file of a run. 404 for anything outside the allow-list."""
+async def get_artifact_file(request: Request, run_id: str, path: str,
+                            download: bool = False) -> FileResponse:
+    """Serve one visual file of a run. 404 for anything outside the allow-list.
+
+    `?download=1` sends it as an attachment (Studio's Download link) instead of inline.
+    """
     runs_root = Path(request.app.state.data_root) / "runs"
     run_root = safe_resolve(runs_root, run_id)
     if run_root is None or len(Path(run_id).parts) != 1:
@@ -78,4 +82,5 @@ async def get_artifact_file(request: Request, run_id: str, path: str) -> FileRes
     headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "no-cache"}
     if ext in _ACTIVE_EXTS:
         headers["Content-Security-Policy"] = _ACTIVE_CSP
-    return FileResponse(target, media_type=MEDIA_TYPES[ext], headers=headers)
+    return FileResponse(target, media_type=MEDIA_TYPES[ext], headers=headers,
+                        filename=target.name if download else None)

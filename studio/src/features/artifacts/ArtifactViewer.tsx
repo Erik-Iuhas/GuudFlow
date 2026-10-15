@@ -60,6 +60,11 @@ export function ArtifactViewer({
                 {kindLabel(item.kind)} · {formatBytes(item.size)}
                 {item.role ? ` · ${item.role}` : ""}
                 {item.taskId ? ` · card ${item.taskId}` : ""}
+                {" · "}
+                <a href={`${item.url}?download=1`} download={item.name}
+                   aria-label={`Download ${item.name}`} className="text-primary underline">
+                  Download
+                </a>
               </DialogDescription>
             </DialogHeader>
             <Tabs defaultValue="view">

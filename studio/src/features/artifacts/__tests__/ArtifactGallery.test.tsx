@@ -104,6 +104,15 @@ describe("ArtifactGallery", () => {
     expect(frame.getAttribute("src")).toBe("/api/runs/run-1/artifact-files/artifacts/backend/report.html");
   });
 
+  it("offers a download of the open artifact", () => {
+    render(withStore(makeStore(SAMPLE), <ArtifactGallery runId="run-1" />));
+    fireEvent.click(screen.getByRole("button", { name: /Open report\.html/ }));
+    const link = screen.getByRole("link", { name: "Download report.html" });
+    expect(link.getAttribute("href")).toBe(
+      "/api/runs/run-1/artifact-files/artifacts/backend/report.html?download=1");
+    expect(link.getAttribute("download")).toBe("report.html");
+  });
+
   describe("SVG viewer", () => {
     let blobs: Blob[];
     beforeEach(() => {
