@@ -271,10 +271,11 @@ def missing_runners(perm: PermissionInputs, installed: Callable[[str], bool]) ->
     return sorted(prog for prog in runners & allowed if not installed(prog))
 
 
-# Runner commands a spec rule may name ("Use bun test"). Bare `node` / `python` are left out:
-# in a rule's prose they are ordinary words.
-_RULE_RUNNER = re.compile(r"\b(pytest|python3? -m pytest|npm test|npm run|npx vitest|npx tsc|"
-                          r"bun test|bun run)\b", re.IGNORECASE)
+# Runner commands a spec rule may name ("Use bun test"): the allowed runner commands without
+# their wildcard. `node *` / `python *` are left out: in a rule's prose those are ordinary words.
+_RULE_RUNNER = re.compile(r"\b(" + "|".join(sorted(
+    (re.escape(p.rstrip("* ")) for p in TEST_RUNNER_BASH if not p.endswith(" *")
+     or len(p.split()) > 2), key=len, reverse=True)) + r")\b", re.IGNORECASE)
 _STEP_SPLIT = re.compile(r"&&|\|\||[;|]")
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 

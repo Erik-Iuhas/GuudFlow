@@ -204,12 +204,12 @@ describe("starting a session", () => {
     mocks.runs.mockResolvedValue([]);
     mocks.invoke.mockResolvedValueOnce({
       accepted: false, requires_approval: true, gate: "missing_runtime", project_id: "p1", message: "POST again",
-      missing_runtimes: [{ program: "bun", why: "spec rule rule-1: Use bun test", where: "this machine" }],
+      missing_runtimes: [{ program: "bun", why: "spec rule rule-1: Use bun test", where: "this machine", checked: true }],
     }).mockResolvedValueOnce({ accepted: true, run_id: "r9", job_id: "j", project_id: "p1", enqueued_at: "" });
     renderStudio("/projects/p1");
     fireEvent.click(await screen.findByRole("button", { name: "Start session" }));
     const box = await screen.findByTestId("missing-runtimes");
-    expect(box.textContent).toMatch(/bun.*this machine.*spec rule rule-1: Use bun test/);
+    expect(box.textContent).toMatch(/bun is not installed on this machine, needed by spec rule rule-1: Use bun test/);
     expect(screen.queryByText("Estimated worst-case cost")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Confirm and run" }));
     await waitFor(() => expect(mocks.invoke).toHaveBeenLastCalledWith("p1", { confirm: true }));

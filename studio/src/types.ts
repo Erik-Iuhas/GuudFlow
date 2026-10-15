@@ -282,6 +282,8 @@ export interface MissingRuntime {
   why: string;
   /** "this machine" | "the sandbox image" */
   where: string;
+  /** False: could not be checked there (Docker unreachable, image not built yet). */
+  checked: boolean;
 }
 
 // ── Project inputs (D-prime §33) ───────────────────────────────────────────

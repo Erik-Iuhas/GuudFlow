@@ -377,11 +377,11 @@ export function Studio() {
             <DialogDescription>{costGate.message}</DialogDescription>
             {costGate.missing.length > 0 && (
               <Alert variant="warn" data-testid="missing-runtimes">
-                <p className="m-0 font-medium">Tests will not run: agents cannot find</p>
+                <p className="m-0 font-medium">Test runners agents may not have</p>
                 <ul className="m-0 mt-1 pl-4 text-sm">
                   {costGate.missing.map((m) => (
                     <li key={m.program}>
-                      <code>{m.program}</code> on {m.where}, needed by {m.why}
+                      <code>{m.program}</code> {m.checked ? "is not installed on" : "could not be checked on"} {m.where}, needed by {m.why}
                     </li>
                   ))}
                 </ul>

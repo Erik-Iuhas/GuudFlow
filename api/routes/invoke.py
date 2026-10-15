@@ -102,12 +102,7 @@ async def invoke_project(
                 "gate": "missing_runtime",
                 "missing_runtimes": missing,
                 "project_id": project_id,
-                "message": (
-                    "Test runners this project needs are not installed where agents run: "
-                    + ", ".join(f"{m['program']} ({m['where']})" for m in missing)
-                    + ". Install them, or POST again with `confirm: true` to start anyway; "
-                    "the tests that need them will not run."
-                ),
+                "message": _missing_message(missing),
             },
         )
 
@@ -131,6 +126,21 @@ async def invoke_project(
             "enqueued_at": datetime.now(timezone.utc).isoformat(),
         },
     )
+
+
+def _missing_message(missing: list[dict]) -> str:
+    """The missing_runtime gate's message: what is not installed, what could not be checked."""
+    def names(rows: list[dict]) -> str:
+        return ", ".join(f"{m['program']} ({m['where']})" for m in rows)
+
+    absent = [m for m in missing if m["checked"]]
+    unchecked = [m for m in missing if not m["checked"]]
+    parts = ([f"Test runners this project needs are not installed where agents run: "
+              f"{names(absent)}."] if absent else [])
+    parts += ([f"Not checked (Docker unreachable or the image not built yet): {names(unchecked)}."]
+              if unchecked else [])
+    return " ".join(parts + ["Install them, or POST again with `confirm: true` to start "
+                             "anyway; tests that need a missing runner will not run."])
 
 
 def _check_project_work(request: Request, project_id: str, body: dict) -> None:

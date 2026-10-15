@@ -48,7 +48,8 @@ def test_host_mode_names_runners_missing_from_path(tmp_path: Path,
                         lambda prog: None if prog == "bun" else f"/usr/bin/{prog}")
     found = runtime_check.missing_runtimes(root, "p1", "pytest -q", sandbox="host")
     assert [m.to_dict() for m in found] == [
-        {"program": "bun", "why": "spec rule rule-1: Use bun test", "where": "this machine"}]
+        {"program": "bun", "why": "spec rule rule-1: Use bun test", "where": "this machine",
+         "checked": True}]
 
 
 def test_nothing_named_means_nothing_missing(tmp_path: Path) -> None:
@@ -69,9 +70,39 @@ def test_docker_mode_asks_the_sandbox_image(tmp_path: Path,
     monkeypatch.setattr(sandbox_manager.SandboxManager, "missing_programs", missing)
     found = runtime_check.missing_runtimes(_project(tmp_path), "p1", "pytest -q", sandbox="auto")
     assert asked == [["pytest"]]
-    assert [(m.program, m.where) for m in found] == [("pytest", "the sandbox image")]
+    assert [(m.program, m.where, m.checked) for m in found] == [
+        ("pytest", "the sandbox image", True)]
 
-    monkeypatch.setattr(sandbox_manager.SandboxManager, "missing_programs",
-                        lambda self, programs: None)
+
+@pytest.mark.parametrize("probe", ["not built", "fails"])
+def test_an_image_that_cannot_be_asked_is_not_checked(tmp_path: Path,
+                                                      monkeypatch: pytest.MonkeyPatch,
+                                                      probe: str) -> None:
+    from worker import sandbox_manager
+
+    def missing(self: object, programs: list[str]) -> list[str] | None:
+        if probe == "fails":
+            raise RuntimeError("daemon hiccup")
+        return None
+
+    monkeypatch.setattr(sandbox_manager.SandboxManager, "available", staticmethod(lambda: True))
+    monkeypatch.setattr(sandbox_manager.SandboxManager, "missing_programs", missing)
+    found = runtime_check.missing_runtimes(_project(tmp_path), "p1", "pytest -q", sandbox="auto")
+    assert [(m.program, m.checked) for m in found] == [("pytest", False)]
+
+
+def test_docker_required_but_unreachable_is_not_checked(tmp_path: Path,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """With GUUDFLOW_SANDBOX=docker the run never falls back to the host, so the host's PATH
+    says nothing about it."""
+    from worker import sandbox_manager
+
+    monkeypatch.setattr(sandbox_manager.SandboxManager, "available", staticmethod(lambda: False))
+    monkeypatch.setattr(runtime_check.shutil, "which", lambda prog: f"/usr/bin/{prog}")
+    found = runtime_check.missing_runtimes(_project(tmp_path), "p1", "pytest -q",
+                                           sandbox="docker")
+    assert [(m.program, m.where, m.checked) for m in found] == [
+        ("pytest", "the sandbox image", False)]
+    # `auto` falls back to the host when Docker is unreachable, so the host is asked.
     assert runtime_check.missing_runtimes(_project(tmp_path), "p1", "pytest -q",
                                           sandbox="auto") == []

@@ -99,12 +99,24 @@ async def test_invoke_asks_first_when_a_test_runner_is_missing(client, auth_head
     body = r.json()
     assert body["accepted"] is False and body["gate"] == "missing_runtime"
     assert body["missing_runtimes"] == [{"program": "bun", "why": "spec rule rule-1: Use bun test",
-                                         "where": "this machine"}]
+                                         "where": "this machine", "checked": True}]
     assert "bun (this machine)" in body["message"]
     assert seen == ["bun test"]
     r = await client.post("/api/invoke/p_rt", json={"confirm": True}, headers=auth_header)
     assert r.status_code == 202
     assert seen == ["bun test"]
+
+
+def test_the_gate_message_tells_missing_from_unchecked() -> None:
+    from api.routes.invoke import _missing_message
+
+    text = _missing_message([
+        {"program": "bun", "where": "this machine", "checked": True},
+        {"program": "pytest", "where": "the sandbox image", "checked": False}])
+    assert "not installed where agents run: bun (this machine)." in text
+    assert "Not checked (Docker unreachable or the image not built yet): pytest" in text
+    assert "not installed" not in _missing_message(
+        [{"program": "pytest", "where": "the sandbox image", "checked": False}])
 
 
 async def test_cost_preview_lists_missing_runners_too(client, auth_header, monkeypatch):
