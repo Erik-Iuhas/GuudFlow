@@ -145,3 +145,19 @@ all roles on `mistral-medium-latest` (provider `mistral`, client `openai_compati
 - Tech lead's design was thin (components + 2 data types; no interfaces/flows/decisions).
 - Tool calling, streaming and structured results otherwise worked: T1 and T3 completed
   with valid AgentResults and merged.
+
+## 2026-10-15 — fixes from the cloud session (on main)
+- F15 FIXED (ed72385): the turn tracker records programs a shell call could not find
+  (`bun: command not found`); 'met' acceptance claims that rest on tests are turned unmet with
+  the reason (`results.unverified_claims`). Not a prompt.
+- F8 FIXED (234d39a): every role may run find/which/diff/sort/uniq/tree/file/stat; editing roles
+  also rm/mv/cp/touch/echo inside the clone (absolute paths, ~, .., $ denied; find -exec/-delete
+  denied, also for explore).
+- UX: role/card drawers 768px + expand button (bb02195); inactive tab panels no longer take
+  space; role Changes tab has "Working now" / "Whole run" (`?scope=run`: the role's own
+  commits since the run's base).
+- Playbook no longer stores per-session card lists as task templates (efc2b85); the Projects
+  table clamps the goal to two lines.
+- One code folder per project, `data/projects/<id>/code`, fast-forwarded on accept, never
+  overwritten when it has local work; path shown in the Work tab header (d4ebcd6).
+- Not done here: "closing the product" (spec/design wrap-up) — needs the owner's intent.
