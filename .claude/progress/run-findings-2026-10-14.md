@@ -94,6 +94,19 @@ all roles on `mistral-medium-latest` (provider `mistral`, client `openai_compati
 - Design tab hides empty sections, so a thin design (0 interfaces/flows/decisions, as the
   Mistral tech lead produced) looks like a rendering bug.
 
+## F15 — OPEN: "met" claimed for tests that never ran
+- Continued run: developer ran `bun test tests/history.test.js` → `bun: command not found`, then
+  marked all 3 acceptance items met with "Test '…' verifies …" as evidence. The brief line from
+  F3 said to mark them unmet; Mistral ignored it. Needs a non-prompt guard (pre-review
+  `check_command`, reviewer, or the preflight in the F3 follow-up).
+
+## Verification run (run_9b256e0d1d, all fixes loaded)
+- Live `/path`: worktree = `roles/tech_lead/work` (was GuudFlow's root).
+- First 22 tool calls: 0 refused, 0 outside the role's clone, no bun hunting, no install
+  request (previous run: 11+ refused, 10+ outside the clone, ~9 bun-hunting calls).
+- $0.17 to the first finished build card including the tech lead (previous: ~$0.28 with the
+  developer still on its first card).
+
 ## Test hygiene
 - `tests/api/test_project_work.py::test_remote_sync_endpoint_and_summary` and
   `tests/api/test_runs.py::test_list_tags_returns_review_points` fail in WSL without a global
