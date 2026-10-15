@@ -377,6 +377,7 @@ def compile_capabilities(caps: Capabilities, role_type: str, *,
         tools.add("web_fetch")
     if caps.packages == "via_it_agent":
         tools.add("request_package")
+        tools.add("sync_dependencies")
     if caps.browser == "screenshot":
         tools.update({"screenshot", "request_visual_feedback"})
     if caps.vision == "on":

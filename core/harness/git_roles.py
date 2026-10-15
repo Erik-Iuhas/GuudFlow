@@ -53,7 +53,7 @@ from core.signals import SignalType
 
 AGENT_BRANCH = "agent/{role}"
 # ".guudflow" without a slash also matches the host-mode symlink.
-LOCAL_EXCLUDES = ("/.guudflow", "node_modules/", "__pycache__/")
+LOCAL_EXCLUDES = ("/.guudflow", "/node_modules", "node_modules/", "__pycache__/")
 _SAFE_GIT = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
              "-c", "commit.gpgsign=false", "-c", "core.symlinks=true")
 
@@ -189,9 +189,11 @@ class RoleClones:
             self.git(role, "config", "user.email", f"{role}@guudflow.local")
             self.git(role, "fetch", "--quiet", str(self.main.working_dir), "main:refs/heads/main")
             self.git(role, "checkout", "--quiet", "-B", self.branch(role), "main")
-            exclude = gdir / "info" / "exclude"
+        exclude = gdir / "info" / "exclude"
+        wanted = "".join(f"{p}\n" for p in LOCAL_EXCLUDES)
+        if not exclude.is_file() or exclude.read_text() != wanted:
             exclude.parent.mkdir(parents=True, exist_ok=True)
-            exclude.write_text("".join(f"{p}\n" for p in LOCAL_EXCLUDES))
+            exclude.write_text(wanted)
         boundary = self.root / role / "boundary.git"
         if not (boundary / "HEAD").exists():
             _run(["git", "init", "--quiet", "--bare", str(boundary)], cwd=self.root)

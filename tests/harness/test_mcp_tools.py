@@ -382,7 +382,58 @@ async def test_default_installer_runs_without_shell(tmp_path: Path) -> None:
 
 def test_tool_names_and_schemas(env: Env) -> None:
     assert list(env.by_name) == ["read_board", "report_progress", "ask_human",
-                                 "request_visual_feedback", "request_package"]
+                                 "request_visual_feedback", "request_package",
+                                 "sync_dependencies"]
     for tool in env.by_name.values():
         schema = tool.schema_for(IDENTITY)
         assert schema["type"] == "object" and "role" not in schema["properties"]
+
+
+# ── sync_dependencies (plan §16) ────────────────────────────────────────────
+def _deps_env(tmp_path: Path, allow: dict[str, list[str]] | None = None) -> Env:
+    from core.deps import ProjectDeps
+
+    e = Env(tmp_path, settings={"package_allow": allow or {}})
+    e.ctx.deps = ProjectDeps(tmp_path / "deps")
+    e.ctx.deps_mount = str(tmp_path / "deps")
+
+    async def installer(argv: list[str]) -> tuple[int, str]:
+        e.calls.append(argv)
+        prefix = Path(argv[argv.index("--prefix") + 1]) if "--prefix" in argv else None
+        if prefix is not None:
+            (prefix / "node_modules" / "left-pad").mkdir(parents=True)
+        return e.install_result
+    e.by_name = {t.name: t for t in tools(e.ctx, installer=installer)}
+    return e
+
+
+async def test_sync_dependencies_allow_listed_installs_once_and_links(tmp_path: Path) -> None:
+    e = _deps_env(tmp_path, {"npm": ["left-pad@1.3.0"]})
+    (e.clone / "package.json").write_text('{"dependencies": {"left-pad": "1.3.0"}}')
+    out = await e.call("sync_dependencies", manager="npm")
+    assert not out.is_error, out.text
+    assert len(e.calls) == 1 and "--ignore-scripts" in e.calls[0]
+    assert (e.clone / "node_modules").is_symlink()
+    assert (e.clone / "node_modules" / "left-pad").is_dir()
+    env = e.ctx.deps.current("npm")
+    assert env and env.packages[0].added_by == ROLE and env.packages[0].approved_by == "allow-list"
+    again = await e.call("sync_dependencies", manager="npm")
+    assert "Already in sync" in again.text and len(e.calls) == 1
+    assert e.signals(SignalType.PACKAGE_APPROVED) and not e.signals(SignalType.APPROVAL_NEEDED)
+
+
+async def test_sync_dependencies_needs_one_approval_for_unlisted(tmp_path: Path) -> None:
+    e = _deps_env(tmp_path)
+    (e.clone / "requirements.txt").write_text("rich==13.7.1\nattrs==23.2.0  # pinned\n")
+    _grant(e, SignalType.APPROVAL_DENIED)
+    out = await e.call("sync_dependencies", manager="pip")
+    assert out.is_error and "attrs==23.2.0" in out.text and not e.calls
+    assert len(e.signals(SignalType.APPROVAL_NEEDED)) == 1 and e.signals(SignalType.PACKAGE_REJECTED)
+    assert e.ctx.deps.current("pip") is None
+
+
+async def test_sync_dependencies_refuses_ranges(tmp_path: Path) -> None:
+    e = _deps_env(tmp_path)
+    (e.clone / "package.json").write_text('{"dependencies": {"a": "^1.0.0", "b": "git+https://x"}}')
+    out = await e.call("sync_dependencies", manager="npm")
+    assert out.is_error and "a:" in out.text and "b:" in out.text and not e.calls

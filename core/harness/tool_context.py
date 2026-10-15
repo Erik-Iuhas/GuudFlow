@@ -12,6 +12,8 @@ input in, output out.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -23,6 +25,10 @@ from core.workspace import Workspace
 
 
 TOOL_DIR_NAME = ".guudflow"
+
+
+if TYPE_CHECKING:
+    from core.deps import ProjectDeps
 
 
 @dataclass
@@ -46,6 +52,10 @@ class RunToolContext:
     settings: dict[str, Any] = field(default_factory=dict)
     # Secrets (search API keys) come from here, never from tool arguments.
     secret: Callable[[str], str | None] = lambda name: None
+    # The project's shared dependencies (plan §16) and where roles see them ("/deps" in a
+    # sandbox, the host path in host mode). None: this run has no shared environment.
+    deps: "ProjectDeps | None" = None
+    deps_mount: str = ""
 
     def tool_dir(self, role: str) -> Path:
         """Host-only tool output directory for `role` (created on demand)."""

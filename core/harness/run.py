@@ -284,12 +284,23 @@ class OpencodeRun:
             settings={"package_allow": gates.get("package_allow") or {},
                       "web": gates.get("web") or {}},
             secret=lambda name: os.environ.get(name) if name in _TOOL_SECRETS else None)
+        # Shared dependencies (plan §16): one store per project, else per run.
+        from core.deps import ProjectDeps
+        project_id = runner.project.project_id
+        self.tool_ctx.deps = ProjectDeps(
+            data_root / "projects" / project_id / "deps" if data_root and project_id
+            else runner.run_root / "deps")
 
     # ── lifecycle ──────────────────────────────────────────────────────────
     async def run(self) -> SchedulerResult:
         """Run every role through the scheduler and tear everything down after."""
         self.mode = await self._resolve_mode()
         self._started = time.time()
+        if self.tool_ctx.deps is not None:
+            from core.deps import SANDBOX_MOUNT
+            self.tool_ctx.deps.root.mkdir(parents=True, exist_ok=True)
+            self.tool_ctx.deps_mount = (SANDBOX_MOUNT if self.mode == "docker"
+                                        else str(self.tool_ctx.deps.root.resolve()))
         # Authors first, so a reviewer can be given a different model from the work it
         # reviews (model diversity); the role order stays as configured.
         prepared: dict[str, _Role] = {}
@@ -851,12 +862,18 @@ class OpencodeRun:
                 run_id=self.run_id, role=name, workdir=workdir,
                 inputs_dir=inputs if inputs.is_dir() else None,
                 profile=role.compiled.container, config=config, password=password,
-                network=self.network, tool_dir=self.clones.tool_dir(name)))
+                network=self.network, tool_dir=self.clones.tool_dir(name),
+                deps_dir=self.tool_ctx.deps.root if self.tool_ctx.deps else None))
             role.client = OpencodeClient(role.sandbox.base_url, "/work", password=password,
                                          timeout=timeout)
             return role.client
         home = self.runner.run_root / "opencode_home" / name
-        role.server = OpencodeServer(config=config, home=home, workdir=workdir)
+        extra_env: dict[str, str] = {}
+        if self.tool_ctx.deps is not None:
+            from core.deps import role_env
+            extra_env = role_env(self.tool_ctx.deps_mount, os.environ.get("PATH", ""))
+        role.server = OpencodeServer(config=config, home=home, workdir=workdir,
+                                     extra_env=extra_env)
         await role.server.start()
         role.client = OpencodeClient(role.server.base_url, str(workdir),
                                      password=role.server.password, timeout=timeout)
@@ -910,6 +927,16 @@ class OpencodeRun:
             teammate_brief=brief, project_context=getattr(runner, "_project_context", ""),
             projects_root=(self._data_root() / "projects") if self._data_root() else None)
 
+    def _link_deps(self, role_name: str, workdir: Path) -> None:
+        """Point the role's node_modules at the shared npm environment, once there is one."""
+        deps = self.tool_ctx.deps
+        if deps is None or deps.current("npm") is None:
+            return
+        from core.deps import link_node_modules
+        problem = link_node_modules(workdir, self.tool_ctx.deps_mount)
+        if problem:
+            log.info("%s: shared node_modules not linked: %s", role_name, problem)
+
     # ── one spawn ──────────────────────────────────────────────────────────
     async def execute_turn(self, role_name: str) -> None:
         """Run one turn for `role_name` (the scheduler's runner callable)."""
@@ -920,6 +947,7 @@ class OpencodeRun:
             self._link_tool_dir(role_name, workdir)
         if not self.clones.sync_from_main(role_name, keep_conflicts=True):
             self._sync_conflict(role_name)
+        self._link_deps(role_name, workdir)
         if self._is_overseer(role_name):
             assert self.overseer is not None
             plan: TurnPlan | None = self.overseer.begin_turn(

@@ -1,5 +1,5 @@
 """Board-facing MCP tools: read_board, report_progress, ask_human,
-request_visual_feedback and request_package (plan §5.4, §5.6).
+request_visual_feedback, request_package (plan §5.4, §5.6) and sync_dependencies (§16).
 
 `tools(ctx)` returns the tools for one run. The calling role comes only from
 `identity.role` (the bearer token), never from arguments. Which role may call
@@ -205,6 +205,78 @@ def tools(ctx: RunToolContext, *, installer: Installer | None = None) -> list[Mc
             how = "installed into .guudflow/node_modules; set NODE_PATH=.guudflow/node_modules"
         return ToolResult(f"Installed {spec}; {how}.")
 
+    sync_lock = asyncio.Lock()   # one install at a time per run; others wait, then reuse
+
+    async def sync_dependencies(identity: McpIdentity, args: dict[str, Any]) -> ToolResult:
+        from core.deps import (MANAGERS, MANIFEST, DepsError, link_node_modules,
+                               merge_provenance, read_pins)
+        role, manager = identity.role, args.get("manager")
+        if manager not in MANAGERS:
+            return ToolResult(f"manager must be one of {', '.join(MANAGERS)}", is_error=True)
+        assert isinstance(manager, str)
+        deps = ctx.deps
+        if deps is None:
+            return ToolResult("This session has no shared dependency environment; use "
+                              "request_package instead.", is_error=True)
+        try:
+            pins = read_pins(ctx.clone_for(role), manager)
+        except DepsError as exc:
+            return ToolResult(str(exc), is_error=True)
+        sep = "==" if manager == "pip" else "@"
+        async with sync_lock:
+            old = deps.current(manager)
+            before = old.pins() if old else {}
+            added = {n: v for n, v in pins.items() if before.get(n) != v}
+            removed = sorted(set(before) - set(pins))
+            if old is not None and not added and not removed:
+                if manager == "npm":
+                    link_node_modules(ctx.clone_for(role), ctx.deps_mount)
+                return ToolResult(f"Already in sync: {len(pins)} {manager} packages from "
+                                  f"{MANIFEST[manager]} are installed.")
+            specs = [f"{n}{sep}{v}" for n, v in sorted(added.items())]
+            detail = {"role": role, "manager": manager, "added": specs, "removed": removed,
+                      "shared": True}
+            ctx.post(SignalType.PACKAGE_REQUEST, role,
+                     f"sync {manager}: " + (", ".join(specs[:8]) or "remove " + ", ".join(removed[:8]))
+                     + (" …" if len(specs) > 8 else ""), detail)
+            allow = ctx.settings.get("package_allow", {})
+            unlisted = [f"{n}{sep}{v}" for n, v in sorted(added.items())
+                        if not _allow_listed(allow, manager, n.split("[", 1)[0], v)]
+            approved_by = "allow-list"
+            if unlisted:
+                granted = await _ask_approval(
+                    ctx, role, f"{role} wants to add to the shared {manager} packages: "
+                    + ", ".join(unlisted), {**detail, "needs_approval": unlisted})
+                if not granted:
+                    ctx.post(SignalType.PACKAGE_REJECTED, role, "rejected: " + ", ".join(unlisted),
+                             json.dumps({**detail, "refused": unlisted}))
+                    return ToolResult("Not approved: " + ", ".join(unlisted) + ". Take them out "
+                                      f"of {MANIFEST[manager]} and continue without them.",
+                                      is_error=True)
+                approved_by = "human"
+            try:
+                code, output = await deps.build(manager, pins, install)
+            except Exception as exc:  # an installer crash is a tool error, not an exception
+                log.exception("dependency sync crashed")
+                return ToolResult(f"Installing the {manager} packages failed: {exc}", is_error=True)
+            if code != 0:
+                return ToolResult(f"Installing the {manager} packages failed (exit {code}):\n"
+                                  f"{output[:OUTPUT_LIMIT]}", is_error=True)
+            deps.activate(manager, merge_provenance(manager, pins, old, role=role,
+                                                    approved_by=approved_by, run_id=ctx.run_id))
+            ctx.post(SignalType.PACKAGE_APPROVED, role,
+                     f"synced {manager}: {len(pins)} packages", {**detail, "approved_by": approved_by})
+        note = ""
+        if manager == "npm":
+            problem = link_node_modules(ctx.clone_for(role), ctx.deps_mount)
+            note = f" ({problem})" if problem else " node_modules points at it."
+            how = "require/import them as usual; their commands (e.g. vitest) are on PATH."
+        else:
+            how = "import them as usual (PYTHONPATH includes them); their commands are on PATH."
+        return ToolResult(f"Synced {len(pins)} {manager} packages from {MANIFEST[manager]} into "
+                          f"the project's shared environment; {how}{note} Teammates get them "
+                          "from their next turn.")
+
     def text(description: str) -> dict[str, Any]:
         return {"type": "string", "description": description}
 
@@ -256,6 +328,17 @@ def tools(ctx: RunToolContext, *, installer: Installer | None = None) -> list[Mc
                                          "version": text("Exact version, e.g. 1.2.3.")},
                           "required": ["manager", "name", "version"]},
             handler=request_package),
+        McpTool(
+            name="sync_dependencies",
+            description="Install the project's dependencies after you change package.json or "
+                        "requirements.txt (exact versions only, e.g. \"1.2.3\" or name==1.2.3). "
+                        "The host installs them, without install scripts, into an environment "
+                        "every teammate shares; packages outside the project allow-list need "
+                        "human approval.",
+            input_schema={"type": "object", "additionalProperties": False,
+                          "properties": {"manager": {"type": "string", "enum": ["npm", "pip"]}},
+                          "required": ["manager"]},
+            handler=sync_dependencies),
     ]
 
 

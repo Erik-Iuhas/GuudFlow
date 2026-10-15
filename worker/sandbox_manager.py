@@ -117,6 +117,8 @@ class SandboxSpec:
     # Host-only tool output (screenshots, installed packages), mounted READ-ONLY at
     # /work/.guudflow so the agent can read it but never redirect host writes (O8).
     tool_dir: Path | None = None
+    # The project's shared dependencies (plan §16), mounted READ-ONLY at /deps.
+    deps_dir: Path | None = None
 
 
 @dataclass
@@ -367,6 +369,12 @@ class SandboxManager:
             "GIT_CONFIG_KEY_0": "safe.directory",
             "GIT_CONFIG_VALUE_0": "*",
         }
+        if spec.deps_dir is not None:
+            from core.deps import SANDBOX_MOUNT, role_env
+            shared = role_env(SANDBOX_MOUNT, _CONTAINER_PATH)
+            env["PATH"] = shared["PATH"]
+            env["PYTHONPATH"] = f"{env['PYTHONPATH']}:{shared['PYTHONPATH']}"
+            env["NODE_PATH"] = f"{env['NODE_PATH']}:{shared['NODE_PATH']}"
         env.update(LOCKED_FLAGS)
         return env
 
@@ -384,6 +392,8 @@ class SandboxManager:
             volumes[str(spec.inputs_dir)] = {"bind": "/inputs", "mode": "ro"}
         if spec.tool_dir is not None:
             volumes[str(spec.tool_dir)] = {"bind": "/work/.guudflow", "mode": "ro"}
+        if spec.deps_dir is not None:
+            volumes[str(spec.deps_dir)] = {"bind": "/deps", "mode": "ro"}
         kwargs: dict[str, Any] = {
             "image": spec.image,
             "name": _container_name(spec.run_id, spec.role),

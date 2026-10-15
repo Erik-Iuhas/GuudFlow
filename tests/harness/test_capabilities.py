@@ -131,7 +131,7 @@ def test_browser_vision_and_packages_grants() -> None:
                         packages="via_it_agent")
     compiled = compile_capabilities(caps, "frontend_builder")
     assert {"screenshot", "request_visual_feedback", "visual_diff",
-            "request_package"} <= compiled.mcp_tools
+            "request_package", "sync_dependencies"} <= compiled.mcp_tools
     assert compiled.container.host_may_reach_dev_server
     assert compiled.permission.attach_images
     base = compile_capabilities(Capabilities(), "builder")

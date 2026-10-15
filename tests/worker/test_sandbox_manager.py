@@ -117,6 +117,18 @@ def test_inputs_mount_is_read_only(manager: SandboxManager, tmp_path: Path) -> N
     assert len(kw["volumes"]) == 2
 
 
+def test_shared_deps_mount_is_read_only_and_on_the_paths(manager: SandboxManager,
+                                                         tmp_path: Path) -> None:
+    kw = manager.container_kwargs(make_spec(tmp_path, deps_dir=tmp_path / "deps"))
+    assert kw["volumes"][str(tmp_path / "deps")] == {"bind": "/deps", "mode": "ro"}
+    env = kw["environment"]
+    assert env["PATH"].startswith("/deps/npm/node_modules/.bin:/deps/pip/site-packages/bin:")
+    assert env["NODE_PATH"].endswith(":/deps/npm/node_modules")
+    assert env["PYTHONPATH"].endswith(":/deps/pip/site-packages")
+    plain = manager.container_kwargs(make_spec(tmp_path))
+    assert "/deps" not in str(plain["volumes"]) and "/deps" not in plain["environment"]["PATH"]
+
+
 def test_runsc_used_only_when_listed(tmp_path: Path) -> None:
     mgr = SandboxManager(client=FakeClient({"runc": {}, "runsc": {}}))  # type: ignore[arg-type]
     assert mgr.runtime() == "runsc"
