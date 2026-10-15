@@ -21,6 +21,7 @@ import { SeatChips } from "../features/project/SeatChips";
 import { SessionsTab } from "../features/project/SessionsTab";
 import { PROJECT_TABS, TAB_LABEL, normalizeTab, type ProjectTab } from "../features/project/projectTabs";
 import { DesignTab } from "../features/design/DesignTab";
+import { CodeBrowser } from "../features/code/CodeBrowser";
 import { useDetailLevel, type DetailLevel } from "../features/project/useDetailLevel";
 import { ProjectWork, type RunRequest } from "../features/work/ProjectWork";
 import { WorkSettings } from "../features/work/WorkSettings";
@@ -338,6 +339,12 @@ export function Studio() {
         id && <SpecPage projectId={id} />
       ) : tab === "design" ? (
         id && <DesignTab projectId={id} />
+      ) : tab === "code" ? (
+        id && (
+          <div className="flex h-[75vh] flex-col">
+            <CodeBrowser projectId={id} runId={runs[0]?.run_id} />
+          </div>
+        )
       ) : tab === "sessions" ? (
         <SessionsTab runs={runs} onResumed={() => void load()} />
       ) : tab === "record" ? (

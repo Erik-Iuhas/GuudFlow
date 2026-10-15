@@ -33,6 +33,9 @@ import { OverseerPanel } from "./OverseerPanel";
 import { PipelineGraph } from "./PipelineGraph";
 import { TeamView } from "./TeamView";
 import { useNodeView, type NodeView } from "./useNodeView";
+import { CodeBrowser } from "../code/CodeBrowser";
+import { OPEN_CODE_EVENT, type OpenCodeDetail } from "../code/api";
+import { lastEditId } from "./RoleChanges";
 import { VirtualBoardFeed, VirtualQuipFeed, useQuipStream, type QuipStream } from "./VirtualFeeds";
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
@@ -42,7 +45,7 @@ const NODE_VIEW_OPTIONS: { value: NodeView; label: string }[] = [
   { value: "graph", label: "Graph" },
 ];
 
-type PanelTab = "board" | "quips" | "overseer" | "cards" | "artifacts" | "console";
+type PanelTab = "board" | "quips" | "overseer" | "cards" | "code" | "artifacts" | "console";
 
 // ── Data wrapper ─────────────────────────────────────────────────────────────
 
@@ -145,6 +148,18 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
   const names = useRunStore((s) => s.names);
 
   const [tab, setTab] = useState<PanelTab>("board");
+  const [codeFocus, setCodeFocus] = useState<OpenCodeDetail | null>(null);
+  useEffect(() => {
+    const onOpen = (ev: Event) => {
+      const d = (ev as CustomEvent<OpenCodeDetail>).detail;
+      if (!d) return;
+      setCodeFocus({ ...d });
+      setTab("code");
+      setPanelOpen(true);
+    };
+    window.addEventListener(OPEN_CODE_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_CODE_EVENT, onOpen);
+  }, []);
   const [graphOpen, setGraphOpen] = useState(true);
   const [nodeView, setNodeView] = useNodeView();
   const [panelOpen, setPanelOpen] = useState(true);
@@ -259,6 +274,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
       quips={quips}
       interventionCount={interventionCount}
       cardCount={cardCount}
+      codeFocus={codeFocus}
     />
   );
 
@@ -445,7 +461,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
 }
 
 function SidePanel({
-  runId, tab, onTab, quips, interventionCount, cardCount,
+  runId, tab, onTab, quips, interventionCount, cardCount, codeFocus,
 }: {
   runId: string;
   tab: PanelTab;
@@ -453,6 +469,7 @@ function SidePanel({
   quips: QuipStream;
   interventionCount: number;
   cardCount: number;
+  codeFocus: OpenCodeDetail | null;
 }) {
   return (
     <Tabs value={tab} onValueChange={(v) => onTab(v as PanelTab)} className="flex min-h-0 flex-1 flex-col">
@@ -461,6 +478,7 @@ function SidePanel({
         <TabsTrigger value="quips">Quips</TabsTrigger>
         <TabsTrigger value="overseer">Overseer{interventionCount > 0 ? ` (${interventionCount})` : ""}</TabsTrigger>
         <TabsTrigger value="cards">Cards{cardCount > 0 ? ` (${cardCount})` : ""}</TabsTrigger>
+        <TabsTrigger value="code">Code</TabsTrigger>
         <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
         <TabsTrigger value="console">Console</TabsTrigger>
       </TabsList>
@@ -476,6 +494,9 @@ function SidePanel({
       <TabsContent value="cards" className="mt-0 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
         <TaskBoard runId={runId} />
       </TabsContent>
+      <TabsContent value="code" className="mt-0 flex min-h-0 flex-1 flex-col p-2 data-[state=inactive]:hidden">
+        {tab === "code" && <RunCode runId={runId} focus={codeFocus} />}
+      </TabsContent>
       <TabsContent value="artifacts" className="mt-0 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
         <ArtifactGallery runId={runId} />
       </TabsContent>
@@ -483,5 +504,25 @@ function SidePanel({
         {tab === "console" && <ConsolePanel runId={runId} live />}
       </TabsContent>
     </Tabs>
+  );
+}
+
+/** The Code tab of a run: this session's main and each worker's checkout, refreshed on edits. */
+function RunCode({ runId, focus }: { runId: string; focus: OpenCodeDetail | null }) {
+  const live = useRunStore((s) => s.live);
+  const names = useRunStore((s) => s.names);
+  const toolFeed = useRunStore((s) => s.toolFeed);
+  const agents = useRunStore((s) => s.agents);
+  const editKeys = useMemo(
+    () => Object.fromEntries(Object.entries(toolFeed).map(([r, f]) => [r, lastEditId(f)])),
+    [toolFeed],
+  );
+  const working = useMemo(
+    () => Object.entries(agents).filter(([, a]) => a.state === "running").map(([r]) => r),
+    [agents],
+  );
+  return (
+    <CodeBrowser runId={runId} projectId={undefined} live={live} editKeys={editKeys}
+                 names={names} working={working} focus={focus} />
   );
 }

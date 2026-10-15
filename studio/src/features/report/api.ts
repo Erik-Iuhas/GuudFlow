@@ -126,7 +126,7 @@ export interface PlaybookEntryWire {
   needs_review?: boolean;
 }
 
-async function getJson<T>(path: string): Promise<T> {
+export async function getJson<T>(path: string): Promise<T> {
   const token = getToken();
   const res = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (!res.ok) {

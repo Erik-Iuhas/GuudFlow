@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { cardsApi } from "../../api";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -23,6 +23,7 @@ import {
 import { useCommentOnCard } from "./useCardMutations";
 import { RoleChanges } from "../cockpit/RoleChanges";
 import { DiffText } from "../report/DiffViewer";
+import { OPEN_CODE_EVENT, openInCode } from "../code/api";
 import type { SpecWire } from "../plan/api";
 import type { CardView } from "../../stores/runEvents";
 
@@ -62,9 +63,17 @@ function HandoffBody({ data }: { data: Record<string, unknown> | undefined }) {
       {h.tests && <p className="m-0"><span className="font-medium">Tests: </span>{h.tests}</p>}
       {h.next && <p className="m-0"><span className="font-medium">For the next card: </span>{h.next}</p>}
       {files.length > 0 && (
-        <p className="m-0 text-xs text-muted-foreground">
-          Files: {files.map(([p, a, r]) => `${p} (+${a}/−${r})`).join(", ")}
-        </p>
+        <ul className="m-0 flex list-none flex-wrap gap-x-3 gap-y-0.5 p-0 text-xs text-muted-foreground" aria-label="Files">
+          {files.map(([p, a, r]) => (
+            <li key={p}>
+              <button type="button" className="cursor-pointer bg-transparent p-0 font-mono text-xs text-primary underline-offset-2 hover:underline"
+                      title="Open in the Code tab" onClick={() => openInCode({ path: p })}>
+                {p}
+              </button>{" "}
+              <span className="text-status-complete">+{a}</span> <span className="text-status-failed">−{r}</span>
+            </li>
+          ))}
+        </ul>
       )}
       {(d.facts?.exports?.length ?? 0) > 0 && (
         <ul className="m-0 list-none p-0 font-mono text-[11px] text-muted-foreground">
@@ -135,6 +144,12 @@ export function WhyThisCard({ card, spec }: { card: CardView; spec?: SpecWire })
 
 export function CardDrawer({ runId, cardId, onClose, spec }: Props) {
   const card = useRunStore((s) => (cardId ? s.cards[cardId] : undefined));
+  // Opening a file in the Code tab closes the drawer so the tab is visible.
+  useEffect(() => {
+    if (!cardId) return;
+    window.addEventListener(OPEN_CODE_EVENT, onClose);
+    return () => window.removeEventListener(OPEN_CODE_EVENT, onClose);
+  }, [cardId, onClose]);
   return (
     <Sheet open={Boolean(cardId && card)} onOpenChange={(open) => !open && onClose()}>
       <SheetContent expandable className="max-w-3xl overflow-y-auto" aria-describedby="card-drawer-desc">
@@ -248,7 +263,13 @@ function DrawerBody({ runId, cardId, spec }: { runId: string; cardId: string; sp
 
       {working && (
         <section className={SECTION} aria-label="Live changes">
-          <h3 className={H}>Live changes</h3>
+          <h3 className={`${H} flex items-center justify-between`}>
+            Live changes
+            <button type="button" className="cursor-pointer bg-transparent p-0 text-xs font-normal text-primary hover:underline"
+                    onClick={() => openInCode({ role: card.owner })}>
+              Open in the Code tab
+            </button>
+          </h3>
           <div className="flex max-h-96 flex-col overflow-hidden rounded-md border border-border">
             <RoleChanges role={card.owner} />
           </div>

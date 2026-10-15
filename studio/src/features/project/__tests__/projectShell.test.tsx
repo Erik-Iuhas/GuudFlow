@@ -113,7 +113,7 @@ describe("Studio project page", () => {
     renderStudio("/projects/p1");
     expect(await screen.findByText("work content")).toBeTruthy();
     const names = screen.getAllByRole("tab").map((t) => t.textContent);
-    expect(names).toEqual(["Work", "Plan", "Spec", "Design", "Sessions", "Team", "Record", "Settings"]);
+    expect(names).toEqual(["Work", "Plan", "Spec", "Design", "Code", "Sessions", "Team", "Record", "Settings"]);
     expect(screen.getByRole("tab", { name: "Work" }).getAttribute("aria-selected")).toBe("true");
   });
 

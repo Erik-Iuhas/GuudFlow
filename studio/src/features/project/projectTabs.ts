@@ -1,5 +1,5 @@
 /** Project page tabs (project flow plan §7) and the mapping of older `?tab=` values. */
-export const PROJECT_TABS = ["work", "plan", "spec", "design", "sessions", "team", "record", "settings"] as const;
+export const PROJECT_TABS = ["work", "plan", "spec", "design", "code", "sessions", "team", "record", "settings"] as const;
 export type ProjectTab = (typeof PROJECT_TABS)[number];
 
 export const TAB_LABEL: Record<ProjectTab, string> = {
@@ -7,6 +7,7 @@ export const TAB_LABEL: Record<ProjectTab, string> = {
   plan: "Plan",
   spec: "Spec",
   design: "Design",
+  code: "Code",
   sessions: "Sessions",
   team: "Team",
   record: "Record",
