@@ -123,7 +123,8 @@ Rules:
 │  each role node: name · state · current card · two-line last result ·     │
 │  calls · cost. Review edges carry the round; blocked arrows dashed;       │
 │  the overseer is a detached node. Clicking a node (or Enter on it) opens  │
-│  a side sheet: capability badge, full last result, tool calls (virtual).  │
+│  a side sheet: capability badge, full last result, and tabs Tool calls    │
+│  (virtual) │ Changes (the role's live working diff, §4.1).                │
 ├───────────────────────────────────────────────────────────────────────────┤
 │ Tabs: Board │ Quips │ Overseer │ Cards │ Artifacts  (virtualized feeds)    │
 ├───────────────────────────────────────────────────────────────────────────┤
@@ -141,6 +142,25 @@ Rules:
   `⌘K` opens the command palette (U4).
 - Accessibility: every colour status also has a text label or icon. Focus is visible.
   Each graph node holds a button labelled with the role and its state.
+
+### 4.1 Seeing code while it is written
+
+- **Changes tab** (agent detail sheet, `features/cockpit/RoleChanges.tsx`): what the role
+  has written since it last synced with `main` (each spawn starts with a sync), from
+  `GET /api/runs/{run_id}/roles/{role}/changes` → `{role, base, head, files: [{path,
+  status: M|A|D|untracked, added, removed}], diff, truncated}`. The route is read-only: it
+  never commits or fetches and runs git with `--no-optional-locks`, so polling cannot race
+  the runner. Protected paths are left out; untracked text files appear as new-file diffs
+  (symlinks, binaries and files over 200 KB are not read); the diff is capped at 200 KB.
+- It refreshes after each finished file-changing `TOOL_CALL` of that role (`edit`, `write`,
+  `patch`, `multiedit`, `apply_patch`, `bash`), at most once every 2 s, and polls every 10 s
+  while the role runs. When the role is not running the view is dimmed: between turns it
+  can still show the turn that was just merged.
+- **Card drawer**: a card in progress whose owner is running shows the same view as
+  "Live changes", above its merged "Diffs".
+- Every diff in Studio (card drawer merges, the Work tab's review diff, the run report)
+  renders through `DiffText` (`features/report/DiffViewer.tsx`, `react-diff-view`); text
+  that is not a unified diff falls back to plain text.
 
 ## 5. Folder layout
 
