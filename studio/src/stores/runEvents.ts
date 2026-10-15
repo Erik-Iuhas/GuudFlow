@@ -154,7 +154,7 @@ export interface RunState {
   cards: Record<string, CardView>;
   approvals: ApprovalView[];
   interventions: InterventionView[];
-  /** role -> USD so far (the latest running total from AGENT_RESULT.cost). */
+  /** role -> USD so far: the highest of AGENT_RESULT.cost and the polled gateway total. */
   costs: Record<string, number>;
   /** role -> worker name, from the TEAM signal (core/crew.py); empty for older runs. */
   names: Record<string, string>;
@@ -170,6 +170,9 @@ export interface RunState {
   humanNeeded: HumanNeededView | null;
   ingest(raw: RawSignal | RawSignal[]): void;
   seedCards(cards: readonly CardWire[]): void;
+  /** Gateway spend per role from `GET /api/runs/{id}/costs` (it moves during a turn).
+   * Totals only grow, so a stale poll never lowers what signals already showed. */
+  seedCosts(rows: readonly { role: string; cost_usd: number }[]): void;
   setLive(live: boolean): void;
   reset(): void;
 }
@@ -262,7 +265,7 @@ export function createRunStore(runId: string): RunStore {
   // Approvals that were decided before (or without) their APPROVAL_NEEDED being seen.
   let decided = new Set<string>();
 
-  function initial(): Omit<RunState, "ingest" | "seedCards" | "setLive" | "reset"> {
+  function initial(): Omit<RunState, "ingest" | "seedCards" | "seedCosts" | "setLive" | "reset"> {
     return {
       runId, live: true, signals: [], byId: new Map(), agents: {}, cards: {}, approvals: [],
       interventions: [], costs: {}, names: {}, artifacts: [], web: [], toolFeed: {}, reviews: {},
@@ -506,6 +509,19 @@ export function createRunStore(runId: string): RunStore {
           : fromRest;
       }
       set({ cards: next });
+    },
+
+    seedCosts(rows) {
+      const { costs, agents } = get();
+      let nextCosts: Record<string, number> | null = null;
+      let nextAgents: Record<string, AgentView> | null = null;
+      for (const r of rows) {
+        if (typeof r.role !== "string" || !Number.isFinite(r.cost_usd) || r.cost_usd <= (costs[r.role] ?? 0)) continue;
+        (nextCosts ??= { ...costs })[r.role] = r.cost_usd;
+        const a = agents[r.role];
+        if (a && r.cost_usd > a.cost) (nextAgents ??= { ...agents })[r.role] = { ...a, cost: r.cost_usd };
+      }
+      if (nextCosts) set(nextAgents ? { costs: nextCosts, agents: nextAgents } : { costs: nextCosts });
     },
 
     setLive(live) {

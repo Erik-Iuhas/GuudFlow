@@ -233,7 +233,8 @@ WSL must be installed. This is the default (`GUUDFLOW_WINDOWS_MODE=wsl`).
   terminal (the scripts find it either way).
 - **Port 3001 already in use.** Studio's dev server will not move to another port; run **Stop dev
   stack**, then start again.
-- **Code edits restart the API** in the reload mode, cancelling running agents. Use the no-reload
+- **Code edits restart the API** in the reload mode (edits under `api/`, `core/`, `agents/`,
+  `worker/`, `gateway/`), stopping running agents; the run's board says so. Use the no-reload
   task during runs.
 - **Line endings.** `.gitattributes` keeps scripts LF. If you copied files rather than cloning and see
   `$'\r': command not found`, re-clone, or run `sed -i 's/\r$//' scripts/*.sh`.

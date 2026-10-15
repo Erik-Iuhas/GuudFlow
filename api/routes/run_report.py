@@ -196,6 +196,13 @@ async def get_run_report(request: Request, run_id: str) -> dict[str, Any]:  # An
     }
 
 
+@router.get("/api/runs/{run_id}/costs", dependencies=[Depends(require_bearer)])
+async def get_run_costs(request: Request, run_id: str) -> dict[str, Any]:  # Any: JSON document
+    """Gateway spend per role so far. Studio polls this during a live run, because
+    AGENT_RESULT.cost only arrives when a turn ends."""
+    return cost_rows(_run_root(request, run_id))
+
+
 def _playbook(request: Request, project_id: str) -> Playbook:
     try:
         return Playbook.load(Path(request.app.state.data_root), project_id)

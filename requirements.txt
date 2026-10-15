@@ -5,7 +5,7 @@ tree-sitter-python==0.21.0
 tree-sitter-javascript==0.21.0
 fastapi==0.115.14
 python-multipart==0.0.20
-uvicorn[standard]==0.30.6
+uvicorn[standard]==0.34.3
 pydantic==2.9.2
 anthropic==0.39.0
 httpx==0.28.1

@@ -204,8 +204,11 @@ Open <http://localhost:3001>. Vite proxies the API to `http://localhost:8000`. I
 elsewhere, start Vite with `GUUDFLOW_API_URL=http://host:port npm run dev`.
 
 `scripts/dev.sh` starts both with `--reload`. **Do not use `--reload` while agents are running**:
-any edit under `api/`, `core/`, `agents/` or `worker/` restarts the API and kills the run. Use
-`./scripts/dev.sh --no-reload`, or plain `uvicorn` as above.
+any edit under `api/`, `core/`, `agents/`, `worker/` or `gateway/` restarts the API, which hosts
+the run's LLM gateway and MCP server, so the run stops (its board gets a `FAILED` from `runner`
+saying so, and it shows as stale until you continue it). Edits elsewhere (`tests/`, `docs/`,
+`data/`) do not restart it; this needs uvicorn 0.34.3 or later, which `requirements.txt` pins.
+Use `./scripts/dev.sh --no-reload`, or plain `uvicorn` as above.
 
 ### Option C: Docker Compose (Linux, only Docker needed)
 

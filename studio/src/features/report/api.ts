@@ -153,6 +153,19 @@ export function useRunReport(runId: string, enabled = true): UseQueryResult<RunR
   });
 }
 
+/** `GET /api/runs/{id}/costs`: gateway spend per role so far. Polled every `pollMs` while a
+ * run is live, because AGENT_RESULT.cost only arrives when a turn ends. */
+export function useRunCosts(
+  runId: string | undefined, pollMs: number | false,
+): UseQueryResult<RunReportData["costs"]> {
+  return useQuery({
+    queryKey: ["runs", runId ?? "", "costs"] as const,
+    queryFn: () => getJson<RunReportData["costs"]>(`/api/runs/${enc(runId as string)}/costs`),
+    enabled: Boolean(runId) && pollMs !== false,
+    refetchInterval: pollMs,
+  });
+}
+
 /** `GET /api/projects/{id}/runs-metrics`: the overseer's per-run metrics, oldest first. */
 export function useRunsMetrics(projectId: string): UseQueryResult<RunMetricsPoint[]> {
   return useQuery({

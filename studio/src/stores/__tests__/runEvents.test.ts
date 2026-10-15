@@ -411,3 +411,25 @@ describe("run event store: review rounds and blocked-on (cockpit)", () => {
     expect(state(store).agents.dev.lastResultSignalId).toBe("res1");
   });
 });
+
+describe("run event store: seedCosts (gateway poll)", () => {
+  it("shows gateway spend during a turn, before AGENT_RESULT", () => {
+    const store = createRunStore("r1");
+    state(store).ingest(sig("STARTED", { from: "dev" }));
+    state(store).seedCosts([{ role: "dev", cost_usd: 0.28 }, { role: "reviewer", cost_usd: 0.01 }]);
+    expect(state(store).costs).toEqual({ dev: 0.28, reviewer: 0.01 });
+    expect(state(store).agents.dev.cost).toBe(0.28);
+  });
+
+  it("never lowers a total: AGENT_RESULT and polls both only raise it", () => {
+    const store = createRunStore("r1");
+    state(store).ingest(sig("AGENT_RESULT", { from: "dev", detail: { cost: 0.3 } }));
+    const before = state(store).costs;
+    state(store).seedCosts([{ role: "dev", cost_usd: 0.2 }]);
+    expect(state(store).costs).toBe(before);
+    state(store).seedCosts([{ role: "dev", cost_usd: 0.4 }]);
+    state(store).ingest(sig("AGENT_RESULT", { from: "dev", detail: { cost: 0.35 } }));
+    expect(state(store).costs.dev).toBe(0.4);
+    expect(state(store).agents.dev.cost).toBe(0.4);
+  });
+});

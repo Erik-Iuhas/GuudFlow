@@ -171,3 +171,18 @@ async def test_metrics_path_unsafe_project_is_404(client) -> None:
 async def test_report_and_metrics_need_the_token(anon) -> None:
     assert (await anon.get("/api/runs/whatever/report")).status_code == 401
     assert (await anon.get("/api/projects/p/runs-metrics")).status_code == 401
+
+
+async def test_costs_reads_gateway_log_while_running(client, run_root) -> None:
+    body = (await client.get("/api/runs/run_a/costs")).json()
+    assert {r["role"]: r["cost_usd"] for r in body["rows"]} == {"dev": 0.75, "reviewer": 0.1}
+    assert body["total"]["cost_usd"] == 0.85
+    with (run_root / "llm_costs.jsonl").open("a") as f:
+        f.write(json.dumps({"role": "dev", "cost_usd": 0.05}) + "\n")
+    body = (await client.get("/api/runs/run_a/costs")).json()
+    assert {r["role"]: r["cost_usd"] for r in body["rows"]}["dev"] == 0.8
+
+
+async def test_costs_unknown_run_and_auth(client, anon) -> None:
+    assert (await client.get("/api/runs/nope/costs")).status_code == 404
+    assert (await anon.get("/api/runs/nope/costs")).status_code == 401
