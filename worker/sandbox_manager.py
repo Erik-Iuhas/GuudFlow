@@ -32,7 +32,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 
@@ -566,6 +566,30 @@ class SandboxManager:
             return code, output
         finally:
             container.remove(force=True)
+
+    # Which programs each image has, by image id: a rebuilt image has a new id and is asked again.
+    _has_program: ClassVar[dict[tuple[str, str], bool]] = {}
+
+    def missing_programs(self, programs: list[str]) -> list[str] | None:
+        """Which of `programs` the sandbox image does not have (None: the image is not built
+        yet, so nothing can be said). Programs not yet known for this image are looked up in
+        one throwaway container with no network; the answers are kept per image id."""
+        from docker.errors import ImageNotFound
+        try:
+            image_id = str(self.client.images.get(self.image).id)
+        except ImageNotFound:
+            return None
+        unknown = [p for p in programs if (image_id, p) not in self._has_program]
+        if unknown:
+            script = 'for p in "$@"; do command -v "$p" >/dev/null 2>&1 || echo "$p"; done'
+            output = self.client.containers.run(
+                self.image, ["-c", script, "sh", *unknown], entrypoint=["sh"], remove=True,
+                network_mode="none", environment={"PATH": _CONTAINER_PATH})
+            text = output.decode("utf-8", "replace") if isinstance(output, bytes) else str(output)
+            absent = {line.strip() for line in text.splitlines()}
+            for prog in unknown:
+                self._has_program[(image_id, prog)] = prog not in absent
+        return [p for p in programs if not self._has_program[(image_id, p)]]
 
     async def stop_run(self, run_id: str) -> None:
         """Remove every container labelled with the run, then the run's network."""

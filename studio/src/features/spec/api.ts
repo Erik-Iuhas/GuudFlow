@@ -156,6 +156,12 @@ export function adherenceText(a: Adherence): string {
 }
 
 /** Checks met and total for one requirement, using the slice's latest check states. */
+/** How a rule stands from its review verdicts. A rule no review answered has no evidence: never "met". */
+export function ruleState(verdicts?: { met: number; unmet: number }): "broken" | "met" | "unchecked" {
+  if ((verdicts?.unmet ?? 0) > 0) return "broken";
+  return (verdicts?.met ?? 0) > 0 ? "met" : "unchecked";
+}
+
 export function checkProgress(req: RequirementWire, slice?: Pick<SpecSlice, "checks">): { met: number; total: number } {
   const states = (req.checks ?? []).map((c) => slice?.checks?.[c.id]?.state ?? c.state);
   return { met: states.filter((s) => s === "met").length, total: states.length };

@@ -200,6 +200,50 @@ def test_remove_tolerates_a_removal_already_in_progress() -> None:
         SandboxManager(client=Client(Broken()))._remove_container("x")  # type: ignore[arg-type]
 
 
+def test_missing_programs_probes_each_image_once_without_network(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    from docker.errors import ImageNotFound
+
+    monkeypatch.setattr(SandboxManager, "_has_program", {})
+    calls: list[dict[str, Any]] = []
+
+    class Image:
+        def __init__(self, image_id: str) -> None:
+            self.id = image_id
+
+    class Images:
+        image_id: str | None = "sha256:a"
+
+        def get(self, _name: str) -> Image:
+            if self.image_id is None:
+                raise ImageNotFound("no image")
+            return Image(self.image_id)
+
+    class Containers:
+        def run(self, image: str, command: list[str], **kwargs: Any) -> bytes:
+            calls.append({"image": image, "command": command, **kwargs})
+            return b"bun\npytest\n"
+
+    class Client:
+        def __init__(self) -> None:
+            self.images = Images()
+            self.containers = Containers()
+
+    client = Client()
+    mgr = SandboxManager(client=client, image="img:1")  # type: ignore[arg-type]
+    assert mgr.missing_programs(["bun", "git", "pytest"]) == ["bun", "pytest"]
+    (call,) = calls
+    assert call["image"] == "img:1" and call["command"][-3:] == ["bun", "git", "pytest"]
+    assert call["network_mode"] == "none" and call["remove"] is True
+    assert mgr.missing_programs(["git", "bun"]) == ["bun"]
+    assert len(calls) == 1                                    # answered from the cache
+    client.images.image_id = "sha256:b"                       # rebuilt image: asked again
+    mgr.missing_programs(["git"])
+    assert len(calls) == 2 and calls[1]["command"][-1:] == ["git"]
+    client.images.image_id = None
+    assert mgr.missing_programs(["bun"]) is None
+
+
 def test_sandbox_base_url() -> None:
     box = Sandbox(container_id="c", name="n", ip="172.30.0.2", password="p")
     assert box.base_url == f"http://172.30.0.2:{OPENCODE_PORT}"

@@ -267,11 +267,24 @@ export type InvokeOutcome =
   | {
       accepted: false;
       requires_approval: true;
+      /** "pre_run_cost_preview" (with the estimate) or "missing_runtime". */
       gate: string;
-      estimated_cost: CostEstimate;
+      estimated_cost?: CostEstimate;
+      /** Test runners the project names that are not installed where agents run. */
+      missing_runtimes?: MissingRuntime[];
       project_id: string;
       message: string;
     };
+
+export interface MissingRuntime {
+  program: string;
+  /** The check command or the spec rule that names it. */
+  why: string;
+  /** "this machine" | "the sandbox image" */
+  where: string;
+  /** False: could not be checked there (Docker unreachable, image not built yet). */
+  checked: boolean;
+}
 
 // ── Project inputs (D-prime §33) ───────────────────────────────────────────
 

@@ -1194,7 +1194,10 @@ offline plan was finished) make that the default:
    text wrapped as untrusted), and its plan must give every item at least one card
    (`backlog_id`, enforced by `check_plan`). Teams without a planner get the items in every
    brief. At run end each item gets a pending outcome (`done` / `partial` / `not_started`),
-   and unfinished extra cards become new items (`source: run:<id>`). An item becomes `done`
+   and unfinished extra cards become new items (`source: run:<id>`). A run that held no items
+   (goal only) adds none: its unfinished cards are listed as leftovers in the session report,
+   and the project manager's after-session draft proposes follow-up items from them (run
+   findings 2026-10-14 F13). An item becomes `done`
    only when the run that finished it is accepted; otherwise it reopens, with the run's
    summary in its history for the next attempt.
 

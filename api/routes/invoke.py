@@ -10,12 +10,15 @@ the project as a callable tool.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 
 from api.auth import require_bearer
+from core.harness import runtime_check
 from worker.queue import Job
 
 
@@ -66,6 +69,12 @@ async def invoke_project(
     gates = project_cfg.approval_gates or {}
     preview_on = bool(gates.get("pre_run_cost_preview", True))
 
+    # Test runners the project names but agents cannot run (run findings F3): asked before
+    # the run like the cost preview, even with that gate off.
+    missing = [] if confirm else [m.to_dict() for m in await asyncio.to_thread(
+        runtime_check.missing_runtimes, Path(request.app.state.data_root), project_id,
+        str(gates.get("check_command") or ""))]
+
     if preview_on and not confirm:
         estimate = estimate_run_cost(project_cfg)
         return JSONResponse(
@@ -75,12 +84,25 @@ async def invoke_project(
                 "requires_approval": True,
                 "gate": "pre_run_cost_preview",
                 "estimated_cost": estimate.to_dict(),
+                "missing_runtimes": missing,
                 "project_id": project_id,
                 "message": (
                     "Pre-run cost preview is on for this project. "
                     "POST again with `confirm: true` (and any other "
                     "payload fields) to actually start the run."
                 ),
+            },
+        )
+    if missing:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "accepted": False,
+                "requires_approval": True,
+                "gate": "missing_runtime",
+                "missing_runtimes": missing,
+                "project_id": project_id,
+                "message": _missing_message(missing),
             },
         )
 
@@ -104,6 +126,21 @@ async def invoke_project(
             "enqueued_at": datetime.now(timezone.utc).isoformat(),
         },
     )
+
+
+def _missing_message(missing: list[dict]) -> str:
+    """The missing_runtime gate's message: what is not installed, what could not be checked."""
+    def names(rows: list[dict]) -> str:
+        return ", ".join(f"{m['program']} ({m['where']})" for m in rows)
+
+    absent = [m for m in missing if m["checked"]]
+    unchecked = [m for m in missing if not m["checked"]]
+    parts = ([f"Test runners this project needs are not installed where agents run: "
+              f"{names(absent)}."] if absent else [])
+    parts += ([f"Not checked (Docker unreachable or the image not built yet): {names(unchecked)}."]
+              if unchecked else [])
+    return " ".join(parts + ["Install them, or POST again with `confirm: true` to start "
+                             "anyway; tests that need a missing runner will not run."])
 
 
 def _check_project_work(request: Request, project_id: str, body: dict) -> None:

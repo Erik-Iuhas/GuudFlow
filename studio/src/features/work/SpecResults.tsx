@@ -1,5 +1,5 @@
 import { cn } from "../../lib/utils";
-import { checkProgress, useSpecSlice } from "../spec/api";
+import { checkProgress, ruleState, useSpecSlice } from "../spec/api";
 import type { CheckState } from "../plan/api";
 
 export const CHECK_MARK: Record<CheckState, string> = { met: "✓", unmet: "✕", unknown: "○" };
@@ -8,6 +8,10 @@ export const CHECK_TEXT: Record<CheckState, string> = {
   unmet: "text-status-failed",
   unknown: "text-muted-foreground",
 };
+
+const RULE_MARK = { broken: "!", met: "✓", unchecked: "○" } as const;
+const RULE_TEXT = { broken: "text-status-failed", met: "text-status-complete", unchecked: "text-muted-foreground" } as const;
+const RULE_LABEL = { broken: "rule broken", met: "rule met", unchecked: "rule not checked" } as const;
 
 /** "Against the spec": the served requirements' checks and the rules met or broken (plan §6). */
 export function SpecResults({ runId }: { runId: string }) {
@@ -44,18 +48,16 @@ export function SpecResults({ runId }: { runId: string }) {
       {rules.length > 0 && (
         <ul className="m-0 mt-2 flex list-none flex-col gap-0.5 p-0 text-xs">
           {rules.map((r) => {
+            const met = r.verdicts?.met ?? 0;
             const unmet = r.verdicts?.unmet ?? 0;
+            const state = ruleState(r.verdicts);
             return (
               <li key={r.id} className="flex gap-1.5">
-                <span className={unmet > 0 ? "text-status-failed" : "text-status-complete"} aria-label={unmet > 0 ? "rule broken" : "rule met"}>
-                  {unmet > 0 ? "!" : "✓"}
-                </span>
+                <span className={RULE_TEXT[state]} aria-label={RULE_LABEL[state]}>{RULE_MARK[state]}</span>
                 <span>{r.text}</span>
-                {r.verdicts && (
-                  <span className="text-muted-foreground">
-                    {r.verdicts.met} met{unmet > 0 ? `, ${unmet} unmet` : ""}
-                  </span>
-                )}
+                <span className="text-muted-foreground">
+                  {state === "unchecked" ? "not checked" : `${met} met${unmet > 0 ? `, ${unmet} unmet` : ""}`}
+                </span>
               </li>
             );
           })}

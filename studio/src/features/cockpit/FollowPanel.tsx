@@ -1,11 +1,17 @@
 import { cn } from "../../lib/utils";
 import type { CheckState } from "../plan/api";
-import { checkProgress, useSpecSlice, type SliceRequirement, type SpecSlice } from "../spec/api";
+import { checkProgress, ruleState, useSpecSlice, type SliceRequirement, type SpecSlice } from "../spec/api";
 
 const CHECK_MARK: Record<string, { icon: string; label: string; cls: string }> = {
   met: { icon: "✓", label: "met", cls: "text-status-complete" },
   unmet: { icon: "✕", label: "unmet", cls: "text-status-failed" },
   unknown: { icon: "○", label: "not checked yet", cls: "text-muted-foreground" },
+};
+
+const RULE_MARK: Record<string, { icon: string; label: string; cls: string }> = {
+  broken: { icon: "!", label: "rule flagged", cls: "text-status-failed" },
+  met: { icon: "✓", label: "rule met", cls: "text-status-complete" },
+  unchecked: { icon: "○", label: "rule not checked yet", cls: "text-muted-foreground" },
 };
 
 /** A requirement's short name: its title, else its first clause. */
@@ -115,13 +121,11 @@ export function FollowPanel({ runId, pollMs = 10_000 }: { runId: string; pollMs?
           <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
             {rules.map((r) => {
               const unmet = r.verdicts?.unmet ?? 0;
+              const mark = RULE_MARK[ruleState(r.verdicts)];
               return (
                 <li key={r.id} className="flex gap-1.5 text-xs leading-snug">
-                  <span
-                    className={cn("shrink-0 font-semibold", unmet > 0 ? "text-status-failed" : "text-status-complete")}
-                    aria-label={unmet > 0 ? "rule flagged" : "rule met"}
-                  >
-                    {unmet > 0 ? "!" : "✓"}
+                  <span className={cn("shrink-0 font-semibold", mark.cls)} aria-label={mark.label}>
+                    {mark.icon}
                   </span>
                   <span className="min-w-0">
                     <span className="line-clamp-3" title={r.text}>{r.text}</span>

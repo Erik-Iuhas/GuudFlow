@@ -244,12 +244,17 @@ class Backlog:
     def record_outcomes(self, run_id: str, cards: Sequence[CardOutcome]) -> list[BacklogItem]:
         """At run end: note each held item's outcome; leftover cards become new items.
 
+        A run that held no items (a goal-only session) creates none: its cards restate the
+        goal, not the backlog, and would duplicate open items (run findings F13). The project
+        manager's after-session draft proposes follow-ups from them instead.
+
         Returns the newly created items. Outcomes stay pending until `decide`.
         """
         now = time.time()
         created: list[BacklogItem] = []
         with self.db.backlog_doc() as doc:
             rows = doc.setdefault("items", [])
+            held = any(r.get("run_id") == run_id and r.get("status") == "in_run" for r in rows)
             for row in rows:
                 if row.get("run_id") != run_id or row.get("status") != "in_run":
                     continue
@@ -267,6 +272,8 @@ class Backlog:
                     "run_id": run_id, "outcome": outcome, "cards_done": done,
                     "cards_open": len(mine) - done, "summary": summary, "cost_usd": cost,
                     "at": now})
+            if not held:
+                return created
             known = {str(r.get("title", "")).casefold() for r in rows
                      if r.get("status") in ("open", "in_run")}
             for card in cards:

@@ -271,6 +271,30 @@ def missing_runners(perm: PermissionInputs, installed: Callable[[str], bool]) ->
     return sorted(prog for prog in runners & allowed if not installed(prog))
 
 
+# Runner commands a spec rule may name ("Use bun test"): the allowed runner commands without
+# their wildcard. `node *` / `python *` are left out: in a rule's prose those are ordinary words.
+_RULE_RUNNER = re.compile(r"\b(" + "|".join(sorted(
+    (re.escape(p.rstrip("* ")) for p in TEST_RUNNER_BASH if not p.endswith(" *")
+     or len(p.split()) > 2), key=len, reverse=True)) + r")\b", re.IGNORECASE)
+_STEP_SPLIT = re.compile(r"&&|\|\||[;|]")
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def needed_runners(check_command: str, rules: Iterable[tuple[str, str]]) -> dict[str, str]:
+    """The programs a project's tests need, each with why: the program of every step of
+    `check_command`, and the test runners its spec `rules` ((id, text) pairs) name."""
+    needed: dict[str, str] = {}
+    command = check_command.strip()
+    for step in _STEP_SPLIT.split(command):
+        words = [w for w in step.split() if not _ASSIGNMENT.match(w)]
+        if words and words[0] != "cd":
+            needed.setdefault(words[0], f"the check command `{command}`")
+    for rule_id, text in rules:
+        for found in _RULE_RUNNER.finditer(text):
+            needed.setdefault(found.group(1).split()[0].lower(), f"spec rule {rule_id}: {text}")
+    return needed
+
+
 def shell_summary(perm: PermissionInputs,
                   installed: Callable[[str], bool] | None = None) -> str | None:
     """The shell commands a role may run, for its brief (flow hardening §6). None: no shell

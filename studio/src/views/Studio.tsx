@@ -15,7 +15,7 @@ import { Segmented } from "../components/ui/segmented";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { checkCls } from "../lib/field";
 import { cn } from "../lib/utils";
-import type { AgentConfig, ProjectConfig, RunMeta } from "../types";
+import type { AgentConfig, MissingRuntime, ProjectConfig, RunMeta } from "../types";
 import { ProjectInsights } from "../features/project/ProjectInsights";
 import { SeatChips } from "../features/project/SeatChips";
 import { SessionsTab } from "../features/project/SessionsTab";
@@ -146,10 +146,12 @@ export function Studio() {
   }
 
   // Phase C.0.5: pre_run_cost_preview gate may intercept the first
-  // POST. We open a confirm modal showing the estimate, then re-POST
+  // POST. We open a confirm modal showing the estimate (and any test
+  // runner the project needs that agents cannot run), then re-POST
   // with confirm=true.
   const [costGate, setCostGate] = useState<null | {
-    estimate: { total_usd: number };
+    estimate?: { total_usd: number };
+    missing: MissingRuntime[];
     message: string;
   }>(null);
 
@@ -176,10 +178,11 @@ export function Studio() {
         navigate(`/runs/${res.run_id}`);
         return;
       }
-      // Cost preview gate intercepted — surface the estimate.
+      // A gate intercepted — surface the estimate and missing runners.
       setCostGate({
         estimate: res.estimated_cost,
-        message: res.message,
+        missing: res.missing_runtimes ?? [],
+        message: res.gate === "pre_run_cost_preview" ? res.message : "Check what agents can run before you start.",
       });
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -372,19 +375,38 @@ export function Studio() {
           <DialogContent>
             <DialogTitle>Confirm run</DialogTitle>
             <DialogDescription>{costGate.message}</DialogDescription>
-            <Card className="border-status-running/40 bg-status-running/10 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-muted-foreground">Estimated worst-case cost</span>
-                <strong className="text-lg">
-                  ${costGate.estimate.total_usd.toFixed(2)}
-                </strong>
-              </div>
-            </Card>
-            <p className="m-0 text-xs text-muted-foreground">
-              This is a worst-case figure (every agent runs every iteration to
-              max). Real spend is usually lower. To turn this gate off, edit
-              the project's approval gates settings.
-            </p>
+            {costGate.missing.length > 0 && (
+              <Alert variant="warn" data-testid="missing-runtimes">
+                <p className="m-0 font-medium">Test runners agents may not have</p>
+                <ul className="m-0 mt-1 pl-4 text-sm">
+                  {costGate.missing.map((m) => (
+                    <li key={m.program}>
+                      <code>{m.program}</code> {m.checked ? "is not installed on" : "could not be checked on"} {m.where}, needed by {m.why}
+                    </li>
+                  ))}
+                </ul>
+                <p className="m-0 mt-1 text-xs text-muted-foreground">
+                  Install it where agents run, or start anyway: the checks that need it stay unmet.
+                </p>
+              </Alert>
+            )}
+            {costGate.estimate && (
+              <>
+                <Card className="border-status-running/40 bg-status-running/10 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-muted-foreground">Estimated worst-case cost</span>
+                    <strong className="text-lg">
+                      ${costGate.estimate.total_usd.toFixed(2)}
+                    </strong>
+                  </div>
+                </Card>
+                <p className="m-0 text-xs text-muted-foreground">
+                  This is a worst-case figure (every agent runs every iteration to
+                  max). Real spend is usually lower. To turn this gate off, edit
+                  the project's approval gates settings.
+                </p>
+              </>
+            )}
             <DialogFooter className="justify-start">
               <Button onClick={() => void runNow(true)}>Confirm and run</Button>
               <Button variant="outline" onClick={() => setCostGate(null)}>Cancel</Button>

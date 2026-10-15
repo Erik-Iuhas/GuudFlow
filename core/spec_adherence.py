@@ -376,11 +376,8 @@ def session_report(data_root: Path, project_id: str, run_id: str) -> str:
                 if isinstance(issue, dict):
                     notes.append(f"Review of {task}: {issue.get('file')}: {issue.get('detail')}")
     lines += ["", "Review notes:"] + (notes or ["(none)"])
-    left: list[str] = []
-    for card in (_read_json(root / "carry_forward.json") or {}).get("open_cards") or []:
-        if isinstance(card, dict):
-            left.append(f"- {card.get('task_id')} {card.get('title')} "
-                        f"(ended in {card.get('column')})")
+    left = [f"- {card.get('task_id')} {card.get('title')} (ended in {card.get('column')})"
+            for card in _open_cards(root)]
     left += [f"- {i.id} {i.title}" for i in Backlog(data_root, project_id).items()
              if i.source == f"run:{run_id}"]
     lines += ["", "Leftovers:"] + (left or ["(none)"])
@@ -389,6 +386,26 @@ def session_report(data_root: Path, project_id: str, run_id: str) -> str:
              for ident, met in check_verdicts(reviews(board)).items() if not met]
     lines += ["", "Unmet checks:"] + (unmet or ["(none)"])
     return "\n".join(lines)
+
+
+def _open_cards(root: Path) -> list[dict[str, Any]]:  # Any: JSON rows
+    """The run's unfinished cards: from its carry-forward, else (a salvaged run writes none)
+    from the last row of each plan or board card in `tasks.jsonl`."""
+    carry = _read_json(root / "carry_forward.json")
+    if carry is not None:
+        return [c for c in carry.get("open_cards") or [] if isinstance(c, dict)]
+    last: dict[str, dict[str, Any]] = {}  # Any: JSON rows
+    tasks = root / "tasks.jsonl"
+    lines = tasks.read_text(encoding="utf-8").splitlines() if tasks.is_file() else []
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("task_id"):
+            last[str(row["task_id"])] = row
+    return [r for r in last.values()
+            if r.get("story_id") in ("plan", "board") and r.get("column") != "done"]
 
 
 def _check_text(spec: Spec, ident: str) -> str:
