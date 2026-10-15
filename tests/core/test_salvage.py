@@ -47,6 +47,39 @@ def test_finds_interrupted_sessions_but_not_live_or_finished_ones(tmp_path: Path
     assert interrupted_runs(tmp_path, "p", live=set()) == []
 
 
+def test_a_meta_written_at_start_does_not_hide_an_interrupted_session(tmp_path: Path) -> None:
+    """The worker writes meta.json with status "running" when a session starts; a session
+    killed mid-run (seen live: the dev API restarted) keeps it, or the API marks it stale."""
+    run_root, items = _interrupted(tmp_path)
+    for status in ("running", "stale"):
+        (run_root / "meta.json").write_text(json.dumps({"project_id": "p", "status": status}))
+        assert [r.run_id for r in interrupted_runs(tmp_path, "p", live=set())] == ["run_x"]
+    (run_root / "meta.json").write_text(json.dumps({"project_id": "p", "status": "complete"}))
+    assert interrupted_runs(tmp_path, "p", live=set()) == []
+
+
+def test_a_goal_only_session_is_found_and_salvaged(tmp_path: Path) -> None:
+    """"Run on the goal only" takes no backlog items, so items cannot be how it is found."""
+    run_root = tmp_path / "runs" / "run_g"
+    working = run_root / "workspace" / "working"
+    prepare_run(tmp_path, "p", "run_g", run_root, working, {}, in_place=False)
+    (working / "app.js").write_text("export const x = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=working, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm",
+                    "feat: app"], cwd=working, check=True)
+    (run_root / "tasks.jsonl").write_text(json.dumps(
+        {"task_id": "T1", "story_id": "plan", "title": "App", "column": "done"}) + "\n")
+    (run_root / "meta.json").write_text(json.dumps({"project_id": "p", "status": "running"}))
+    (tmp_path / "runs" / "run_other").mkdir()
+    (tmp_path / "runs" / "run_other" / "meta.json").write_text(
+        json.dumps({"project_id": "q", "status": "running"}))
+    found = interrupted_runs(tmp_path, "p", live=set())
+    assert [(r.run_id, r.items, r.cards_done) for r in found] == [("run_g", [], 1)]
+    assert interrupted_runs(tmp_path, "p", live={"run_g"}) == []
+    assert salvage_run(tmp_path, "p", "run_g") == "pending"
+    assert interrupted_runs(tmp_path, "p", live=set()) == []
+
+
 def test_salvage_submits_merged_work_and_reopens_unfinished_items(tmp_path: Path) -> None:
     _run_root, (done_id, open_id) = _interrupted(tmp_path)
     assert salvage_run(tmp_path, "p", "run_x") == "pending"

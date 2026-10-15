@@ -68,16 +68,38 @@ def _signals(run_root: Path) -> list[Signal]:
     return out
 
 
+def _meta(run_root: Path) -> dict[str, Any] | None:  # Any: JSON
+    try:
+        meta = json.loads((run_root / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return meta if isinstance(meta, dict) else {}
+
+
+# The worker writes meta.json with "running" when a session starts and the API reports an
+# orphaned one as "stale": either way the session never finished.
+_UNFINISHED = ("running", "stale")
+
+
 def interrupted_runs(data_root: Path, project_id: str, live: set[str]) -> list[InterruptedRun]:
-    """Sessions of the project that hold backlog items but are neither live nor finished."""
+    """Sessions of the project that are neither live nor finished: those holding backlog
+    items, and those (goal-only sessions hold none) whose meta.json says they never ended."""
     held: dict[str, list[str]] = {}
     for item in Backlog(data_root, project_id).items():
         if item.status == "in_run" and item.run_id and item.run_id not in live:
             held.setdefault(item.run_id, []).append(item.id)
+    runs_dir = Path(data_root) / "runs"
+    for meta_path in runs_dir.glob("*/meta.json") if runs_dir.is_dir() else ():
+        meta = _meta(meta_path.parent) or {}
+        run_id = meta_path.parent.name
+        if (meta.get("project_id") == project_id and meta.get("status") in _UNFINISHED
+                and run_id not in live):
+            held.setdefault(run_id, [])
     out = []
     for run_id, items in sorted(held.items()):
         run_root = Path(data_root) / "runs" / run_id
-        if not run_root.is_dir() or (run_root / "meta.json").is_file():
+        meta = _meta(run_root)
+        if not run_root.is_dir() or (meta is not None and meta.get("status") not in _UNFINISHED):
             continue          # never started here, or finished (and its items are pending)
         cards = [c for c in _cards(run_root) if getattr(c, "story_id", "") in ("plan", "board")]
         board = _jsonl(run_root / "board.jsonl")
