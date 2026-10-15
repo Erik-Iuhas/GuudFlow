@@ -96,13 +96,21 @@ if [ "${NO_RELOAD}" -eq 1 ]; then
     info "→ Starting backend  → http://localhost:8000  [NO RELOAD — safe for agent testing]"
     python -m uvicorn api.main:app --port 8000 > "${LOG_BACK}" 2>&1 &
 else
-    info "→ Starting backend  → http://localhost:8000  [reload watches api/core/agents/worker]"
+    info "→ Starting backend  → http://localhost:8000  [reload watches api/core/agents/worker/gateway]"
+    warn "  A reload restarts the process that hosts the LLM gateway and MCP server: a run in"
+    warn "  progress stops (its board says so). For agent runs use: dev --no-reload"
     # NOTE: do NOT pass --reload-include — it OVERRIDES --reload-dir scoping
     # and makes watchfiles see *.py files anywhere in the project, including
     # data/runs/<id>/workspace/working/**/*.py written by agents.
+    # uvicorn < 0.34.3 ignored --reload-dir under the cwd and watched the whole
+    # project (a tests/ edit restarted it); requirements.txt pins a fixed version.
+    # --timeout-graceful-shutdown: an open Studio websocket otherwise keeps the old
+    # worker alive but deaf, so a reload hangs instead of restarting.
     python -m uvicorn api.main:app --reload \
         --reload-dir api --reload-dir core --reload-dir agents --reload-dir worker \
+        --reload-dir gateway \
         --reload-exclude '*.pyc' --reload-exclude '__pycache__/*' \
+        --timeout-graceful-shutdown 5 \
         --port 8000 > "${LOG_BACK}" 2>&1 &
 fi
 BACK_PID=$!

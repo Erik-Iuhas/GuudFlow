@@ -144,6 +144,30 @@ async def restart_inproc_worker(app: FastAPI, data_root: Path) -> None:
     _start_inproc_worker(app, data_root)
 
 
+API_SHUTDOWN_NOTICE = (
+    "The API is shutting down while this run is in progress (a dev --reload restart or a "
+    "stop). The run's LLM gateway and MCP server live in this process, so the run stops "
+    "here; continue it from its review card. For agent runs use the dev stack without reload."
+)
+
+
+def _notify_live_runs_of_shutdown(registry: RunRegistry) -> list[str]:
+    """Post a FAILED signal on every live run's board and log it, so a restart of the
+    process that hosts the gateway never silently strands a run (F11). Returns the run ids."""
+    import logging as _logging
+    from core.signals import Signal, SignalType
+
+    run_ids = sorted(registry.runs)
+    for run_id in run_ids:
+        registry.runs[run_id].post_signal(Signal(
+            type=SignalType.FAILED, from_agent="runner", summary=API_SHUTDOWN_NOTICE))
+    if run_ids:
+        _logging.getLogger(__name__).warning(
+            "API shutting down with run(s) in progress: %s. %s", ", ".join(run_ids),
+            API_SHUTDOWN_NOTICE)
+    return run_ids
+
+
 def _recover_orphaned_runs(runs_dir: Path) -> None:
     """Mark any run still tagged status="running" as "stale".
 
@@ -273,6 +297,7 @@ async def lifespan(app: FastAPI):
     finally:
         if autopilot_task is not None:
             autopilot_task.cancel()
+        _notify_live_runs_of_shutdown(app.state.run_registry)
         if app.state.__dict__.get("worker_task") is not None:
             app.state.job_runner.stop()
             try:
