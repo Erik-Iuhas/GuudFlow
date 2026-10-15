@@ -1434,6 +1434,13 @@ class OpencodeRun:
         stop = self.workspace.pending_human
         if not self.settings.notebooks or (stop is not None and stop.from_agent == "system"):
             return
+        writers = [r.cfg.role for r in self._roles.values()
+                   if not self._is_overseer(r.cfg.role) and r.turns_done]
+        if writers:
+            from core.harness import run_console
+            run_console.note(self.runner.run_root, "runner",
+                             "work finished; before the run ends, each role writes its notebook "
+                             "for the next session: " + ", ".join(writers))
         for role in self._roles.values():
             name = role.cfg.role
             if self._is_overseer(name) or role.turns_done == 0:

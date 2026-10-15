@@ -213,6 +213,8 @@ async def test_a_notebook_turn_ends_once_the_notebook_is_saved(tmp_path: Path,
     assert (await runner.run()).status is SchedulerStatus.COMPLETE
     assert (runner.run_root / "notebooks" / "builder.md").read_text().strip() == "- note 1"
     assert fake_llm.remaining("Write your notebook") >= 1   # never asked for the third
+    console = (runner.run_root / "console.jsonl").read_text()
+    assert "each role writes its notebook for the next session: builder" in console
 
 
 @pytest.mark.parametrize("production", [True])
