@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { formatUsd } from "../../lib/cost";
@@ -19,9 +20,10 @@ function when(ts: number | null | undefined): string {
 
 /** Where the project's code comes from and goes to, and the autopilot (plan §14.1, §14.7). */
 export function WorkHeader({
-  remote, autopilot, lastSync, onSync, syncing,
+  remote, code, autopilot, lastSync, onSync, syncing,
 }: {
   remote: RemoteSummary | null | undefined;
+  code?: { path: string; exists: boolean };
   autopilot: AutopilotStatus | undefined;
   lastSync: SyncWire | null;
   onSync: () => void;
@@ -30,6 +32,7 @@ export function WorkHeader({
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-card px-3 py-2 text-sm"
       data-testid="work-header">
+      {code?.exists && <CodeFolder path={code.path} />}
       {remote ? (
         <span className="flex flex-wrap items-center gap-2">
           <span className="text-muted-foreground">Remote</span>
@@ -99,5 +102,25 @@ export function Suggestions({
         </ul>
       )}
     </section>
+  );
+}
+
+
+/** The project's code as accepted so far: one folder to open, updated on every accept. */
+function CodeFolder({ path }: { path: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    void navigator.clipboard?.writeText(path).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <span className="flex flex-wrap items-center gap-2" data-testid="code-folder"
+      title="Updated each time you accept a session. Work you do in it yourself is never overwritten.">
+      <span className="text-muted-foreground">Code</span>
+      <code className="font-mono text-xs">{path}</code>
+      <Button size="sm" variant="outline" onClick={copy}>{copied ? "Copied" : "Copy path"}</Button>
+    </span>
   );
 }

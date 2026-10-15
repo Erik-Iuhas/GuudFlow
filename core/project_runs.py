@@ -239,6 +239,11 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
     repo = ProjectRepo(data_root, project_id)
     synced = sync(repo, remote) if accept and remote is not None else None
     run = repo.accept(run_id, note) if accept else repo.reject(run_id, note)
+    if accept:
+        try:  # the one folder people open: never fails the accept
+            log.info("project code at %s: %s", repo.code_path(), repo.refresh_code())
+        except Exception:  # noqa: BLE001 - logged, the merge has already happened
+            log.exception("could not update %s", repo.code_path())
     items = Backlog(data_root, project_id).decide(run_id, accepted=accept, note=note)
     _remember_decision(data_root, project_id, run_id, accept, note)
     if accept:

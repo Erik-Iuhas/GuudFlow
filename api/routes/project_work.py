@@ -229,7 +229,14 @@ async def list_project_runs(request: Request, project_id: str) -> dict[str, Any]
     except AutopilotError as exc:
         pilot_status = {"enabled": False, "error": str(exc)}
     seat = Seats.from_project(project).reviewer
+    code = repo.code_path()
+    if main and not (code / ".git").exists():
+        try:
+            await asyncio.to_thread(repo.refresh_code)
+        except Exception:  # noqa: BLE001 - the folder is a convenience
+            pass
     return {"main": main,
+            "code": {"path": str(code.resolve()), "exists": (code / ".git").exists()},
             "runs": [{**asdict(r), "needs_cosign": r.state == "pending"
                       and needs_cosign(data_root, project_id, r.run_id, seat),
                       **_handover(data_root, r.run_id)}

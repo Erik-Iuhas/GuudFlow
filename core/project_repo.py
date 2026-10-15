@@ -119,6 +119,34 @@ class ProjectRepo:
                     _git("push", "--quiet", str(self.path), f"{MAIN}:{MAIN}", cwd=Path(tmp))
         return self.sha(MAIN)
 
+    # ── the project's code, to open ─────────────────────────────────────────
+    def code_path(self) -> Path:
+        """One working copy of the accepted `main` for people to open (`<project>/code`).
+
+        Sessions work in their own throwaway copies under `runs/`; this is the single place
+        that always holds the project as accepted so far."""
+        return self.project_dir / "code"
+
+    def refresh_code(self) -> str:
+        """Bring `code_path()` to the current `main`. Never overwrites work: a copy with local
+        changes or its own commits is left as it is. Returns what happened, in a few words."""
+        code = self.code_path()
+        if not self.exists():
+            return "no project repo yet"
+        if not (code / ".git").exists():
+            if code.exists() and any(code.iterdir()):
+                return "not updated: the folder exists and is not the project's copy"
+            _git("clone", "--quiet", "--no-local", "--branch", MAIN, str(self.path), str(code))
+            return "created"
+        if _git("status", "--porcelain", cwd=code):
+            return "not updated: the copy has local changes"
+        _git("fetch", "--quiet", "origin", MAIN, cwd=code)
+        try:
+            _git("merge", "--ff-only", "--quiet", f"origin/{MAIN}", cwd=code)
+        except ProjectRepoError:
+            return "not updated: the copy has its own commits"
+        return "updated"
+
     def sha(self, ref: str) -> str:
         """Commit sha of `ref` in the project repo."""
         return _git("rev-parse", "--verify", f"{ref}^{{commit}}", cwd=self.path)

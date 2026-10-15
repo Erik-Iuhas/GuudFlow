@@ -154,3 +154,19 @@ def test_locked_json_round_trip_and_busy(tmp_path: Path) -> None:
     except ValueError:
         pass
     assert read_json(path, {}) == {"a": 1}      # not saved on error
+
+
+def test_the_code_folder_follows_main_and_never_overwrites_local_work(tmp_path: Path) -> None:
+    repo = ProjectRepo(tmp_path / "data", "p")
+    base = repo.ensure(_seed(tmp_path))
+    assert repo.refresh_code() == "created" and (repo.code_path() / "README.md").is_file()
+    work = tmp_path / "run1"
+    repo.clone_into(work)
+    _commit(work, "app.py", "print('v1')\n")
+    repo.submit("run_1", work, base)
+    repo.accept("run_1")
+    assert repo.refresh_code() == "updated"
+    assert (repo.code_path() / "app.py").read_text() == "print('v1')\n"
+    (repo.code_path() / "app.py").write_text("my edit\n")          # someone works in the copy
+    assert repo.refresh_code() == "not updated: the copy has local changes"
+    assert (repo.code_path() / "app.py").read_text() == "my edit\n"

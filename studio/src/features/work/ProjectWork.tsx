@@ -195,6 +195,7 @@ export function ProjectWork({
       {runs.data && (
         <WorkHeader
           remote={runs.data.remote}
+          code={runs.data.code}
           autopilot={runs.data.autopilot}
           lastSync={syncRemote.data ?? null}
           onSync={() => syncRemote.mutate()}

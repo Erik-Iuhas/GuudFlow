@@ -95,6 +95,8 @@ export interface AutopilotStatus {
 
 export interface RunsReview {
   main: string | null;
+  /** One working copy of the accepted main to open (`<data>/projects/<id>/code`), updated on accept. */
+  code?: { path: string; exists: boolean };
   runs: RunBranchWire[];
   remote?: RemoteSummary | null;
   autopilot?: AutopilotStatus;
