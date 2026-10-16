@@ -24,6 +24,7 @@ import { ApprovalsBar } from "./ApprovalsBar";
 import { BudgetMeter } from "./BudgetMeter";
 import { HumanAnswerBox } from "./HumanAnswerBox";
 import { StoppedBar } from "./StoppedBar";
+import { PlanCheckpoint } from "./PlanCheckpoint";
 import { WakeOverseer } from "../overseer/WakeOverseer";
 import { LimitsControl } from "./LimitsControl";
 import { ArtifactGallery } from "../artifacts/ArtifactGallery";
@@ -373,7 +374,11 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           {actionError}
         </div>
       )}
-      {humanNeeded && !stoppedAt && (
+      {humanNeeded && !stoppedAt && humanNeeded.kind === "plan_review" && (
+        <PlanCheckpoint runId={runId} role={humanNeeded.role} cards={humanNeeded.cards ?? []}
+          onEdit={() => setTab("cards")} />
+      )}
+      {humanNeeded && !stoppedAt && humanNeeded.kind !== "plan_review" && (
         <div role="alert" className="rounded-md border border-status-waiting/40 bg-status-waiting/10 px-3 py-2 text-sm" data-testid="human-needed">
           <strong>{humanNeeded.role ?? "An agent"} needs you:</strong> {humanNeeded.summary}{" "}
           <HumanAnswerBox runId={runId} />

@@ -46,6 +46,7 @@ const DEFAULT_GATES = {
   iteration_breach_at: 2 as number | null,
   per_iteration: false,
   token_budget_usd: null as number | null,
+  review_plan: false,
 };
 
 export function Studio() {
@@ -159,6 +160,8 @@ export function Studio() {
   // What the run should take on (backlog items, a pending run to continue);
   // kept across the cost-preview round trip.
   const [runRequest, setRunRequest] = useState<RunRequest>({});
+  // A prepared plan made on an older spec, design or main (worker context plan H3).
+  const [staleGate, setStaleGate] = useState<string[] | null>(null);
   const backlog = useBacklog(id ?? "");
   const openItems = (backlog.data ?? []).filter((i) => i.status === "open").length;
   const [starting, setStarting] = useState(false);
@@ -186,7 +189,12 @@ export function Studio() {
         message: res.gate === "pre_run_cost_preview" ? res.message : "Check what agents can run before you start.",
       });
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      const detail: unknown = e instanceof ApiError ? e.detail : undefined;
+      if (detail && typeof detail === "object" && (detail as { gate?: string }).gate === "preflight_stale") {
+        setStaleGate((detail as { reasons?: string[] }).reasons ?? []);
+      } else {
+        setError(e instanceof ApiError ? String(e.detail) : String(e));
+      }
     } finally {
       setStarting(false);
     }
@@ -422,6 +430,25 @@ export function Studio() {
         </Dialog>
       )}
 
+      {staleGate && (
+        <Dialog open onOpenChange={(o) => !o && setStaleGate(null)}>
+          <DialogContent>
+            <DialogTitle>The prepared plan may be out of date</DialogTitle>
+            <DialogDescription>
+              Since it was approved: {staleGate.join("; ")}.
+            </DialogDescription>
+            <DialogFooter className="justify-start">
+              <Button onClick={() => { setStaleGate(null); void runNow(false, { ...runRequest, stale_ok: true }); }}>
+                Start anyway
+              </Button>
+              <Button variant="outline" onClick={() => { setStaleGate(null); setTab("design" as ProjectTab); }}>
+                Refresh the plan
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
       {slideOverPersonaId && (
         <PersonaSlideOver
           personaId={slideOverPersonaId}
@@ -491,6 +518,12 @@ function SettingsTab({ gates, onChange }: SettingsTabProps) {
           help="Show the cost estimate before each run starts. Click Confirm to proceed."
           checked={gates.pre_run_cost_preview}
           onChange={(v) => onChange({ ...gates, pre_run_cost_preview: v })}
+        />
+        <Toggle
+          label="Review the plan before work starts"
+          help="When a session has no prepared plan, pause after the planner's cards are made: approve, edit them, or send the plan back. Nothing starts until you do."
+          checked={gates.review_plan}
+          onChange={(v) => onChange({ ...gates, review_plan: v })}
         />
         <Toggle
           label="Confirm HEAVY-tier mid-run dispatch"

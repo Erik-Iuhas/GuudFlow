@@ -433,3 +433,14 @@ describe("run event store: seedCosts (gateway poll)", () => {
     expect(state(store).agents.dev.cost).toBe(0.4);
   });
 });
+
+describe("run event store: plan checkpoint (worker context plan H5)", () => {
+  it("marks a plan-review pause with its cards", () => {
+    const store = createRunStore("r1");
+    state(store).ingest([sig("HUMAN_NEEDED", { from: "planner", summary: "Review the plan before work starts",
+      detail: { kind: "plan_review", cards: ["T1", "T2"], design_changes: 0, notes: "" } })]);
+    expect(state(store).humanNeeded).toMatchObject({ kind: "plan_review", cards: ["T1", "T2"] });
+    state(store).ingest([sig("HUMAN_NEEDED", { from: "dev", summary: "which db?", detail: "plain text" })]);
+    expect(state(store).humanNeeded?.kind).toBeUndefined();
+  });
+});

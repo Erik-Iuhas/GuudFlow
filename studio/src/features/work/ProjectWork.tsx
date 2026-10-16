@@ -31,10 +31,15 @@ import { usePmName } from "../pm/api";
 import { PhaseStrip } from "../design/PhaseStrip";
 import { usePhases } from "../design/api";
 import { itemPhaseLabel } from "../design/model";
+import { PrepareSession } from "../preflight/PrepareSession";
 
 export interface RunRequest {
   backlog_items?: string[];
   continue_run?: string;
+  /** Start from the plan prepared with the tech lead (worker context plan H3). */
+  preflight?: string;
+  /** "Start anyway" on a prepared plan made on an older spec, design or main. */
+  stale_ok?: boolean;
 }
 
 /**
@@ -144,6 +149,8 @@ export function ProjectWork({
             {groom.isPending ? "Thinking…" : "Suggest items"}
           </Button>
         </div>
+        <PrepareSession projectId={projectId} chosen={chosen} starting={starting}
+          onStart={(plan) => onStartRun({ backlog_items: plan.items, preflight: plan.id })} />
         {proposals && (
           <div className="mb-3">
             <Suggestions proposals={proposals} onAdd={addProposal} onDismiss={() => setProposals(null)} />

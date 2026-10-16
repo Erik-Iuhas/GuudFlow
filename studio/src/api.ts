@@ -782,6 +782,16 @@ export async function messageWorker(runId: string, role: string, text: string, w
     { text, wake }, true);
 }
 
+/** Approve the plan at the checkpoint (`POST /api/runs/{id}/plan/approve`, worker context plan H5). */
+export async function approvePlan(runId: string): Promise<void> {
+  await request("POST", `/api/runs/${encodeURIComponent(runId)}/plan/approve`, {}, true);
+}
+
+/** Send the plan back with a note: unstarted cards go, the planner plans again. */
+export async function sendPlanBack(runId: string, note: string): Promise<{ cancelled: string[] }> {
+  return request("POST", `/api/runs/${encodeURIComponent(runId)}/plan/send-back`, { note }, true);
+}
+
 /** Body of `POST /api/runs/{id}/cards` (human adds a card). */
 export interface NewCardBody {
   owner: string;

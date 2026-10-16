@@ -137,6 +137,9 @@ export interface HumanNeededView {
   role: string | null;
   summary: string;
   timestamp: string;
+  /** "plan_review": the plan checkpoint (worker context plan H5), with the plan's cards. */
+  kind?: string;
+  cards?: string[];
 }
 
 export interface RunState {
@@ -467,7 +470,21 @@ export function createRunStore(runId: string): RunStore {
           d.stoppedAt = sig.timestamp;
           break;
         }
-        d.humanNeeded = { signalId: sig.id, role: role ?? null, summary: sig.summary, timestamp: sig.timestamp };
+        {
+          // HUMAN_NEEDED's detail is JSON only for some posters (the plan checkpoint, ask_human).
+          let extra: { kind?: unknown; cards?: unknown } = {};
+          try {
+            const parsed: unknown = sig.detail ? JSON.parse(sig.detail) : null;
+            if (isRecord(parsed)) extra = parsed;
+          } catch {
+            /* plain-text detail */
+          }
+          d.humanNeeded = {
+            signalId: sig.id, role: role ?? null, summary: sig.summary, timestamp: sig.timestamp,
+            ...(typeof extra.kind === "string" ? { kind: extra.kind } : {}),
+            ...(Array.isArray(extra.cards) ? { cards: extra.cards.map(String) } : {}),
+          };
+        }
         if (role) patchAgent(d, role, (a) => ({ ...a, state: "waiting" }));
         break;
       case "HUMAN_RESPONDED":

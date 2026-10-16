@@ -15,6 +15,7 @@ import {
   type KnowledgeNoteWire,
 } from "./api";
 import { changeLabel } from "./model";
+import { PreflightPanel } from "../preflight/PreflightPanel";
 
 /**
  * The project's design and knowledge base (role contracts plan §4.2, §4.3): what the tech
@@ -30,6 +31,7 @@ export function DesignTab({ projectId }: { projectId: string }) {
   const open = data.drafts.filter((d) => d.status === "open");
   return (
     <div className="flex flex-col gap-6" data-testid="design-tab">
+      <PreflightPanel projectId={projectId} />
       {open.map((d) => <DraftCard key={d.id} projectId={projectId} draft={d} />)}
       {data.design.empty ? (
         <EmptyState title="No design yet">
