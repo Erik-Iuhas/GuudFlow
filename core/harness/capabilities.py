@@ -47,7 +47,7 @@ ROLE_TYPES = ("researcher", "planner", "architect", "builder", "frontend_builder
 # Paths no agent may edit, whatever its role (plan §5.5). Rendered last so
 # they win over any allow (opencode: last matching rule wins).
 PROTECTED_PATHS = ("inputs/**", ".github/**", "opencode.json", ".opencode/**", ".guudflow/**",
-                   ".git")
+                   ".git", "AGENTS.md")
 
 READONLY_BASH = ("git status*", "git diff*", "git log*", "git show*", "git branch*",
                  "ls*", "cat *", "head *", "tail *", "wc *", "pwd", "grep *", "cd *",

@@ -19,7 +19,7 @@ returns None), so old projects and one-shot runs behave as before.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -54,7 +54,8 @@ class SpecBrief:
                        if data_root is not None and project_id else None)
         if project_dir is not None and (project_dir / "work.db").is_file():
             spec = Spec(WorkDB(project_dir).read_spec_doc())
-        has_spec = bool(spec.version or spec.requirements or spec.decisions or spec.rules)
+        has_spec = bool(spec.version or spec.requirements or spec.decisions or spec.rules
+                        or not spec.stack.empty)
         if not has_spec and mode is None:
             return None
         return cls(spec=spec, start_mode=mode)
@@ -67,8 +68,8 @@ class SpecBrief:
     def rules(self, role_type: str) -> list[Rule]:
         """Active spec rules for the role type, plus the start mode's default rules the spec
         does not already say."""
-        out = ([r for r in self.spec.rules if r.status == "active"] if role_type == "*"
-               else self.spec.rules_for(role_type))
+        out = [r for r in self.spec.rules if r.status == "active"
+               and (role_type == "*" or _applies(r, role_type))]
         have = {_one_line(r.text).casefold() for r in self.spec.rules if r.status == "active"}
         for default in DEFAULT_RULES.get(self.start_mode or "", ()):
             if _one_line(default.text).casefold() not in have:
@@ -158,6 +159,36 @@ class SpecBrief:
                 "with a specific `detail`:\n" + "\n".join(f"- [ ] {line}" for line in extra_lines))
         return "\n\n".join(parts) if parts else None
 
+    def ground_rules(self, role_type: str, *, design_decisions: Sequence[Mapping[str, object]] = ()
+                     ) -> str | None:
+        """The standing rules every turn of this role follows (worker context plan B3): the
+        stack, the binding rules and decisions, the preferences, and the other accepted decisions
+        as context. None when there is nothing to say."""
+        parts: list[str] = []
+        stack = self.spec.stack
+        if not stack.empty:
+            parts.append("### The stack (the owner's choice: build with exactly this)\n"
+                         + "\n".join(stack.lines())
+                         + "\nDo not add another language, framework or test runner. The merge "
+                           "refuses files in another language.")
+        parts += [p.replace("Binding decisions (follow them):", "### Binding decisions")
+                  .replace("Binding rules (a reviewer checks each one):", "### Binding rules "
+                           "(a reviewer checks each one)")
+                  .replace("Preferences (follow them where reasonable; nobody fails a review "
+                           "for them):", "### Preferences (nobody fails a review for them)")
+                  for p in self._shared(role_type=role_type)]
+        plain = [d for d in self.spec.decisions if d.status == "accepted" and not d.binding]
+        if plain:
+            parts.append("### Other decisions (the current choice; follow unless the card says "
+                         "otherwise)\n" + "\n".join(f"- **{d.id}** {d.title}: {d.choice}"
+                                                     for d in plain))
+        tech = [d for d in design_decisions if d.get("status", "accepted") == "accepted"]
+        if tech:
+            parts.append("### Technical decisions of the design\n" + "\n".join(
+                f"- **{d.get('id')}** {d.get('title')}: {d.get('choice')}"
+                + (" (binding)" if d.get("binding") else "") for d in tech))
+        return "\n\n".join(parts) if parts else None
+
     def _shared(self, *, planner: bool = False, role_type: str = "*") -> list[str]:
         parts: list[str] = []
         decisions = self.binding_decisions()
@@ -175,6 +206,15 @@ class SpecBrief:
                          "for them):\n" + "\n".join(
                              f"- **{r.id}** (preference) {_one_line(r.text)}" for r in prefs))
         return parts
+
+
+def _applies(rule: Rule, role_type: str) -> bool:
+    """Does the rule reach this role type? A rule whose `applies_to` names no known role type
+    (an older rule written with a role name) is read as `*` rather than reaching nobody
+    (worker context plan B5)."""
+    from core.harness.capabilities import ROLE_TYPES
+    targets = [t for t in rule.applies_to if t == "*" or t in ROLE_TYPES]
+    return not targets or "*" in targets or role_type in targets
 
 
 def _req_text(req: Requirement, served_by: Sequence[str]) -> str:

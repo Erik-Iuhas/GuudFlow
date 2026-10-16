@@ -191,6 +191,8 @@ class WorkDB:
             rows = conn.execute("SELECT data FROM spec_items WHERE kind=? ORDER BY num",
                                 (kind,)).fetchall()
             doc[key] = [json.loads(r[0]) for r in rows]
+        if meta.get("spec_stack"):
+            doc["stack"] = json.loads(meta["spec_stack"])
         return doc
 
     @staticmethod
@@ -202,6 +204,8 @@ class WorkDB:
                     "ON CONFLICT(id) DO UPDATE SET data=excluded.data",
                     (kind, row["id"], _spec_num(str(row["id"])), json.dumps(row)))
         _set_meta(conn, "spec_version", str(int(doc.get("version", 0))))
+        if doc.get("stack"):
+            _set_meta(conn, "spec_stack", json.dumps(doc["stack"]))
         for c in _COUNTERS:
             _set_meta(conn, f"next_{c}", str(int(doc.get("next", {}).get(c, 1))))
 

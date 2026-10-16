@@ -87,8 +87,11 @@ def test_agent_entry_uses_build_permission_unchanged() -> None:
     entry = agent_entry(compiled, model_ref="anthropic/claude-x", prompt="p", description="d")
     assert entry["mode"] == "primary" and entry["model"] == "anthropic/claude-x"
     assert entry["steps"] == 60 and "temperature" not in entry
-    assert entry["permission"] == build_permission(compiled)
-    assert list(entry["permission"]) == list(build_permission(compiled))
+    # The role's permissions, plus the skill rule last: only the offered skills load.
+    assert entry["permission"] == {**build_permission(compiled), "skill": {"*": "deny"}}
+    assert list(entry["permission"]) == [*build_permission(compiled), "skill"]
+    skilled = agent_entry(compiled, model_ref="m", prompt="p", skills=["orient", "test-first"])
+    assert skilled["permission"]["skill"] == {"*": "deny", "orient": "allow", "test-first": "allow"}
     assert agent_entry(compiled, model_ref="m", prompt="p", temperature=0.2)["temperature"] == 0.2
 
 
@@ -362,3 +365,14 @@ def test_opencode_never_sends_local_calls_through_a_proxy(monkeypatch, tmp_path)
     env = locked_env(tmp_path, {}, "pw")
     assert env["HTTPS_PROXY"] == "http://proxy.corp:8080"
     assert env["NO_PROXY"] == env["no_proxy"] == ".corp.example,localhost,127.0.0.1,::1"
+
+
+def test_build_config_lists_rules_and_skills() -> None:
+    agent = agent_entry(_compiled(), model_ref="anthropic/claude-x", prompt="p")
+    cfg = build_config(role="builder", agent=agent, binding=ANTHROPIC,
+                       instructions=["/work/.guudflow/rules/guudflow.md"],
+                       skill_paths=["/work/.guudflow/skills"])
+    assert cfg["instructions"] == ["/work/.guudflow/rules/guudflow.md"]
+    assert cfg["skills"] == {"paths": ["/work/.guudflow/skills"]}
+    plain = build_config(role="builder", agent=agent, binding=ANTHROPIC)
+    assert "instructions" not in plain and "skills" not in plain

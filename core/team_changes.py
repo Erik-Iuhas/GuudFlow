@@ -7,6 +7,7 @@ applies from the next session; a running session never changes.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from core.harness.capabilities import infer_role_type
@@ -65,8 +66,8 @@ def apply_team_changes(agents: list[dict[str, Any]],  # Any: agent rows
                     == "reviewer"
             if role not in summary["edited"]:
                 summary["edited"].append(role)
-        elif op in ("set_kind", "add_contract_rule"):
-            continue                     # not the team: see kind_change, contract_rules
+        elif op in ("set_kind", "add_contract_rule", "add_skill"):
+            continue                     # not the team: see kind_change, contract_rules, skills
         elif op == "remove_role":
             if row is None:
                 raise TeamChangeError(f"role {role!r} is not on the team")
@@ -97,6 +98,29 @@ def contract_rules(changes: list[dict[str, Any]]) -> list[tuple[str, str]]:  # A
     """(contract, rule) for each ticked `add_contract_rule`, in order."""
     return [(str(ch["contract"]), str(ch["rule"])) for ch in changes
             if ch.get("op") == "add_contract_rule"]
+
+
+def write_skills(data_root: Path, project_id: str,
+                 changes: list[dict[str, Any]]) -> list[str]:  # Any: dumped Changes
+    """Write each ticked `add_skill` as `data/projects/{id}/skills/<name>/SKILL.md` (worker
+    context plan R5); returns the names written. Workers get them from their next spawn."""
+    import re
+    written: list[str] = []
+    root = Path(data_root) / "projects" / project_id / "skills"
+    for ch in changes:
+        if ch.get("op") != "add_skill":
+            continue
+        name = str(ch["name"])
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,39}", name):
+            raise TeamChangeError(f"bad skill name {name!r}")
+        description = " ".join(str(ch["description"]).split())
+        folder = root / name
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {description}\n---\n\n"
+            f"{str(ch['body']).strip()}\n", encoding="utf-8")
+        written.append(name)
+    return written
 
 
 def missing_roles(agents: list[dict[str, Any]]) -> list[str]:  # Any: agent rows

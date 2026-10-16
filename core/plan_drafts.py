@@ -23,7 +23,8 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter, 
 from core.backlog import BacklogError, _check_deps, add_to_doc, update_in_doc
 from core.harness.capabilities import ROLE_TYPES, Capabilities, CapabilityError
 from core.spec import (
-    CHECK_REF, REQ_ID, Check, Decision, Param, Requirement, Rule, Spec, SpecError, derive_title,
+    CHECK_REF, REQ_ID, STACK_FIELDS, Check, Decision, Param, Requirement, Rule, Spec, SpecError,
+    derive_title,
     find_row, highest_check_number, make_checks, next_id, structured_check, structured_checks,
     sync_decision_rule)
 from core.work_db import WorkDB, WorkTxn
@@ -346,6 +347,33 @@ class AddContractRule(_Op):
     reason: str
 
 
+class SetStack(_Op):
+    """Set what the project is built with (worker context plan B1). Only the fields given
+    change; a field a person set is pinned. Workers see the stack in every turn."""
+
+    op: Literal["set_stack"]
+    language: str | None = None
+    framework: str | None = None
+    package_manager: str | None = None
+    test_command: str | None = None
+    run_command: str | None = None
+    source_dir: str | None = None
+    test_dir: str | None = None
+    notes: str | None = None
+    reason: str
+
+
+class AddSkill(_Op):
+    """Add a project skill (worker context plan R5): a short playbook workers load when its
+    work comes up, e.g. how this game's levels are built. A human always ticks it."""
+
+    op: Literal["add_skill"]
+    name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,39}$")
+    description: str = Field(min_length=10, max_length=200)
+    body: str = Field(min_length=20, max_length=4000)
+    reason: str
+
+
 class SetKind(_Op):
     """Set the project's kind (role contracts plan §3), and optionally its start mode; a human
     always ticks it and it applies from the next session."""
@@ -360,7 +388,7 @@ Change = Annotated[
     AddRequirement | EditRequirement | DropRequirement | SetTitle | SetStatement | SetParam
     | RemoveParam | AddCheck | EditCheck | RemoveCheck | AddDecision | SupersedeDecision
     | AddItem | EditItem | DropItem | AddRule | DropRule | AddRole | EditRole | RemoveRole
-    | SetKind | AddContractRule,
+    | SetKind | AddContractRule | SetStack | AddSkill,
     Field(discriminator="op")]
 _CHANGE_ADAPTER: TypeAdapter[Any] = TypeAdapter(Change)  # Any: the union members above
 _REF_KIND = {"add_requirement": "requirement", "add_decision": "decision",
@@ -660,6 +688,16 @@ def validate_turn(turn: PlanTurn, spec: Spec, backlog_doc: dict[str, Any],  # An
                 problems.append(f"change {n} ({ch.op}): {ch.id} belongs to decision "
                                 f"{rule.source}; supersede the decision instead")
     problems.extend(_validate_team(turn, team or []))
+    problems.extend(_validate_rule_targets(turn, team or []))
+    for n, ch in enumerate(turn.changes, 1):
+        if isinstance(ch, SetStack):
+            fields = {k for k in STACK_FIELDS if getattr(ch, k) is not None}
+            if not fields:
+                problems.append(f"change {n} ({ch.op}): sets no field")
+            hit = sorted(fields & set(spec.stack.pinned_fields))
+            if hit:
+                problems.append(f"change {n} ({ch.op}): the owner set the stack's "
+                                f"{', '.join(hit)}; do not change it")
     problems.extend(_validate_kind(turn))
     for n, ch in enumerate(turn.changes, 1):
         if isinstance(ch, AddContractRule):
@@ -686,6 +724,39 @@ def _validate_kind(turn: PlanTurn) -> list[str]:
         elif ch.start_mode is not None and ch.start_mode not in kind.start_modes:
             problems.append(f"{where}: start_mode {ch.start_mode!r} is not one of "
                             f"{', '.join(kind.start_modes)} for {ch.kind}")
+    return problems
+
+
+def rule_targets(applies_to: Sequence[str], team: Sequence[Mapping[str, Any]]  # Any: agent rows
+                 ) -> tuple[list[str], list[str]]:
+    """(role types a rule's `applies_to` means, entries that name nothing). A role *name* on the
+    team is read as that role's type (worker context plan B5)."""
+    from core.harness.capabilities import ROLE_TYPES
+    by_name = {str(a.get("role")): str(a.get("role_type") or "") for a in team}
+    known = set(ROLE_TYPES) | {t for t in by_name.values() if t}
+    out: list[str] = []
+    bad: list[str] = []
+    for entry in applies_to:
+        key = entry.strip()
+        if key == "*" or key in known:
+            out.append(key)
+        elif by_name.get(key):
+            out.append(by_name[key])
+        else:
+            bad.append(entry)
+    return list(dict.fromkeys(out)), bad
+
+
+def _validate_rule_targets(turn: PlanTurn, team: list[dict[str, Any]]) -> list[str]:  # Any: rows
+    from core.harness.capabilities import ROLE_TYPES
+    problems: list[str] = []
+    for n, ch in enumerate(turn.changes, 1):
+        if isinstance(ch, AddRule):
+            _, bad = rule_targets(ch.applies_to, team)
+            if bad:
+                problems.append(
+                    f"change {n} ({ch.op}): applies_to {', '.join(map(repr, bad))} is not a "
+                    f"role type; use '*' or role types such as {', '.join(ROLE_TYPES[:6])}")
     return problems
 
 
@@ -1339,6 +1410,8 @@ class _Applier:
         self.current: DraftChange | None = None
         self.created: dict[str, str] = {}
         self.team_changes: list[dict[str, Any]] = []  # Any: dumped team Changes
+        # The project's agents, so a rule naming a role is stored with its type (plan B5).
+        self.team: list[dict[str, Any]] = []  # Any: agent rows
 
     def apply(self, chosen: list[DraftChange]) -> dict[str, str]:
         """Apply in phases (requirements, their fields and checks, decisions, rules, new items,
@@ -1348,12 +1421,13 @@ class _Applier:
         self.team_changes = [ch.model_dump(mode="json", exclude_none=True, exclude={"group"})
                              for _, ch in parsed
                              if isinstance(ch, (AddRole, EditRole, RemoveRole, SetKind,
-                                                AddContractRule))]
+                                                AddContractRule, AddSkill))]
         phases: list[tuple[type, ...]] = [
             (AddRequirement, EditRequirement, DropRequirement),
             (SetTitle, SetStatement, SetParam, RemoveParam, AddCheck, EditCheck),
             (RemoveCheck,),                  # after add_check, so a swap keeps one check
-            (AddDecision, SupersedeDecision), (AddRule, DropRule), (AddItem,), (EditItem,), (DropItem,)]
+            (AddDecision, SupersedeDecision), (AddRule, DropRule, SetStack), (AddItem,),
+            (EditItem,), (DropItem,)]
         try:
             for dc, ch in parsed:                      # ids for everything but items
                 self.current = dc
@@ -1463,10 +1537,25 @@ class _Applier:
             old["status"] = "superseded"
             sync_decision_rule(spec, Decision.from_dict(old))
             self._add_decision(dc, ch.ref, ch, supersedes=ch.id)
+        elif isinstance(ch, SetStack):
+            row = spec.setdefault("stack", {})
+            who = self._who(dc)
+            pins = list(row.get("pinned_fields") or [])
+            for k in STACK_FIELDS:
+                value = getattr(ch, k)
+                if value is None:
+                    continue
+                if k in pins and who != "human":
+                    raise SpecError(f"the owner set the stack's {k}")
+                row[k] = value.strip()
+                if who == "human" and k not in pins:
+                    pins.append(k)
+            row["pinned_fields"], row["set_by"] = pins, who
         elif isinstance(ch, AddRule):
+            targets, _ = rule_targets(ch.applies_to, self.team)
             rule = Rule(id=self.ids[ch.ref] if ch.ref else next_id(spec, "rule"),
                         text=ch.text.strip(), source=self._who(dc),
-                        applies_to=list(ch.applies_to) or ["*"], strength=ch.strength)
+                        applies_to=targets or ["*"], strength=ch.strength)
             spec.setdefault("rules", []).append(rule.to_dict())
             self.created[ch.ref or f"rule:{rule.id}"] = rule.id
         elif isinstance(ch, DropRule):

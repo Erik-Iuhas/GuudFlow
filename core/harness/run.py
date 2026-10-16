@@ -24,6 +24,7 @@ import re
 import logging
 import os
 import shutil
+import subprocess
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
@@ -848,12 +849,14 @@ class OpencodeRun:
                               api_key=virtual_key,
                               effort=self._effort(role.cfg, role.binding.model))
         role.prompt = await self._system_prompt(role, task_hint)
+        rules_path, skills_path = self._prepare_rules_and_skills(role)
         agent = agent_entry(role.compiled, model_ref=via_gateway.model_ref,
                             prompt=role.prompt.render(), description=role.cfg.description,
-                            steps=self.settings.steps)
+                            steps=self.settings.steps, skills=role.skills)
         config = build_config(role=name, agent=agent, binding=via_gateway,
                               mcp_url=self._http.url + "/", mcp_token=role.token,
-                              extra_providers=self.settings.extra_providers)
+                              extra_providers=self.settings.extra_providers,
+                              instructions=[rules_path], skill_paths=[skills_path])
         # The event stream's read timeout must outlast the stall window (and any turn cap).
         timeout = max(self.settings.turn_timeout or 0.0, self.settings.turn_stall_timeout) + 60
         if self.mode == "docker":
@@ -882,6 +885,112 @@ class OpencodeRun:
         role.client = OpencodeClient(role.server.base_url, str(workdir),
                                      password=role.server.password, timeout=timeout)
         return role.client
+
+    # ── rules, skills and project files (worker context plan R, E, G) ───────
+    def _tool_path(self, role: str, *parts: str) -> str:
+        """Where the role's server finds a file of its tool dir: `/work/.guudflow/...` in a
+        sandbox (the read-only mount), the host path in host mode."""
+        if self.mode == "docker":
+            return "/work/.guudflow/" + "/".join(parts)
+        return str(self.clones.tool_dir(role).resolve().joinpath(*parts))
+
+    def _spec_brief(self) -> "SpecBrief | None":
+        """The project's spec for briefs and rules, with or without a task board (plan B, F10)."""
+        if self.flow is not None and self.flow.spec is not None:
+            return self.flow.spec
+        if not hasattr(self, "_spec_cache"):
+            from core.harness.spec_brief import SpecBrief
+            self._spec_cache = SpecBrief.load(
+                self._data_root(), self.runner.project.project_id,
+                getattr(self.runner.project, "start_mode", None))
+        return self._spec_cache
+
+    def _project_skills_dir(self) -> Path | None:
+        data_root = self._data_root()
+        pid = self.runner.project.project_id
+        return data_root / "projects" / pid / "skills" if data_root and pid else None
+
+    def _prepare_rules_and_skills(self, role: _Role) -> tuple[str, str]:
+        """Pick and write the role's skills; return the rules file and skills folder paths
+        as the server sees them. The rules file itself is written at every spawn."""
+        from core.harness.worker_rules import RULES_DIR, RULES_FILE, SKILLS_DIR, write_skills
+        name = role.cfg.role
+        project_skills = self._project_skills_dir()
+        role.skills = self._pick_skills(role)
+        tool_dir = self.clones.tool_dir(name)
+        write_skills(tool_dir, role.skills, project_skills)
+        rules = tool_dir / RULES_DIR / RULES_FILE
+        if not rules.is_file():
+            self._write_rules(role, self.clones.path(name))
+        return self._tool_path(name, RULES_DIR, RULES_FILE), self._tool_path(name, SKILLS_DIR)
+
+    def _pick_skills(self, role: _Role) -> list[str]:
+        from core.harness.worker_rules import project_skill_names, skills_for
+        spec = self._spec_brief()
+        return skills_for(self._rules_role_type(role.cfg.role),
+                          spec.spec.stack if spec else None,
+                          extra=project_skill_names(self._project_skills_dir()))
+
+    def _rules_role_type(self, role: str) -> str:
+        if self.flow is not None and role == self.flow.planner:
+            return "planner"
+        return self._roles[role].role_type if role in self._roles else ""
+
+    def _write_rules(self, role: _Role, workdir: Path) -> None:
+        """Write the role's rules file and project files for this spawn (plan R2, E1, G1)."""
+        from core.harness.worker_rules import (ProjectFiles, rules_text, where_you_are,
+                                               write_project_files, write_rules)
+        name = role.cfg.role
+        spec = self._spec_brief()
+        design = self.flow.design if self.flow is not None else None
+        if design is None and self._data_root() is not None and self.runner.project.project_id:
+            try:
+                from core.design import Design
+                design = Design.load(self._data_root(), self.runner.project.project_id)
+            except Exception as e:  # noqa: BLE001 — the design is context, never a failure
+                log.warning("design unreadable for rules: %s", e)
+        from core.design import render_for_brief as design_brief
+        facts = self.flow.facts if self.flow is not None else None
+        commands = list((facts or {}).get("commands") or [])
+        planner = self.flow is not None and name == self.flow.planner
+        rtype = self._rules_role_type(name)
+        ground = spec.ground_rules(role.role_type, design_decisions=(design.decisions()
+                                   if design is not None else ())) if spec else None
+        tool_dir = self.clones.tool_dir(name)
+        if not role.skills:
+            role.skills = self._pick_skills(role)
+        text = rules_text(
+            role=name, name=self.names.get(name, name), role_type=rtype, planner=planner,
+            ground_rules=ground,
+            where=where_you_are(workdir, stack=spec.spec.stack if spec else None,
+                                check_command=commands[0] if commands else "",
+                                sandbox=self.mode == "docker"),
+            skills=role.skills, description=role.cfg.description,
+            project_notes=self._person_agents_md())
+        write_rules(tool_dir, text)
+        write_project_files(tool_dir, ProjectFiles(
+            spec=spec.spec if spec else None,
+            design_text=design_brief(design) if design is not None else None,
+            cards=self._card_rows()))
+        role.rules_files = {"guudflow.md": text}
+
+    def _person_agents_md(self) -> str | None:
+        """A person-written `AGENTS.md` on the run's main (agents cannot change it, and
+        opencode does not read the worktree's copy: GuudFlow passes it on in the rules)."""
+        from core.agents_md import FILE, person_written
+        proc = subprocess.run(["git", "-C", str(self.runner.git.working_dir), "show",
+                               f"main:{FILE}"], capture_output=True, text=True)
+        text = proc.stdout if proc.returncode == 0 else None
+        return text if person_written(text) else None
+
+    def _card_rows(self) -> list[dict[str, object]]:
+        """This session's cards for CARDS.md and `guudflow_spec`."""
+        if self.flow is None:
+            return []
+        return [{"id": t.task_id, "title": t.title, "owner": t.assigned_to, "column": t.column,
+                 "serves": list(getattr(t, "serves", []) or []), "depends_on": list(t.depends_on),
+                 "files": list(t.files_hint), "acceptance": list(t.acceptance_criteria)}
+                for t in self.flow.board.cards()]
 
     def _role_budget(self, role: _Role) -> float | None:
         budgets = self.runner.project.approval_gates.get("role_budget_usd") or {}
@@ -952,6 +1061,10 @@ class OpencodeRun:
         if not self.clones.sync_from_main(role_name, keep_conflicts=True):
             self._sync_conflict(role_name)
         self._link_deps(role_name, workdir)
+        try:
+            self._write_rules(role, workdir)
+        except OSError as e:  # the rules are context; a turn still runs without a fresh copy
+            log.warning("%s: rules not written: %s", role_name, e)
         if self._is_overseer(role_name):
             assert self.overseer is not None
             plan: TurnPlan | None = self.overseer.begin_turn(

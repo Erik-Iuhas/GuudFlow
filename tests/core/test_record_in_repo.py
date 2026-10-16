@@ -47,9 +47,9 @@ def test_accept_writes_spec_and_decisions_when_opted_in(tmp_path: Path) -> None:
     files = _main_files(repo)
     assert "SPEC.md" in files and "a.py" in files
     assert any(f.startswith("docs/decisions/0001-") for f in files)
-    log = subprocess.run(["git", "log", "-1", "--format=%s", "main"], cwd=repo.path,
+    log = subprocess.run(["git", "log", "-3", "--format=%s", "main"], cwd=repo.path,
                          capture_output=True, text=True, check=True).stdout
-    assert "project record" in log
+    assert "project record" in log   # next to it, the generated AGENTS.md (its own commit)
 
 
 def test_accept_leaves_the_repo_alone_without_opt_in(tmp_path: Path) -> None:

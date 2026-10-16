@@ -743,3 +743,47 @@ def test_a_number_that_names_something_is_not_tunable(pd: PlanDrafts) -> None:
         {"key": "tries", "value": 3}]))
     problems = validate_turn(turn, spec, pd.db.read_backlog_doc())
     assert any("(3)" in p for p in problems) and not any("1," in p or "(1" in p for p in problems)
+
+
+# ── worker context plan B1, B5, R5 ──────────────────────────────────────────
+def test_set_stack_applies_and_pins_what_a_person_set(pd: PlanDrafts) -> None:
+    turn = _turn({"op": "set_stack", "language": "Python 3.12", "framework": "pygame 2.6",
+                  "test_command": "python -m pytest -q", "reason": REASON})
+    assert _problems(pd, turn) == []
+    _approve_all(pd, turn)
+    stack = Spec(pd.db.read_spec_doc()).stack
+    assert stack.language == "Python 3.12" and stack.framework == "pygame 2.6"
+    assert set(stack.pinned_fields) == set()          # approved by a person, proposed by the PM
+    doc = pd.db.read_spec_doc()
+    doc["stack"]["pinned_fields"] = ["language"]
+    with pd.db.spec_doc() as live:
+        live.update(doc)
+    again = _turn({"op": "set_stack", "language": "TypeScript", "reason": REASON})
+    assert any("owner set the stack's language" in p for p in _problems(pd, again))
+    assert any("sets no field" in p for p in _problems(pd, _turn({"op": "set_stack",
+                                                                    "reason": REASON})))
+
+
+def test_rule_applies_to_must_name_role_types() -> None:
+    from core.plan_drafts import rule_targets
+    team = [{"role": "developer", "role_type": "builder"}, {"role": "qa", "role_type": "tester"}]
+    assert rule_targets(["developer", "tester"], team) == (["builder", "tester"], [])
+    assert rule_targets(["python devs"], team) == ([], ["python devs"])
+    turn = _turn({"op": "add_rule", "text": "Use pygame for all drawing",
+                  "applies_to": ["python devs"]})
+    problems = validate_turn(turn, Spec({}), {"items": []}, team=team)
+    assert any("is not a role type" in p for p in problems)
+
+
+def test_add_skill_is_a_team_change_written_on_approve(tmp_path: Path) -> None:
+    from core.team_changes import apply_team_changes, write_skills
+    turn = _turn({"op": "add_skill", "name": "level-building",
+                  "description": "How levels are built in this game",
+                  "body": "Each level is a module in levels/ exporting LEVEL = Level(...).",
+                  "reason": REASON})
+    change = turn.changes[0].model_dump(mode="json", exclude_none=True, exclude={"group"})
+    agents, summary = apply_team_changes([], [change])
+    assert agents == [] and summary == {"added": [], "edited": [], "removed": []}
+    assert write_skills(tmp_path, "p", [change]) == ["level-building"]
+    text = (tmp_path / "projects" / "p" / "skills" / "level-building" / "SKILL.md").read_text()
+    assert text.startswith("---\nname: level-building\n") and "LEVEL = Level" in text

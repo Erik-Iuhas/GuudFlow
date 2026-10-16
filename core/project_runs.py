@@ -258,6 +258,12 @@ def decide_run(data_root: Path, project_id: str, run_id: str, accept: bool,
         run = repo.get(run_id) or run
         keep_notebooks(data_root, project_id, run_id)
         _refresh_knowledge(data_root, project_id, run_id, list(run.files))
+        from core import agents_md
+        if agents_md.write(data_root, project_id, f"after run {run_id}"):
+            try:
+                repo.refresh_code()
+            except Exception:  # noqa: BLE001 - logged, the merge has already happened
+                log.exception("could not update %s", repo.code_path())
         _score_contracts(data_root, project_id, run_id, run.check)
         carry = Path(data_root) / "runs" / run_id / "carry_forward.json"
         target = Path(data_root) / "projects" / project_id / "context" / LAST_ACCEPTED_JSON

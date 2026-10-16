@@ -229,6 +229,52 @@ class Rule:
                    strength=row.get("strength", "binding"), status=row.get("status", "active"))
 
 
+STACK_FIELDS = ("language", "framework", "package_manager", "test_command", "run_command",
+                "source_dir", "test_dir", "notes")
+STACK_LABELS = {"language": "Language", "framework": "Framework and libraries",
+                "package_manager": "Packages", "test_command": "Test command",
+                "run_command": "Run command", "source_dir": "Source folder",
+                "test_dir": "Test folder", "notes": "Also"}
+
+
+@dataclass
+class Stack:
+    """What the project is built with (worker context plan B1). Every field is optional; a field
+    a person set is pinned, so the project manager cannot change it."""
+
+    language: str = ""
+    framework: str = ""
+    package_manager: str = ""
+    test_command: str = ""
+    run_command: str = ""
+    source_dir: str = ""
+    test_dir: str = ""
+    notes: str = ""
+    pinned_fields: list[str] = field(default_factory=list)
+    set_by: str = ""                 # human | pm
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any] | None) -> "Stack":  # Any: JSON row
+        """Read the `stack` object of the spec document (missing → empty)."""
+        row = row or {}
+        return cls(**{k: str(row.get(k) or "") for k in STACK_FIELDS},
+                   pinned_fields=[str(f) for f in row.get("pinned_fields") or []],
+                   set_by=str(row.get("set_by") or ""))
+
+    def to_dict(self) -> dict[str, Any]:  # Any: JSON row
+        """JSON form."""
+        return asdict(self)
+
+    @property
+    def empty(self) -> bool:
+        """True when no field is set."""
+        return not any(getattr(self, k) for k in STACK_FIELDS)
+
+    def lines(self) -> list[str]:
+        """`- Language: Python 3.12` lines for the fields that are set."""
+        return [f"- {STACK_LABELS[k]}: {getattr(self, k)}" for k in STACK_FIELDS if getattr(self, k)]
+
+
 class Spec:
     """A read view of the spec document (`WorkDB.read_spec_doc()`)."""
 
@@ -237,6 +283,7 @@ class Spec:
         self.requirements = [Requirement.from_dict(r) for r in doc.get("requirements", [])]
         self.decisions = [Decision.from_dict(r) for r in doc.get("decisions", [])]
         self.rules = [Rule.from_dict(r) for r in doc.get("rules", [])]
+        self.stack = Stack.from_dict(doc.get("stack"))
 
     # ── lookup ──────────────────────────────────────────────────────────────
     def requirement(self, req_id: str) -> Requirement:
@@ -296,6 +343,8 @@ class Spec:
         # QUESTION: plan §2 does not say what `limit` counts; entries per section is used.
         """
         sections: list[str] = []
+        if not self.stack.empty:
+            sections.append("\n".join(["## Stack"] + self.stack.lines()))
         reqs = [r for r in self.requirements if r.status == "active"]
         if reqs:
             lines = ["## Requirements"]

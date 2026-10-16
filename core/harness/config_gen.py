@@ -11,6 +11,7 @@ is rejected by the newest Claude models, so roles finish via the
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -101,15 +102,21 @@ def provider_entry(binding: ProviderBinding) -> dict[str, Any]:
 
 def agent_entry(compiled: CompiledCapabilities, *, model_ref: str, prompt: str,
                 description: str = "", steps: int = 60,
-                temperature: float | None = None) -> dict[str, Any]:
-    """`agent.<name>` entry: a primary agent locked to the role's compiled permissions."""
+                temperature: float | None = None,
+                skills: Sequence[str] = ()) -> dict[str, Any]:
+    """`agent.<name>` entry: a primary agent locked to the role's compiled permissions.
+
+    `skills` are the GuudFlow skills the role may load (worker context plan R3); every other
+    skill is hidden and refused."""
+    permission = build_permission(compiled)
+    permission["skill"] = {"*": "deny", **{name: "allow" for name in skills}}
     entry: dict[str, Any] = {
         "mode": "primary",
         "model": model_ref,
         "prompt": prompt,
         "description": description,
         "steps": steps,
-        "permission": build_permission(compiled),
+        "permission": permission,
     }
     if temperature is not None:
         entry["temperature"] = temperature
@@ -148,8 +155,14 @@ def build_config(*, role: str, agent: dict[str, Any], binding: ProviderBinding,
                  small_binding: ProviderBinding | None = None,
                  mcp_url: str | None = None, mcp_token: str | None = None,
                  image_caps: ImageCaps = ImageCaps(),
-                 extra_providers: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+                 extra_providers: dict[str, dict[str, Any]] | None = None,
+                 instructions: Sequence[str] = (),
+                 skill_paths: Sequence[str] = ()) -> dict[str, Any]:
     """Full opencode config for the server that runs `role`.
+
+    `instructions` are rules files loaded into the system prompt on every call and
+    `skill_paths` folders of `SKILL.md` skills (worker context plan R), both absolute paths in
+    the role's read-only tool directory.
 
     Raises ValueError when `mcp_url` is given without `mcp_token`.
     """
@@ -190,6 +203,10 @@ def build_config(*, role: str, agent: dict[str, Any], binding: ProviderBinding,
             "max_base64_bytes": image_caps.max_base64_bytes,
         }},
     }
+    if instructions:
+        config["instructions"] = list(instructions)
+    if skill_paths:
+        config["skills"] = {"paths": list(skill_paths)}
     if mcp_url is not None:
         config["mcp"] = {"guudflow": {
             "type": "remote", "url": mcp_url, "enabled": True, "oauth": False,

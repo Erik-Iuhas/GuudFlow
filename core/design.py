@@ -333,6 +333,11 @@ class Design:
         return [d for d in self.doc.get("decisions", [])
                 if d.get("binding") and d.get("status", "accepted") == "accepted"]
 
+    def decisions(self) -> list[dict[str, Any]]:  # Any: JSON rows
+        """Every accepted technical decision, binding or not."""
+        return [d for d in self.doc.get("decisions", [])
+                if d.get("status", "accepted") == "accepted"]
+
     def open_debt(self) -> list[dict[str, Any]]:  # Any: JSON rows
         """Debt not resolved yet."""
         return [d for d in self.doc.get("debt", []) if d.get("status", "open") == "open"]
