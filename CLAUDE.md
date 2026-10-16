@@ -93,6 +93,15 @@ other words (Mistral `none`/`high`, Groq Qwen `none`/`default`). Every level is 
 in a draft, or by a person) runs that turn at it. Host-side calls send effort too: the PM the
 project's `pm_effort` gate (else its model's default), quips always `low` on the fast tier.
 
+**Worker context (`docs/WORKER_CONTEXT_PLAN.md`).** Every turn's brief is saved (`core/harness/brief_log.py`,
+Studio "What it was told"). Workers get a rules file and allowed skills through opencode's
+`instructions` / `skills` (`core/harness/worker_rules.py`, `data/skills/`), the project files under
+`.guudflow/project/` and a `guudflow_spec` lookup. The spec has a `stack`; a change outside it is sent back
+(`core/harness/stack_check.py`). The host writes check lines on cards. Stopping a run is `STOP_REQUESTED`,
+not a question. The tech lead can prepare a session before it starts (`core/preflight.py`, Design tab); a
+session started from the approved plan skips the planner's first turn, and the `review_plan` gate pauses
+after an in-run plan (approve, edit, send back).
+
 **Flow hardening (`docs/FLOW_HARDENING_PLAN.md`).** Manual checks are the owner's: a card's
 manual lines are listed apart, never block a card, and reach Studio's review card as
 `owner_checks.json`. A card blocked on a finished role wakes the overseer, a run that stops early

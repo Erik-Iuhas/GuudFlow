@@ -1,6 +1,20 @@
 # Worker context, orientation and run controls
 
-**Status:** plan, written 2026-10-16. Nothing here is built yet.
+**Status:** built (2026-10-16): packages A, R and B–I. Where the build differs from the text:
+
+- **D2.** GuudFlow attaches a selected check the plan left uncovered to its item's card itself
+  (`SpecBrief.with_check_lines`, a "spec checks added" notice) instead of returning a plan problem.
+- **H1–H2.** The preflight is `core/preflight.py` (store `data/projects/{id}/preflight.json`,
+  routes `api/routes/preflight.py`). Its prompt sections and checks come from an offline
+  `TaskFlow`, so they are the in-run planner's. The plan's design changes stay in the plan and
+  apply when the session starts, as an in-run plan's do; the Design tab lists them with the cards.
+- **H4.** Every answer (an owner question or an override of the tech lead's choice) becomes a spec
+  decision through a direct edit.
+- **H5.** The checkpoint is the project gate `review_plan`, off by default so invoked and
+  autopilot sessions never wait on a person; it never applies to a session started from a
+  prepared plan. "Send back" removes the plan's unstarted cards (TASK_CANCELLED), the planner
+  re-plans with the note, and new cards get fresh ids.
+- **Owner run** (§3) and the escape suite on Docker remain the owner's / CI's.
 
 Testing with smaller models showed:
 
