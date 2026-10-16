@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## 0.1.3 (2026-10-16)
+
+The Code tab, shared project dependencies, and fixes from the WSL + Mistral runs.
+
+- **Code tab.** Read the project's code in Studio, on the project page and in the run view
+  (a Code button in the run header): the accepted `main`, this session's merged code, or one
+  worker's checkout with its unmerged edits. The file tree marks added, modified and deleted
+  files, and each file has a File / Diff toggle. While a worker runs, "Follow edits" opens what
+  it just wrote. File names on a card open it.
+- **Shared dependencies.** A worker pins packages in `package.json` or `requirements.txt` and
+  calls `sync_dependencies`. The host installs each manifest once (no install scripts, binary
+  wheels only), packages off the allow-list need one approval, and every worker sees the
+  environment read-only at `/deps`. The Code tab lists each package, who added it and who
+  approved it.
+- **One code folder per project** (`data/projects/<id>/code`), kept at the accepted `main` and
+  shown in the Work tab.
+- **Honest results.** A turn whose tests could not run (`bun: command not found`) cannot claim
+  them met. Studio says before a session which test runners the agents cannot run, and a rule
+  no review answered shows as not checked.
+- **Harness fixes.** WSL never starts a Windows opencode. A role's work folder is its own git
+  boundary, so agents cannot read the enclosing checkout. List-valued content from
+  OpenAI-compatible providers (Mistral) no longer fails turns. Roles can look around and move
+  files inside their own clone. End-of-run notebooks end once saved, and the console says when
+  they are being written.
+- **Studio.** Live spend follows the gateway during a turn. Each role has a live Changes tab.
+  Drawers are wider and can expand. Artifacts can be downloaded. A new Studio build shows up
+  without a forced reload.
+- **Salvage and dev.** Interrupted sessions are found for salvage, a goal-only session's
+  leftover cards go to Jack's draft instead of the backlog, and the dev stack's reload no longer
+  kills live runs.
+
 ## 0.1.2 (2026-10-14)
 
 - Runs no longer hang after "opencode server listening" behind a company proxy: GuudFlow's calls

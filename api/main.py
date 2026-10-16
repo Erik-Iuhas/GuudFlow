@@ -335,7 +335,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="GuudFlow",
         description="Managed multi-agent orchestration platform",
-        version="0.1.2",
+        version="0.1.3",
         lifespan=lifespan,
     )
 
