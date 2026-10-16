@@ -426,7 +426,7 @@ class Scheduler:
                 # 1. Try to spawn anything ready. The `pending_human` flag is
                 #    the global block for new spawns; per-agent WAITING_FOR_PEER
                 #    and WAITING_FOR_SKIP_CONFIRM are filtered inside _ready_to_spawn.
-                if not self.workspace.pending_human:
+                if not self.workspace.pending_human and not self.workspace.stop_requested:
                     for spec in self._ready_to_spawn():
                         if self.workspace.draining and not (
                                 self.drain_filter is not None and self.drain_filter(spec.role)):

@@ -326,17 +326,30 @@ const view = (store: RunStore, extra: Partial<React.ComponentProps<typeof Cockpi
 );
 
 describe("CockpitView", () => {
-  it("always renders the comment box, in every layout and run state", () => {
+  it("shows the comment box while the run is live, and the stopped bar after", () => {
     const store = createRunStore("r1");
     const { unmount } = render(view(store));
-    expect(screen.getByLabelText("Comment for the agents")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Comment for the agents") ?? screen.getByTestId("stopped-bar")).toBeInTheDocument();
     unmount();
 
     mockViewport(false);
     store.getState().ingest(sig("STARTED", "dev"));
     store.getState().setLive(false);
-    render(view(store, { meta: { run_id: "r1", project_id: "p1", status: "complete" } }));
-    expect(screen.getByLabelText("Comment for the agents")).toBeInTheDocument();
+    const done = render(view(store, { meta: { run_id: "r1", project_id: "p1", status: "complete" } }));
+    expect(screen.queryByLabelText("Comment for the agents")).toBeNull();
+    expect(screen.getByTestId("stopped-bar")).toHaveTextContent("This session has finished.");
+    done.unmount();
+  });
+
+  it("a stop is not a question: no answer box, the stopped bar with Continue", () => {
+    const store = createRunStore("r1");
+    store.getState().ingest([sig("STARTED", "dev"),
+      { ...sig("HUMAN_NEEDED", "system", null, "Run stopped by user") }]);
+    render(view(store, { meta: { run_id: "r1", project_id: "p1", status: "running" } }));
+    expect(screen.queryByTestId("human-needed")).toBeNull();
+    expect(screen.queryByLabelText("Comment for the agents")).toBeNull();
+    expect(screen.getByTestId("stopped-bar")).toHaveTextContent("Stopped by you");
+    expect(screen.getByRole("button", { name: "Continue with the open cards" })).toBeInTheDocument();
   });
 
   it("shows the waiting state before any agent starts, then the lanes", () => {
@@ -470,7 +483,7 @@ describe("recorded run (2,000 signals)", () => {
     expect(rows.length).toBeLessThan(400);
     expect(screen.getByTestId("graph-node-backend")).toBeInTheDocument();
     expect(screen.getByTestId("budget-meter")).toHaveTextContent("/ $5.00");
-    expect(screen.getByLabelText("Comment for the agents")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Comment for the agents") ?? screen.getByTestId("stopped-bar")).toBeInTheDocument();
     expect(store.getState().reviews["reviewer>backend"].round).toBeGreaterThan(0);
   });
 });

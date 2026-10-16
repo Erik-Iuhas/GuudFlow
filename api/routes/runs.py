@@ -776,6 +776,36 @@ async def wake_overseer(request: Request, run_id: str, body: WakeBody | None = N
     return {"ok": True, "signal_id": str(signal.id)}
 
 
+class MessageBody(BaseModel):
+    """Body of POST /{run_id}/roles/{role}/message."""
+
+    text: str = Field(min_length=1, max_length=4000)
+    wake: bool = True
+
+
+@router.post("/{run_id}/roles/{role}/message", dependencies=[Depends(require_bearer)])
+async def message_worker(request: Request, run_id: str, role: str, body: MessageBody) -> dict:
+    """Message one worker directly (worker context plan F3): a priority comment only that role
+    reads in its next brief. With `wake` (the default), an idle, finished or parked worker runs
+    again (a worker with no card gets one turn whose task is the message), and a running one
+    runs once more right after its current turn. 410 if the run is not active."""
+    workspace = await request.app.state.run_registry.get(run_id)
+    if workspace is None:
+        raise HTTPException(status_code=410, detail=f"run {run_id!r} is not active")
+    if workspace.stop_requested:
+        raise HTTPException(status_code=409, detail="the run was stopped; continue it instead")
+    known = {s.from_agent for s in workspace.board if s.from_agent} | set(
+        workspace.agent_states)
+    if role not in known:
+        raise HTTPException(status_code=404, detail=f"no worker {role!r} in run {run_id!r}")
+    text = body.text.strip()
+    signal = Signal(type=SignalType.USER_COMMENT_PRIORITY, summary=text[:500],
+                    detail=json.dumps({"to": role, "wake": body.wake, "text": text}),
+                    from_agent=None, iteration=workspace.iteration)
+    workspace.post_signal(signal)
+    return {"ok": True, "signal_id": str(signal.id), "to": role, "wake": body.wake}
+
+
 class RespondBody(BaseModel):
     """Body of POST /{run_id}/respond."""
 
@@ -1074,14 +1104,12 @@ async def resume_run(request: Request, run_id: str) -> dict:
 async def stop_run(request: Request, run_id: str) -> dict:
     """Hard-cancel an active run.
 
-    Sets workspace.pending_human (so the scheduler stops new spawns) and
-    cancels all in-flight agent tasks immediately via runner.force_stop().
-    Idempotent — a second call is a no-op.
+    Sets `workspace.stop_requested` (so the scheduler stops new spawns), posts
+    STOP_REQUESTED (not a question: worker context plan I) and cancels all in-flight agent
+    tasks immediately via runner.force_stop(). Idempotent — a second call is a no-op.
 
     Returns 404 if the run isn't currently active in the registry.
     """
-    from core.workspace import HumanRequest
-
     registry = request.app.state.run_registry
     workspace = await registry.get(run_id)
     if workspace is None:
@@ -1090,17 +1118,13 @@ async def stop_run(request: Request, run_id: str) -> dict:
             detail=f"run {run_id!r} is not active",
         )
 
-    if workspace.pending_human is None:
-        workspace.pending_human = HumanRequest(
-            from_agent="system",
-            question="Run stopped by user.",
-            iteration=workspace.iteration,
-        )
+    if not workspace.stop_requested:
+        workspace.stop_requested = True
         workspace.post_signal(Signal(
-            type=SignalType.HUMAN_NEEDED,
-            summary="Run stopped by user",
-            detail="A user pressed Stop. All in-flight agents are being cancelled.",
-            from_agent="system",
+            type=SignalType.STOP_REQUESTED,
+            summary="Stopped by you",
+            detail="Stop was pressed. Work in flight is being cancelled; nothing new starts.",
+            from_agent="user",
             iteration=workspace.iteration,
         ))
 

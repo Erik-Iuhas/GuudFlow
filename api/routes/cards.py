@@ -21,6 +21,7 @@ from core.harness.card_ops import (
     card_view,
     human_add_card,
     human_comment,
+    human_edit_card,
     human_set_priority,
     thread_entry_view,
 )
@@ -43,12 +44,18 @@ class CardCreate(BaseModel):
     priority: int = 0
     depends_on: list[str] = Field(default_factory=list)
     files_hint: list[str] = Field(default_factory=list)
+    serves: list[str] = Field(default_factory=list)
 
 
 class CardPatch(BaseModel):
-    """Body of PATCH /cards/{task_id}."""
+    """Body of PATCH /cards/{task_id}: the priority, and (before the card starts) its title,
+    acceptance, dependencies or the checks it serves."""
 
-    priority: int
+    priority: int | None = None
+    title: str | None = None
+    acceptance: list[str] | None = None
+    depends_on: list[str] | None = None
+    serves: list[str] | None = None
 
 
 class CardComment(BaseModel):
@@ -86,7 +93,7 @@ async def add_card(request: Request, run_id: str, body: CardCreate) -> dict[str,
         card = human_add_card(
             workspace, owner=body.owner, title=body.title, acceptance=body.acceptance,
             kind=body.kind, size=body.size, priority=body.priority,
-            depends_on=body.depends_on, files_hint=body.files_hint)
+            depends_on=body.depends_on, files_hint=body.files_hint, serves=body.serves)
     except CardOpError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return card_view(card)
@@ -95,10 +102,18 @@ async def add_card(request: Request, run_id: str, body: CardCreate) -> dict[str,
 @router.patch("/{run_id}/cards/{task_id}", dependencies=[Depends(require_bearer)])
 async def patch_card(request: Request, run_id: str, task_id: str,
                      body: CardPatch) -> dict[str, Any]:
-    """Change a card's priority. 400 for a done card, 404 for an unknown card or inactive run."""
+    """Change a card's priority, or edit a card that has not started. 400 for a done or started
+    card or bad fields, 404 for an unknown card or inactive run."""
     workspace = await _active_workspace(request, run_id)
     try:
-        card = human_set_priority(workspace, task_id, body.priority)
+        edits = {k: v for k, v in (("title", body.title), ("acceptance", body.acceptance),
+                                   ("depends_on", body.depends_on), ("serves", body.serves))
+                 if v is not None}
+        card = human_edit_card(workspace, task_id, **edits) if edits else None  # type: ignore[arg-type]
+        if body.priority is not None:
+            card = human_set_priority(workspace, task_id, body.priority)
+        if card is None:
+            raise CardOpError("nothing to change")
     except KeyError:
         raise HTTPException(status_code=404, detail=f"card {task_id!r} not found") from None
     except CardOpError as exc:

@@ -117,6 +117,8 @@ export function Conversation({ messages, pending, onSend, onStart, error, curren
   const [text, setText] = useState("");
   const [mode, setMode] = useState<PlanMode>("update");
   const [failure, setFailure] = useState<string | null>(null);
+  // The message being sent: shown in the thread at once, the box cleared (worker context F1).
+  const [outgoing, setOutgoing] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -136,12 +138,17 @@ export function Conversation({ messages, pending, onSend, onStart, error, curren
 
   async function send(): Promise<void> {
     if (!canSend) return;
+    const message = text.trim();
     setFailure(null);
+    setOutgoing(message);
+    setText("");
     try {
-      await onSend(text.trim(), mode);
-      setText("");
+      await onSend(message, mode);
     } catch (e) {
+      setText((now) => (now.trim() ? now : message));     // give the words back to edit
       setFailure(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOutgoing(null);
     }
   }
 
@@ -210,6 +217,13 @@ export function Conversation({ messages, pending, onSend, onStart, error, curren
                   : undefined} />
             ))}
           </ol>
+        </div>
+      )}
+      {outgoing && !messages.some((m) => m.author !== "pm" && m.text.trim() === outgoing) && (
+        <div className="ml-auto max-w-[85%] rounded-lg border border-border bg-primary/10 px-3 py-2 text-sm"
+             data-testid="outgoing" aria-label="Your message, sent">
+          <p className="m-0 whitespace-pre-wrap break-words">{outgoing}</p>
+          <p className="m-0 mt-1 text-[11px] text-muted-foreground">Sent · waiting for {pmName}</p>
         </div>
       )}
       {pending && (

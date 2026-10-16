@@ -403,6 +403,8 @@ class Workspace:
     agent_states: dict[str, AgentState] = field(default_factory=dict)
     hired_personas: dict[str, str] = field(default_factory=dict)
     pending_human: HumanRequest | None = None
+    # A person pressed Stop (worker context plan I1): no new spawns, and not a question.
+    stop_requested: bool = False
     pending_screenshots: list[PendingScreenshot] = field(default_factory=list)
     git: GitState = field(default_factory=GitState)
     pending_package_requests: list[PackageRequest] = field(default_factory=list)

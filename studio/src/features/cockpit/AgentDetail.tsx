@@ -10,6 +10,7 @@ import { useRunStore } from "../../stores/runStoreContext";
 import { formatUsd } from "./model";
 import { RoleChanges } from "./RoleChanges";
 import { WhatItWasTold } from "../briefs/WhatItWasTold";
+import { MessageWorker } from "./MessageWorker";
 import { VirtualFeed } from "./VirtualFeed";
 
 const EMPTY_FEED: readonly TypedSignal[] = [];
@@ -103,6 +104,8 @@ export function AgentDetail({ role }: { role: string }) {
   const agent = useRunStore((s) => s.agents[role]);
   const runId = useRunStore((s) => s.runId);
   const live = useRunStore((s) => s.live);
+  const stoppedAt = useRunStore((s) => s.stoppedAt);
+  const name = useRunStore((s) => s.names[role]);
   const feed = useRunStore((s) => s.toolFeed[role]) ?? EMPTY_FEED;
   const resultSignal = useRunStore((s) => {
     const id = s.agents[role]?.lastResultSignalId;
@@ -110,6 +113,7 @@ export function AgentDetail({ role }: { role: string }) {
   });
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid={`agent-detail-${role}`}>
+      <MessageWorker runId={runId} role={role} name={name} live={live && !stoppedAt} />
       <div className="max-h-[40%] shrink-0 overflow-y-auto border-b border-border px-3 py-2 text-sm">
         {agent?.capabilities && (
           <div className="mb-2">

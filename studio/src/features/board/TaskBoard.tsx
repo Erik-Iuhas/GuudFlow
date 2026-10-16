@@ -33,7 +33,7 @@ import {
   COLUMN_LABEL,
 } from "./boardModel";
 import type { CardView } from "../../stores/runEvents";
-import { useSetPriority } from "./useCardMutations";
+import { useAddCard, useSetPriority } from "./useCardMutations";
 
 interface Props {
   runId: string;
@@ -79,6 +79,7 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
   const [view, setView] = useState<"role" | "requirement">("role");
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState<{ owner?: string; title?: string }>({});
   const [notice, setNotice] = useState<string | null>(null);
   // Optimistic priorities for in-flight PATCHes. Rolled back on error, cleared on success.
   const [pending, setPending] = useState<Record<string, number>>({});
@@ -171,7 +172,7 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
         </div>
         <Button
           size="sm"
-          onClick={() => setAdding(true)}
+          onClick={() => { setDraft({}); setAdding(true); }}
           disabled={!live}
           title={live ? undefined : "This run has finished: the board is read-only"}
         >
@@ -241,7 +242,13 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
                   aria-label={`Lane ${lane.role}`}
                   className="mb-3 grid gap-1"
                 >
-                  <h3 className="m-0 text-sm font-semibold text-muted-foreground">{lane.role}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="m-0 text-sm font-semibold text-muted-foreground">{lane.role}</h3>
+                    {live && (
+                      <QuickAdd runId={runId} role={lane.role}
+                        onMore={(title) => { setDraft({ owner: lane.role, title }); setAdding(true); }} />
+                    )}
+                  </div>
                   <div className="grid grid-cols-6 gap-2">
                     {COLUMNS.map((col) => {
                       const cell = lane.cells[col.id];
@@ -290,8 +297,58 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
         roles={roles}
         open={adding}
         onOpenChange={setAdding}
+        spec={spec}
+        cards={list}
+        initialOwner={draft.owner}
+        initialTitle={draft.title}
       />
     </section>
+  );
+}
+
+/**
+ * A lane's quick-add row (worker context plan F2): type a title and press Enter to add a small
+ * card whose acceptance is the title; "More" opens the full dialog prefilled.
+ */
+function QuickAdd({ runId, role, onMore }: { runId: string; role: string; onMore: (title: string) => void }) {
+  const add = useAddCard(runId);
+  const [title, setTitle] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(): Promise<void> {
+    const text = title.trim();
+    if (text.length < 5) return setError("At least 5 characters.");
+    setError(null);
+    try {
+      await add.mutateAsync({ owner: role, title: text, acceptance: [text], kind: "code", size: "S" });
+      setTitle("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add the card.");
+    }
+  }
+
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      <input
+        className="h-7 w-64 rounded-md border border-input bg-background px-2 text-xs"
+        aria-label={`Add a card for ${role}`}
+        placeholder={`Add a card for ${role}...`}
+        value={title}
+        disabled={add.isPending}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void submit();
+          }
+        }}
+      />
+      <button type="button" className="border-0 bg-transparent text-xs text-muted-foreground underline"
+        aria-label={`More options for a ${role} card`} onClick={() => onMore(title.trim())}>
+        More
+      </button>
+      {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
+    </div>
   );
 }
 

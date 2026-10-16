@@ -59,6 +59,7 @@ export type SignalType =
   | "TASK_THREAD"
   | "RUN_SUBMITTED"
   | "RUN_STOPPED"
+  | "STOP_REQUESTED"
   | "RUN_LIMITS_CHANGED"
   | "TIME_LIMIT_REACHED"
   | "OVERSEER_WAKE"

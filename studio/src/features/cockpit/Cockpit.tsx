@@ -23,6 +23,8 @@ import { AgentDetail } from "./AgentDetail";
 import { ApprovalsBar } from "./ApprovalsBar";
 import { BudgetMeter } from "./BudgetMeter";
 import { HumanAnswerBox } from "./HumanAnswerBox";
+import { StoppedBar } from "./StoppedBar";
+import { WakeOverseer } from "../overseer/WakeOverseer";
 import { LimitsControl } from "./LimitsControl";
 import { ArtifactGallery } from "../artifacts/ArtifactGallery";
 import { TaskBoard } from "../board";
@@ -133,6 +135,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
   const firstTs = useRunStore((s) => s.signals[0]?.timestamp);
   const lastTs = useRunStore((s) => s.signals[s.signals.length - 1]?.timestamp);
   const humanNeeded = useRunStore((s) => s.humanNeeded);
+  const stoppedAt = useRunStore((s) => s.stoppedAt);
   // plan §11.4: the latest budget warning, unless the limits changed after it.
   const budgetWarning = useRunStore((s) => {
     for (let i = s.signals.length - 1; i >= 0; i--) {
@@ -266,6 +269,8 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
   const connection =
     socket.status === "open" ? (live ? "live" : "finished") : socket.status === "error" ? "error" : socket.status;
 
+  const overseerPresent = [...allSpecs.map((r) => r.role), ...Object.keys(names)].some((r) => r.includes("overseer"));
+  const overseerActive = !stoppedAt && !["complete", "failed", "stuck", "stopped", "max_iterations"].includes(String(status));
   const sidePanel = (
     <SidePanel
       runId={runId}
@@ -276,6 +281,8 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
       cardCount={cardCount}
       codeFocus={codeFocus}
       projectId={meta?.project_id}
+      overseerPresent={overseerPresent}
+      overseerActive={overseerActive}
     />
   );
 
@@ -366,7 +373,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           {actionError}
         </div>
       )}
-      {humanNeeded && (
+      {humanNeeded && !stoppedAt && (
         <div role="alert" className="rounded-md border border-status-waiting/40 bg-status-waiting/10 px-3 py-2 text-sm" data-testid="human-needed">
           <strong>{humanNeeded.role ?? "An agent"} needs you:</strong> {humanNeeded.summary}{" "}
           <HumanAnswerBox runId={runId} />
@@ -395,9 +402,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           <PipelineGraph specs={allSpecs} selectedRole={selectedRole} onSelectRole={selectRole} direction="LR" fitHeight />
         </div>
       )}
-      <OverseerBar runId={runId}
-        present={[...allSpecs.map((r) => r.role), ...Object.keys(names)].some((r) => r.includes("overseer"))}
-        active={!["complete", "failed", "stuck", "stopped", "max_iterations"].includes(String(status))} />
+      <OverseerBar runId={runId} present={overseerPresent} active={overseerActive} />
 
       {desktop && panelOpen && (
         <aside className={cn("flex flex-col overflow-hidden rounded-lg border border-border bg-card",
@@ -459,9 +464,13 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
             {live && !terminal && <LimitsControl runId={runId} budgetUsd={budgetUsd} />}
           </div>
         </div>
-        <div data-testid="comment-bar">
-          <CommentBox runId={runId} inputRef={commentRef} />
-        </div>
+        {live && !terminal && !stoppedAt ? (
+          <div data-testid="comment-bar">
+            <CommentBox runId={runId} inputRef={commentRef} />
+          </div>
+        ) : (
+          <StoppedBar runId={runId} projectId={meta?.project_id} finished={meta?.status === "complete"} />
+        )}
         <p className="m-0 text-xs text-muted-foreground">
           Shortcuts: <kbd>g</kbd> graph · <kbd>c</kbd> comment · <kbd>a</kbd> approvals
         </p>
@@ -472,6 +481,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
 
 function SidePanel({
   runId, tab, onTab, quips, interventionCount, cardCount, codeFocus, projectId,
+  overseerPresent, overseerActive,
 }: {
   runId: string;
   tab: PanelTab;
@@ -481,6 +491,8 @@ function SidePanel({
   cardCount: number;
   codeFocus: OpenCodeDetail | null;
   projectId?: string;
+  overseerPresent: boolean;
+  overseerActive: boolean;
 }) {
   return (
     <Tabs value={tab} onValueChange={(v) => onTab(v as PanelTab)} className="flex min-h-0 flex-1 flex-col">
@@ -500,6 +512,7 @@ function SidePanel({
         <VirtualQuipFeed stream={quips} />
       </TabsContent>
       <TabsContent value="overseer" className="mt-0 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
+        <WakeOverseer runId={runId} present={overseerPresent} active={overseerActive} />
         <OverseerPanel />
       </TabsContent>
       <TabsContent value="cards" className="mt-0 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">

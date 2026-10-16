@@ -467,17 +467,12 @@ class AgentRunner:
         """Cancel all in-flight agent tasks immediately.
 
         Called by the stop endpoint when the user wants an instant halt rather
-        than waiting for the current LLM calls to finish. Sets pending_human
+        than waiting for the current LLM calls to finish. Sets `stop_requested`
         first so no new agents are spawned, then cancels the scheduler's tasks.
         """
-        from core.workspace import HumanRequest
-
-        if self.workspace.pending_human is None:
-            self.workspace.pending_human = HumanRequest(
-                from_agent="system",
-                question="Run stopped by user.",
-                iteration=self.workspace.iteration,
-            )
+        # A stop is not a question for anyone (worker context plan I1): the flag blocks new
+        # spawns while the in-flight ones are cancelled.
+        self.workspace.stop_requested = True
 
         if self._scheduler is not None:
             await self._scheduler.force_cancel()

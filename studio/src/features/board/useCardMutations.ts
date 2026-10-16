@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
-import { cardsApi, type NewCardBody } from "../../api";
+import { cardsApi, type CardEditBody, type NewCardBody } from "../../api";
 import { queryKeys } from "../../api/queries";
 import type { TaskThreadDetail } from "../../lib/runEvents.gen";
 import { useRunStoreApi } from "../../stores/runStoreContext";
@@ -49,5 +49,14 @@ export function useCommentOnCard(
 ): UseMutationResult<TaskThreadDetail, Error, CommentVars> {
   return useMutation({
     mutationFn: ({ taskId, text }: CommentVars) => cardsApi.comment(runId, taskId, text),
+  });
+}
+
+/** Edit a card that has not started (`PATCH /cards/{id}`, worker context plan F2). */
+export function useEditCard(runId: string): UseMutationResult<CardWire, Error, { taskId: string; body: CardEditBody }> {
+  const store = useRunStoreApi();
+  return useMutation({
+    mutationFn: ({ taskId, body }) => cardsApi.edit(runId, taskId, body),
+    onSuccess: (card) => store.getState().seedCards([card]),
   });
 }

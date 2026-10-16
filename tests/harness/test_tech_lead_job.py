@@ -69,3 +69,19 @@ def test_planner_branch_may_only_change_docs(files: list[str], ok: bool) -> None
     found = OpencodeRun._planner_merge_check(fake, "lead", files)  # type: ignore[arg-type]
     assert (found is None) is ok
     assert OpencodeRun._planner_merge_check(fake, "dev", ["game/main.py"]) is None  # type: ignore[arg-type]
+
+
+def test_a_pinged_worker_without_a_card_gets_one_turn_with_the_message() -> None:
+    flow, _ = _flow(None, [])
+    flow.plan_accepted(PlanResult(tasks=[PlannedTask(
+        id="T1", title="Draw the ship", owner_role="api", size="S", kind="code",
+        acceptance=["the ship is drawn"])]))
+    assert not flow.has_work("tester")
+    flow.pinged["tester"] = "Add a test for the ship size."
+    assert flow.has_work("tester")
+    turn = flow.begin_turn("tester")
+    assert turn is not None and not turn.skip and turn.card_id is None
+    assert "Add a test for the ship size." in (turn.task_text or "")
+    assert flow.begin_turn("tester").skip                         # once only
+    flow.pinged["api"] = "Ship is 32x32."
+    assert flow.begin_turn("api").card_id == "T1" and "api" not in flow.pinged

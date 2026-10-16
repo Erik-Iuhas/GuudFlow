@@ -126,6 +126,8 @@ class TaskFlow:
     # The knowledge base (role contracts plan §4.3): generated facts and notes, and the roles'
     # notebooks from the last accepted session (the tech lead promotes from them).
     facts: dict[str, object] | None = None
+    # Owner pings (worker context plan F3): role -> the message, for a turn with no card.
+    pinged: dict[str, str] = field(default_factory=dict)
     # A merged range's diff, for the reviewer brief (worker context plan E3); set by the run.
     diff_for: Callable[[list[tuple[str, str]]], str] | None = None
     notebooks: dict[str, str] = field(default_factory=dict)
@@ -179,7 +181,9 @@ class TaskFlow:
         return [d for d in cfg.depends_on if d not in self.card_roles]
 
     def has_work(self, role: str) -> bool:
-        """Is there a card for `role` right now? (AgentSpec.has_work)"""
+        """Is there a card for `role` right now, or an owner's ping? (AgentSpec.has_work)"""
+        if role in self.pinged:
+            return True
         if not self.board.planned:
             return False
         if self.role_types.get(role) == "reviewer":
@@ -275,7 +279,15 @@ class TaskFlow:
                                                    if isinstance(r, ReviewResult) else []))
         card = self.board.next_for(role)
         if card is None:
+            message = self.pinged.pop(role, None)
+            if message:
+                return TurnPlan(model=AgentResult, task_text=(
+                    "The owner messaged you directly and no card is waiting for you:\n\n"
+                    f"> {message}\n\nDo what it asks within your job, in your own folder, then "
+                    "finish as usual (`task_id` may stay empty). If it needs a card or another "
+                    "role, say so in your summary instead."))
             return TurnPlan(model=AgentResult, skip=True)
+        self.pinged.pop(role, None)          # the message reaches the card turn as a comment
         self.board.start(role, card.task_id)
         criteria, owner = self.board.split_checks(card)
         self_check = ("\n\n" + visual_review.self_check_text(card)

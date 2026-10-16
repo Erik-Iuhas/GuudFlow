@@ -80,9 +80,10 @@ def prepare_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
         else:
             _, conflicts = repo.continue_into(working_dir, parent, run_id)
             items += backlog.transfer(parent, run_id)
+        note = str(payload.get("continue_note") or "").strip()[:2000]
         write_json(run_root / PROJECT_RUN_JSON,
                    {"base": base, "parent_run": parent, "conflicts": conflicts,
-                    "sync": synced})
+                    "sync": synced, **({"owner_note": note} if note else {})})
         if conflicts:
             fix = backlog.add(
                 f"Resolve the merge with main (continuing {parent})",

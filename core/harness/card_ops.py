@@ -94,6 +94,7 @@ def human_add_card(
     depends_on: Sequence[str] = (),
     files_hint: Sequence[str] = (),
     author: str = "human",
+    serves: Sequence[str] = (),
 ) -> Task:
     """Add a todo card on behalf of a human and return it.
 
@@ -131,7 +132,8 @@ def human_add_card(
             raise CardOpError(f"depends_on unknown card id '{dep}'") from None
     card = board.add_card(owner=owner, title=title, acceptance=items, created_by=author,
                           kind=kind, size=size, depends_on=deps,
-                          files_hint=_clean_items(files_hint), priority=priority)
+                          files_hint=_clean_items(files_hint), priority=priority,
+                          serves=_clean_items(serves))
     board.note(card.task_id, "human_comment", author, "added by a human")
     notify_board_changed(ws)
     return card
@@ -155,6 +157,51 @@ def human_set_priority(ws: Workspace, task_id: str, priority: int,
     if persister is not None:
         persister(card)
     board.note(task_id, "human_comment", author, f"priority set to {priority}")
+    notify_board_changed(ws)
+    return card
+
+
+def human_edit_card(ws: Workspace, task_id: str, *, title: str | None = None,
+                    acceptance: Sequence[str] | None = None,
+                    depends_on: Sequence[str] | None = None,
+                    serves: Sequence[str] | None = None, author: str = "human") -> Task:
+    """Edit a card nobody has started yet (worker context plan F2): its title, acceptance,
+    dependencies or what it serves. Raises :class:`KeyError` for an unknown card and
+    :class:`CardOpError` once the card has started or for invalid fields."""
+    board = TaskBoard(ws)
+    card = board.card(task_id)
+    if card.column != "todo" or card.started_at_iter is not None:
+        raise CardOpError(f"{task_id} has started; comment on it instead")
+    changed: list[str] = []
+    if title is not None:
+        if len(title.strip()) < MIN_TITLE_CHARS:
+            raise CardOpError(f"title must be at least {MIN_TITLE_CHARS} characters")
+        card.title = card.goal = title.strip()
+        changed.append("title")
+    if acceptance is not None:
+        items = _clean_items(acceptance)
+        if not items:
+            raise CardOpError("at least one non-empty acceptance item is required")
+        card.acceptance_criteria = items
+        changed.append("acceptance")
+    if depends_on is not None:
+        deps = [d.strip() for d in depends_on if isinstance(d, str) and d.strip()]
+        for dep in deps:
+            if dep == task_id:
+                raise CardOpError("a card cannot depend on itself")
+            board.card(dep)
+        card.depends_on = deps
+        changed.append("depends_on")
+    if serves is not None:
+        from core.harness.tasks import card_serves
+        card.serves = card_serves(card.acceptance_criteria, _clean_items(serves))
+        changed.append("serves")
+    if not changed:
+        raise CardOpError("nothing to change")
+    persister = ws._task_persister  # noqa: SLF001 - same pattern as TaskBoard._move
+    if persister is not None:
+        persister(card)
+    board.note(task_id, "human_comment", author, "edited " + ", ".join(changed))
     notify_board_changed(ws)
     return card
 

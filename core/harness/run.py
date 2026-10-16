@@ -259,6 +259,7 @@ class OpencodeRun:
         self._turn_seq = 0
         self._budget_warned: float | None = None
         self._limits_seen: dict[str, str] = {}      # role -> last RUN_LIMITS_CHANGED briefed
+        self._wake_after: set[str] = set()          # pinged while running: run once more (F3)
         self._desks: dict[str, Any] = {}           # role -> DeskIndex (agents.persona_desk)
         self._desk_seen: dict[str, set[str]] = {}  # role -> desk notes already in its session
         self.images = ImageBudget()
@@ -364,6 +365,7 @@ class OpencodeRun:
             flow.vision_for = lambda r: (r in self._roles and
                                          self._roles[r].compiled.capabilities.vision == "on")
             self._unsubscribe_flow = self.workspace.subscribe(flow.on_signal)
+        self._unsubscribe_ping = self.workspace.subscribe(self._on_ping)
         try:
             await self._start_services()
             specs = [AgentSpec(role=cfg.role, runner=self._runner_for(cfg),
@@ -517,6 +519,15 @@ class OpencodeRun:
         except (PlanDraftError, OSError) as e:
             log.warning("overseer team change not added to the draft: %s", e)
 
+    def _owner_note(self) -> str:
+        """What the owner typed with "Continue with the open cards" (worker context plan I2)."""
+        from core.project_runs import PROJECT_RUN_JSON
+        try:
+            doc = json.loads((self.runner.run_root / PROJECT_RUN_JSON).read_text())
+        except (OSError, ValueError):
+            return ""
+        return str(doc.get("owner_note") or "").strip() if isinstance(doc, dict) else ""
+
     def _load_carry_forward(self) -> int:
         """Read the carry-forward of the run(s) this one continues; returns cards carried.
 
@@ -533,6 +544,10 @@ class OpencodeRun:
                     data_root, self.runner.project.project_id)
             return 0
         self._carry_text = "\n\n".join(str(d.get("text") or "") for d in docs).strip()
+        note = self._owner_note()
+        if note:
+            self._carry_text = (f"The owner's note for this continuation (read it first): "
+                                f"{note}\n\n{self._carry_text}").strip()
         if self.flow is None:
             return 0
         owners = self.flow.owners()
@@ -766,8 +781,42 @@ class OpencodeRun:
 
     def _runner_for(self, cfg: "AgentConfig") -> Callable[[Workspace], Any]:
         async def run_role(workspace: Workspace) -> None:
-            await self.execute_turn(cfg.role)
+            try:
+                await self.execute_turn(cfg.role)
+            finally:
+                if cfg.role in self._wake_after:
+                    # Pinged while it worked: run once more so it reads the message.
+                    self._wake_after.discard(cfg.role)
+                    if self.flow is not None and cfg.role not in self.flow.pinged:
+                        self.flow.pinged[cfg.role] = "(see the owner's message in your brief)"
+                    asyncio.get_running_loop().call_soon(self._rearm_quietly, cfg.role)
         return run_role
+
+    def _on_ping(self, sig: Signal) -> None:
+        """An owner's direct message to one worker (worker context plan F3): with `wake`, an
+        idle, finished or parked worker runs again; a running one, right after this turn."""
+        if sig.type is not SignalType.USER_COMMENT_PRIORITY:
+            return
+        try:
+            detail = json.loads(sig.detail or "{}")
+        except ValueError:
+            return
+        role = detail.get("to") if isinstance(detail, dict) else None
+        if not isinstance(role, str) or role not in self._roles or not detail.get("wake"):
+            return
+        if self.flow is not None:
+            self.flow.pinged[role] = sig.summary
+        if self._scheduler().is_running(role):
+            self._wake_after.add(role)
+        else:
+            self._rearm_quietly(role)
+
+    def _rearm_quietly(self, role: str) -> None:
+        try:
+            self._scheduler().rearm(role)
+            self._scheduler().notify()
+        except KeyError:
+            log.warning("ping for unknown role %s", role)
 
     # ── role setup ─────────────────────────────────────────────────────────
     def _prepare_role(self, cfg: "AgentConfig") -> _Role:

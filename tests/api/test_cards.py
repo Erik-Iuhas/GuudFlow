@@ -170,3 +170,28 @@ async def test_a_card_can_go_to_a_team_role_that_has_not_started(client, auth_he
     r = await client.post("/api/runs/run_team/cards", headers=auth_header,
                           json={**body, "owner": "overseer"})
     assert r.status_code == 400
+
+
+async def test_add_card_with_the_checks_it_serves(client, app, auth_header) -> None:
+    ws = _register(app)
+    r = await client.post("/api/runs/run_c/cards", headers=auth_header, json={
+        **_NEW, "acceptance": ["GET /health is 200", "R2.1: the health route answers"],
+        "serves": ["R2.1"]})
+    assert r.status_code == 201, r.text
+    assert ws.tasks[r.json()["id"]].serves == ["R2.1"]
+
+
+async def test_edit_a_card_before_it_starts(client, app, auth_header) -> None:
+    ws = _register(app)
+    r = await client.patch("/api/runs/run_c/cards/T1", headers=auth_header, json={
+        "title": "First card, reworded", "acceptance": ["it works", "it is fast"],
+        "depends_on": ["T2"]})
+    assert r.status_code == 200, r.text
+    card = ws.tasks["T1"]
+    assert card.title == "First card, reworded" and card.depends_on == ["T2"]
+    assert card.acceptance_criteria == ["it works", "it is fast"]
+    TaskBoard(ws).start("backend", "T1")
+    r = await client.patch("/api/runs/run_c/cards/T1", headers=auth_header, json={"title": "Too late now"})
+    assert r.status_code == 400 and "has started" in r.json()["detail"]
+    r = await client.patch("/api/runs/run_c/cards/T2", headers=auth_header, json={})
+    assert r.status_code == 400

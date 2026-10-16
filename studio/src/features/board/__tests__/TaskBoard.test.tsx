@@ -299,9 +299,7 @@ describe("AddCardDialog", () => {
 
     fireEvent.change(within(dialog).getByLabelText("Owner"), { target: { value: "tester" } });
     fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Write the docs" } });
-    fireEvent.change(within(dialog).getByLabelText("Acceptance item 1"), { target: { value: "README covers install" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add item" }));
-    fireEvent.change(within(dialog).getByLabelText("Acceptance item 2"), { target: { value: " docs build " } });
+    fireEvent.change(within(dialog).getByLabelText("Acceptance"), { target: { value: "README covers install\n docs build \n" } });
     fireEvent.change(within(dialog).getByLabelText("Kind"), { target: { value: "docs" } });
     fireEvent.change(within(dialog).getByLabelText("Size"), { target: { value: "M" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Create card" }));
@@ -337,9 +335,51 @@ describe("AddCardDialog", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Create card" }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("at least one acceptance item");
 
-    fireEvent.change(within(dialog).getByLabelText("Acceptance item 1"), { target: { value: "it works" } });
+    fireEvent.change(within(dialog).getByLabelText("Acceptance"), { target: { value: "it works" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Create card" }));
     await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent("unknown owner"));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+});
+
+describe("Cards in the app (worker context plan F2)", () => {
+  it("adds a card from a lane's quick-add row on Enter", async () => {
+    const backend = mockBackend([card({ id: "T1", owner: "dev" })], (c) =>
+      c.method === "POST" ? json(card({ id: "T2", owner: "dev", title: "Fix the score" }), 201) : undefined,
+    );
+    renderBoard();
+    await screen.findByTestId("card-T1");
+    const input = screen.getByLabelText("Add a card for dev");
+    fireEvent.change(input, { target: { value: "Fix the score" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(backend.writes()).toHaveLength(1));
+    expect(backend.writes()[0].body).toMatchObject({ owner: "dev", title: "Fix the score", acceptance: ["Fix the score"] });
+    await waitFor(() => expect(input).toHaveValue(""));
+  });
+
+  it("opens the full dialog prefilled from More", async () => {
+    mockBackend([card({ id: "T1", owner: "dev" })]);
+    renderBoard();
+    await screen.findByTestId("card-T1");
+    fireEvent.change(screen.getByLabelText("Add a card for dev"), { target: { value: "Draw the map" } });
+    fireEvent.click(screen.getByRole("button", { name: "More options for a dev card" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("Title")).toHaveValue("Draw the map");
+    expect(within(dialog).getByLabelText("Owner")).toHaveValue("dev");
+  });
+
+  it("edits a todo card from the drawer", async () => {
+    const backend = mockBackend([card({ id: "T1", owner: "dev", column: "todo" })], (c) =>
+      c.method === "PATCH" ? json(card({ id: "T1", owner: "dev", column: "todo", title: "A new title" })) : undefined,
+    );
+    renderBoard();
+    await screen.findByTestId("card-T1");
+    fireEvent.click(screen.getByRole("button", { name: /Card T1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit card" }));
+    fireEvent.change(screen.getByLabelText("Card title"), { target: { value: "A new title" } });
+    fireEvent.change(screen.getByLabelText("Card acceptance"), { target: { value: "one\ntwo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(backend.writes()).toHaveLength(1));
+    expect(backend.writes()[0]).toMatchObject({ method: "PATCH", body: { title: "A new title", acceptance: ["one", "two"] } });
   });
 });

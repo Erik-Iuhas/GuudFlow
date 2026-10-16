@@ -442,41 +442,53 @@ async def test_stop_unknown_run_404(client, auth_header):
     assert r.status_code == 404
 
 
-async def test_stop_active_run_sets_pending_human_and_posts_signal(
-    client, app, auth_header,
-):
+async def test_stop_is_not_a_question(client, app, auth_header):
+    """Stop blocks new spawns with its own flag and posts STOP_REQUESTED, never a HUMAN_NEEDED
+    nobody could answer (worker context plan I1)."""
     ws = _register_workspace(app, "run_stop")
-    assert ws.pending_human is None
-
     r = await client.post("/api/runs/run_stop/stop", headers=auth_header)
     assert r.status_code == 200, r.text
-    body = r.json()
-    assert body == {"ok": True, "run_id": "run_stop"}
+    assert r.json() == {"ok": True, "run_id": "run_stop"}
+    assert ws.stop_requested and ws.pending_human is None
 
-    # pending_human is set so the scheduler stops dispatching new agents
-    assert ws.pending_human is not None
-    assert ws.pending_human.from_agent == "system"
-
-    # A HUMAN_NEEDED signal landed on the board
     from core.signals import SignalType
-    human_needed = [s for s in ws.board if s.type is SignalType.HUMAN_NEEDED]
-    assert len(human_needed) == 1
-    assert human_needed[0].summary == "Run stopped by user"
-    assert human_needed[0].from_agent == "system"
+    assert not [s for s in ws.board if s.type is SignalType.HUMAN_NEEDED]
+    stops = [s for s in ws.board if s.type is SignalType.STOP_REQUESTED]
+    assert len(stops) == 1 and stops[0].summary == "Stopped by you"
 
 
 async def test_stop_idempotent_does_not_double_post(client, app, auth_header):
-    """Calling /stop twice should not stack two HUMAN_NEEDED signals."""
+    """Calling /stop twice posts one STOP_REQUESTED."""
     ws = _register_workspace(app, "run_stop2")
     await client.post("/api/runs/run_stop2/stop", headers=auth_header)
     await client.post("/api/runs/run_stop2/stop", headers=auth_header)
 
     from core.signals import SignalType
-    human_needed = [s for s in ws.board if s.type is SignalType.HUMAN_NEEDED]
-    assert len(human_needed) == 1
+    assert len([s for s in ws.board if s.type is SignalType.STOP_REQUESTED]) == 1
 
 
 async def test_stop_requires_auth(client, app):
     _register_workspace(app, "run_stop_auth")
     r = await client.post("/api/runs/run_stop_auth/stop")
     assert r.status_code == 401
+
+
+async def test_message_a_worker_posts_a_targeted_priority_comment(client, app, auth_header):
+    import json as _json
+
+    from core.signals import SignalType
+    from core.workspace import AgentState
+    ws = _register_workspace(app, "run_msg")
+    ws.agent_states["dev"] = AgentState.COMPLETE
+    r = await client.post("/api/runs/run_msg/roles/dev/message",
+                          json={"text": "Use pygame for drawing."}, headers=auth_header)
+    assert r.status_code == 200 and r.json()["to"] == "dev" and r.json()["wake"] is True
+    (sig,) = [s for s in ws.board if s.type is SignalType.USER_COMMENT_PRIORITY]
+    assert sig.summary == "Use pygame for drawing." and _json.loads(sig.detail)["to"] == "dev"
+    assert (await client.post("/api/runs/run_msg/roles/nobody/message", json={"text": "x"},
+                              headers=auth_header)).status_code == 404
+    assert (await client.post("/api/runs/gone/roles/dev/message", json={"text": "x"},
+                              headers=auth_header)).status_code == 410
+    ws.stop_requested = True
+    assert (await client.post("/api/runs/run_msg/roles/dev/message", json={"text": "x"},
+                              headers=auth_header)).status_code == 409

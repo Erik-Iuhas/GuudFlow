@@ -168,6 +168,8 @@ export interface RunState {
   blockedOn: Record<string, BlockedOnView>;
   /** The latest unanswered HUMAN_NEEDED; drives the banner and comment-box focus. */
   humanNeeded: HumanNeededView | null;
+  /** When a person pressed Stop (STOP_REQUESTED, or an older board's "Run stopped by user"). */
+  stoppedAt: string | null;
   ingest(raw: RawSignal | RawSignal[]): void;
   seedCards(cards: readonly CardWire[]): void;
   /** Gateway spend per role from `GET /api/runs/{id}/costs` (it moves during a turn).
@@ -223,6 +225,7 @@ interface Draft {
   reviews: Record<string, ReviewRoundView>;
   blockedOn: Record<string, BlockedOnView>;
   humanNeeded: HumanNeededView | null;
+  stoppedAt: string | null;
   dirty: Set<keyof Draft>;
 }
 
@@ -231,12 +234,12 @@ function startDraft(s: RunState): Draft {
     signals: s.signals, agents: s.agents, cards: s.cards, approvals: s.approvals,
     interventions: s.interventions, costs: s.costs, names: s.names, artifacts: s.artifacts, web: s.web,
     toolFeed: s.toolFeed, reviews: s.reviews, blockedOn: s.blockedOn,
-    humanNeeded: s.humanNeeded, dirty: new Set(),
+    humanNeeded: s.humanNeeded, stoppedAt: s.stoppedAt, dirty: new Set(),
   };
 }
 
 /** Make slice `k` writable (shallow copy once per ingest call). */
-function own<K extends Exclude<keyof Draft, "dirty" | "humanNeeded">>(d: Draft, k: K): Draft[K] {
+function own<K extends Exclude<keyof Draft, "dirty" | "humanNeeded" | "stoppedAt">>(d: Draft, k: K): Draft[K] {
   if (!d.dirty.has(k)) {
     const cur = d[k];
     (d as unknown as Record<string, unknown>)[k] = Array.isArray(cur) ? [...cur] : { ...cur };
@@ -269,7 +272,7 @@ export function createRunStore(runId: string): RunStore {
     return {
       runId, live: true, signals: [], byId: new Map(), agents: {}, cards: {}, approvals: [],
       interventions: [], costs: {}, names: {}, artifacts: [], web: [], toolFeed: {}, reviews: {},
-      blockedOn: {}, humanNeeded: null,
+      blockedOn: {}, humanNeeded: null, stoppedAt: null,
     };
   }
 
@@ -454,7 +457,16 @@ export function createRunStore(runId: string): RunStore {
         own(d, "web").push(webFromDetail(sig, data));
         break;
       }
+      case "STOP_REQUESTED":
+        d.stoppedAt = sig.timestamp;
+        d.humanNeeded = null;
+        break;
       case "HUMAN_NEEDED":
+        // Older runs posted Stop as a question from "system"; it is a stop, not a question.
+        if (role === "system" && /^run stopped by user/i.test(sig.summary)) {
+          d.stoppedAt = sig.timestamp;
+          break;
+        }
         d.humanNeeded = { signalId: sig.id, role: role ?? null, summary: sig.summary, timestamp: sig.timestamp };
         if (role) patchAgent(d, role, (a) => ({ ...a, state: "waiting" }));
         break;
@@ -488,6 +500,7 @@ export function createRunStore(runId: string): RunStore {
       const patch: Partial<RunState> = {};
       for (const k of d.dirty) (patch as Record<string, unknown>)[k] = d[k];
       patch.humanNeeded = d.humanNeeded;
+      patch.stoppedAt = d.stoppedAt;
       set(patch);
     },
 

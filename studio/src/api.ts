@@ -776,6 +776,12 @@ export async function wakeOverseer(runId: string, text: string): Promise<void> {
   await request("POST", `/api/runs/${encodeURIComponent(runId)}/overseer/wake`, { text }, true);
 }
 
+/** Message one worker (`POST /api/runs/{id}/roles/{role}/message`); `wake` runs it again. */
+export async function messageWorker(runId: string, role: string, text: string, wake: boolean): Promise<void> {
+  await request("POST", `/api/runs/${encodeURIComponent(runId)}/roles/${encodeURIComponent(role)}/message`,
+    { text, wake }, true);
+}
+
 /** Body of `POST /api/runs/{id}/cards` (human adds a card). */
 export interface NewCardBody {
   owner: string;
@@ -784,6 +790,16 @@ export interface NewCardBody {
   kind: string;
   size: string;
   priority?: number;
+  serves?: string[];
+  depends_on?: string[];
+}
+
+/** Fields a person may change on a card that has not started (worker context plan F2). */
+export interface CardEditBody {
+  title?: string;
+  acceptance?: string[];
+  depends_on?: string[];
+  serves?: string[];
 }
 
 /** Human operations on the live task board (bearer auth). Columns never change from here. */
@@ -795,6 +811,13 @@ export const cardsApi = {
       "PATCH",
       `/api/runs/${encodeURIComponent(runId)}/cards/${encodeURIComponent(taskId)}`,
       { priority },
+      true,
+    ),
+  edit: (runId: string, taskId: string, body: CardEditBody) =>
+    request<CardWire>(
+      "PATCH",
+      `/api/runs/${encodeURIComponent(runId)}/cards/${encodeURIComponent(taskId)}`,
+      body,
       true,
     ),
   comment: (runId: string, taskId: string, text: string) =>

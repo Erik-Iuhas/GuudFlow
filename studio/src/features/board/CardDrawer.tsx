@@ -20,7 +20,7 @@ import {
   servedRequirements,
   splitCheckLine,
 } from "./boardModel";
-import { useCommentOnCard } from "./useCardMutations";
+import { useCommentOnCard, useEditCard } from "./useCardMutations";
 import { RoleChanges } from "../cockpit/RoleChanges";
 import { DiffText } from "../report/DiffViewer";
 import { OPEN_CODE_EVENT, openInCode } from "../code/api";
@@ -220,6 +220,8 @@ function DrawerBody({ runId, cardId, spec }: { runId: string; cardId: string; sp
       </SheetHeader>
 
       <WhyThisCard card={card} spec={spec} />
+
+      {live && card.column === "todo" && <EditCard runId={runId} card={card} />}
 
       <section className={SECTION} aria-label="Acceptance checklist">
         <h3 className={H}>Acceptance</h3>
@@ -430,6 +432,59 @@ function CommentForm({ runId, cardId, disabled }: { runId: string; cardId: strin
         <Button type="submit" disabled={disabled || comment.isPending || !text.trim()}>
           {comment.isPending ? "Posting..." : "Post comment"}
         </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Edit a card nobody has started (worker context plan F2). The host refuses once the owner has
+ * picked it up; then the way to change it is a comment.
+ */
+function EditCard({ runId, card }: { runId: string; card: CardView }) {
+  const edit = useEditCard(runId);
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState(card.title);
+  const [acceptance, setAcceptance] = useState(card.acceptance.join("\n"));
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <div>
+        <Button size="sm" variant="outline" onClick={() => {
+          setTitle(card.title);
+          setAcceptance(card.acceptance.join("\n"));
+          setError(null);
+          setOpen(true);
+        }}>Edit card</Button>
+      </div>
+    );
+  }
+
+  async function save(e: FormEvent): Promise<void> {
+    e.preventDefault();
+    const items = acceptance.split("\n").map((i) => i.trim()).filter(Boolean);
+    if (title.trim().length < 5) return setError("The title needs at least 5 characters.");
+    if (items.length === 0) return setError("Add at least one acceptance item.");
+    try {
+      await edit.mutateAsync({ taskId: card.id, body: { title: title.trim(), acceptance: items } });
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the card.");
+    }
+  }
+
+  return (
+    <form className={SECTION} aria-label="Edit card" onSubmit={(e) => void save(e)}>
+      <h3 className={H}>Edit card</h3>
+      <input className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm" aria-label="Card title"
+        value={title} onChange={(e) => setTitle(e.target.value)} />
+      <textarea className="min-h-[5rem] w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
+        aria-label="Card acceptance" value={acceptance} onChange={(e) => setAcceptance(e.target.value)} />
+      {error && <p role="alert" className="m-0 text-sm text-destructive">{error}</p>}
+      <div className="flex gap-2">
+        <Button size="sm" type="submit" disabled={edit.isPending}>{edit.isPending ? "Saving..." : "Save"}</Button>
+        <Button size="sm" variant="outline" type="button" onClick={() => setOpen(false)}>Cancel</Button>
       </div>
     </form>
   );
