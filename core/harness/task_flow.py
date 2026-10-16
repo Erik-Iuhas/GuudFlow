@@ -131,6 +131,9 @@ class TaskFlow:
     # A merged range's diff, for the reviewer brief (worker context plan E3); set by the run.
     diff_for: Callable[[list[tuple[str, str]]], str] | None = None
     notebooks: dict[str, str] = field(default_factory=dict)
+    # The owner's note when a plan was sent back at the plan checkpoint (worker context plan H5).
+    plan_feedback: str = ""
+    retired_ids: set[str] = field(default_factory=set)   # cards removed when a plan was sent back
 
     @classmethod
     def build(cls, agents: Sequence["AgentConfig"], role_types: dict[str, str],
@@ -236,6 +239,10 @@ class TaskFlow:
                     sections = sections + (("The knowledge base", knowledge),)
             if self.backlog:
                 sections = (("This run's backlog items", backlog_text(self.backlog)),) + sections
+            if self.plan_feedback:
+                sections = (("The owner sent your plan back", (
+                    f"> {self.plan_feedback}\n\nPlan the session again with this in mind. Your "
+                    "earlier cards were removed; nothing was built from them.")),) + sections
             item_serves = self._item_serves()
             designer = self.designer
             if recovering and self.spec is not None:
@@ -616,9 +623,45 @@ class TaskFlow:
         """Backlog item id → the requirement ids it serves."""
         return {i.id: list(i.serves) for i in self.backlog}
 
+    def discard_plan(self, note: str) -> list[str]:
+        """The owner sent the plan back at the checkpoint: the plan's cards that have not
+        started are cancelled and taken off the board, and the planner plans again with
+        `note`. Returns the cancelled card ids."""
+        ws = self.workspace
+        gone: list[str] = []
+        for card in self.board.cards():
+            if card.story_id != "plan" or card.column != "todo" or card.started_at_iter is not None:
+                continue
+            ws.mutate_task(card.task_id, "CANCELLED", iteration=ws.iteration,
+                           cancelled_reason="sent back by the owner")
+            ws.tasks.pop(card.task_id, None)
+            queue = ws.task_queues.get(card.assigned_to, [])
+            if card.task_id in queue:
+                queue.remove(card.task_id)
+            gone.append(card.task_id)
+        self.retired_ids.update(gone)
+        self.board.planned = any(c.column != "done" for c in self.board.cards())
+        self.plan_feedback = note.strip()
+        return gone
+
+    def _fresh_ids(self, plan: PlanResult) -> PlanResult:
+        """Renumber the plan's cards when an id is already on the board (a re-plan)."""
+        taken = set(self.workspace.tasks) | self.retired_ids
+        if not any(t.id in taken for t in plan.tasks):
+            return plan
+        start = max((int(t[1:]) for t in taken if t[:1] == "T" and t[1:].isdigit()), default=0)
+        ids = {t.id: f"T{start + n}" for n, t in enumerate(plan.tasks, 1)}
+        return plan.model_copy(update={"tasks": [
+            t.model_copy(update={"id": ids[t.id],
+                                 "depends_on": [ids.get(d, d) for d in t.depends_on],
+                                 "supports": [ids.get(d, d) for d in t.supports]})
+            for t in plan.tasks]})
+
     def plan_accepted(self, plan: PlanResult) -> None:
         """Apply (or draft) the plan's design changes, pass its feasibility notes to the
         product manager, then create the cards and give card roles enough spawns."""
+        plan = self._fresh_ids(plan)
+        self.plan_feedback = ""
         attached: list[str] = []
         if self.spec is not None:
             plan, attached = self.spec.with_check_lines(plan, self.backlog)

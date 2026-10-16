@@ -863,6 +863,60 @@ async def respond_to_pause(request: Request, run_id: str, body: RespondBody) -> 
     return {"ok": True, "signal_id": str(responded.id), "question_id": question_id}
 
 
+def _plan_review(workspace: Any) -> Any:  # Any: Workspace, HumanRequest
+    pending = workspace.pending_human
+    if pending is None or pending.context != "plan_review":
+        raise HTTPException(status_code=409, detail="the plan is not waiting for review")
+    return pending
+
+
+@router.post("/{run_id}/plan/approve", dependencies=[Depends(require_bearer)])
+async def approve_plan(request: Request, run_id: str) -> dict:
+    """Approve the plan at the checkpoint (worker context plan H5): work starts."""
+    workspace = await request.app.state.run_registry.get(run_id)
+    if workspace is None:
+        raise HTTPException(status_code=410, detail=f"run {run_id!r} is not active")
+    _plan_review(workspace)
+    responded = Signal(type=SignalType.HUMAN_RESPONDED, summary="plan approved",
+                       detail=json.dumps({"answer": "plan approved", "plan_review": "approved"}),
+                       from_user=True, iteration=workspace.iteration)
+    workspace.post_signal(responded)
+    workspace.pending_human = None
+    wake = workspace.controls.get("wake")
+    if wake is not None:
+        wake()
+    return {"ok": True, "signal_id": str(responded.id)}
+
+
+class SendBackBody(BaseModel):
+    """Body of POST /{run_id}/plan/send-back."""
+
+    note: str = Field(min_length=3, max_length=4000)
+
+
+@router.post("/{run_id}/plan/send-back", dependencies=[Depends(require_bearer)])
+async def send_plan_back(request: Request, run_id: str, body: SendBackBody) -> dict:
+    """Send the plan back at the checkpoint: its unstarted cards are removed and the planner
+    plans again with the note (worker context plan H5)."""
+    workspace = await request.app.state.run_registry.get(run_id)
+    if workspace is None:
+        raise HTTPException(status_code=410, detail=f"run {run_id!r} is not active")
+    _plan_review(workspace)
+    send_back = workspace.controls.get("plan_send_back")
+    if send_back is None:
+        raise HTTPException(status_code=409, detail="this run cannot re-plan")
+    note = body.note.strip()
+    workspace.post_signal(Signal(
+        type=SignalType.HUMAN_RESPONDED, summary=f"plan sent back: {note[:200]}",
+        detail=json.dumps({"answer": note, "plan_review": "sent_back"}),
+        from_user=True, iteration=workspace.iteration))
+    cancelled = send_back(note)
+    wake = workspace.controls.get("wake")
+    if wake is not None:
+        wake()
+    return {"ok": True, "cancelled": cancelled}
+
+
 class LimitsBody(BaseModel):
     """Body of PATCH /{run_id}/limits."""
 

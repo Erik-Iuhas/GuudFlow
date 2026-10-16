@@ -248,6 +248,7 @@ class OpencodeRun:
             str(k): [str(p) for p in v] for k, v in allow.items() if isinstance(v, list)})
         self.results: dict[str, BaseModel] = {}
         self.flow: TaskFlow | None = None
+        self.preplanned = False          # cards came from a plan approved before the run (H3)
         self.overseer: OverseerFlow | None = None
         self.agents: list["AgentConfig"] = list(runner.project.agents)
         self._started = 0.0
@@ -393,6 +394,8 @@ class OpencodeRun:
                                   watchdog_interval=self.settings.watchdog_interval)
             scheduler.drain_filter = self._may_start_while_draining
             self.runner._scheduler = scheduler  # noqa: SLF001 — lets force_stop() reach it
+            if flow is not None and not carried:
+                self._start_from_preflight(flow)
             if self.flow is not None:
                 # Humans edit the board through the card API (S34): re-arm roles
                 # that got a card back and let the scheduler look again.
@@ -405,6 +408,50 @@ class OpencodeRun:
             if unsubscribe is not None:
                 unsubscribe()
             await self.shutdown()
+
+    def _start_from_preflight(self, flow: TaskFlow) -> None:
+        """A session started from a plan approved before the run (worker context plan H3):
+        the runner creates its cards and the planner's first turn is skipped."""
+        from core.preflight import run_plan
+        found = run_plan(self.runner.run_root)
+        if found is None:
+            return
+        plan, plan_id = found
+        self.preplanned = True
+        flow.plan_accepted(plan)
+        self._mark_complete(flow.planner)
+        self._post(SignalType.COMPLETE, flow.planner,
+                   f"{flow.planner} complete: {len(plan.tasks)} card(s) from the plan approved "
+                   f"before the session ({plan_id})",
+                   json.dumps({"preflight": plan_id, "cards": [t.id for t in plan.tasks]}))
+
+    def _review_plan_gate(self) -> bool:
+        """The project setting "Review the plan before work starts" (worker context plan H5)."""
+        gates = getattr(self.runner.project, "approval_gates", None) or {}
+        return bool(gates.get("review_plan")) and not self.preplanned
+
+    def _pause_for_plan_review(self, planner: str, plan: PlanResult) -> None:
+        """Pause before any card starts so a person can approve, edit or send the plan back.
+        A normal pause: nothing running is stopped and nothing is lost."""
+        from core.workspace import HumanRequest
+        self.workspace.pending_human = HumanRequest(
+            from_agent=planner, question="Review the plan before work starts",
+            context="plan_review", iteration=self.workspace.iteration)
+        self.workspace.controls["plan_send_back"] = self._send_plan_back
+        self._post(SignalType.HUMAN_NEEDED, planner, "Review the plan before work starts",
+                   json.dumps({"kind": "plan_review", "cards": [t.id for t in plan.tasks],
+                               "design_changes": len(plan.design.changes) if plan.design else 0,
+                               "notes": plan.notes}))
+
+    def _send_plan_back(self, note: str) -> list[str]:
+        """The owner sent the plan back: its cards that have not started are cancelled and
+        the planner plans again with the owner's note. Returns the cancelled card ids."""
+        assert self.flow is not None
+        flow = self.flow
+        cancelled = flow.discard_plan(note)
+        self.workspace.pending_human = None
+        self._scheduler().rearm(flow.planner)
+        return cancelled
 
     def _load_contracts(self) -> dict[str, Contract]:
         """role → its contract (the library with the project's overrides; plan §2)."""
@@ -1414,6 +1461,8 @@ class OpencodeRun:
         elif isinstance(result, PlanResult) and self.flow is not None:
             self.flow.plan_accepted(result)
             summary = f"planned {len(result.tasks)} card(s). {result.notes}".strip()
+            if self._review_plan_gate() and result.tasks:
+                self._pause_for_plan_review(name, result)
         self.workspace.completed_agents.append(name)
         self.workspace.agent_states[name] = AgentState.COMPLETE
         self._post(SignalType.COMPLETE, name, f"{name} complete", summary or None)

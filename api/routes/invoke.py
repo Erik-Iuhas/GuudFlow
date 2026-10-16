@@ -52,6 +52,7 @@ async def invoke_project(
 
     body = body or {}
     confirm = bool(body.get("confirm", False))
+    _check_preflight(request, project_id, project, body)
     _check_project_work(request, project_id, body)
     _check_spec_gate(request, project_id, project, body)
     if not body.get("allow_parallel"):
@@ -171,6 +172,30 @@ def _check_project_work(request: Request, project_id: str, body: dict) -> None:
         if run is None or run.state != "pending":
             raise HTTPException(status_code=400,
                                 detail=f"continue_run: {parent!r} is not waiting for review")
+
+
+def _check_preflight(request: Request, project_id: str, project: dict, body: dict) -> None:
+    """A session started from a prepared plan (worker context plan H3, H4): the plan must be
+    approved, and a plan made on an older spec, design or main needs `stale_ok: true` (Studio's
+    "Start anyway"). The plan's backlog items are the run's unless the body names others."""
+    plan_id = body.get("preflight")
+    if not plan_id:
+        return
+    from core.preflight import Preflight
+    row = Preflight(Path(request.app.state.data_root), project_id, project).current()
+    if row is None or row.get("id") != plan_id:
+        raise HTTPException(status_code=409, detail=f"preflight: {plan_id!r} is not open")
+    if row.get("status") != "approved":
+        detail = ("answer the owner's questions first: " + ", ".join(row["open_questions"])
+                  if row.get("open_questions") else "approve the prepared plan first")
+        raise HTTPException(status_code=409, detail=detail)
+    if row.get("stale") and body.get("stale_ok") is not True:
+        raise HTTPException(status_code=409, detail={
+            "gate": "preflight_stale", "reasons": row["stale"],
+            "message": "The prepared plan may be out of date: " + "; ".join(row["stale"])
+                       + ". Refresh the plan, or start anyway with `stale_ok: true`."})
+    if body.get("backlog_items") is None and row.get("items"):
+        body["backlog_items"] = list(row["items"])
 
 
 def _check_spec_gate(request: Request, project_id: str, project: dict, body: dict) -> None:

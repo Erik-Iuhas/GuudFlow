@@ -291,6 +291,8 @@ def no_plan(view: RunView, cfg: DetectorConfig) -> list[Stall]:
     finished without a plan, so the run would end stuck before any work started."""
     if view.cards or view.running:
         return []
+    if any(s.type is SignalType.TASK_ASSIGNED for s in view.signals):
+        return []        # there was a plan: its cards were sent back and a re-plan is due
     ran = [s for s in view.signals
            if s.type in (SignalType.AGENT_RESULT, SignalType.FAILED, SignalType.COMPLETE)]
     if not ran:

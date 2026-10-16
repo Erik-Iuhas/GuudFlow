@@ -102,6 +102,13 @@ def prepare_run(data_root: Path, project_id: str, run_id: str, run_root: Path,
         items += backlog.take_for_run(run_id, [str(i) for i in wanted])
     if items:
         write_json(run_root / SELECTION_JSON, [asdict(i) for i in items])
+    if payload.get("preflight"):
+        # A plan approved before the run (worker context plan H3): the run creates its cards.
+        from core.preflight import Preflight
+        if not Preflight(data_root, project_id).hand_to_run(str(payload["preflight"]), run_id,
+                                                             run_root):
+            log.warning("run %s: preflight plan %s is not approved; the planner plans",
+                        run_id, payload["preflight"])
     return items
 
 
