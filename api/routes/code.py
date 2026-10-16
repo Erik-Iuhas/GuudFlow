@@ -156,3 +156,27 @@ async def run_file(request: Request, run_id: str, path: str, role: str | None = 
     """One file of the run's `main` or of a role's worktree; `diff=1` adds its diff."""
     src = _run_source(request, run_id, role)
     return await asyncio.to_thread(_file_body, src, path, diff)
+
+
+# ── what each worker was told (worker context plan A) ────────────────────────
+@router.get("/api/runs/{run_id}/briefs")
+async def run_briefs(request: Request, run_id: str) -> dict[str, Any]:  # Any: JSON
+    """Every role's recorded turns: `{roles: {role: [{n, card, at, size}]}}`."""
+    from core.harness.brief_log import BriefLog
+    log_ = BriefLog(_run_root(request, run_id))
+    return {"roles": {r: [{"n": e.n, "card": e.card, "at": e.at, "size": e.size}
+                          for e in log_.entries(r)] for r in log_.roles()}}
+
+
+@router.get("/api/runs/{run_id}/roles/{role}/briefs/{n}")
+async def run_brief(request: Request, run_id: str, role: str, n: int) -> dict[str, Any]:  # Any: JSON
+    """One recorded turn: the rules files, the skills offered and the brief."""
+    from core.harness.brief_log import BriefLog
+    _one_part(role)
+    try:
+        text = BriefLog(_run_root(request, run_id)).read(role, n)
+    except ValueError:
+        text = None
+    if text is None:
+        raise HTTPException(status_code=404, detail="no such brief")
+    return {"role": role, "n": n, "text": text}

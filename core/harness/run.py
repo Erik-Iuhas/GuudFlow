@@ -34,6 +34,7 @@ from pydantic import BaseModel
 
 from core.contracts import Contract, ContractError, contracts_for_team, load_for_project, load_library, render_for_brief
 from core.crew import Member, crew_names, label as crew_label, resolve_recipient, team_section
+from core.harness.brief_log import BriefLog
 from core.harness.brief import (
     CONFLICT_HOWTO as _CONFLICT_HOWTO,
     BriefInputs,
@@ -217,6 +218,9 @@ class _Role:
     last_turn_end: float = 0.0           # monotonic time the last turn in the session ended
     last_context: int = 0                # context size of the session's last model call
     last_card: str | None = None         # the card of the session's last turn
+    # The rules files and skills this role's server was started with (worker context plan R).
+    rules_files: dict[str, str] = field(default_factory=dict)
+    skills: list[str] = field(default_factory=list)
 
 
 class OpencodeRun:
@@ -1038,8 +1042,9 @@ class OpencodeRun:
                 self._desk_seen.pop(role_name, None)
             session_id = str(role.session_id)
             role.session_turns += 1
-            stats = await drive_turn(client, session_id,
-                                     self._brief(role, plan, continuation=continuing),
+            brief_text = self._brief(role, plan, continuation=continuing)
+            self._record_brief(role, card_id, brief_text, "kept" if continuing else "fresh")
+            stats = await drive_turn(client, session_id, brief_text,
                                      agent=role_name, on_event=on_event,
                                      on_permission=on_permission,
                                      timeout=self.settings.turn_timeout,
@@ -1052,6 +1057,17 @@ class OpencodeRun:
             role.last_turn_end, role.last_card = time.monotonic(), card_id
             if not (kept and reuse) and not self.settings.keep_servers:
                 await self._stop_server(role)
+
+    def _record_brief(self, role: _Role, card_id: str | None, brief: str, session: str) -> None:
+        """Keep what the worker was told this turn (worker context plan A)."""
+        try:
+            BriefLog(self.runner.run_root).record(
+                role.cfg.role, card_id, brief, session=session,
+                prompt_digest=role.prompt.digest() if role.prompt is not None else "",
+                prompt_layers=role.prompt.included() if role.prompt is not None else (),
+                rules=role.rules_files, skills=role.skills)
+        except (OSError, ValueError) as e:  # a record that cannot be written never fails a turn
+            log.warning("%s: brief not recorded: %s", role.cfg.role, e)
 
     def _reuses_session(self, role: _Role) -> bool:
         """Does this role keep its server and session between cards?"""

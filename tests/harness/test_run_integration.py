@@ -244,8 +244,8 @@ async def test_shell_ask_goes_through_the_approval_gate(tmp_path: Path, fake_llm
     import asyncio
     from core.signals import Signal
     fake_llm.route("Your turn: builder",
-                   ToolCall("bash", {"command": "touch made_by_ask.txt", "description": "x"}),
-                   ToolCall("bash", {"command": "touch second.txt", "description": "y"}),
+                   ToolCall("bash", {"command": "truncate -s 0 made_by_ask.txt", "description": "x"}),
+                   ToolCall("bash", {"command": "truncate -s 0 second.txt", "description": "y"}),
                    _done("Created two files through approved shell commands."))
     runner = _runner(tmp_path, [AgentConfig(role="builder", capabilities={"shell": "ask"})],
                      fake_llm)
@@ -264,7 +264,7 @@ async def test_shell_ask_goes_through_the_approval_gate(tmp_path: Path, fake_llm
 
     ws.subscribe(approve)
     assert (await runner.run()).status is SchedulerStatus.COMPLETE
-    assert len(asked) == 1, "an 'always this run' grant covers the second touch"
+    assert len(asked) == 1, "an 'always this run' grant covers the second command"
     main = runner.git.working_dir
     assert (main / "made_by_ask.txt").exists() and (main / "second.txt").exists()
 

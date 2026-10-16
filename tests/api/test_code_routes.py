@@ -96,3 +96,18 @@ async def test_project_deps_lists_packages(client, auth_header, data_root: Path)
     body = (await client.get("/api/projects/p2/deps", headers=auth_header)).json()
     (env,) = body["environments"]
     assert env["manager"] == "npm" and env["packages"][0]["added_by"] == "developer"
+
+
+async def test_briefs_are_listed_and_read(client, auth_header, role_run) -> None:
+    from core.harness.brief_log import BriefLog
+
+    BriefLog(role_run).record("builder", "T1", "# Your turn: builder\nDo T1.",
+                              rules={"guudflow.md": "Use Python."}, skills=["orient"])
+    listing = (await client.get("/api/runs/run_a/briefs", headers=auth_header)).json()
+    assert [e["card"] for e in listing["roles"]["builder"]] == ["T1"]
+    one = (await client.get("/api/runs/run_a/roles/builder/briefs/1", headers=auth_header)).json()
+    assert "Use Python." in one["text"] and "Do T1." in one["text"] and "orient" in one["text"]
+    assert (await client.get("/api/runs/run_a/roles/builder/briefs/9",
+                             headers=auth_header)).status_code == 404
+    assert (await client.get("/api/runs/run_a/roles/..%2Fx/briefs/1",
+                             headers=auth_header)).status_code == 404

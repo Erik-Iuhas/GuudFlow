@@ -24,6 +24,7 @@ import { useCommentOnCard } from "./useCardMutations";
 import { RoleChanges } from "../cockpit/RoleChanges";
 import { DiffText } from "../report/DiffViewer";
 import { OPEN_CODE_EVENT, openInCode } from "../code/api";
+import { WhatItWasTold } from "../briefs/WhatItWasTold";
 import type { SpecWire } from "../plan/api";
 import type { CardView } from "../../stores/runEvents";
 
@@ -275,6 +276,15 @@ function DrawerBody({ runId, cardId, spec }: { runId: string; cardId: string; sp
           </div>
         </section>
       )}
+
+      <section className={SECTION} aria-label="What the worker was told">
+        <details>
+          <summary className="cursor-pointer text-sm font-semibold">What the worker was told</summary>
+          <div className="mt-2 flex max-h-[32rem] flex-col">
+            <WhatItWasTold runId={runId} role={card.owner} card={card.id} live={live} />
+          </div>
+        </details>
+      </section>
 
       <section className={SECTION} aria-label="Diffs">
         <h3 className={H}>Diffs</h3>

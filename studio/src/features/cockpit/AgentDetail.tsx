@@ -9,6 +9,7 @@ import type { RunState } from "../../stores/runEvents";
 import { useRunStore } from "../../stores/runStoreContext";
 import { formatUsd } from "./model";
 import { RoleChanges } from "./RoleChanges";
+import { WhatItWasTold } from "../briefs/WhatItWasTold";
 import { VirtualFeed } from "./VirtualFeed";
 
 const EMPTY_FEED: readonly TypedSignal[] = [];
@@ -100,6 +101,8 @@ export function resultSummary(s: RunState, role: string): string {
 /** A role's tool calls and full last result (opened from its card or graph node). */
 export function AgentDetail({ role }: { role: string }) {
   const agent = useRunStore((s) => s.agents[role]);
+  const runId = useRunStore((s) => s.runId);
+  const live = useRunStore((s) => s.live);
   const feed = useRunStore((s) => s.toolFeed[role]) ?? EMPTY_FEED;
   const resultSignal = useRunStore((s) => {
     const id = s.agents[role]?.lastResultSignalId;
@@ -129,6 +132,7 @@ export function AgentDetail({ role }: { role: string }) {
         <TabsList className="mx-3 mt-2 self-start">
           <TabsTrigger value="tools">Tool calls</TabsTrigger>
           <TabsTrigger value="changes">Changes</TabsTrigger>
+          <TabsTrigger value="told">What it was told</TabsTrigger>
         </TabsList>
         <TabsContent value="tools" className="flex min-h-0 flex-1 flex-col">
           <VirtualFeed
@@ -144,6 +148,9 @@ export function AgentDetail({ role }: { role: string }) {
         </TabsContent>
         <TabsContent value="changes" className="flex min-h-0 flex-1 flex-col">
           <RoleChanges role={role} />
+        </TabsContent>
+        <TabsContent value="told" className="flex min-h-0 flex-1 flex-col">
+          <WhatItWasTold runId={runId} role={role} live={live} />
         </TabsContent>
       </Tabs>
     </div>
