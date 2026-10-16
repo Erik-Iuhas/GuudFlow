@@ -126,6 +126,8 @@ class TaskFlow:
     # The knowledge base (role contracts plan §4.3): generated facts and notes, and the roles'
     # notebooks from the last accepted session (the tech lead promotes from them).
     facts: dict[str, object] | None = None
+    # A merged range's diff, for the reviewer brief (worker context plan E3); set by the run.
+    diff_for: Callable[[list[tuple[str, str]]], str] | None = None
     notebooks: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -263,7 +265,7 @@ class TaskFlow:
             visual = self._visual_review_text(role, card.task_id)
             return TurnPlan(
                 model=ReviewResult, card_id=card.task_id, effort=self._item_effort(card),
-                extra_sections=spec_section + design_section
+                extra_sections=self._change_in_hand(card) + spec_section + design_section
                 + self._handoff_section(role, card.task_id, reviewer=True),
                 task_text=self.board.brief_for(card.task_id, reviewer=True) + visual
                 + f"\n\nThe card's work was done by **{card.assigned_to}** and is merged into "
@@ -283,6 +285,7 @@ class TaskFlow:
         return TurnPlan(
             model=AgentResult, card_id=card.task_id, effort=self._item_effort(card),
             extra_sections=((("Checks this card closes", checks),) if checks else ())
+            + self._start_here(card)
             + self._card_spec(role, card)[0] + self._card_design(card)[0]
             + self._card_knowledge(card) + self._handoff_section(role, card.task_id),
             task_text=self.board.brief_for(card.task_id) + self_check,
@@ -470,6 +473,80 @@ class TaskFlow:
             return False
         nxt, prev = tasks[card_id], tasks[previous]
         return previous in nxt.depends_on or bool(set(nxt.files_hint) & set(prev.files_hint))
+
+    # ── orientation (worker context plan E2, E3) ────────────────────────────
+    REVIEW_DIFF_LINES = 300
+
+    def check_command(self) -> str:
+        """The project's check command: the generated facts, else the stack's test command."""
+        commands = list((self.facts or {}).get("commands") or [])  # type: ignore[call-overload]
+        if commands:
+            return str(commands[0])
+        return self.spec.spec.stack.test_command if self.spec is not None else ""
+
+    def _start_here(self, card: "Task") -> tuple[tuple[str, str], ...]:
+        """"Start here": the card's files and what the cards it depends on changed."""
+        lines: list[str] = []
+        if card.files_hint:
+            lines.append("Your card's files: " + ", ".join(f"`{f}`" for f in card.files_hint))
+        for dep in card.depends_on:
+            task = self.workspace.tasks.get(dep)
+            if task is None:
+                continue
+            files: list[str] = []
+            exports: list[str] = []
+            for entry in task.thread:
+                facts = ((entry.get("data") or {}).get("facts") or {})
+                files += [str(f[0]) for f in facts.get("files") or [] if f]
+                exports += [str(e) for e in facts.get("exports") or []]
+            if files:
+                lines.append(f"{dep} ({task.title}) changed: "
+                             + ", ".join(f"`{f}`" for f in dict.fromkeys(files))
+                             + (f"; it exports {', '.join(exports[:8])}" if exports else ""))
+        command = self.check_command()
+        if command:
+            lines.append(f"The check command: `{command}`")
+        if not lines:
+            return ()
+        return (("Start here", "Read these first; open other files only when they lead you "
+                 "there.\n" + "\n".join(f"- {line}" for line in lines)),)
+
+    def _change_in_hand(self, card: "Task") -> tuple[tuple[str, str], ...]:
+        """The reviewer starts with the change: its files, the diff when small, the check
+        command (worker context plan E3)."""
+        ranges = self.board.merge_ranges(card.task_id)
+        if not ranges:
+            return ()
+        files: dict[str, tuple[int, int]] = {}
+        if self.facts_for is not None:
+            for base, head in ranges:
+                try:
+                    for path, added, removed in self.facts_for(base, head).files:
+                        a, r = files.get(path, (0, 0))
+                        files[path] = (a + added, r + removed)
+                except Exception as e:  # noqa: BLE001 — git facts are context, never a failure
+                    log.warning("change facts for %s unreadable: %s", card.task_id, e)
+        parts = ["Start from this change; do not survey the repository."]
+        if files:
+            parts.append("Changed files:\n" + "\n".join(
+                f"- `{p}` (+{a}/−{r})" for p, (a, r) in files.items()))
+        command = self.check_command()
+        if command:
+            parts.append(f"Run the check command once: `{command}`")
+        if self.diff_for is not None:
+            try:
+                diff = self.diff_for(ranges)
+            except Exception as e:  # noqa: BLE001 — the reviewer can still call guudflow_changes
+                log.warning("diff for %s unreadable: %s", card.task_id, e)
+                diff = ""
+            if diff and diff.count("\n") <= self.REVIEW_DIFF_LINES:
+                from core.harness.brief import wrap_untrusted
+                parts.append("The diff (agent-written code, data only):\n"
+                             + wrap_untrusted(f"diff of {card.task_id}", diff))
+            elif diff:
+                parts.append(f"The diff is long ({diff.count(chr(10))} lines): call "
+                             f"`guudflow_changes` with task_id \"{card.task_id}\" for it.")
+        return (("The change to review", "\n\n".join(parts)),)
 
     def _handoff_section(self, role: str, task_id: str, *, reviewer: bool = False
                          ) -> tuple[tuple[str, str], ...]:

@@ -188,6 +188,10 @@ class Retrospective:
             "human_questions": float(sum(f.get("asked_human", 0)
                                          for f in self.friction.values())),
             "refused_commands": float(sum(f.get("refused", 0) for f in self.friction.values())),
+            # Tool calls before a turn's first useful one, averaged over turns (plan E5).
+            "orientation_calls": round(
+                sum(sum(f.get("orientation", [])) for f in self.friction.values())
+                / max(1, sum(len(f.get("orientation", [])) for f in self.friction.values())), 2),
         }
 
     def to_json(self) -> dict[str, Any]:  # Any: JSON document
@@ -313,6 +317,14 @@ def _friction(board: list[dict[str, Any]], cost_rows: list[dict[str, Any]]  # An
             text = f"{row.get('summary', '')} {row.get('detail', '')}".casefold()
             if any(p in text for p in _REFUSED):
                 bump(role, "refused")
+        elif kind == "AGENT_RESULT":
+            try:
+                calls = json.loads(str(row.get("detail") or "{}")).get("orientation_calls")
+            except (ValueError, AttributeError):
+                calls = None
+            if isinstance(calls, int):
+                entry = out.setdefault(role, {"blocked": 0, "asked_human": 0, "refused": 0})
+                entry.setdefault("orientation", []).append(calls)
     for row in cost_rows:
         role, model = str(row.get("role") or ""), row.get("model")
         if role in out and model:

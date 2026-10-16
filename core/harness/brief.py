@@ -78,6 +78,8 @@ class BriefInputs:
     continuation: bool = False
     notebook: str | None = None                      # the role's notes from the last session
     contract: str | None = None                      # "Your role contract" (core/contracts.py)
+    # A small (fast-tier) model gets "How to work" as a short numbered checklist (plan E4).
+    small: bool = False
 
 
 def _section(title: str, body: str) -> str:
@@ -141,7 +143,8 @@ def build_brief(inp: BriefInputs) -> str:
                               f"calling `{SUBMIT_TOOL_NAME}` once, as your last action."
                               + ("" if inp.is_reviewer else " " + HANDOFF_INSTRUCTIONS)))
     else:
-        parts.append(_section("How to work", _how_to_work(inp.is_reviewer)))
+        parts.append(_section("How to work", _small_steps(inp.is_reviewer) if inp.small
+                              else _how_to_work(inp.is_reviewer)))
     return "\n".join(parts)
 
 
@@ -172,6 +175,26 @@ def _how_to_work(is_reviewer: bool) -> str:
     return (f"{doing}\n\nYou cannot talk to other agents directly and nobody will answer "
             f"questions mid-turn: decide sensibly, note assumptions in your summary, and use "
             f"`notes_for` to leave a note for a teammate (by name or role).\n\n{finish}")
+
+
+def _small_steps(is_reviewer: bool) -> str:
+    """"How to work" for small models: five steps, the long how-to lives in skills (plan E4)."""
+    if is_reviewer:
+        steps = ["Read \"The change to review\" above; open only the files it names.",
+                 "Run the check command once.",
+                 "Answer every checklist line in `items`, with evidence you saw.",
+                 "Do not edit files.",
+                 f"Finish with `{SUBMIT_TOOL_NAME}`: verdict, items, and specific issues."]
+    else:
+        steps = ["Read \"Start here\" and your card; open only those files first "
+                 "(skill `orient`).",
+                 "Make a short todo list, then change only what the card asks, in the stack.",
+                 "Write or run the tests; run the check command (skill `test-first`).",
+                 "Answer every acceptance line, keeping `R#.#` ids exactly (skill "
+                 "`close-a-check`).",
+                 f"Finish with `{SUBMIT_TOOL_NAME}`: status done (summary, files, handoff), "
+                 "blocked (on whom, for what) or failed (why)."]
+    return "\n".join(f"{n}. {step}" for n, step in enumerate(steps, 1))
 
 
 HANDOFF_INSTRUCTIONS = (

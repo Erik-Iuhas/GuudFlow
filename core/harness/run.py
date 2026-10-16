@@ -74,7 +74,8 @@ from core.harness import mcp_browser, mcp_tools, mcp_visual, mcp_web
 from core.harness.approvals import PermissionGate
 from core.harness.artifacts import ArtifactRegistry
 from core.harness.persona_prompt import PromptLayers, build_agent_prompt
-from core.harness.opencode_runner import EventHook, PermissionHook, PermissionReply, TurnStats, drive_turn
+from core.harness.opencode_runner import (EventHook, PermissionHook, PermissionReply, TurnStats,
+                                         drive_turn, orientation_calls)
 from core.harness.result_inbox import ResultInbox
 from core.harness.results import TEST_PROGRAMS, AgentResult, ReviewResult, unverified_claims
 from core.harness.server import OpencodeServer
@@ -240,6 +241,7 @@ class OpencodeRun:
         self.mcp.register(self._notebook_tool())
         for tool in self._git_tools():
             self.mcp.register(tool)
+        self.mcp.register(self._spec_tool())
         self.clones = RoleClones(runner.git, runner.run_root / "roles")
         allow = runner.project.approval_gates.get("tool_permission_allow") or {}
         self.gate = PermissionGate(self.workspace, allow_list={
@@ -354,6 +356,7 @@ class OpencodeRun:
             flow.facts_for = lambda base, head: host_facts(
                 self.clones.main_numstat(base, head),
                 lambda path, rev=head: self.clones.main_file(rev, path))
+            flow.diff_for = self.clones.merged_diff
             flow.exports_for = lambda base, head: changed_exports(
                 self.clones.main_numstat(base, head),
                 lambda path, rev=head: self.clones.main_file(rev, path),
@@ -842,7 +845,7 @@ class OpencodeRun:
         name = role.cfg.role
         identity = McpIdentity(self.run_id, name, role.compiled.mcp_tools
                                | {"submit_result", "changes", "history", "post_note",
-                                  "notebook"})
+                                  "notebook", "spec"})
         role.token = self.mcp.issue_token(identity)
         virtual_key = self.gateway.issue_key(self.run_id, name, [role.binding.model.id],
                                              budget_usd=self._role_budget(role))
@@ -1315,6 +1318,8 @@ class OpencodeRun:
         self._post(SignalType.AGENT_RESULT, name, _result_line(name, result),
                    json.dumps({"result": result.model_dump(), "cost": stats.cost,
                                "tokens": stats.tokens, "tool_calls": stats.tool_calls,
+                               "orientation_calls": orientation_calls(
+                                   stats.tool_calls, reviewer=role.role_type == "reviewer"),
                                "commits": collected.new_commits,
                                "files": collected.changed_files}))
         for to, note in getattr(result, "notes_for", {}).items():
@@ -1467,6 +1472,7 @@ class OpencodeRun:
             continuation=continuation,
             notebook=self._notebooks.get(cfg.role),
             contract=self._contract_text(cfg.role),
+            small=role.binding.model.tier == "fast",
             names=self.names, review_from=review_from,
             team=team_section(cfg.role, [
                 Member(c.role, self.names.get(c.role, c.role), self._roles[c.role].role_type,
@@ -1740,6 +1746,64 @@ class OpencodeRun:
             McpTool("history", "Recent commits on your branch.",
                     {**empty, "properties": {"limit": {"type": "integer"}}}, history),
         ]
+
+    def _spec_tool(self) -> McpTool:
+        """`guudflow_spec`: look one requirement, check, decision, rule or card up by id, or the
+        few that match a phrase (worker context plan G2). Read-only, from the host's copy."""
+
+        async def lookup(identity: McpIdentity, args: dict[str, Any]) -> ToolResult:
+            query = str(args.get("query") or "").strip()
+            if not query:
+                return ToolResult("query: give an id (R3, R3.2, D2, rule-1, T4) or a phrase",
+                                  is_error=True)
+            return ToolResult(await asyncio.to_thread(self._spec_lookup, query))
+
+        return McpTool(
+            "spec", "Look up the project's spec and this session's cards: an id (R3, R3.2, D2, "
+            "rule-1, T4) returns that entry in full; a phrase returns the entries that mention "
+            "it. Use it instead of searching the code for requirements.",
+            {"type": "object", "additionalProperties": False,
+             "properties": {"query": {"type": "string"}}, "required": ["query"]}, lookup)
+
+    def _spec_lookup(self, query: str) -> str:
+        spec = self._spec_brief()
+        sections: list[tuple[str, str]] = []          # (id, text)
+        if spec is not None:
+            sp = spec.spec
+            for r in sp.requirements:
+                if r.status != "active":
+                    continue
+                lines = [f"{r.id} [{r.kind}, {r.priority}] {r.text}"]
+                lines += [f"  {c.id} ({c.state}, {c.method or 'unit'}): {c.text}" for c in r.checks]
+                sections.append((r.id, "\n".join(lines)))
+                for c in r.checks:
+                    sections.append((c.id, f"{c.id} ({c.state}, {c.method or 'unit'}) of {r.id} "
+                                           f"{r.title or r.text}: {c.text}"))
+            for d in sp.decisions:
+                if d.status == "accepted":
+                    sections.append((d.id, f"{d.id}{' (binding)' if d.binding else ''} {d.title}: "
+                                           f"{d.choice} (because {d.reason})"))
+            for rule in sp.rules:
+                if rule.status == "active":
+                    sections.append((rule.id, f"{rule.id} ({rule.strength}) {rule.text}"))
+            if not sp.stack.empty:
+                sections.append(("stack", "stack:\n" + "\n".join(sp.stack.lines())))
+        for row in self._card_rows():
+            sections.append((str(row["id"]), (
+                f"{row['id']} {row['title']} (owner {row['owner']}, {row['column']}; serves "
+                f"{', '.join(map(str, row['serves'])) or '—'})\n"
+                + "\n".join(f"  - [ ] {a}" for a in row["acceptance"]))))  # type: ignore[attr-defined]
+        exact = [text for ident, text in sections if ident.casefold() == query.casefold()]
+        if exact:
+            return exact[0]
+        words = [w for w in query.casefold().split() if len(w) > 2]
+        hits = [text for _, text in sections
+                if words and all(w in text.casefold() for w in words)]
+        if not hits:
+            return (f"Nothing matches {query!r}. The whole spec is in "
+                    "`.guudflow/project/SPEC.md` and the cards in `.guudflow/project/CARDS.md`.")
+        return "\n\n".join(dict.fromkeys(hits[:8])) + (
+            f"\n\n({len(hits) - 8} more; narrow the phrase)" if len(hits) > 8 else "")
 
     def _post_note_tool(self) -> McpTool:
         async def handler(identity: McpIdentity, args: dict[str, Any]) -> ToolResult:

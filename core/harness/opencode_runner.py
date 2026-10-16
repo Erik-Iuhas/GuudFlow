@@ -62,6 +62,21 @@ _NOT_FOUND = re.compile(r"(?:^|[\s:])([\w.+-]+): (?:command )?not found\b")
 _ZSH_NOT_FOUND = re.compile(r"command not found: ([\w.+-]+)")
 
 
+_EDIT_TOOLS = frozenset({"edit", "write", "patch", "multiedit", "apply_patch"})
+
+
+def orientation_calls(tool_calls: list[tuple[str, str]], *, reviewer: bool) -> int:
+    """Tool calls before the first useful one (worker context plan E5): a builder's first file
+    edit, a reviewer's first shell command (running the checks) or its verdict. A turn with no
+    useful call counts all of its calls."""
+    for n, (tool, _) in enumerate(tool_calls):
+        if reviewer and (tool == "bash" or tool.endswith("submit_result")):
+            return n
+        if not reviewer and (tool in _EDIT_TOOLS or tool.endswith("submit_result")):
+            return n
+    return len(tool_calls)
+
+
 def missing_programs(output: str) -> set[str]:
     """Program names a shell output says were not found."""
     text = output or ""
