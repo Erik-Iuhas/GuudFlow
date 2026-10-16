@@ -23,14 +23,22 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from typing import TYPE_CHECKING
+
 from core.backlog import BacklogItem
 from core.spec import Decision, Requirement, Rule, Spec, resolve_acceptance
 from core.spec_adherence import CHECK_LINE
 from core.start_modes import DEFAULT_RULES, PLANNER_TEXT, REVIEWER_LINES, START_MODES
 from core.work_db import WorkDB
 
+if TYPE_CHECKING:
+    from core.harness.tasks import PlanResult
+
+GROUND_POINTER = ("The stack, binding rules and decisions are in your rules (Ground rules) and in "
+                  "`.guudflow/project/SPEC.md`.")
 KEEP_LINES = ("Keep every `R#.#:` acceptance line of an item on the card that implements it, "
-              "word for word.")
+              "word for word. GuudFlow also adds the line of every check a card `serves`, and "
+              "puts an item's check that no card carries on that item's first card.")
 
 
 def _one_line(text: str) -> str:
@@ -104,6 +112,91 @@ class SpecBrief:
                 out += [c.id for c in r.checks]
         return out
 
+    # ── check lines on cards (worker context plan D1, D2) ───────────────────
+    def check_line(self, check_id: str) -> str | None:
+        """`R3.2: <current text>` for an active check, else None."""
+        try:
+            check = self.spec.check(check_id.upper())
+            req = self.spec.requirement(check_id.upper().split(".")[0])
+        except Exception:  # noqa: BLE001 — SpecError: unknown or bad id
+            return None
+        return f"{check.id}: {_one_line(check.text)}" if req.status == "active" else None
+
+    def with_check_lines(self, plan: "PlanResult", items: Sequence[BacklogItem]
+                         ) -> tuple["PlanResult", list[str]]:
+        """The plan with its check lines written by GuudFlow, not copied by the model:
+
+        - every check a card `serves` gets its `R#.#: <text>` acceptance line;
+        - every check of a session item that no card carries is added to the first card of
+          that item (the planner is told which).
+
+        Returns the new plan and the check ids that were attached to an item's card."""
+        from core.harness.tasks import card_serves
+        from core.spec_adherence import CHECK_LINE
+        tasks = [t.model_copy(update={"acceptance": list(t.acceptance)}) for t in plan.tasks]
+
+        def ids_on(lines: Sequence[str]) -> set[str]:
+            return {m.group(1).upper() for line in lines if (m := CHECK_LINE.match(line))}
+
+        for t in tasks:
+            have = ids_on(t.acceptance)
+            for sid in card_serves(t.acceptance, t.serves):
+                if "." in sid and sid not in have and (line := self.check_line(sid)):
+                    t.acceptance.append(line)
+                    have.add(sid)
+        attached: list[str] = []
+        carried = set().union(*(ids_on(t.acceptance) for t in tasks)) if tasks else set()
+        for item in items:
+            if getattr(item, "pending", "") == "done":
+                continue
+            target = next((t for t in tasks if t.backlog_id == item.id), None)
+            if target is None:
+                continue
+            wanted = [m.group(1).upper() for line in item.acceptance
+                      if (m := CHECK_LINE.match(line))]
+            for rid in item.serves:
+                try:
+                    wanted += [c.id for c in self.spec.requirement(rid).checks]
+                except Exception:  # noqa: BLE001 — unknown requirement: nothing to add
+                    continue
+            for cid in dict.fromkeys(wanted):
+                if cid not in carried and (line := self.check_line(cid)):
+                    target.acceptance.append(line)
+                    carried.add(cid)
+                    attached.append(cid)
+        return plan.model_copy(update={"tasks": tasks}), attached
+
+    def open_requirements(self, limit: int = 30) -> str | None:
+        """Requirements with a check that is not met yet, for a session with no items (D3)."""
+        rows = [r for r in self.spec.requirements if r.status == "active"
+                and any(c.state != "met" for c in r.checks)]
+        if not rows:
+            return None
+        return "\n".join(_req_text(r, []) for r in rows[:limit]) + (
+            f"\n- … {len(rows) - limit} more in `.guudflow/project/SPEC.md`"
+            if len(rows) > limit else "")
+
+    def checks_section(self, acceptance: Sequence[str]) -> str | None:
+        """"Checks this card closes": each `R#.#` line with how it is verified (D4)."""
+        from core.spec_adherence import CHECK_LINE
+        methods = self.check_methods()
+        how = {"unit": "a test you write and run; name the test file and test in evidence",
+               "visual": "a screenshot with the screenshot tool; give its path in evidence",
+               "perf": "a measurement you run; give the number in evidence",
+               "manual": "the owner checks it at acceptance; do not block on it"}
+        lines = []
+        for line in acceptance:
+            found = CHECK_LINE.match(line)
+            if found:
+                method = methods.get(found.group(1).upper(), "unit")
+                lines.append(f"- **{line.strip()}** → {how.get(method, how['unit'])}")
+        if not lines:
+            return None
+        return ("These acceptance lines close the session's requirements. Answer each one in "
+                "`acceptance` with its id kept exactly as written; the reviewer confirms each, "
+                "and accepting the session records it in the spec. The `close-a-check` skill "
+                "says how.\n" + "\n".join(lines))
+
     # ── review lines ────────────────────────────────────────────────────────
     def rule_lines(self, owner_type: str) -> list[str]:
         """One `rule-N: <text>` line per binding rule that applies to the card's owner."""
@@ -111,8 +204,14 @@ class SpecBrief:
                 if r.strength == "binding"]
 
     def reviewer_lines(self, owner_type: str) -> list[str]:
-        """Lines added to a card's review criteria: binding rules, then the mode's lines."""
-        return self.rule_lines(owner_type) + list(REVIEWER_LINES.get(self.start_mode or "", ()))
+        """Lines added to a card's review criteria: the stack, binding rules, then the mode's
+        lines (worker context plan B7)."""
+        stack = self.spec.stack
+        what = ", ".join(x for x in (stack.language, stack.framework) if x)
+        head = ([f"stack: the change is written in {what} and uses no other language, "
+                 f"framework or test runner"] if what else [])
+        return head + self.rule_lines(owner_type) + list(
+            REVIEWER_LINES.get(self.start_mode or "", ()))
 
     # ── sections ────────────────────────────────────────────────────────────
     def planner_section(self, items: Sequence[BacklogItem]) -> str | None:
@@ -126,9 +225,15 @@ class SpecBrief:
         if reqs:
             parts.append("Requirements these items serve:\n"
                          + "\n".join(_req_text(r, serving[r.id]) for r in reqs))
-        parts += self._shared(planner=True)
+        parts.append(GROUND_POINTER)
         if items:
             parts.append(KEEP_LINES + " The reviewer answers each of those lines.")
+        if not any(i.pending != "done" for i in items):
+            open_reqs = self.open_requirements()
+            if open_reqs:
+                parts.append("No backlog items were picked, so work towards these open "
+                             "requirements. Every card names the checks it serves in `serves`; "
+                             "GuudFlow adds their lines to the card:\n" + open_reqs)
         if self.start_mode:
             parts.append(PLANNER_TEXT[self.start_mode])
         return "\n\n".join(parts) if parts else None
@@ -150,7 +255,8 @@ class SpecBrief:
         if checks:
             parts.append("This card is for " + ", ".join(checks)
                          + ". Say in your summary how each one is met.")
-        parts += self._shared(role_type=owner_type or role_type)
+        if parts:
+            parts.append(GROUND_POINTER)
         if extra_lines:
             parts.append(
                 "Review checklist additions. Besides the card's acceptance items, answer each "

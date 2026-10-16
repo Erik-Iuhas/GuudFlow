@@ -6,7 +6,7 @@ from pathlib import Path
 
 from core.backlog import BacklogItem
 from core.harness.results import AcceptanceCheck, AgentResult, ItemVerdict, ReviewResult
-from core.harness.spec_brief import SpecBrief
+from core.harness.spec_brief import GROUND_POINTER, SpecBrief
 from core.harness.task_flow import TaskFlow
 from core.harness.tasks import PlannedTask, PlanResult
 from core.runner import AgentConfig
@@ -108,11 +108,14 @@ def test_planner_section(tmp_path: Path) -> None:
     sections = _sections(turn)
     text = sections["The spec"]
     assert "**R1** [feature, must]" in text and "R1.1: a saved recipe shows in the list" in text
-    assert "R2" not in text.split("Binding decisions")[0]      # R2 is not served by B1
-    assert "D1" in text and "SQLite" in text                    # binding decision
-    assert "D2" not in text                                     # not binding
-    assert RULE1 in text and RULE2 in text and PREF in text
-    assert "(preference)" in text
+    assert "R2" not in text                                     # R2 is not served by B1
+    # Decisions and rules moved to the rules file (worker context plan B3); the brief points.
+    assert "SQLite" not in text and GROUND_POINTER in text
+    ground = brief.ground_rules("*") or ""                      # the planner sees every rule
+    assert "D1" in ground and "SQLite" in ground                # binding decision
+    assert "D2" in ground.split("### Other decisions")[1]       # plain ones, as context
+    assert RULE1 in ground and RULE2 in ground and PREF in ground
+    assert "(preference)" in ground
     assert "Keep every `R#.#:` acceptance line of an item on the card that implements it, " \
            "word for word." in text
     assert PLANNER_TEXT["test_first"] in text
@@ -127,19 +130,28 @@ def test_planner_without_spec_or_mode_is_unchanged() -> None:
                                      "Your output: the task list"]
 
 
-def test_soft_coverage_warning(tmp_path: Path) -> None:
+def test_checks_no_card_carries_go_on_their_items_card(tmp_path: Path) -> None:
     seed_spec(tmp_path)
     posted: list = []
     flow, _ = _flow(SpecBrief.load(tmp_path, "p1", None), [_item()], posted)
     flow.plan_accepted(_plan(acceptance=[R11, OWN]))           # R1.2 is on no card
-    assert flow.board.planned                                   # the plan stands
-    notes = [p for p in posted if "spec coverage" in p[1]]
+    assert flow.board.planned
+    assert R12 in flow.board.card("T1").acceptance_criteria     # GuudFlow added it (plan D1)
+    notes = [p for p in posted if "spec checks added" in p[1]]
     assert len(notes) == 1 and notes[0][0] is SignalType.THINKING and "R1.2" in notes[0][1]
-    assert "R1.1" not in notes[0][1]
     posted.clear()
     flow2, _ = _flow(SpecBrief.load(tmp_path, "p1", None), [_item()], posted)
     flow2.plan_accepted(_plan())                                # all lines kept: quiet
-    assert not [p for p in posted if "spec coverage" in p[1]]
+    assert not [p for p in posted if "spec checks added" in p[1]]
+
+
+def test_served_checks_get_their_lines(tmp_path: Path) -> None:
+    seed_spec(tmp_path)
+    flow, _ = _flow(SpecBrief.load(tmp_path, "p1", None), [])
+    flow.plan_accepted(PlanResult(tasks=[PlannedTask(
+        id="T1", title="List saved recipes", owner_role="api", size="S", kind="code",
+        acceptance=["the list renders"], serves=["R1.1"])]))
+    assert flow.board.card("T1").acceptance_criteria == ["the list renders", R11]
 
 
 # ── card roles ──────────────────────────────────────────────────────────────
@@ -151,9 +163,11 @@ def test_builder_card_section(tmp_path: Path) -> None:
     assert turn is not None
     text = _sections(turn)["The spec"]
     assert "Requirements this card serves" in text and "**R1**" in text and R11 in text
-    assert "SQLite" in text and RULE1 in text
-    assert RULE2 not in text                                    # rule-2 is for testers only
-    assert f"(preference) {PREF}" in text
+    assert "SQLite" not in text and GROUND_POINTER in text
+    ground = SpecBrief.load(tmp_path, "p1", None).ground_rules("builder") or ""  # type: ignore[union-attr]
+    assert "SQLite" in ground and RULE1 in ground
+    assert RULE2 not in ground                                  # rule-2 is for testers only
+    assert f"(preference) {PREF}" in ground
     assert "Review checklist" not in text
 
 
@@ -178,8 +192,8 @@ def test_card_without_an_item_gets_decisions_and_rules_only(tmp_path: Path) -> N
         acceptance=["the cleanup is done"])]))
     turn = flow.begin_turn("api")
     assert turn is not None
-    text = _sections(turn)["The spec"]
-    assert "Requirements this card serves" not in text and RULE1 in text
+    assert "The spec" not in _sections(turn)                    # nothing card-specific
+    assert RULE1 in (SpecBrief.load(tmp_path, "p1", None).ground_rules("builder") or "")  # type: ignore[union-attr]
 
 
 # ── reviewer ────────────────────────────────────────────────────────────────
@@ -195,7 +209,7 @@ def test_reviewer_gets_rule_lines_and_must_answer_them(tmp_path: Path) -> None:
     assert f"- [ ] {rule1}" in text
     checklist = text.split("Review checklist additions")[1]
     assert "rule-2" not in checklist and "rule-3" not in checklist   # testers only / preference
-    assert "(preference) Prefer small functions" in text
+    assert "(preference) Prefer small functions" not in checklist     # preferences: rules file
     card_items = [ItemVerdict(item=i, met=True) for i in (R11, R12, OWN)]
 
     missing = ReviewResult(verdict="pass", task_id="T1", items=card_items)
@@ -263,8 +277,9 @@ def test_maintain_brings_two_default_rules_without_a_spec(tmp_path: Path) -> Non
     assert [d.id for d in DEFAULT_RULES["maintain"]] == ["rule-m1", "rule-m2"]
     flow, _ = _flow(brief, [BacklogItem(id="B1", title="Fix the crash")])
     sections = _sections(flow.begin_turn("planner"))           # type: ignore[arg-type]
-    assert "Make the smallest change that meets the item" in sections["The spec"]
-    assert "Every fix gets a regression test" in sections["The spec"]
+    ground = brief.ground_rules("*") or ""
+    assert "Make the smallest change that meets the item" in ground
+    assert "Every fix gets a regression test" in ground
     assert PLANNER_TEXT["maintain"] in sections["The spec"]
     flow.plan_accepted(PlanResult(tasks=[PlannedTask(
         id="T1", title="Fix the crash", owner_role="api", backlog_id="B1", size="S",
@@ -345,7 +360,8 @@ def test_cards_store_what_they_serve(tmp_path: Path) -> None:
     plan.tasks.append(PlannedTask(id="T2", title="Shared helper", owner_role="tester",
                                   size="S", kind="code", acceptance=[R12], supports=["T1"]))
     flow.plan_accepted(plan)
-    assert flow.board.card("T1").serves == ["R1"]                  # from its item
+    # T1 carries no check line of its own; GuudFlow puts its item's uncovered R1.1 on it.
+    assert flow.board.card("T1").serves == ["R1.1"]
     assert flow.board.card("T2").serves == ["R1.2"]
     assert flow.board.card("T2").supports == ["T1"]
     flow.board.blocked("T1", "tester", "the fixture loader is missing")
@@ -360,4 +376,33 @@ def test_card_brief_names_the_checks_it_is_for(tmp_path: Path) -> None:
     turn = flow.begin_turn("api")
     assert turn is not None
     text = _sections(turn)["The spec"]
-    assert "This card is for R1.1." in text and "**R1**" in text
+    assert "This card is for R1.1, R1.2." in text and "**R1**" in text
+    checks = _sections(turn)["Checks this card closes"]
+    assert "R1.1" in checks and "R1.2" in checks and "name the test file" in checks
+
+
+def test_unit_checks_need_test_evidence(tmp_path: Path) -> None:
+    seed_spec(tmp_path)
+    flow, _ = _flow(SpecBrief.load(tmp_path, "p1", None), [_item()])
+    flow.plan_accepted(_plan())
+    turn = flow.begin_turn("api")
+    assert turn is not None and turn.check is not None
+    vague = AgentResult(status="done", task_id="T1", summary="Implemented the saving flow.",
+                        acceptance=[AcceptanceCheck(item=i, met=True, evidence="it works fine now")
+                                    for i in (R11, R12, OWN)])
+    problems = turn.check(vague)
+    assert any("'R1.1' is a unit check" in p for p in problems)
+    proved = AgentResult(status="done", task_id="T1", summary="Implemented the saving flow.",
+                         acceptance=[AcceptanceCheck(item=i, met=True,
+                                                     evidence="tests/test_save.py::test_saved passed")
+                                     for i in (R11, R12, OWN)])
+    assert turn.check(proved) == []
+
+
+def test_goal_only_session_shows_open_requirements(tmp_path: Path) -> None:
+    seed_spec(tmp_path)
+    flow, _ = _flow(SpecBrief.load(tmp_path, "p1", None), [])
+    turn = flow.begin_turn("planner")
+    assert turn is not None
+    text = _sections(turn)["The spec"]
+    assert "work towards these open requirements" in text and "**R1**" in text

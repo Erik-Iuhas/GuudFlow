@@ -165,6 +165,9 @@ def team_problems(agents: list[dict[str, Any]],  # Any: agent rows
     if not planners:
         return problems
     planner = planners[0]
+    if types[planner] not in ("planner", "architect"):
+        problems.append(f"{planner} plans the sessions but its role_type is {types[planner]}; "
+                        f"keep it architect (tech lead) or planner so it writes the cards")
     deps = {str(a["role"]): set(a.get("depends_on") or []) for a in rows}
 
     def after_planner(role: str, seen: frozenset[str] = frozenset()) -> bool:

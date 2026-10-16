@@ -97,6 +97,29 @@ function HandoffBody({ data }: { data: Record<string, unknown> | undefined }) {
  * Why a card exists (plan §12): requirement → check → backlog item → card, with the spec's
  * words; or the cards it supports; or a plain note that it is not linked.
  */
+type CheckState = "open" | "claimed" | "unmet" | "met";
+const STATE_LABEL: Record<CheckState, string> = { open: "open", claimed: "claimed met", unmet: "not met", met: "met" };
+const STATE_TONE: Record<CheckState, string> = {
+  open: "bg-muted text-muted-foreground",
+  claimed: "bg-status-waiting/15 text-status-waiting",
+  unmet: "bg-status-failed/15 text-status-failed",
+  met: "bg-status-complete/15 text-status-complete",
+};
+
+/** Where a spec check stands on this card (worker context plan D6): met once the card's review
+ * passed, not met when the latest review flagged it, claimed when the worker said it was met. */
+export function checkState(card: CardView, id: string): CheckState {
+  if (card.column === "done") return "met";
+  const thread = card.thread ?? [];
+  const starts = (t: string) => t.replace(/^[✓✗]\s*/, "").toUpperCase().startsWith(`${id.toUpperCase()}:`);
+  for (let i = thread.length - 1; i >= 0; i -= 1) {
+    const e = thread[i];
+    if (e.kind === "review_issue" && starts(e.text)) return "unmet";
+    if (e.kind === "note" && starts(e.text)) return e.text.startsWith("✓") ? "claimed" : "unmet";
+  }
+  return "open";
+}
+
 export function WhyThisCard({ card, spec }: { card: CardView; spec?: SpecWire }) {
   const reqs = servedRequirements(card);
   const checks = (card.serves ?? []).filter((s) => s.includes("."));
@@ -124,12 +147,16 @@ export function WhyThisCard({ card, spec }: { card: CardView; spec?: SpecWire })
                 <span aria-hidden className="text-muted-foreground">→</span>
                 <span className={cn(chip, "border-border")}>{card.id}</span>
               </p>
-              {mine.map((c) => (
-                <p key={c} className="m-0 pl-2 text-xs text-muted-foreground">
-                  <span className="mr-1.5 font-mono text-foreground">{c}</span>
-                  {checkText(c) ?? ""}
-                </p>
-              ))}
+              {mine.map((c) => {
+                const state = checkState(card, c);
+                return (
+                  <p key={c} className="m-0 pl-2 text-xs text-muted-foreground" data-testid={`check-${c}`}>
+                    <span className="mr-1.5 font-mono text-foreground">{c}</span>
+                    {checkText(c) ?? ""}
+                    <span className={cn("ml-1.5 rounded px-1 text-[10px]", STATE_TONE[state])}>{STATE_LABEL[state]}</span>
+                  </p>
+                );
+              })}
               {!mine.length && <p className="m-0 pl-2 text-xs text-muted-foreground">Works towards the whole requirement.</p>}
             </div>
           );

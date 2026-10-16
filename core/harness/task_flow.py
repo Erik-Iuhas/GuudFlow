@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Sequence
+import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -30,7 +31,7 @@ from core.design import Design, DesignDrafts, DesignError, render_for_brief as d
 from core.harness.handoff import HostFacts, render_handoffs, select_handoffs, thread_data
 from core.harness.result_inbox import ResultCheck
 from core.harness.results import AgentResult, ReviewResult
-from core.harness.spec_brief import SpecBrief, missing_check_lines
+from core.harness.spec_brief import SpecBrief
 from core.harness.task_board import BoardLimits, TaskBoard
 from core.harness.tasks import PlanResult, check_link_problems, check_plan, check_task_result
 from core.harness import visual_review
@@ -204,6 +205,8 @@ class TaskFlow:
     # ── turns ─────────────────────────────────────────────────────────────
     def begin_turn(self, role: str) -> TurnPlan | None:
         """Plan one spawn. None → not task-driven (use role mode)."""
+        if role == self.planner and self.board.planned:
+            return self._answer_turn()
         if role == self.planner:
             owners = self.owners()
             # Items a continued run already finished need no card (flow hardening §5).
@@ -275,13 +278,97 @@ class TaskFlow:
         criteria, owner = self.board.split_checks(card)
         self_check = ("\n\n" + visual_review.self_check_text(card)
                       if card.kind == "visual" and self.tool_dir_for is not None else "")
+        checks = (self.spec.checks_section(criteria) if self.spec is not None else None)
+        methods = self.spec.check_methods() if self.spec is not None else {}
         return TurnPlan(
             model=AgentResult, card_id=card.task_id, effort=self._item_effort(card),
-            extra_sections=self._card_spec(role, card)[0] + self._card_design(card)[0]
+            extra_sections=((("Checks this card closes", checks),) if checks else ())
+            + self._card_spec(role, card)[0] + self._card_design(card)[0]
             + self._card_knowledge(card) + self._handoff_section(role, card.task_id),
             task_text=self.board.brief_for(card.task_id) + self_check,
-            check=lambda r, tid=card.task_id: (_check_done(r, tid, criteria, owner)
+            check=lambda r, tid=card.task_id: ((_check_done(r, tid, criteria, owner)
+                                                + _check_evidence(r, methods))
                                                if isinstance(r, AgentResult) else []))
+
+    # ── the planner after planning (worker context plan C3) ─────────────────
+    def waiting_on_planner(self) -> list["Task"]:
+        """Open unblock cards the planner owns: the questions cards are blocked on."""
+        return [c for c in self.board.cards(self.planner)
+                if c.column not in ("done", "cancelled")]
+
+    def _answer_turn(self) -> TurnPlan:
+        """A planner turn once the session is planned: answer the cards waiting on it by
+        changing cards, never by re-planning the session."""
+        waiting = self.waiting_on_planner()
+        if not waiting:
+            return TurnPlan(model=PlanResult, skip=True)
+        lines: list[str] = []
+        for unblock in waiting:
+            for tid in unblock.supports or []:
+                try:
+                    blocked = self.board.card(tid)
+                except KeyError:
+                    continue
+                lines.append(f"- **{tid} {blocked.title}** ({blocked.assigned_to}) waits on you "
+                             f"for: {'; '.join(unblock.acceptance_criteria)}")
+                lines += [f"    - [ ] {a}" for a in blocked.acceptance_criteria]
+        owners = self.owners()
+        text = (
+            "The session is already planned. These cards are blocked on you:\n" + "\n".join(lines)
+            + "\n\nAnswer them by changing cards, not by re-planning: decide each open question "
+              "in `notes` (it is posted on the waiting cards), and add a card in `tasks` only for "
+              "missing work (ids T1, T2, … in your answer; GuudFlow renumbers them; `supports` names the "
+              f"waiting card it is for, and `owner_role` is one of: {', '.join(owners)}). Leave `tasks` empty when a "
+              "decision is enough. The waiting cards go on when you submit.")
+        return TurnPlan(
+            model=PlanResult, extra_sections=(("Cards waiting on you", text),),
+            check=lambda r: ((check_plan(_without_board_supports(r), owners, [],
+                                         require_tasks=False)
+                              + [f"{t.id}: supports '{x}', which is not a card on the board"
+                                 for t in r.tasks for x in t.supports
+                                 if x not in self.workspace.tasks]
+                              + ([] if r.notes.strip() or r.tasks else
+                                 ["notes: say what the waiting cards should do (at least one "
+                                  "decision), or add the missing cards in `tasks`"]))
+                             if isinstance(r, PlanResult) else []))
+
+    def answer_accepted(self, plan: PlanResult) -> list[str]:
+        """Apply a planner's answer: new cards (renumbered), its notes on the waiting cards, and
+        the unblock cards settled so the waiting cards go on. Returns the new card ids."""
+        waiting = self.waiting_on_planner()
+        if self.spec is not None:
+            plan, _ = self.spec.with_check_lines(plan, [])
+        ids: dict[str, str] = {}
+        created: list[str] = []
+        for t in plan.tasks:
+            card = self.board.add_card(
+                owner=t.owner_role, title=t.title, acceptance=list(t.acceptance),
+                created_by=self.planner, kind=t.kind, size=t.size,
+                files_hint=list(t.files_hint), serves=list(t.serves), supports=list(t.supports))
+            ids[t.id] = card.task_id
+            created.append(card.task_id)
+        for t in plan.tasks:
+            card = self.board.card(ids[t.id])
+            card.depends_on = [ids.get(d, d) for d in t.depends_on]
+            for tid in t.supports:          # a new card a waiting card needs: it waits on it
+                try:
+                    waiting_card = self.board.card(tid)
+                except KeyError:
+                    continue
+                if card.task_id not in waiting_card.depends_on:
+                    waiting_card.depends_on.append(card.task_id)
+        for unblock in waiting:
+            for tid in unblock.supports or []:
+                if plan.notes.strip():
+                    self.board.note(tid, "decision", self.planner, plan.notes.strip())
+                try:
+                    self.board.reopen(tid, f"{self.planner} answered: "
+                                      + (plan.notes.strip()[:200] or "see the new cards"))
+                except KeyError:
+                    continue
+        if created:
+            self.scheduler().max_iterations += len(created) * 2
+        return created
 
     def _item_effort(self, card: "Task") -> str | None:
         """The effort the card's backlog item asks for, if any."""
@@ -443,6 +530,9 @@ class TaskFlow:
     def plan_accepted(self, plan: PlanResult) -> None:
         """Apply (or draft) the plan's design changes, pass its feasibility notes to the
         product manager, then create the cards and give card roles enough spawns."""
+        attached: list[str] = []
+        if self.spec is not None:
+            plan, attached = self.spec.with_check_lines(plan, self.backlog)
         created = self._apply_design(plan)
         self._spec_notes(plan)
         self._knowledge_notes(plan)
@@ -453,14 +543,11 @@ class TaskFlow:
                 for t in plan.tasks]})
         self.board.create_from_plan(plan, self.planner, self._item_serves(),
                                     self._component_paths())
-        if self.spec is not None:
-            missing = missing_check_lines(self.backlog, [t.acceptance for t in plan.tasks])
-            if missing:
-                # Soft: the plan stands. There is no warning signal type, so a THINKING
-                # notice from the planner carries it.
-                self.post(SignalType.THINKING, self.planner,
-                          f"spec coverage warning: {', '.join(missing)} on no card",
-                          json.dumps({"warning": "spec_coverage", "checks": missing}))
+        if attached:
+            # Coverage is GuudFlow's job, not the model's (worker context plan D1, D2).
+            self.post(SignalType.THINKING, self.planner,
+                      f"spec checks added to their item's card: {', '.join(attached)}",
+                      json.dumps({"notice": "spec_coverage", "checks": attached}))
         per_role: dict[str, int] = {}
         for t in plan.tasks:
             per_role[t.owner_role] = per_role.get(t.owner_role, 0) + 1
@@ -632,6 +719,9 @@ class TaskFlow:
         self.post(SignalType.BLOCKED, role, f"{role} is blocked on {on_role} ({card_id})",
                   json.dumps({"task_id": card_id, "on": on_role, "need": need,
                               "unblock_card": unblock.task_id}))
+        if on_role == self.planner:
+            # The tech lead answers by changing cards (worker context plan C3).
+            self.scheduler().rearm(self.planner)
 
     # ── visual review (§5.10, O24) ────────────────────────────────────────
     def _visual_precheck(self, role: str, card_id: str) -> bool:
@@ -741,6 +831,26 @@ def _check_done(result: AgentResult, task_id: str, criteria: list[str],
     return check_task_result(result, task_id, criteria, owner)
 
 
+_TEST_EVIDENCE = re.compile(r"test|spec\b|pytest|vitest|jest|bun\b", re.IGNORECASE)
+
+
+def _check_evidence(result: AgentResult, methods: Mapping[str, str]) -> list[str]:
+    """A spec check verified by a test needs evidence that names the test (plan D4)."""
+    from core.spec_adherence import CHECK_LINE
+    if result.status != "done":
+        return []
+    problems: list[str] = []
+    for entry in result.acceptance:
+        found = CHECK_LINE.match(entry.item)
+        if not found or not entry.met:
+            continue
+        if methods.get(found.group(1).upper(), "unit") == "unit" \
+                and not _TEST_EVIDENCE.search(entry.evidence):
+            problems.append(f"acceptance: '{found.group(1).upper()}' is a unit check; its "
+                            f"evidence must name the test that proves it and say it passed")
+    return problems
+
+
 def backlog_text(items: Sequence["BacklogItem"]) -> str:
     """The run's backlog items as a brief section (plan §13)."""
     return ("This project is ongoing work; this run takes these items from its backlog. "
@@ -802,6 +912,13 @@ def design_instructions(recovering: bool) -> str:
         "Every design change names its reason in `design.groups` (summary, because, evidence). "
         "Your changes apply when the plan is accepted (or, when a person holds the Lead seat, "
         "wait for their approval while the cards already follow them).")
+
+
+def _without_board_supports(plan: PlanResult) -> PlanResult:
+    """An answer turn's `supports` name cards on the board, not cards of the answer: leave them
+    out of the plan check (they are checked against the board instead)."""
+    return plan.model_copy(update={"tasks": [t.model_copy(update={"supports": []})
+                                             for t in plan.tasks]})
 
 
 def _planner_instructions(owners: list[str]) -> str:

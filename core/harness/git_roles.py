@@ -43,6 +43,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -137,6 +138,9 @@ class RoleClones:
     def __init__(self, main: GitWorkspace, clones_root: Path) -> None:
         self.main = main
         self.root = Path(clones_root)
+        # Extra merge checks: (role, changed paths) -> a problem, or None to pass. The runner
+        # adds the stack check here (worker context plan B6).
+        self.file_checks: list[Callable[[str, list[str]], str | None]] = []
 
     def branch(self, role: str) -> str:
         """The role's branch name."""
@@ -427,6 +431,12 @@ class RoleClones:
         if secrets:
             return CollectResult(merged=False, new_commits=new_commits, changed_files=changed,
                                  problem=f"possible secrets committed: {', '.join(secrets)}")
+        present = [p for p in changed if (work / p).exists()]
+        for check in self.file_checks:
+            found = check(role, present)
+            if found:
+                return CollectResult(merged=False, new_commits=new_commits,
+                                     changed_files=changed, problem=found)
         if self.main.emit is not None:
             subject = repo.git.log("-1", "--format=%s", branch)
             self.main.emit(SignalType.GIT_COMMIT,

@@ -36,6 +36,7 @@ from pydantic import BaseModel
 from core.contracts import Contract, ContractError, contracts_for_team, load_for_project, load_library, render_for_brief
 from core.crew import Member, crew_names, label as crew_label, resolve_recipient, team_section
 from core.harness.brief_log import BriefLog
+from core.harness.stack_check import outside_stack, problem_text
 from core.harness.brief import (
     CONFLICT_HOWTO as _CONFLICT_HOWTO,
     BriefInputs,
@@ -301,6 +302,8 @@ class OpencodeRun:
         """Run every role through the scheduler and tear everything down after."""
         self.mode = await self._resolve_mode()
         self._started = time.time()
+        self.clones.file_checks.append(self._stack_merge_check)
+        self.clones.file_checks.append(self._planner_merge_check)
         if self.tool_ctx.deps is not None:
             from core.deps import SANDBOX_MOUNT
             self.tool_ctx.deps.root.mkdir(parents=True, exist_ok=True)
@@ -954,7 +957,8 @@ class OpencodeRun:
         commands = list((facts or {}).get("commands") or [])
         planner = self.flow is not None and name == self.flow.planner
         rtype = self._rules_role_type(name)
-        ground = spec.ground_rules(role.role_type, design_decisions=(design.decisions()
+        ground = spec.ground_rules("*" if planner else role.role_type,
+                                   design_decisions=(design.decisions()
                                    if design is not None else ())) if spec else None
         tool_dir = self.clones.tool_dir(name)
         if not role.skills:
@@ -973,6 +977,36 @@ class OpencodeRun:
             design_text=design_brief(design) if design is not None else None,
             cards=self._card_rows()))
         role.rules_files = {"guudflow.md": text}
+
+    def _outside_stack(self, role: str) -> list[str]:
+        """Files in the role's unmerged work that are outside the stack (plan B6)."""
+        spec = self._spec_brief()
+        if spec is None or spec.spec.stack.empty:
+            return []
+        try:
+            changes = self.clones.working_changes(role)
+        except Exception as e:  # noqa: BLE001 — the merge check still runs on collect
+            log.warning("%s: changes unreadable for the stack check: %s", role, e)
+            return []
+        return outside_stack(spec.spec.stack,
+                             [f.path for f in changes.files if f.status != "D"])
+
+    def _stack_merge_check(self, role: str, files: list[str]) -> str | None:
+        """The merge gate: refuse files outside the stack (registered on the role clones)."""
+        spec = self._spec_brief()
+        if spec is None or spec.spec.stack.empty:
+            return None
+        stray = outside_stack(spec.spec.stack, files)
+        return problem_text(spec.spec.stack, stray) if stray else None
+
+    def _planner_merge_check(self, role: str, files: list[str]) -> str | None:
+        """The tech lead writes cards, not code (worker context plan C2): its branch may only
+        change docs and markdown; anything else is set aside with the reason."""
+        if self.flow is None or role != self.flow.planner:
+            return None
+        code = [f for f in files if not (f.startswith("docs/") or f.endswith(".md"))]
+        return (f"the tech lead writes cards, not code: {', '.join(code)} must be built by a "
+                f"card's owner (add a card for it instead)") if code else None
 
     def _person_agents_md(self) -> str | None:
         """A person-written `AGENTS.md` on the run's main (agents cannot change it, and
@@ -1215,6 +1249,20 @@ class OpencodeRun:
             _merge_stats(stats, more)
             return self.inbox.take(self.run_id, role_name)
 
+        if isinstance(result, AgentResult) and result.status == "done":
+            stray = self._outside_stack(role_name)
+            if stray:
+                # One follow-up in the same session: the work stays, the stray files go.
+                stack = self._spec_brief().spec.stack  # type: ignore[union-attr]
+                more = await drive_turn(
+                    client, session["id"],
+                    f"Before this can merge: {problem_text(stack, stray)} Then call "
+                    "`guudflow_submit_result` again.",
+                    agent=role_name, on_event=on_event, on_permission=on_permission,
+                    timeout=self.settings.followup_timeout,
+                    variant=self._turn_variant(role, plan))
+                _merge_stats(stats, more)
+                result = self.inbox.take(self.run_id, role_name) or result
         if isinstance(result, AgentResult) and stats.missing_programs:
             result, unverified = unverified_claims(result, stats.missing_programs)
             if unverified:
@@ -1304,7 +1352,12 @@ class OpencodeRun:
         if isinstance(result, AgentResult) and result.status == "failed":
             self._post(SignalType.FAILED, name, f"{name} reported failure", result.summary)
             raise TurnFailed(f"{name}: {result.summary}")
-        if isinstance(result, PlanResult) and self.flow is not None:
+        if isinstance(result, PlanResult) and self.flow is not None and self.flow.board.planned:
+            added = self.flow.answer_accepted(result)
+            summary = (f"answered the cards waiting on it"
+                       + (f"; added {', '.join(added)}" if added else "")
+                       + (f". {result.notes}" if result.notes else "")).strip()
+        elif isinstance(result, PlanResult) and self.flow is not None:
             self.flow.plan_accepted(result)
             summary = f"planned {len(result.tasks)} card(s). {result.notes}".strip()
         self.workspace.completed_agents.append(name)

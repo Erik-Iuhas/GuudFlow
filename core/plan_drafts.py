@@ -766,7 +766,21 @@ def _validate_team(turn: PlanTurn, team: list[dict[str, Any]]) -> list[str]:  # 
                 if isinstance(ch, (AddRole, EditRole, RemoveRole))]
     if not numbered:
         return []
-    problems: list[str] = []
+    problems_removed: list[str] = []
+    builders = {"builder", "frontend_builder", "tester"}
+    for n, ch in numbered:
+        if isinstance(ch, RemoveRole):
+            row = next((a for a in team if a.get("role") == ch.role), None)
+            if row is not None and str(row.get("role_type")) in ("planner", "architect") \
+                    and any(str(a.get("role_type")) in builders for a in team
+                            if a.get("role") != ch.role) \
+                    and not any(isinstance(c, (AddRole, EditRole)) and
+                                getattr(c, "role_type", None) in ("planner", "architect")
+                                for _, c in numbered):
+                problems_removed.append(
+                    f"change {n} ({ch.op}): {ch.role} writes the session's cards; the builders "
+                    f"would get none. Keep it, or add another tech lead in the same draft")
+    problems: list[str] = list(problems_removed)
     final: dict[str, dict[str, Any]] = {  # Any: role_type str + two str lists
         str(a["role"]): {"role_type": str(a.get("role_type") or ""),
                          "depends_on": list(a.get("depends_on") or []),
