@@ -132,10 +132,34 @@ A team with no planner (no task board) gets no spec sections (known gap,
   again, so the message never arrives. There is no way to wake one worker.
 - **S4. The Overseer tab has no wake button.** It is only in the bar under the graph
   (`OverseerBar.tsx`).
+- **S5. Stopping a run asks a question nobody can answer.** *Stop* is implemented as a
+  `HUMAN_NEEDED` from `system` ("Run stopped by user", `api/routes/runs.py:1093`), because that
+  is what blocks new spawns. Studio shows it as the "needs you" banner with an answer box, and
+  the comment box stays (a test asserts it shows "in every run state"). The run has stopped, so
+  nothing can read either.
+
+### F11. Workers cannot look the spec up
+
+A worker sees only the requirements of its own card ("Requirements this card serves"), and only
+the design elements its card names. Its tools are submit, changes, history, notes, notebook and
+the board. None of them reads the spec, the design or the other cards.
+
+`SPEC.md` is in the repo only when the record setting keeps it there, and then only as of the
+last accept. So a worker that wonders "what else does R3 say?" or "which card owns the level
+loader?" has nowhere to look, and either guesses or greps the code for it.
+
+### F12. The tech lead decides inside the run, when it is too late to steer
+
+The design and the session's cards are made in the tech lead's first turn, inside the running
+session. By the time a person sees an assumption (a stack, a file layout, a split of the work),
+builders are already working on it, and stopping costs the session.
+
+`TEAM_AND_DESIGN_THIN_PLAN.md` §2 (D1–D5) planned a designer conversation before the run. It is
+not built, and it stops at the design: the cards are still planned in the run.
 
 ## 2. Work packages
 
-They are in order. A comes first so every later fix can be checked against what workers were
+They are in order (G, H and I can run alongside B–E). A comes first so every later fix can be checked against what workers were
 really told. R comes next because it decides where B, C, D and E put their text.
 
 ### A. Record what every worker was told
@@ -386,6 +410,84 @@ standing facts become rules, know-how becomes skills, and the brief keeps only t
    reason, using `POST /runs/{id}/overseer/wake`. When the run has no overseer, the tab says why,
    as the bar does.
 
+### G. The spec within reach (F11)
+
+1. **Project files at every spawn.** The runner writes a read-only folder in the role's tool
+   directory, `.guudflow/project/`, rendered from the store at that moment:
+   - `SPEC.md`: every active requirement with its checks and their states, the decisions and the
+     rules;
+   - `DESIGN.md`: components, interfaces, technical decisions;
+   - `CARDS.md`: this session's cards, their owners, columns, the checks they close and what
+     they wait on;
+   - `STACK.md`: the stack.
+
+   The rules file (R2) says where they are, in one line: "the requirements are in
+   `.guudflow/project/SPEC.md`". Reading a file costs one tool call and needs no new permission.
+2. **One lookup tool.** `guudflow_spec(id_or_text)` returns one requirement, check, decision,
+   rule or card by id, or the few that match a phrase. Small models answer "what does R3.2 say"
+   in one call instead of reading the whole file.
+3. **Every worker, every mode.** Builders, testers, reviewers, the tech lead and plain-roles
+   teams all get G1. The A4 contract test checks that the files exist and match the store.
+
+### H. The tech lead before the run (F12)
+
+The tech lead becomes a preflight: the design, the session's cards and the assumptions are
+settled with a person before a session starts. The session then executes an approved plan.
+
+1. **"Prepare the session" on the Work tab.** Pick the items (or the goal), then **Prepare**.
+   It builds D1–D2 of `TEAM_AND_DESIGN_THIN_PLAN.md` §2 and goes further. A host-side turn of
+   the tech lead (the `tech_lead` contract, the same repair loop as Jack) returns three things:
+   - design changes, as a design draft;
+   - the session's cards, as a **session plan draft**: the same `PlanResult` the in-run planner
+     returns, validated by the same `check_plan`, with the check lines GuudFlow adds (D1);
+   - its **assumptions and questions**, each marked *I decided* or *the owner decides*.
+
+   The tech lead reads the repo, the spec and the knowledge base, as in a run, through the
+   project files of G1.
+2. **Work on it in the Design tab.** Next to the design view:
+   - a conversation with the tech lead, as with Jack ("use one module per level", "split T3");
+   - the session plan as editable cards (the inline editor of F2);
+   - the assumptions list, each answerable.
+
+   A person edits, adds or removes cards and design elements, and approves. Every turn and edit
+   is recorded with its cost, as planning spend.
+3. **Start runs the approved plan.** A session started from an approved plan skips the
+   planner's first turn: the runner creates the cards from the plan, and the tech lead in the
+   run only answers blocked cards (C3).
+
+   *Start* warns when the spec, the design or `main` changed since the plan was approved, and
+   offers **Refresh the plan** (a cheap repair turn) or **Start anyway**.
+4. **Open owner questions block Start.** An assumption marked *the owner decides* must be
+   answered first. Its answer becomes a decision or a rule (B2), so it reaches every worker.
+5. **Without a preflight: a plan checkpoint.** A project setting, *Review the plan before work
+   starts*, which is on when no preflight plan exists. After the in-run planner's turn, the
+   session pauses before any card starts.
+
+   Studio shows the cards, the design changes and the assumptions with **Approve**, **Edit** and
+   **Send back**. It is a normal pause (no spawns, nothing lost), so a wrong assumption costs
+   one planner turn, not a session.
+6. **Same contract, same rules.** The preflight and in-run tech lead use the same rules file and
+   `write-cards` skill (R), so a plan made before the run and one made in it look the same.
+
+### I. Stopping is not a question (S5)
+
+1. **Stop gets its own state.** *Stop* sets a stop flag that blocks new spawns (the scheduler
+   checks it like `pending_human`) and posts `STOP_REQUESTED`, then `RUN_STOPPED` with the open
+   cards (`core/harness/run_stop.py`). It never posts `HUMAN_NEEDED`.
+
+   A run stopped this way is *stopped*, not *waiting for you*.
+2. **Studio shows what you can do.** On a stopped or finished run, the comment box and answer
+   box are replaced by one line:
+   - "This session stopped at 14:02 with 3 cards open";
+   - **Continue with the open cards** and **Send to review** buttons;
+   - a message field that goes with *Continue* as the first thing every worker reads.
+
+   The banner says "Stopped by you", not "system needs you".
+3. **Old runs.** A board whose `HUMAN_NEEDED` came from `system` with "Run stopped by user"
+   renders as stopped too, so runs from before the fix read correctly.
+4. **The comment box rule.** The comment box stays visible *while the run is live* (the rule in
+   CLAUDE.md). The Studio test that asserts it in "every run state" is changed to live runs.
+
 ## 3. Tests and checks
 
 - **A4 brief contract test**, for every role and mode, as above, over the brief *and* the
@@ -399,7 +501,14 @@ standing facts become rules, know-how becomes skills, and the brief keeps only t
   - a pinged idle worker spawns once with the message (F3).
 - **Unit tests** for `applies_to` validation, `set_stack`, the "Where you are" renderer (caps,
   no files outside the worktree) and the reviewer diff cut-off.
-- **Vitest tests** for the chat send, inline card add, the worker message box and the wake button.
+- **Vitest tests** for the chat send, inline card add, the worker message box, the wake button,
+  and the stopped-run view (no answer box, Continue shown, old "system" boards rendered as
+  stopped).
+- **G**: a scripted worker answers "what does R3.2 say" with one `guudflow_spec` call, and the
+  project files match the store.
+- **H**: an approved preflight plan starts a session with no planner turn and exactly the
+  approved cards. An open owner question refuses Start. The checkpoint pauses before the first
+  card and resumes on Approve.
 - **The escape suite** for R2, R3, B2, B6 and E1, because they touch `core/harness/` and
   sandbox mounts.
 - **Owner run.** A real small-model session (Haiku or Mistral) on the pygame project. Expected:
