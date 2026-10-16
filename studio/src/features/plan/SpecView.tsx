@@ -3,7 +3,7 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/form-controls";
 import { cn } from "../../lib/utils";
-import type { ChangeWire, CheckState, ParamValue, RequirementWire, SpecWire } from "./api";
+import { STACK_FIELDS, type ChangeWire, type CheckState, type ParamValue, type RequirementWire, type SpecWire, type StackField, type StackWire } from "./api";
 import type { BacklogItemWire } from "../work/api";
 import { usePmName } from "../pm/api";
 import { MethodBadge } from "./DraftPanel";
@@ -52,6 +52,77 @@ export function assumptions(spec: SpecWire): Assumption[] {
         out.push({ reqId: r.id, title, key: p.key, value: `${String(p.value)}${p.unit ? ` ${p.unit}` : ""}`, raw: p.value });
   }
   return out;
+}
+
+/**
+ * What the project is built with (worker context plan B1). Workers see it in every turn and a
+ * change in another language is sent back; a field a person sets is pinned against the PM.
+ */
+function StackSection({ stack, onEdit }: { stack?: StackWire; onEdit?: (change: ChangeWire) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Partial<Record<StackField, string>>>({});
+  const pins = new Set(stack?.pinned_fields ?? []);
+  const set = STACK_FIELDS.filter(([k]) => stack?.[k]);
+  const start = () => {
+    setDraft(Object.fromEntries(STACK_FIELDS.map(([k]) => [k, stack?.[k] ?? ""])));
+    setEditing(true);
+  };
+  const save = () => {
+    const change: ChangeWire = { op: "set_stack", reason: "set by the owner" };
+    let changed = false;
+    for (const [k] of STACK_FIELDS) {
+      const v = (draft[k] ?? "").trim();
+      if (v !== (stack?.[k] ?? "")) {
+        change[k] = v;
+        changed = true;
+      }
+    }
+    if (changed) onEdit?.(change);
+    setEditing(false);
+  };
+  return (
+    <section aria-label="Stack" className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stack</h3>
+        {onEdit && !editing && (
+          <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={start}>
+            {set.length ? "Edit stack" : "Set the stack"}
+          </Button>
+        )}
+      </div>
+      {editing ? (
+        <form className="grid gap-2 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); save(); }}>
+          {STACK_FIELDS.map(([k, label]) => (
+            <label key={k} className="grid gap-1 text-xs">
+              {label}
+              <Input aria-label={label} className="h-7 text-xs" value={draft[k] ?? ""}
+                onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} />
+            </label>
+          ))}
+          <div className="flex gap-2 sm:col-span-2">
+            <Button size="sm" className="h-7 text-xs" type="submit">Save stack</Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs" type="button" onClick={() => setEditing(false)}>Cancel</Button>
+          </div>
+        </form>
+      ) : set.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Not set yet. Workers pick their own language and tools until it is.
+        </p>
+      ) : (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+          {set.map(([k, label]) => (
+            <div key={k} className="contents">
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd className="m-0">
+                {stack?.[k]}
+                {pins.has(k) && <Badge variant="outline" className="ml-2 text-[10px]">set by you</Badge>}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  );
 }
 
 function AssumptionRow({ a, onEdit }: { a: Assumption; onEdit?: (change: ChangeWire) => void }) {
@@ -208,6 +279,8 @@ export function SpecView({
           </ul>
         </section>
       )}
+
+      <StackSection stack={spec.stack} onEdit={onEdit} />
 
       <section aria-label="Requirements" className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">

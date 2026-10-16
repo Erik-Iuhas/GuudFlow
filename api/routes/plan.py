@@ -160,13 +160,14 @@ async def plan_preview(request: Request, project_id: str) -> dict[str, Any]:  # 
 # ── spec ────────────────────────────────────────────────────────────────────
 @router.get("/{project_id}/spec")
 async def get_spec(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
-    """The approved spec: `{version, requirements, decisions, rules}`."""
+    """The approved spec: `{version, requirements, decisions, rules, stack}`."""
     data_root, _ = await _project(request, project_id)
     spec = Spec(await asyncio.to_thread(PlanDrafts(data_root, project_id).db.read_spec_doc))
     return {"version": spec.version,
             "requirements": [r.to_dict() for r in spec.requirements],
             "decisions": [d.to_dict() for d in spec.decisions],
-            "rules": [r.to_dict() for r in spec.rules]}
+            "rules": [r.to_dict() for r in spec.rules],
+            "stack": spec.stack.to_dict()}
 
 
 @router.post("/{project_id}/spec/edit")

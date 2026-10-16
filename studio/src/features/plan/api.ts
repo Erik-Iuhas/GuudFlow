@@ -105,7 +105,26 @@ export interface SpecWire {
   requirements: RequirementWire[];
   decisions: DecisionWire[];
   rules: RuleWire[];
+  /** What the project is built with (worker context plan B1); fields a person set are pinned. */
+  stack?: StackWire;
 }
+
+export const STACK_FIELDS = [
+  ["language", "Language"],
+  ["framework", "Framework and libraries"],
+  ["package_manager", "Packages"],
+  ["test_command", "Test command"],
+  ["run_command", "Run command"],
+  ["source_dir", "Source folder"],
+  ["test_dir", "Test folder"],
+  ["notes", "Also"],
+] as const;
+export type StackField = (typeof STACK_FIELDS)[number][0];
+
+export type StackWire = Partial<Record<StackField, string>> & {
+  pinned_fields?: string[];
+  set_by?: string;
+};
 
 /** One proposed change; the fields depend on `op` (see core/plan_drafts.py). */
 export interface ChangeWire {
@@ -157,6 +176,14 @@ export interface ChangeWire {
   start_mode?: string;
   rule?: string;
   evidence_runs?: string[];
+  // set_stack (worker context plan B1); `notes` is above.
+  language?: string;
+  framework?: string;
+  package_manager?: string;
+  test_command?: string;
+  run_command?: string;
+  source_dir?: string;
+  test_dir?: string;
 }
 
 export interface DraftChangeWire {

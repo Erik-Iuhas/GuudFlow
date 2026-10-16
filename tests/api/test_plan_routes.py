@@ -50,7 +50,9 @@ async def test_unknown_project_is_404(client, auth_header) -> None:
 async def test_empty_spec_and_plan(client, auth_header) -> None:
     await _project(client, auth_header)
     spec = (await client.get("/api/projects/p1/spec", headers=auth_header)).json()
+    stack = spec.pop("stack")
     assert spec == {"version": 0, "requirements": [], "decisions": [], "rules": []}
+    assert stack["pinned_fields"] == [] and not stack["language"]
     plan = (await client.get("/api/projects/p1/plan", headers=auth_header)).json()
     assert plan == {"messages": [], "draft": None, "pm_spend": {
         "calls": 0, "total_usd": 0.0, "last_24h_usd": 0.0, "wasted_usd": 0.0}}
@@ -196,6 +198,19 @@ async def test_direct_edit(client, auth_header, app) -> None:
     spec = (await client.get("/api/projects/p1/spec", headers=auth_header)).json()
     assert spec["requirements"][0]["text"] == "Save a recipe with photos"
     assert spec["requirements"][0]["version"] == 2
+
+
+async def test_owner_sets_the_stack(client, auth_header) -> None:
+    """Worker context plan B1: the stack is in the spec and a person's fields are pinned."""
+    await _project(client, auth_header)
+    r = await client.post("/api/projects/p1/spec/edit", headers=auth_header, json={
+        "change": {"op": "set_stack", "language": "Python 3.12", "framework": "pygame",
+                   "reason": "set by the owner"}})
+    assert r.status_code == 200, r.text
+    stack = (await client.get("/api/projects/p1/spec", headers=auth_header)).json()["stack"]
+    assert stack["language"] == "Python 3.12" and stack["framework"] == "pygame"
+    assert sorted(stack["pinned_fields"]) == ["framework", "language"]
+    assert stack["set_by"] == "human"
 
 
 async def test_direct_edit_errors(client, auth_header) -> None:

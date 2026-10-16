@@ -261,6 +261,23 @@ describe("SpecView", () => {
     expect(screen.getByText("No new runtime deps")).toBeInTheDocument();
   });
 
+  it("shows the stack and sends only the changed fields as set_stack", async () => {
+    server.plan = { messages: [msg(1, "pm", "Hi")], draft: null };
+    server.handlers["GET /api/projects/p1/spec"] = () => ({
+      json: { ...spec, stack: { language: "Python 3.12", framework: "pygame", pinned_fields: ["language"] } },
+    });
+    server.handlers["POST /api/projects/p1/spec/edit"] = () => ({ json: { version: 4, applied: ["c1"], created: {} } });
+    renderTab();
+    const section = await screen.findByRole("region", { name: "Stack" });
+    expect(within(section).getByText("Python 3.12")).toBeInTheDocument();
+    expect(within(section).getByText("set by you")).toBeInTheDocument();
+    fireEvent.click(within(section).getByRole("button", { name: "Edit stack" }));
+    fireEvent.change(within(section).getByLabelText("Test command"), { target: { value: "pytest -q" } });
+    fireEvent.click(within(section).getByRole("button", { name: "Save stack" }));
+    await waitFor(() => expect(mutating()).toHaveLength(1));
+    expect(mutating()[0].body).toEqual({ change: { op: "set_stack", reason: "set by the owner", test_command: "pytest -q" } });
+  });
+
   it("can switch between the draft and the spec", async () => {
     server.plan = { messages: [msg(1, "pm", "Hi")], draft: draftOf([dc("c1", { op: "add_rule", text: "Be kind" })]) };
     renderTab();
