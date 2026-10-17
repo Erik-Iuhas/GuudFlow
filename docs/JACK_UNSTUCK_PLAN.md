@@ -7,8 +7,9 @@
 
 Today, when a session gets stuck, an operator steps in. They read the board, find the cause, and
 press the right Studio button or call the right route (`FIELD_NOTES.md` F1–F14). **That job is
-Jack's.** The owner should never need to know which route clears a pause or which card blocks
-which.
+Jack's, for everything outside the overseer's responsibility** (§2). The owner should never need
+to know which route clears a pause, why a start was refused, or what to do with a session that
+stopped.
 
 Jack works one loop, in the dock or the Plan tab:
 
@@ -33,17 +34,31 @@ Jack works one loop, in the dock or the Plan tab:
 - **During a run.** The board digest is the default context. Briefs, consoles, threads and diffs
   come through read tool calls when Jack needs them.
 
-## 2. How Jack differs from the overseer
+## 2. Jack does not do the overseer's job
 
-The **overseer** runs inside a session and is woken by the stall detectors. It acts at once
-through its fixed menu (rebrief, decide, reassign, split, extend review, restart role, pause),
-and it has no person to ask.
+Inside a running session the **overseer** owns getting work moving. Its stall detectors and its
+fixed menu cover:
 
-**Jack** works for the owner, across sessions, before and after them and while they run. He
-proposes; the owner presses. When an in-run fix is what is needed, Jack's button usually *asks the
-overseer*: "Wake the overseer: T3 waits on a finished role, decide it." The overseer stays the
-one actor inside a run. Jack also covers what the overseer cannot reach: setup, the team, the
-spec, environment problems, a stopped or crashed run, review, and money.
+- blocked chains and cards waiting on a finished role (F13);
+- cards in Needs attention, and repeated validation failures;
+- review loops and exhausted review rounds;
+- burn without output, permission thrash, card aging and escalations.
+
+It rebriefs, decides, reassigns, splits, extends review, restarts a role or pauses. **Jack does not
+diagnose, fix or second-guess any of that**, and he offers no competing action. Asked "why is T3
+stuck?" during a run, Jack reads the overseer's log and explains what it saw and did, or that it
+has not been woken yet.
+
+Jack steps in only where the overseer cannot:
+
+- **The overseer has handed the run to a person:** its wakes ran out, it failed, or it paused
+  (`HUMAN_NEEDED` from the overseer).
+- **A decision only the owner can make:** a worker's question to a person, the budget or the time
+  limit, a package outside the allow-list, a team change the overseer proposed, scope, or the plan
+  checkpoint.
+- **There is no overseer:** a plain-roles team. Jack proposes the team change that adds a planner.
+- **Everything outside a running session:** setup, starting, a session that stopped, ended stuck,
+  crashed or is waiting for review, the spec, the team, the environment, and money across sessions.
 
 ## 3. Where things get stuck, and what Jack does
 
@@ -74,21 +89,19 @@ real incidents.
 | **Planner produced no valid plan** (validation failures, `no_plan`) | the planner's turns and their rejections (read tool) | what the plan kept getting wrong; a note to the planner, or a spec fix if the spec caused it |
 | **Plan checkpoint waiting** | the planned cards against the items and checks | a one-line review ("covers B4, B5; R2.3 has no card") with Approve, or Send back with his note |
 
-### 3.3 During a session
+### 3.3 During a session: only what reaches the owner
+
+Work stalls inside a run are the overseer's (§2) and are not listed here.
 
 | Stuck state | Jack reads | Jack offers |
 |---|---|---|
-| **A worker asked a question** (`ask_human`; F11, F12) | the question, the worker's brief, the spec | an answer drafted from the spec, the board and the shell allow-list ("run `bun test` plain"), sent with one press; or "this is yours to decide" with the options |
-| **Card blocked on a finished role** (F13) | the blocked chain | Wake the overseer with the reason; or reopen the card, or make the answer a decision |
-| **Card in Needs attention** (validation failures, set-aside work) | the card thread, the last result, the console tail | the cause in one line ("summary too short", "touched `.github/`") and Retry with a note to the worker |
-| **Same review issue twice / review rounds exhausted** | both reviews, the diff | extend review, split the card, or reassign it, through the overseer or a card edit |
-| **Wrong stack in the work** (stack check refusals) | the refusal, the stack | confirm the stack (a decision) or relax it; message the worker |
-| **Burning money without output** (`burn_without_output`) | cost per role, the last turns | narrow the card, lower its effort, or stop that role |
+| **A worker asked you a question** (`ask_human`; F11, F12) | the question, the worker's brief, the spec | an answer drafted from the spec, the board and the shell allow-list ("run `bun test` plain"), sent with one press; or "this is yours to decide", with the options |
+| **The overseer handed the run to you** (wakes used up, it failed, or it paused) | the overseer's log, the open cards | what it tried and why it stopped, and the owner's options: answer, raise a limit, change scope, stop, or continue later with a note |
 | **Budget or time nearly out** (F5, F6) | spend, the cap, the cards left | raise the cap or extend the time (limits route) and say what that buys; or stop cleanly |
-| **Merge conflicts keep coming back** | git notes, files in the conflict | serialise the cards (`depends_on`), or give both to one worker |
-| **Spec changed mid-run** | the project update and who has been told | who still has to see it; message them now |
-| **Package request waiting** | the package, version, allow-list | approve once, add it to the allow-list, or reject with a reason |
-| **Paused for the overseer's cap** | the overseer's log | what it tried and why it stopped; the next action |
+| **Package outside the allow-list** | the package, its version, the allow-list | approve once, add it to the allow-list, or reject with a reason |
+| **The overseer proposed a team change** | the proposal, the team | a team-change draft for the next session → Approve now |
+| **Plan checkpoint** | see §3.2 | |
+| **No overseer on this team** | the team | a team-change draft adding a planner, for the next session |
 
 ### 3.4 After a session
 
@@ -143,11 +156,10 @@ maps to a route that already exists:
 
 | Action | Route |
 |---|---|
-| `message_worker(role, text, wake)` | `POST /runs/{id}/roles/{role}/message` |
-| `wake_overseer(reason)` | `POST /runs/{id}/overseer/wake` |
 | `answer(text)` | `POST /runs/{id}/respond` |
+| `message_worker(role, text)` | `POST /runs/{id}/roles/{role}/message`: only to pass on an owner decision the worker needs, never to steer work the overseer owns |
 | `plan_review(approve or send_back, note)` | `/runs/{id}/plan/approve`, `/plan/send-back` |
-| `edit_card` / `add_card` / `set_priority` | `/runs/{id}/cards…` |
+| `add_card` | `/runs/{id}/cards`: new work the owner asked for (scope), not a fix for a stalled card |
 | `limits(budget, minutes)` | `PATCH /runs/{id}/limits` |
 | `approve_package(id)` | `POST /runs/{id}/approval/{id}` |
 | `stop` | `POST /runs/{id}/stop` |
@@ -167,7 +179,7 @@ Every stuck surface gets an *Ask Jack* button that opens the dock with the conte
 set and a starter question filled in. Some examples:
 
 - the HUMAN_NEEDED banner: "Help me answer this";
-- the Needs attention column and the card drawer: "Why is this card stuck?";
+- the overseer's hand-off to a person: "What are my options?";
 - the stopped bar: "What should the next session do?";
 - a refused Start (team, spec, runtime, 409): "Fix this";
 - the budget warning: "Is it worth raising?";
@@ -200,11 +212,14 @@ Scripted Jack turns, where each scenario is a recorded board that must produce t
 and action:
 
 - F11, a denied pipe: answer with the allow-list;
-- F13, blocked on a finished role: wake the overseer with the reason;
+- the overseer out of wakes: explain what it tried, offer the owner's options, and propose no
+  card-level fix;
+- a card stalled inside a run, overseer awake: Jack explains the overseer's view and offers no
+  action;
 - a team with two planners: a team-change draft;
 - a stale preflight: refresh;
 - a budget at 85%: raise, with confirm;
 - a run ended stuck: continue with a note.
 
-Plus: no action runs without a press, no tool returns a secret, the digest stays under its cap, and
+Plus: no action runs without a press, Jack never offers an overseer-menu action, no tool returns a secret, the digest stays under its cap, and
 read tools stop at the per-turn budget.
