@@ -107,11 +107,9 @@ The dock is a full-screen sheet with a back arrow. Everything else is the same.
   on you (HUMAN_NEEDED, plan checkpoint), a session waiting for review, an unread Jack reply.
 - **J6 Project picker and new project** for pages outside a project.
 
-## Open questions
+## Decisions (2026-10-17)
 
-- **Discuss turns cost money too.** Should the dock default to a cheaper model for Ask mode, with
-  Change the plan on Jack's own model? (Today both use `pm_model`.)
-- **Should Approve now exist at all,** or should every change go through the Plan tab? It is
-  faster, but it skips seeing the whole draft.
-- **Jack in a live run:** answer only from the board, or also read the worker briefs (A1) to
-  explain what a worker was told? Briefs make the answers sharper and the prompts bigger.
+- Jack keeps his own model everywhere, including Ask mode.
+- Approve now in the dock stays (small drafts with one reason).
+- In a run Jack reads the board digest by default and fetches briefs, consoles and diffs with read
+  tools when needed. Jack's job of getting sessions unstuck: `JACK_UNSTUCK_PLAN.md`.
