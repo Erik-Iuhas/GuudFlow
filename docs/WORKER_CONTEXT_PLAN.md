@@ -532,12 +532,15 @@ settled with a person before a session starts. The session then executes an appr
 
   It needs an API key, so it is the owner's run.
 
-## 4. Open questions
+## 4. Open questions (answered 2026-10-17)
 
-- **Card adding.** "Making cards inside the app is awkward": the plan assumes the friction is the
-  modal and the missing check and dependency pickers. If it is something else (editing, moving,
-  where the button is), F2 changes.
-- **"Tech reviewer".** This plan reads it as the tech lead. If a separate reviewer role was meant
-  to write cards, C changes.
-- **Where "pygame" was said.** In the goal, in the chat with Jack, or in the spec? A1 shows it on
-  the next run. F1–F4 cover all three.
+- **Card adding.** The friction was elsewhere: work could only be added as a backlog item, an
+  item could not be given to a person or worker, and a comment went to everyone with no sign of
+  who had read it. Built: backlog items have an assignee (a role, which the planner must honour,
+  or the owner, which gets no card); the run's comment box has a To picker; `DELIVERED` signals
+  show who has each comment; mid-session spec and design changes post `PROJECT_UPDATED` and
+  open every worker's next brief with "What changed in the project".
+- **"Tech reviewer"** was the tech lead (package C as written).
+- **"pygame"** was added by Jack after the first draft, before the first run, so it was in the
+  spec but reached no worker (F1). Ground rules (B3) now carry every accepted decision. For the
+  stack check (B6) to apply, the spec's stack must say it: set it in the Spec tab.
