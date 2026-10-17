@@ -48,10 +48,12 @@ export interface RunRequest {
  * the cost-preview flow).
  */
 export function ProjectWork({
-  projectId, onStartRun, starting, seats,
+  projectId, onStartRun, starting, seats, roles = [],
 }: {
   projectId: string;
   seats?: ProjectSeats;
+  /** The team's roles, so backlog items can be assigned to one. */
+  roles?: readonly string[];
   onStartRun: (request: RunRequest) => void;
   starting?: boolean;
 }) {
@@ -167,6 +169,8 @@ export function ProjectWork({
             onDrop={(itemId) => patch.mutate({ itemId, patch: { status: "dropped" } })}
             onReopen={(itemId) => patch.mutate({ itemId, patch: { status: "open" } })}
             onEffort={(itemId, effort) => patch.mutate({ itemId, patch: { effort } })}
+            roles={roles}
+            onAssign={(itemId, assignee) => patch.mutate({ itemId, patch: { assignee } })}
             onAdd={(item) => add.mutate(item)}
             onStart={() => onStartRun({ backlog_items: chosen })}
             adding={add.isPending}

@@ -21,6 +21,8 @@ export interface BacklogItemWire {
   priority: number;
   /** How hard agents think on this item ("" or missing: the role's own effort). */
   effort?: "" | EffortLevel;
+  /** Who does it: a team role, "owner" (you, no card) or "" (the planner decides). */
+  assignee?: string;
   status: ItemStatus;
   notes: string;
   files_hint: string[];
@@ -165,9 +167,10 @@ export interface NewItem {
   effort?: "" | EffortLevel;
   depends_on?: string[];
   serves?: string[];
+  assignee?: string;
 }
 
-export type ItemPatch = Partial<Pick<BacklogItemWire, "title" | "acceptance" | "kind" | "size" | "priority" | "notes" | "effort">> & {
+export type ItemPatch = Partial<Pick<BacklogItemWire, "title" | "acceptance" | "kind" | "size" | "priority" | "notes" | "effort" | "assignee">> & {
   status?: "open" | "dropped";
 };
 

@@ -25,6 +25,7 @@ import { BudgetMeter } from "./BudgetMeter";
 import { HumanAnswerBox } from "./HumanAnswerBox";
 import { StoppedBar } from "./StoppedBar";
 import { PlanCheckpoint } from "./PlanCheckpoint";
+import { Deliveries } from "./Deliveries";
 import { WakeOverseer } from "../overseer/WakeOverseer";
 import { LimitsControl } from "./LimitsControl";
 import { ArtifactGallery } from "../artifacts/ArtifactGallery";
@@ -270,6 +271,8 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
   const connection =
     socket.status === "open" ? (live ? "live" : "finished") : socket.status === "error" ? "error" : socket.status;
 
+  // Workers a comment can reach (the overseer is told by the run, not by comments).
+  const workerRoles = useMemo(() => allSpecs.map((r) => r.role).filter((r) => !r.includes("overseer")), [allSpecs]);
   const overseerPresent = [...allSpecs.map((r) => r.role), ...Object.keys(names)].some((r) => r.includes("overseer"));
   const overseerActive = !stoppedAt && !["complete", "failed", "stuck", "stopped", "max_iterations"].includes(String(status));
   const sidePanel = (
@@ -471,7 +474,8 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
         </div>
         {live && !terminal && !stoppedAt ? (
           <div data-testid="comment-bar">
-            <CommentBox runId={runId} inputRef={commentRef} />
+            <CommentBox runId={runId} inputRef={commentRef} roles={workerRoles} names={names} />
+            <Deliveries workers={workerRoles} />
           </div>
         ) : (
           <StoppedBar runId={runId} projectId={meta?.project_id} finished={meta?.status === "complete"} />

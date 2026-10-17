@@ -242,7 +242,8 @@ export function Studio() {
       </Tabs>
 
       {tab === "work" ? (
-        id && <ProjectWork projectId={id} seats={project.seats} starting={starting} onStartRun={(r) => void runNow(false, r)} />
+        id && <ProjectWork projectId={id} seats={project.seats} starting={starting}
+          roles={(project.agents ?? []).map((a) => a.role).filter((r) => !r.includes("overseer"))} onStartRun={(r) => void runNow(false, r)} />
       ) : tab === "team" ? (
         <>
           <KindPanel project={project} onChange={setProject} />

@@ -25,6 +25,24 @@ export interface BacklogListProps {
   starting?: boolean;
   /** The lifecycle phase an open item waits on ("waits for design"), if any. */
   phaseLabel?: (itemId: string) => string | null;
+  /** The team's roles, to assign an item to one of them (or to yourself). */
+  roles?: readonly string[];
+  /** Change who an open item is for ("" = the planner decides). */
+  onAssign?: (itemId: string, assignee: string) => void;
+}
+
+function AssigneeSelect({ id, value, roles, onChange, label }: {
+  id?: string; value: string; roles: readonly string[]; onChange: (v: string) => void; label: string;
+}) {
+  return (
+    <Select id={id} aria-label={label} value={value} className="h-7 w-36 py-0 text-xs"
+      title="Who does it: a worker gets its cards; you do your own items yourself"
+      onChange={(e) => onChange(e.target.value)}>
+      <option value="">planner decides</option>
+      {roles.map((r) => <option key={r} value={r}>for {r}</option>)}
+      <option value="owner">for me (no card)</option>
+    </Select>
+  );
 }
 
 /**
@@ -33,6 +51,7 @@ export interface BacklogListProps {
  */
 export function BacklogList({
   items, selected, onToggle, onMove, onDrop, onReopen, onEffort, onAdd, onStart, adding, starting, phaseLabel,
+  roles = [], onAssign,
 }: BacklogListProps) {
   const groups = groupBacklog(items);
   return (
@@ -81,6 +100,10 @@ export function BacklogList({
                   }
                 >
                   {phaseLabel?.(item.id) && <Badge variant="outline">{phaseLabel(item.id)}</Badge>}
+                  {onAssign && (
+                    <AssigneeSelect label={`Who does ${item.id}`} value={item.assignee ?? ""} roles={roles}
+                      onChange={(v) => onAssign(item.id, v)} />
+                  )}
                   {onEffort && (
                     <Select aria-label={`Effort for ${item.id}`} value={item.effort ?? ""}
                       title="How hard agents think on this item; higher costs more"
@@ -103,7 +126,7 @@ export function BacklogList({
         )}
       </div>
 
-      <AddItemForm onAdd={onAdd} adding={adding} />
+      <AddItemForm onAdd={onAdd} adding={adding} roles={roles} />
 
       {(groups.done.length > 0 || groups.dropped.length > 0) && (
         <details>
@@ -145,6 +168,11 @@ function ItemRow({
           <Badge variant="outline">{item.kind}</Badge>
           <Badge variant="outline">size {item.size}</Badge>
           {item.effort && <Badge variant="outline" data-testid={`effort-${item.id}`}>{item.effort} effort</Badge>}
+          {item.assignee && (
+            <Badge variant="secondary" data-testid={`assignee-${item.id}`}>
+              {item.assignee === "owner" ? "yours" : `for ${item.assignee}`}
+            </Badge>
+          )}
           {item.depends_on.length > 0 && (
             <span className="text-xs text-muted-foreground">after {item.depends_on.join(", ")}</span>
           )}
@@ -208,7 +236,8 @@ function ItemRow({
   );
 }
 
-function AddItemForm({ onAdd, adding }: { onAdd: (item: NewItem) => void; adding?: boolean }) {
+function AddItemForm({ onAdd, adding, roles }: { onAdd: (item: NewItem) => void; adding?: boolean; roles: readonly string[] }) {
+  const [assignee, setAssignee] = useState("");
   const [title, setTitle] = useState("");
   const [acceptance, setAcceptance] = useState("");
   const [kind, setKind] = useState("code");
@@ -222,6 +251,7 @@ function AddItemForm({ onAdd, adding }: { onAdd: (item: NewItem) => void; adding
     const dependsOn = parseItemIds(after);
     onAdd({ title: title.trim(), acceptance: parseAcceptance(acceptance), kind, size,
       ...(effort ? { effort } : {}),
+      ...(assignee ? { assignee } : {}),
       ...(dependsOn.length ? { depends_on: dependsOn } : {}) });
     setTitle("");
     setAcceptance("");
@@ -260,6 +290,10 @@ function AddItemForm({ onAdd, adding }: { onAdd: (item: NewItem) => void; adding
             <option value="">team effort</option>
             {EFFORT_LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
           </Select>
+        </div>
+        <div>
+          <Label htmlFor="backlog-assignee">Who does it</Label>
+          <AssigneeSelect id="backlog-assignee" label="Who does it" value={assignee} roles={roles} onChange={setAssignee} />
         </div>
         <div>
           <Label htmlFor="backlog-after">After (items)</Label>
