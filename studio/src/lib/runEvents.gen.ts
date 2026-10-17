@@ -60,6 +60,8 @@ export type SignalType =
   | "RUN_SUBMITTED"
   | "RUN_STOPPED"
   | "STOP_REQUESTED"
+  | "PROJECT_UPDATED"
+  | "DELIVERED"
   | "RUN_LIMITS_CHANGED"
   | "TIME_LIMIT_REACHED"
   | "OVERSEER_WAKE"
@@ -95,6 +97,19 @@ export interface CapabilitiesDetail {
   model: string;
   warnings: string[];
   prompt?: { digest: string; layers: string[] };
+}
+
+export interface ProjectUpdatedDetail {
+  update: string;
+  spec?: [number, number];
+  design?: [number, number];
+  changes: string[];
+}
+
+export interface DeliveredDetail {
+  kind: "comment" | "project_update";
+  ref: string;
+  role: string;
 }
 
 export interface TeamDetail {
@@ -233,6 +248,8 @@ export interface ScreenshotReadyDetail {
 
 export interface DetailByType {
   CAPABILITIES: CapabilitiesDetail;
+  PROJECT_UPDATED: ProjectUpdatedDetail;
+  DELIVERED: DeliveredDetail;
   TEAM: TeamDetail;
   AGENT_RESULT: AgentResultDetail;
   TOOL_CALL: ToolCallDetail;
@@ -258,6 +275,8 @@ export type TypedSignal = {
 
 export const JSON_DETAIL_TYPES: ReadonlySet<SignalType> = new Set([
   "CAPABILITIES",
+  "PROJECT_UPDATED",
+  "DELIVERED",
   "TEAM",
   "AGENT_RESULT",
   "TOOL_CALL",

@@ -21,6 +21,13 @@ DETAIL_SHAPES: dict[str, dict[str, str]] = {
         "model": "string", "warnings": "string[]",
         "prompt?": "{ digest: string; layers: string[] }",
     },
+    "PROJECT_UPDATED": {
+        "update": "string", "spec?": "[number, number]", "design?": "[number, number]",
+        "changes": "string[]",
+    },
+    "DELIVERED": {
+        "kind": "\"comment\" | \"project_update\"", "ref": "string", "role": "string",
+    },
     "TEAM": {
         "members": "{ role: string; name: string; role_type: string }[]",
     },

@@ -155,6 +155,10 @@ class SignalType(str, Enum):
     RUN_SUBMITTED = "RUN_SUBMITTED"
     RUN_STOPPED = "RUN_STOPPED"          # ended early with open cards; detail says why
     STOP_REQUESTED = "STOP_REQUESTED"    # a person pressed Stop: no new spawns, then the end
+    # The spec or the design changed while the session runs; detail lists what changed.
+    PROJECT_UPDATED = "PROJECT_UPDATED"
+    # A worker was handed something in its brief: a person's comment or a project update.
+    DELIVERED = "DELIVERED"
     # A human raised the budget or extended the deadline of a live run.
     RUN_LIMITS_CHANGED = "RUN_LIMITS_CHANGED"
     # The session reached its soft time limit (plan §11.6): no new work starts; running

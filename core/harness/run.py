@@ -249,6 +249,9 @@ class OpencodeRun:
         self.results: dict[str, BaseModel] = {}
         self.flow: TaskFlow | None = None
         self.preplanned = False          # cards came from a plan approved before the run (H3)
+        # Spec/design changes during the session, and how many of them each role was told.
+        self._updates: list[tuple[str, list[str]]] = []
+        self._updates_told: dict[str, int] = {}
         self.overseer: OverseerFlow | None = None
         self.agents: list["AgentConfig"] = list(runner.project.agents)
         self._started = 0.0
@@ -367,6 +370,7 @@ class OpencodeRun:
                                          self._roles[r].compiled.capabilities.vision == "on")
             self._unsubscribe_flow = self.workspace.subscribe(flow.on_signal)
         self._unsubscribe_ping = self.workspace.subscribe(self._on_ping)
+        self._refresh_project()          # the versions this session starts from
         try:
             await self._start_services()
             specs = [AgentSpec(role=cfg.role, runner=self._runner_for(cfg),
@@ -1195,6 +1199,7 @@ class OpencodeRun:
             self._sync_conflict(role_name)
         self._link_deps(role_name, workdir)
         try:
+            self._refresh_project()
             self._write_rules(role, workdir)
         except OSError as e:  # the rules are context; a turn still runs without a fresh copy
             log.warning("%s: rules not written: %s", role_name, e)
@@ -1575,7 +1580,8 @@ class OpencodeRun:
             team=team_section(cfg.role, [
                 Member(c.role, self.names.get(c.role, c.role), self._roles[c.role].role_type,
                        c.description) for c in self.agents if c.role in self._roles]),
-            extra_sections=self._input_sections(cfg.role, plan, continuation)
+            extra_sections=self._take_project_updates(cfg.role)
+            + self._input_sections(cfg.role, plan, continuation)
             + (plan.extra_sections if plan is not None else ())
             + ((("This run's backlog items", backlog_text(self.backlog)),)
                if self.backlog and self.flow is None else ())
@@ -1687,6 +1693,78 @@ class OpencodeRun:
                     + f"priority: {_SLUG_WORD.sub('', str(seed.get('priority') or 'normal'))}\n"
                     + "---\n" + str(seed["body"]).strip() + "\n", encoding="utf-8")
 
+    def _project_versions(self) -> tuple[int, int]:
+        """(spec version, design version) of the project now."""
+        from core.design import Design
+        from core.spec import Spec
+        from core.work_db import WorkDB
+        data_root, pid = self._data_root(), self.runner.project.project_id
+        if data_root is None or not pid:
+            return 0, 0
+        project_dir = data_root / "projects" / pid
+        spec = (Spec(WorkDB(project_dir).read_spec_doc()).version
+                if (project_dir / "work.db").is_file() else 0)
+        return spec, Design.load(data_root, pid).version
+
+    def _refresh_project(self) -> None:
+        """The spec or design changed during the session: reload them for briefs and rules,
+        and record what changed so each worker is told in its next turn."""
+        from core.design import Design
+        from core.harness.project_updates import design_changes, spec_changes
+        from core.harness.spec_brief import SpecBrief
+        try:
+            now = self._project_versions()
+        except Exception as e:  # noqa: BLE001 — a project read must never fail a turn
+            log.warning("project versions unreadable: %s", e)
+            return
+        if not hasattr(self, "_versions"):
+            self._versions = now
+            return
+        if now == self._versions:
+            return
+        then, self._versions = self._versions, now
+        data_root, pid = self._data_root(), self.runner.project.project_id
+        old_spec = self._spec_brief()
+        new_spec = SpecBrief.load(data_root, pid, getattr(self.runner.project, "start_mode", None))
+        changes: list[str] = []
+        if now[0] != then[0] and new_spec is not None:
+            from core.spec import Spec
+            changes += spec_changes(old_spec.spec if old_spec else Spec({}), new_spec.spec)
+        old_design = self.flow.design if self.flow is not None else None
+        new_design = Design.load(data_root, pid)
+        if now[1] != then[1]:
+            changes += design_changes(old_design or Design({}), new_design)
+        if self.flow is not None:
+            if new_spec is not None:
+                self.flow.spec = new_spec
+            self.flow.design = new_design
+        self._spec_cache = new_spec
+        if not changes:
+            return
+        update = f"U{len(self._updates) + 1}"
+        self._updates.append((update, changes))
+        detail: dict[str, Any] = {"update": update, "changes": changes}
+        if now[0] != then[0]:
+            detail["spec"] = [then[0], now[0]]
+        if now[1] != then[1]:
+            detail["design"] = [then[1], now[1]]
+        self._post(SignalType.PROJECT_UPDATED, "runner",
+                   f"project changed during the session: {len(changes)} change(s)",
+                   json.dumps(detail))
+
+    def _take_project_updates(self, role: str) -> tuple[tuple[str, str], ...]:
+        """The project updates this role has not been told about, as a brief section."""
+        from core.harness.project_updates import brief_text
+        told = self._updates_told.setdefault(role, 0)
+        fresh = self._updates[told:]
+        if not fresh or self._is_overseer(role):
+            return ()
+        self._updates_told[role] = len(self._updates)
+        for update, _ in fresh:
+            self._post(SignalType.DELIVERED, role, f"{role} was told about {update}",
+                       json.dumps({"kind": "project_update", "ref": update, "role": role}))
+        return (("What changed in the project", brief_text(fresh)),)
+
     def _take_human_comments(self, role: str) -> tuple[str, ...]:
         """Comments the human posted on the run that this role has not seen yet.
 
@@ -1699,6 +1777,9 @@ class OpencodeRun:
         fresh.sort(key=lambda s: s.type is not SignalType.USER_COMMENT_PRIORITY)
         for sig in fresh:
             self.workspace.mark_seen(sig.id, role)
+            # Studio shows who has been handed each comment.
+            self._post(SignalType.DELIVERED, role, f"{role} got the comment: {sig.summary[:80]}",
+                       json.dumps({"kind": "comment", "ref": str(sig.id), "role": role}))
         return tuple(("(priority) " if sig.type is SignalType.USER_COMMENT_PRIORITY else "")
                      + sig.summary for sig in fresh)
 
