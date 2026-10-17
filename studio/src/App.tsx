@@ -13,6 +13,7 @@ import { Roster } from "./views/Roster";
 import { RunRoute } from "./views/RunRoute";
 import { JackDock } from "./features/jack/JackDock";
 import { JackProvider } from "./features/jack/context";
+import { ConfirmProvider } from "./components/ConfirmProvider";
 import { Settings } from "./views/Settings";
 import { Studio } from "./views/Studio";
 import { Tournament } from "./views/Tournament";
@@ -34,9 +35,11 @@ export function App() {
   return (
     <ToastProvider>
       <GlobalErrorHandler />
-      <JackProvider>
-        <AppShell token={token} setTokenLocal={setTokenLocal} />
-      </JackProvider>
+      <ConfirmProvider>
+        <JackProvider>
+          <AppShell token={token} setTokenLocal={setTokenLocal} />
+        </JackProvider>
+      </ConfirmProvider>
     </ToastProvider>
   );
 }

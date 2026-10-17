@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useConfirm } from "../../components/ConfirmProvider";
 import { Badge, type BadgeProps } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Alert, Input, Label, Select, Skeleton, Table, Td, Th } from "../../components/ui/form-controls";
@@ -55,6 +56,7 @@ type PriceField = (typeof PRICE_FIELDS)[number][0];
  * and the gateway's spend use.
  */
 export function ModelSettings() {
+  const confirm = useConfirm();
   const config = useModelConfig();
   const [draft, setDraft] = useState<ConfigDoc | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,8 +112,9 @@ export function ModelSettings() {
           <Badge variant={view.custom ? "secondary" : "outline"}>{view.custom ? "custom" : "shipped defaults"}</Badge>
           {view.custom && (
             <Button size="sm" variant="ghost" disabled={reset.isPending}
-              onClick={() => {
-                if (window.confirm("Go back to the shipped models and prices? Saved keys are kept.")) {
+              onClick={async () => {
+                if (await confirm({ title: "Go back to the shipped models and prices?", body: "Saved keys are kept.",
+                  confirmLabel: "Reset" })) {
                   setDraft(null);
                   reset.mutate(undefined);
                 }

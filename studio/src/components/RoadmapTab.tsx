@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useConfirm } from "./ConfirmProvider";
 import { ApiError, projectsApi } from "../api";
 import { errorCls, fieldCls } from "../lib/field";
 import { Button } from "./ui/button";
@@ -14,6 +15,7 @@ import { Card } from "./ui/card";
  * needs one.
  */
 export function RoadmapTab({ projectId }: { projectId: string }) {
+  const confirm = useConfirm();
   const [content, setContent] = useState("");
   const [original, setOriginal] = useState("");
   const [exists, setExists] = useState(false);
@@ -57,8 +59,9 @@ export function RoadmapTab({ projectId }: { projectId: string }) {
     }
   }
 
-  function clear() {
-    if (!confirm("Clear the roadmap? This removes the file; the team will run without project context.")) {
+  async function clear() {
+    if (!(await confirm({ title: "Clear the roadmap?", body: "This removes the file; the team will run without project context.",
+      confirmLabel: "Clear", destructive: true }))) {
       return;
     }
     setContent("");

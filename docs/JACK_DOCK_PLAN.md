@@ -1,6 +1,6 @@
 # Jack everywhere: a chat dock on every page
 
-**Status:** storyboard, 2026-10-17. Not built.
+**Status:** built 2026-10-17: J1 dock, J2 page context, J3 run awareness and actions, J4 inline draft approve, J5 dot and nudge, J6 project picker. Code: `studio/src/features/jack/`, `core/jack_context.py`, `core/jack_actions.py`.
 
 Today you talk to Jack only in the Plan tab. The idea is a small chat dock, always one click away
 on every page, into the **same** conversation. The Plan tab stays the full view of that

@@ -1,6 +1,6 @@
 # Jack keeps the project moving
 
-**Status:** plan, 2026-10-17. Builds on `JACK_DOCK_PLAN.md` (the dock) and `RESPONSIVENESS_PLAN.md`
+**Status:** built 2026-10-17: U1 board digest, U2 read tools, U3 actions, U4 Ask Jack buttons (question banner, stopped bar, refused starts), U5 (the existing `RUN_STOPPED` report, read by the digest), U6 `GET /projects/{id}/health`. U7 (patterns into rules) uses the rule and skill drafts Jack already has; no new code. Builds on `JACK_DOCK_PLAN.md` (the dock) and `RESPONSIVENESS_PLAN.md`
 (receipts).
 
 ## 1. The role

@@ -102,6 +102,12 @@ not a question. The tech lead can prepare a session before it starts (`core/pref
 session started from the approved plan skips the planner's first turn, and the `review_plan` gate pauses
 after an in-run plan (approve, edit, send back).
 
+**Jack everywhere (`docs/JACK_DOCK_PLAN.md`, `docs/JACK_UNSTUCK_PLAN.md`).** A dock on every Studio page talks
+to Jack in the project's plan thread. Messages carry the owner's page as ids; the host builds a "Where the owner is"
+digest (`core/jack_context.py`) and Jack may call read tools during a turn. His replies carry typed actions
+(`core/jack_actions.py`) that the owner presses; Jack never acts, and never takes over the overseer's in-run work.
+Studio uses no browser dialogs: confirms go through `components/ConfirmProvider.tsx`.
+
 **Flow hardening (`docs/FLOW_HARDENING_PLAN.md`).** Manual checks are the owner's: a card's
 manual lines are listed apart, never block a card, and reach Studio's review card as
 `owner_checks.json`. A card blocked on a finished role wakes the overseer, a run that stops early

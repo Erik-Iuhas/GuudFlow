@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useConfirm } from "../components/ConfirmProvider";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ApiError,
@@ -65,6 +66,7 @@ function unresolvedApprovals(signals: Signal[]): Signal[] {
 const isTerminal = isTerminalStatus;
 
 export function Run() {
+  const confirm = useConfirm();
   const { runId } = useParams<{ runId: string }>();
   const [meta, setMeta] = useState<RunMeta | null>(null);
   const [signals, setSignals] = useState<Signal[]>([]);
@@ -155,7 +157,8 @@ export function Run() {
 
   async function handleStop() {
     if (!runId) return;
-    if (!confirm("Stop this run? Currently-running agents finish their iteration; no new agents will be dispatched. The run can be resumed later.")) {
+    if (!(await confirm({ title: "Stop this run?", body: "Running agents finish their turn; no new agents start. You can continue it later.",
+      confirmLabel: "Stop", destructive: true }))) {
       return;
     }
     setStopping(true);

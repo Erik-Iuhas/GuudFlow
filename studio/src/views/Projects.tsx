@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useConfirm } from "../components/ConfirmProvider";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError, exampleProjectsApi, projectsApi, runsApi } from "../api";
 import type { ExampleProjectSummary, ProjectConfig, RunMeta } from "../types";
@@ -12,6 +13,7 @@ import { runStatusVariant } from "../lib/field";
 import { cn } from "../lib/utils";
 
 export function Projects() {
+  const confirm = useConfirm();
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
   const [activeRuns, setActiveRuns] = useState<RunMeta[]>([]);
   const [examples, setExamples] = useState<ExampleProjectSummary[]>([]);
@@ -75,7 +77,7 @@ export function Projects() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm(`Delete project ${id}?`)) return;
+    if (!(await confirm({ title: `Delete project ${id}?`, confirmLabel: "Delete", destructive: true }))) return;
     const prev = projects;
     setProjects(projects.filter((p) => p.project_id !== id));
     try {

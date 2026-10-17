@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { useConfirm } from "../../components/ConfirmProvider";
 import { useEffect, useState, type FormEvent } from "react";
 import { Badge, type BadgeProps } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -127,6 +128,7 @@ function ServerDetail({
   error?: string;
   onTested: (r: McpTestResult) => void;
 }) {
+  const confirm = useConfirm();
   const [test, setTest] = useState<McpTestResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
@@ -197,8 +199,9 @@ function ServerDetail({
           </Button>
         )}
         <Button size="sm" variant="ghost" disabled={remove.isPending}
-          onClick={() => {
-            if (window.confirm(`Remove the MCP server "${server.name}" and its saved key?`)) remove.mutate(undefined);
+          onClick={async () => {
+            if (await confirm({ title: `Remove the MCP server "${server.name}"?`, body: "Its saved key is removed too.",
+              confirmLabel: "Remove", destructive: true })) remove.mutate(undefined);
           }}>
           Remove
         </Button>

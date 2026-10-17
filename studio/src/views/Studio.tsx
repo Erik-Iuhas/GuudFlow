@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useConfirm } from "../components/ConfirmProvider";
 import { KindPanel } from "../features/team/KindPanel";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, invokeApi, projectsApi, runsApi } from "../api";
@@ -52,6 +53,7 @@ const DEFAULT_GATES = {
 };
 
 export function Studio() {
+  const confirm = useConfirm();
   const { id } = useParams<{ id: string }>();
   const [project, setProject] = useState<ProjectConfig | null>(null);
   const [runs, setRuns] = useState<RunMeta[]>([]);
@@ -225,10 +227,11 @@ export function Studio() {
             {saving ? "Saving…" : "Save"}
           </Button>
           {/* Backlog runs start from the Work tab; this runs on the project goal alone. */}
-          <Button variant="outline" onClick={() => {
-            if (openItems > 0 && !window.confirm(
-              `${openItems} backlog item${openItems === 1 ? " is" : "s are"} open and ready. `
-              + "Running on the goal only skips them. Continue? (Cancel, then use Start a run on the Work tab.)")) return;
+          <Button variant="outline" onClick={async () => {
+            if (openItems > 0 && !(await confirm({
+              title: "Run on the goal only?",
+              body: `${openItems} backlog item${openItems === 1 ? " is" : "s are"} open and ready. Running on the goal only skips them; to take them, use Start a session on the Work tab.`,
+              confirmLabel: "Run on the goal only" }))) return;
             void runNow(false, {});
           }}>Run on the goal only</Button>
         </div>

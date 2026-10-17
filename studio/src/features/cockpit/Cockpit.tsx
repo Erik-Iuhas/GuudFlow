@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useConfirm } from "../../components/ConfirmProvider";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useStore } from "zustand";
@@ -133,6 +134,7 @@ function isTypingTarget(t: EventTarget | null): boolean {
 }
 
 function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaChanged }: CockpitViewProps) {
+  const confirm = useConfirm();
   const desktop = useMediaQuery(DESKTOP_QUERY);
   useJackPlace(meta?.project_id ? { projectId: meta.project_id, page: "run", run_id: runId } : null);
   const agents = useRunStore((s) => s.agents);
@@ -246,7 +248,8 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
   }, []);
 
   async function stop() {
-    if (!window.confirm("Stop this run? Running agents finish their turn; no new agents are started. You can resume it later.")) return;
+    if (!(await confirm({ title: "Stop this run?", body: "Running agents finish their turn; no new agents start. You can continue it later.",
+      confirmLabel: "Stop", destructive: true }))) return;
     setBusy("stop");
     setActionError(null);
     try {

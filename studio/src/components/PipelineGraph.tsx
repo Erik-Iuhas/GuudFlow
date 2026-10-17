@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useConfirm } from "./ConfirmProvider";
 import type { AgentConfig } from "../types";
 import type { AgentLiveSummary, AgentLiveState } from "../lib/iterations";
 import type { GraphData } from "../hooks/useRunGraph";
@@ -46,6 +47,7 @@ interface Props {
 }
 
 export function PipelineGraph({ agents, liveStates, onClickAgent, onRemoveAgent, graphData }: Props) {
+  const confirm = useConfirm();
   if (agents.length === 0) {
     return (
       <div className="p-3 text-xs text-muted-foreground">
@@ -119,7 +121,8 @@ export function PipelineGraph({ agents, liveStates, onClickAgent, onRemoveAgent,
                   className="cursor-pointer"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (confirm(`Remove agent ${n.role}?`)) onRemoveAgent(n.role);
+                    void confirm({ title: `Remove agent ${n.role}?`, confirmLabel: "Remove", destructive: true })
+                      .then((ok) => { if (ok) onRemoveAgent(n.role); });
                   }}
                 >
                   <circle cx={NODE_W - 10} cy={10} r={9} className="fill-destructive stroke-card" strokeWidth={1.5} />
