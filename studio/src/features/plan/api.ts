@@ -231,6 +231,38 @@ export interface PlanMessageWire {
   problems?: string[];
   /** Changes the turn left out, each with the fix GuudFlow computed (when there is one). */
   parked?: ParkedChangeWire[];
+  /** Buttons Jack offered (docs/JACK_UNSTUCK_PLAN.md §5); the owner presses them. */
+  actions?: JackActionWire[];
+  /** Where the owner wrote from (the Jack dock). */
+  context?: (OwnerContextWire & { label?: string }) | null;
+}
+
+/** Where the owner is in Studio, sent with a dock message (ids only). */
+export interface OwnerContextWire {
+  page: string;
+  run_id?: string;
+  card?: string;
+  item?: string;
+  requirement?: string;
+  component?: string;
+}
+
+export type JackActionKind =
+  | "answer" | "message_worker" | "plan_approve" | "plan_send_back" | "raise_limits" | "stop"
+  | "continue_run" | "start_session" | "release_item" | "approve_draft" | "open";
+
+export interface JackActionWire {
+  kind: JackActionKind;
+  label: string;
+  run_id?: string;
+  role?: string;
+  text?: string;
+  items?: string[];
+  item?: string;
+  budget_usd?: number;
+  extend_minutes?: number;
+  target?: string;
+  card?: string;
 }
 
 export interface ParkedChangeWire {
@@ -317,8 +349,9 @@ export const planApi = {
   spec: (projectId: string) => send<SpecWire>("GET", `/api/projects/${enc(projectId)}/spec`),
   plan: (projectId: string) => send<PlanWire>("GET", `/api/projects/${enc(projectId)}/plan`),
   start: (projectId: string) => send<PlanTurnWire>("POST", `/api/projects/${enc(projectId)}/plan/start`, {}),
-  message: (projectId: string, text: string, mode: PlanMode) =>
-    send<PlanTurnWire>("POST", `/api/projects/${enc(projectId)}/plan/messages`, { text, mode }),
+  message: (projectId: string, text: string, mode: PlanMode, context?: OwnerContextWire | null) =>
+    send<PlanTurnWire>("POST", `/api/projects/${enc(projectId)}/plan/messages`,
+      context ? { text, mode, context } : { text, mode }),
   tick: (projectId: string, cid: string, accepted: boolean | null) =>
     send<DraftWire>("PATCH", `/api/projects/${enc(projectId)}/plan/draft/${enc(cid)}`, { accepted }),
   approve: (projectId: string) =>
@@ -366,10 +399,10 @@ export function useStartPlan(projectId: string): UseMutationResult<PlanTurnWire,
 
 export function useSendMessage(
   projectId: string,
-): UseMutationResult<PlanTurnWire, Error, { text: string; mode: PlanMode }> {
+): UseMutationResult<PlanTurnWire, Error, { text: string; mode: PlanMode; context?: OwnerContextWire | null }> {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (v) => planApi.message(projectId, v.text, v.mode),
+    mutationFn: (v) => planApi.message(projectId, v.text, v.mode, v.context),
     onSuccess: (turn) => qc.setQueryData<PlanWire>(planKeys.plan(projectId), (p) => mergeTurn(p, turn)),
   });
 }

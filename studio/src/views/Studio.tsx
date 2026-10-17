@@ -34,6 +34,8 @@ import { SeatsPanel } from "../features/team/SeatsPanel";
 import { RulesPanel } from "../features/team/RulesPanel";
 import { ContractsPanel } from "../features/team/ContractsPanel";
 import { RecordTab } from "../features/record/RecordTab";
+import { useJackPlace } from "../features/jack/context";
+import { AskJack } from "../features/jack/AskJack";
 
 const DETAIL_OPTIONS: { value: DetailLevel; label: string }[] = [
   { value: "overview", label: "Overview" },
@@ -59,6 +61,7 @@ export function Studio() {
   // The tab lives in `?tab=` so links work; old names (inputs, roadmap, insights) map onto new tabs.
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: ProjectTab = normalizeTab(searchParams.get("tab"));
+  useJackPlace(id ? { projectId: id, page: tab } : null);
   function setTab(next: ProjectTab) {
     setSearchParams(
       (prev) => {
@@ -231,7 +234,13 @@ export function Studio() {
         </div>
       </div>
 
-      {error && <Alert variant="error" className="mb-3">{error}</Alert>}
+      {error && (
+        <Alert variant="error" className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="mr-auto">{error}</span>
+          {id && <AskJack label="Fix this with Jack" place={{ projectId: id, page: tab }}
+            question={`This was refused: "${error}". What is wrong, and how do I fix it?`} />}
+        </Alert>
+      )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as ProjectTab)} className="mb-4">
         <TabsList>

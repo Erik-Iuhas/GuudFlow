@@ -6,10 +6,13 @@ import { cn } from "../../lib/utils";
 import type { PlanMessageWire, PlanMode } from "./api";
 import { usePmName } from "../pm/api";
 import { Markdown } from "../../lib/markdown";
+import { JackActions } from "../jack/JackActions";
 import { foldThread, timeLabel } from "./model";
 
 export interface ConversationProps {
   messages: readonly PlanMessageWire[];
+  /** The project, so Jack's buttons under his replies work here as in the dock. */
+  projectId?: string;
   /** True while the project manager is working on a turn. */
   pending: boolean;
   /** Sends the composer text; rejecting keeps the text in the composer. */
@@ -50,7 +53,8 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "turn failed, nothing added",
 };
 
-function Message({ m, pmName, onFix, onAccept }: {
+function Message({ m, pmName, onFix, onAccept, projectId }: {
+  projectId?: string;
   m: PlanMessageWire; pmName: string; onFix?: () => void;
   onAccept?: (parkedId: number) => void;
 }) {
@@ -90,6 +94,8 @@ function Message({ m, pmName, onFix, onAccept }: {
         ) : (
           <p className="mt-1 whitespace-pre-wrap break-words text-sm">{m.text}</p>
         )}
+        {!pm && m.context?.label && <p className="m-0 text-xs text-muted-foreground">from {m.context.label}</p>}
+        {pm && projectId && <JackActions projectId={projectId} actions={m.actions ?? []} />}
         {onAccept && (m.parked ?? []).some((p) => p.suggestion) && (
           <ul className="mt-2 flex flex-col gap-1" aria-label="Left-out changes">
             {(m.parked ?? []).filter((p) => p.suggestion).map((p) => (
@@ -113,7 +119,7 @@ function Message({ m, pmName, onFix, onAccept }: {
 }
 
 /** The plan conversation: the thread, an empty state and the composer. */
-export function Conversation({ messages, pending, onSend, onStart, error, currentDraftId, onAcceptParked, preview = [] }: ConversationProps) {
+export function Conversation({ messages, pending, onSend, onStart, error, currentDraftId, onAcceptParked, preview = [], projectId }: ConversationProps) {
   const pmName = usePmName();
   const [text, setText] = useState("");
   const [mode, setMode] = useState<PlanMode>("update");
@@ -203,14 +209,14 @@ export function Conversation({ messages, pending, onSend, onStart, error, curren
               </summary>
               <ol className="mt-3 flex flex-col gap-4">
                 {g.messages.map((m) => (
-                  <Message key={m.id} m={m} pmName={pmName} />
+                  <Message key={m.id} m={m} pmName={pmName} projectId={projectId} />
                 ))}
               </ol>
             </details>
           ))}
           <ol className="flex flex-col gap-4" aria-live="polite">
             {thread.open.map((m) => (
-              <Message key={m.id} m={m} pmName={pmName}
+              <Message key={m.id} m={m} pmName={pmName} projectId={projectId}
                 onFix={m.id === fixableId && !pending ? () => void fix(m.problems ?? []) : undefined}
                 onAccept={m.id === fixableId && !pending && onAcceptParked
                   ? (pid) => void onAcceptParked(m.id, pid).catch((e: unknown) =>

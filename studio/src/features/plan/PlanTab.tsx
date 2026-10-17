@@ -62,6 +62,7 @@ export function PlanTab({ projectId, onTeamChanged }: { projectId: string; onTea
     )}
     <div className="flex flex-col gap-4 min-[1000px]:flex-row min-[1000px]:items-start">
       <Conversation
+        projectId={projectId}
         messages={plan.data?.messages ?? []}
         currentDraftId={draft?.id ?? null}
         pending={pending}

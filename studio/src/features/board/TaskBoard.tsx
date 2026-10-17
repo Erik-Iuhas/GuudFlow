@@ -291,7 +291,7 @@ export function TaskBoard({ runId, reviewCap: capProp, className }: Props) {
         </div>
       )}
 
-      <CardDrawer runId={runId} cardId={openId} onClose={() => setOpenId(null)} spec={spec} />
+      <CardDrawer runId={runId} cardId={openId} onClose={() => setOpenId(null)} spec={spec} projectId={projectId} />
       <AddCardDialog
         runId={runId}
         roles={roles}

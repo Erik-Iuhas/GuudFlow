@@ -27,6 +27,8 @@ import { StoppedBar } from "./StoppedBar";
 import { PlanCheckpoint } from "./PlanCheckpoint";
 import { Deliveries, type Outgoing } from "./Deliveries";
 import { AnswerReceipt } from "./AnswerReceipt";
+import { useJackPlace } from "../jack/context";
+import { AskJack } from "../jack/AskJack";
 import { WakeOverseer } from "../overseer/WakeOverseer";
 import { LimitsControl } from "./LimitsControl";
 import { ArtifactGallery } from "../artifacts/ArtifactGallery";
@@ -132,6 +134,7 @@ function isTypingTarget(t: EventTarget | null): boolean {
 
 function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaChanged }: CockpitViewProps) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
+  useJackPlace(meta?.project_id ? { projectId: meta.project_id, page: "run", run_id: runId } : null);
   const agents = useRunStore((s) => s.agents);
   const live = useRunStore((s) => s.live);
   const signalCount = useRunStore((s) => s.signals.length);
@@ -387,6 +390,10 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
       {humanNeeded && !stoppedAt && humanNeeded.kind !== "plan_review" && (
         <div role="alert" className="rounded-md border border-status-waiting/40 bg-status-waiting/10 px-3 py-2 text-sm" data-testid="human-needed">
           <strong>{humanNeeded.role ?? "An agent"} needs you:</strong> {humanNeeded.summary}{" "}
+          {meta?.project_id && (
+            <AskJack label="Help me answer this" question={`${humanNeeded.role ?? "The run"} is waiting on me: "${humanNeeded.summary}". What should I answer?`}
+              place={{ projectId: meta.project_id, page: "run", run_id: runId }} />
+          )}
           <HumanAnswerBox runId={runId} />
         </div>
       )}

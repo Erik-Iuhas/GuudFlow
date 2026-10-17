@@ -25,6 +25,7 @@ import { RoleChanges } from "../cockpit/RoleChanges";
 import { DiffText } from "../report/DiffViewer";
 import { OPEN_CODE_EVENT, openInCode } from "../code/api";
 import { WhatItWasTold } from "../briefs/WhatItWasTold";
+import { useJackPlace } from "../jack/context";
 import type { SpecWire } from "../plan/api";
 import type { CardView } from "../../stores/runEvents";
 
@@ -34,6 +35,8 @@ interface Props {
   onClose: () => void;
   /** The project's spec, to name the requirements and checks a card serves. */
   spec?: SpecWire;
+  /** For the Jack dock: the card the owner has open. */
+  projectId?: string;
 }
 
 const SECTION = "grid gap-2";
@@ -170,7 +173,7 @@ export function WhyThisCard({ card, spec }: { card: CardView; spec?: SpecWire })
   );
 }
 
-export function CardDrawer({ runId, cardId, onClose, spec }: Props) {
+export function CardDrawer({ runId, cardId, onClose, spec, projectId }: Props) {
   const card = useRunStore((s) => (cardId ? s.cards[cardId] : undefined));
   // Opening a file in the Code tab closes the drawer so the tab is visible.
   useEffect(() => {
@@ -181,14 +184,15 @@ export function CardDrawer({ runId, cardId, onClose, spec }: Props) {
   return (
     <Sheet open={Boolean(cardId && card)} onOpenChange={(open) => !open && onClose()}>
       <SheetContent expandable className="max-w-3xl overflow-y-auto" aria-describedby="card-drawer-desc">
-        {card && <DrawerBody runId={runId} cardId={card.id} spec={spec} />}
+        {card && <DrawerBody runId={runId} cardId={card.id} spec={spec} projectId={projectId} />}
       </SheetContent>
     </Sheet>
   );
 }
 
-function DrawerBody({ runId, cardId, spec }: { runId: string; cardId: string; spec?: SpecWire }) {
+function DrawerBody({ runId, cardId, spec, projectId }: { runId: string; cardId: string; spec?: SpecWire; projectId?: string }) {
   const card = useRunStore((s) => s.cards[cardId]);
+  useJackPlace(projectId ? { projectId, page: "run", run_id: runId, card: cardId } : null);
   const signals = useRunStore((s) => s.signals);
   const artifacts = useRunStore((s) => s.artifacts);
   const live = useRunStore((s) => s.live);

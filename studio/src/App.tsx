@@ -11,6 +11,8 @@ import { NewProject } from "./features/project/NewProject";
 import { Propose } from "./views/Propose";
 import { Roster } from "./views/Roster";
 import { RunRoute } from "./views/RunRoute";
+import { JackDock } from "./features/jack/JackDock";
+import { JackProvider } from "./features/jack/context";
 import { Settings } from "./views/Settings";
 import { Studio } from "./views/Studio";
 import { Tournament } from "./views/Tournament";
@@ -32,7 +34,9 @@ export function App() {
   return (
     <ToastProvider>
       <GlobalErrorHandler />
-      <AppShell token={token} setTokenLocal={setTokenLocal} />
+      <JackProvider>
+        <AppShell token={token} setTokenLocal={setTokenLocal} />
+      </JackProvider>
     </ToastProvider>
   );
 }
@@ -119,6 +123,7 @@ function AppShell({
         />
       </header>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <JackDock />
       <main id="main" tabIndex={-1} className="flex-1 overflow-auto p-5 focus:outline-none">
         <Routes>
           <Route path="/" element={<Dashboard />} />

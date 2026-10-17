@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { ApiError, invokeApi } from "../../api";
 import { Button } from "../../components/ui/button";
 import { useRunStore } from "../../stores/runStoreContext";
+import { AskJack } from "../jack/AskJack";
 
 /**
  * Shown instead of the comment box once a run has stopped or finished (worker context plan
@@ -82,6 +83,9 @@ export function StoppedBar({ runId, projectId, finished }: {
             <Button size="sm" variant="outline" asChild>
               <Link to={`/projects/${encodeURIComponent(projectId)}?tab=work`}>Send to review</Link>
             </Button>
+            <AskJack label="What should happen next?" place={{ projectId, page: "run", run_id: runId }}
+              question={stoppedAt ? "I stopped this session. What should the next session do, and what note should it carry?"
+                : "This session ended. Why did it end the way it did, and what should happen next?"} />
           </div>
           {gate && <p className="m-0 text-xs text-muted-foreground">{gate}</p>}
           {error && <p className="m-0 text-xs text-destructive" role="alert">{error}</p>}
