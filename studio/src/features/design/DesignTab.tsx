@@ -16,6 +16,7 @@ import {
 } from "./api";
 import { changeLabel } from "./model";
 import { PreflightPanel } from "../preflight/PreflightPanel";
+import { AskJack } from "../jack/AskJack";
 
 /**
  * The project's design and knowledge base (role contracts plan §4.2, §4.3): what the tech
@@ -39,7 +40,7 @@ export function DesignTab({ projectId }: { projectId: string }) {
           design from the existing code before anything changes.
         </EmptyState>
       ) : (
-        <DesignBody design={data.design} />
+        <DesignBody design={data.design} projectId={projectId} />
       )}
       <KnowledgeSection projectId={projectId} />
     </div>
@@ -100,7 +101,7 @@ function active<T extends { status: string }>(rows: T[]): T[] {
   return rows.filter((r) => r.status !== "dropped" && r.status !== "superseded");
 }
 
-function DesignBody({ design }: { design: DesignWire }) {
+function DesignBody({ design, projectId }: { design: DesignWire; projectId: string }) {
   const components = active(design.components);
   const names = Object.fromEntries(design.components.map((c) => [c.id, c.name]));
   const who = (id: string) => (names[id] ? `${id} ${names[id]}` : id);
@@ -110,7 +111,7 @@ function DesignBody({ design }: { design: DesignWire }) {
       <div>
         <SectionTitle className="mt-0">Components</SectionTitle>
         <Table>
-          <thead><tr><Th>Id</Th><Th>Component</Th><Th>Owns</Th><Th>Responsibility</Th></tr></thead>
+          <thead><tr><Th>Id</Th><Th>Component</Th><Th>Owns</Th><Th>Responsibility</Th><Th><span className="sr-only">Ask</span></Th></tr></thead>
           <tbody>
             {components.map((c) => (
               <tr key={c.id}>
@@ -118,6 +119,10 @@ function DesignBody({ design }: { design: DesignWire }) {
                 <Td>{c.name}</Td>
                 <Td className="font-mono text-xs">{c.paths.join(", ")}</Td>
                 <Td>{c.responsibility}</Td>
+                <Td>
+                  <AskJack label="Ask" place={{ projectId, page: "design", component: c.id }}
+                    question={`About ${c.id} ${c.name}: `} />
+                </Td>
               </tr>
             ))}
           </tbody>

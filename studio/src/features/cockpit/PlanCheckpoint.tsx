@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AskJack } from "../jack/AskJack";
 import { approvePlan, sendPlanBack } from "../../api";
 import { Button } from "../../components/ui/button";
 
@@ -6,8 +7,9 @@ import { Button } from "../../components/ui/button";
  * The plan checkpoint (worker context plan H5): the planner's cards are on the board and
  * nothing starts until a person approves, edits them, or sends the plan back with a note.
  */
-export function PlanCheckpoint({ runId, role, cards, onEdit }: {
+export function PlanCheckpoint({ runId, role, cards, onEdit, projectId }: {
   runId: string;
+  projectId?: string;
   role: string | null;
   cards: string[];
   onEdit: () => void;
@@ -39,6 +41,10 @@ export function PlanCheckpoint({ runId, role, cards, onEdit }: {
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" disabled={busy} onClick={() => void act(() => approvePlan(runId))}>Approve the plan</Button>
         <Button size="sm" variant="outline" onClick={onEdit}>Edit the cards</Button>
+        {projectId && (
+          <AskJack label="Ask Jack to check it" place={{ projectId, page: "run", run_id: runId }}
+            question="Check this plan before I approve it: does it cover the items and the checks, and is anything risky?" />
+        )}
         <input className="h-8 min-w-[16rem] flex-1 rounded-md border border-input bg-background px-2 text-sm"
           aria-label="What to change" placeholder="What should change? e.g. one module per level"
           value={note} onChange={(e) => setNote(e.target.value)} />

@@ -388,7 +388,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
       {!stoppedAt && <AnswerReceipt />}
       {humanNeeded && !stoppedAt && humanNeeded.kind === "plan_review" && (
         <PlanCheckpoint runId={runId} role={humanNeeded.role} cards={humanNeeded.cards ?? []}
-          onEdit={() => setTab("cards")} />
+          onEdit={() => setTab("cards")} projectId={meta?.project_id ?? undefined} />
       )}
       {humanNeeded && !stoppedAt && humanNeeded.kind !== "plan_review" && (
         <div role="alert" className="rounded-md border border-status-waiting/40 bg-status-waiting/10 px-3 py-2 text-sm" data-testid="human-needed">
@@ -477,8 +477,12 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           </div>
           <div className="flex flex-col items-end gap-1">
             {budgetWarning && live && !terminal && (
-              <p role="alert" className="m-0 max-w-md rounded-md border border-status-waiting/50 bg-status-waiting/10 px-2 py-1 text-xs" data-testid="budget-warning">
-                {budgetWarning}
+              <p role="alert" className="m-0 flex max-w-md flex-wrap items-center gap-2 rounded-md border border-status-waiting/50 bg-status-waiting/10 px-2 py-1 text-xs" data-testid="budget-warning">
+                <span>{budgetWarning}</span>
+                {meta?.project_id && (
+                  <AskJack label="Is it worth raising?" place={{ projectId: meta.project_id, page: "run", run_id: runId }}
+                    question="The budget is nearly spent. Is it worth raising, and by how much, for the cards that are left?" />
+                )}
               </p>
             )}
             <BudgetMeter budgetUsd={budgetUsd} />

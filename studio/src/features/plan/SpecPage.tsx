@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useJackPlace } from "../jack/context";
 import { Alert, Skeleton } from "../../components/ui/form-controls";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -229,12 +230,14 @@ function ServingWork({ r, items }: { r: RequirementWire; items: BacklogItemWire[
  * requirement's values, checks and where it came from (each draft and the words behind it);
  * and the work that serves it. Decisions and rules follow the list.
  */
-export function SpecPageView({ spec, items = [], onEdit }: { spec: SpecWire; items?: BacklogItemWire[]; onEdit?: (c: ChangeWire) => void }) {
+export function SpecPageView({ spec, items = [], onEdit, projectId }: { spec: SpecWire; items?: BacklogItemWire[]; onEdit?: (c: ChangeWire) => void; projectId?: string }) {
   const [filter, setFilter] = useState<Filter>("all");
   const active = spec.requirements.filter((r) => r.status === "active");
   const shown = active.filter((r) => (filter === "unmet" ? isUnmet(r) : filter === "assumed" ? isAssumed(r) : true));
   const [picked, setPicked] = useState<string | null>(null);
   const current = shown.find((r) => r.id === picked) ?? shown[0];
+  // The requirement on screen goes with a Jack dock message.
+  useJackPlace(projectId && current ? { projectId, page: "spec", requirement: current.id } : null);
   const decisions = spec.decisions.filter((d) => d.status === "accepted");
   const rules = spec.rules.filter((r) => r.status === "active");
   const count = (f: Filter) => active.filter((r) => (f === "unmet" ? isUnmet(r) : f === "assumed" ? isAssumed(r) : true)).length;
@@ -309,7 +312,7 @@ export function SpecPage({ projectId }: { projectId: string }) {
   return (
     <div className="grid gap-3">
       {edit.error && <Alert variant="error">{edit.error.message}</Alert>}
-      <SpecPageView spec={spec.data} items={backlog.data} onEdit={(c) => edit.mutate(c)} />
+      <SpecPageView spec={spec.data} items={backlog.data} onEdit={(c) => edit.mutate(c)} projectId={projectId} />
     </div>
   );
 }

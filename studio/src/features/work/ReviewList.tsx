@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AskJack } from "../jack/AskJack";
 import { Link } from "react-router-dom";
 import { Badge, type BadgeProps } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -140,6 +141,12 @@ function PendingRun({
         <span className="text-sm text-muted-foreground">{changeSummary(run)}</span>
         {run.parent_run && <span className="text-xs text-muted-foreground">continues {run.parent_run}</span>}
         {run.check && <Badge variant={CHECK_VARIANT[run.check.status]}>{CHECK_LABEL[run.check.status]}</Badge>}
+        {projectId && (
+          <span className="ml-auto">
+            <AskJack label="What should I check?" place={{ projectId, page: "run", run_id: run.run_id }}
+              question="This session is waiting for my review. What should I look at first, which checks are mine, and is it safe to accept?" />
+          </span>
+        )}
       </div>
       {run.check && run.check.status !== "passed" && (
         <details className="mt-1">
