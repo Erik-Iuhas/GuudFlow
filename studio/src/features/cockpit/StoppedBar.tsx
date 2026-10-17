@@ -16,6 +16,12 @@ export function StoppedBar({ runId, projectId, finished }: {
 }) {
   const stoppedAt = useRunStore((s) => s.stoppedAt);
   const open = useRunStore((s) => Object.values(s.cards).filter((c) => c.column !== "done").length);
+  // Stop lets running turns finish (DESIGN rule 7): say who is still finishing (R4).
+  // A joined string keeps the selector's result stable between renders.
+  const finishingText = useRunStore((s) => (s.stoppedAt && s.live
+    ? Object.values(s.agents).filter((a) => a.state === "running").map((a) => s.names[a.role] ?? a.role).join("\u0000")
+    : ""));
+  const finishing = finishingText ? finishingText.split("\u0000") : [];
   const navigate = useNavigate();
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -49,7 +55,14 @@ export function StoppedBar({ runId, projectId, finished }: {
 
   return (
     <div className="grid gap-2 rounded-md border border-border bg-muted/40 p-3" data-testid="stopped-bar" role="status">
-      <p className="m-0 text-sm font-medium">{headline} Nothing is listening here any more.</p>
+      {finishing.length > 0 ? (
+        <p className="m-0 text-sm font-medium" data-testid="stopping">
+          <span className="mr-1.5 inline-block h-2 w-2 animate-pulse rounded-full bg-status-waiting align-middle" aria-hidden />
+          Stopping: {finishing.join(", ")} {finishing.length === 1 ? "is" : "are"} finishing the current turn. Nothing new starts.
+        </p>
+      ) : (
+        <p className="m-0 text-sm font-medium">{headline} Nothing is listening here any more.</p>
+      )}
       {projectId ? (
         <>
           <label className="grid gap-1 text-xs text-muted-foreground">

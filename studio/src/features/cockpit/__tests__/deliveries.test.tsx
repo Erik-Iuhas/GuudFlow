@@ -31,7 +31,7 @@ describe("who has been told", () => {
     expect(within(all).getByText("waiting: tester")).toBeInTheDocument();
     const one = screen.getByTestId(`delivery-${direct.id}`);
     expect(within(one).getByText(/To dev/)).toBeInTheDocument();
-    expect(within(one).getByText("waiting: dev")).toBeInTheDocument();
+    expect(within(one).getByText(/dev reads it when it next starts/)).toBeInTheDocument();
     const update = screen.getByTestId("delivery-U1");
     expect(within(update).getByText(/800x600/)).toBeInTheDocument();
     expect(within(update).getByText("✓ tester")).toBeInTheDocument();

@@ -1,6 +1,6 @@
 # Responsive interaction: no message into the void
 
-**Status:** plan and build, 2026-10-17.
+**Status:** built 2026-10-17 (R1–R6). Receipts: `studio/src/features/cockpit/receipts.ts`, `ReceiptLine.tsx`, `AnswerReceipt.tsx`.
 
 Every time a person acts on an agent (writes to it, wakes it, answers it, stops it) Studio should
 show, from real signals, what happened to that action: sent, waiting for the worker, being read,

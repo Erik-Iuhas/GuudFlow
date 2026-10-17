@@ -1,5 +1,14 @@
 import { useMemo } from "react";
 import { useRunStore } from "../../stores/runStoreContext";
+import { ReceiptLine } from "./ReceiptLine";
+
+/** Something the person sent that may not be on the board yet. */
+export interface Outgoing {
+  ref: string;
+  text: string;
+  to: string | null;
+  at: number;
+}
 
 const SHOWN = 4;
 
@@ -16,7 +25,7 @@ interface Row {
  * during the session, each with the workers that have it in a brief and the ones still waiting.
  * A worker reads a comment at the start of its next turn.
  */
-export function Deliveries({ workers }: { workers: readonly string[] }) {
+export function Deliveries({ workers, outbox = [] }: { workers: readonly string[]; outbox?: readonly Outgoing[] }) {
   const signals = useRunStore((s) => s.signals);
   const names = useRunStore((s) => s.names);
   const { rows, told } = useMemo(() => {
@@ -43,11 +52,29 @@ export function Deliveries({ workers }: { workers: readonly string[] }) {
     }
     return { rows: rows.slice(-SHOWN).reverse(), told };
   }, [signals]);
-  if (rows.length === 0) return null;
+  const sentAt = useMemo(() => Object.fromEntries(outbox.map((o) => [o.ref, o.at])), [outbox]);
+  const onBoard = useMemo(() => new Set(signals.map((s) => s.id)), [signals]);
+  const pending = outbox.filter((o) => !onBoard.has(o.ref));
+  if (rows.length === 0 && pending.length === 0) return null;
   const label = (r: string) => names[r] ?? r;
   return (
     <ul aria-label="Who has been told" className="m-0 mt-2 flex list-none flex-col gap-1 p-0 text-xs" data-testid="deliveries">
+      {pending.map((o) => (
+        <li key={o.ref} className="flex flex-wrap items-center gap-1.5 text-muted-foreground" data-testid={`delivery-${o.ref}`}>
+          <span className="font-medium text-foreground">{o.to ? `To ${label(o.to)}` : "To everyone"}:</span>
+          <span className="max-w-[28rem] truncate" title={o.text}>{o.text}</span>
+          <span><span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current align-middle" aria-hidden />sent · reaching the board…</span>
+        </li>
+      ))}
       {rows.map((row) => {
+        if (row.to && row.kind === "comment") {
+          return (
+            <li key={row.id} className="flex flex-wrap items-center gap-1.5" data-testid={`delivery-${row.id}`}>
+              <span className="font-medium">To {label(row.to)}:</span>
+              <ReceiptLine refId={row.id} role={row.to} who={label(row.to)} sentAt={sentAt[row.id] ?? Date.parse(row.at)} text={row.text} />
+            </li>
+          );
+        }
         const audience = row.to ? [row.to] : workers;
         const got = told[row.id] ?? [];
         const waiting = audience.filter((r) => !got.includes(r));

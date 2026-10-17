@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { messageWorker } from "../../api";
 import { Button } from "../../components/ui/button";
+import { ReceiptLine } from "./ReceiptLine";
+
+interface Sent { ref: string; text: string; wake: boolean; at: number }
 
 /** Message one worker directly (worker context plan F3). "Send" puts it in the worker's next
  * brief; "Send and wake" also starts the worker again (a worker with no card gets one turn
@@ -14,6 +17,7 @@ export function MessageWorker({ runId, role, name, live }: {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [sent, setSent] = useState<Sent[]>([]);
   if (!live) return null;
   const who = name && name !== role ? name : role;
   async function send(wake: boolean) {
@@ -21,12 +25,19 @@ export function MessageWorker({ runId, role, name, live }: {
     if (!message) return;
     setBusy(true);
     setNote(null);
+    // The box clears at once; the receipt below carries the message from here.
+    setText("");
     try {
-      await messageWorker(runId, role, message, wake);
-      setText("");
-      setNote(wake ? `Sent. ${who} picks it up on its next turn, starting now or right after this one.`
-        : `Sent. ${who} reads it at the start of its next turn.`);
+      const at = Date.now();
+      const res = await messageWorker(runId, role, message, wake);
+      if (res.signal_id) {
+        const ref = res.signal_id;
+        setSent((list) => [{ ref, text: message, wake, at }, ...list].slice(0, 3));
+      } else {
+        setNote(`Sent. ${who} reads it at the start of its next turn.`);
+      }
     } catch (e) {
+      setText(message);
       setNote(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -50,6 +61,9 @@ export function MessageWorker({ runId, role, name, live }: {
         <Button size="sm" variant="outline" disabled={busy || !text.trim()} onClick={() => void send(false)}>Send</Button>
         {note && <span className="text-xs text-muted-foreground" role="status">{note}</span>}
       </div>
+      {sent.map((m) => (
+        <ReceiptLine key={m.ref} refId={m.ref} role={role} who={who} wake={m.wake} sentAt={m.at} text={m.text} />
+      ))}
     </div>
   );
 }

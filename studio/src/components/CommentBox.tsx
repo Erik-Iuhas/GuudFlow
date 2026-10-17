@@ -14,9 +14,11 @@ interface Props {
   roles?: readonly string[];
   /** Worker names by role, for the picker. */
   names?: Record<string, string>;
+  /** Called once the server took it, with the signal it created (for receipts). */
+  onSent?: (sent: { ref: string; text: string; to: string | null; at: number }) => void;
 }
 
-export function CommentBox({ runId, onSubmit, inputRef, roles = [], names = {} }: Props) {
+export function CommentBox({ runId, onSubmit, inputRef, roles = [], names = {}, onSent }: Props) {
   const [text, setText] = useState("");
   const [to, setTo] = useState("");
   const [priority, setPriority] = useState<"normal" | "high">("normal");
@@ -35,11 +37,12 @@ export function CommentBox({ runId, onSubmit, inputRef, roles = [], names = {} }
     try {
       if (onSubmit) {
         await onSubmit(trimmed, priority);
-      } else if (to) {
-        // One worker: it reads it in its next turn (a priority note addressed to it).
-        await messageWorker(runId, to, trimmed, false);
       } else {
-        await runsApi.postComment(runId, trimmed, priority);
+        const at = Date.now();
+        // One worker: it reads it in its next turn (a priority note addressed to it).
+        const res = to ? await messageWorker(runId, to, trimmed, false)
+          : await runsApi.postComment(runId, trimmed, priority);
+        if (res?.signal_id) onSent?.({ ref: res.signal_id, text: trimmed, to: to || null, at });
       }
     } catch (e) {
       // Revert optimistic clear so the user can retry.
@@ -100,7 +103,7 @@ export function CommentBox({ runId, onSubmit, inputRef, roles = [], names = {} }
           </select>
         </div>
         <Button className="self-end" onClick={send} disabled={!text.trim() || busy}>
-          {busy ? "Posting…" : "Post"}
+          {busy ? "Sending…" : "Post"}
         </Button>
       </div>
     </Card>

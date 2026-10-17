@@ -1,3 +1,4 @@
+import { clock, usePendingClock } from "../cockpit/receipts";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Label, Textarea } from "../../components/ui/form-controls";
 import { Button } from "../../components/ui/button";
@@ -230,6 +231,7 @@ export function Conversation({ messages, pending, onSend, onStart, error, curren
         <div role="status" className="text-sm text-muted-foreground" data-testid="drafting">
           <p className="m-0">
             {pmName} is drafting…{preview.length > 0 ? ` ${preview.length} change${preview.length === 1 ? "" : "s"} so far` : ""}
+            <DraftingClock pending={pending} />
           </p>
           {preview.length > 0 && (
             <ul className="m-0 mt-1 list-none p-0 opacity-60" aria-label="Changes being written" data-testid="preview">
@@ -292,4 +294,10 @@ export function Conversation({ messages, pending, onSend, onStart, error, curren
       )}
     </section>
   );
+}
+
+/** How long the project manager has been at it (a real wait, never a fake delay). */
+function DraftingClock({ pending }: { pending: boolean }) {
+  const seconds = usePendingClock(pending);
+  return <span className="ml-1.5 tabular-nums" data-testid="drafting-clock">{clock(seconds)}</span>;
 }

@@ -772,14 +772,14 @@ export async function getConsole(runId: string): Promise<RunConsole> {
 }
 
 /** Wake the overseer by hand (`POST /api/runs/{id}/overseer/wake`). */
-export async function wakeOverseer(runId: string, text: string): Promise<void> {
-  await request("POST", `/api/runs/${encodeURIComponent(runId)}/overseer/wake`, { text }, true);
+export async function wakeOverseer(runId: string, text: string): Promise<{ signal_id?: string }> {
+  return (await request<{ signal_id?: string }>("POST", `/api/runs/${encodeURIComponent(runId)}/overseer/wake`, { text }, true)) ?? {};
 }
 
 /** Message one worker (`POST /api/runs/{id}/roles/{role}/message`); `wake` runs it again. */
-export async function messageWorker(runId: string, role: string, text: string, wake: boolean): Promise<void> {
-  await request("POST", `/api/runs/${encodeURIComponent(runId)}/roles/${encodeURIComponent(role)}/message`,
-    { text, wake }, true);
+export async function messageWorker(runId: string, role: string, text: string, wake: boolean): Promise<{ signal_id?: string }> {
+  return (await request<{ signal_id?: string }>("POST", `/api/runs/${encodeURIComponent(runId)}/roles/${encodeURIComponent(role)}/message`,
+    { text, wake }, true)) ?? {};
 }
 
 /** Approve the plan at the checkpoint (`POST /api/runs/{id}/plan/approve`, worker context plan H5). */

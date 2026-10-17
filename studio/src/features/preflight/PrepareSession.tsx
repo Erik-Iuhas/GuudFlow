@@ -1,3 +1,4 @@
+import { clock, usePendingClock } from "../cockpit/receipts";
 import { Link } from "react-router-dom";
 import { Alert } from "../../components/ui/form-controls";
 import { Button } from "../../components/ui/button";
@@ -15,6 +16,7 @@ export function PrepareSession({ projectId, chosen, starting, onStart }: {
 }) {
   const plan = usePreflight(projectId).data;
   const prepare = usePreflightAction(projectId, (items: string[]) => preflightApi.prepare(projectId, items));
+  const seconds = usePendingClock(prepare.isPending);
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border p-2 text-sm" data-testid="prepare-session">
       {plan ? (
@@ -36,7 +38,7 @@ export function PrepareSession({ projectId, chosen, starting, onStart }: {
           </span>
           <Button size="sm" variant="outline" disabled={!chosen.length || prepare.isPending}
             onClick={() => prepare.mutate(chosen)}>
-            {prepare.isPending ? "The tech lead is planning…" : "Prepare with the tech lead"}
+            {prepare.isPending ? `The tech lead is planning… ${clock(seconds)}` : "Prepare with the tech lead"}
           </Button>
         </>
       )}

@@ -1,3 +1,4 @@
+import { clock, usePendingClock } from "../cockpit/receipts";
 import { useEffect, useState, type FormEvent } from "react";
 import { Alert, SectionTitle } from "../../components/ui/form-controls";
 import { Badge } from "../../components/ui/badge";
@@ -193,6 +194,7 @@ function Conversation({ projectId, plan }: { projectId: string; plan: PreflightW
   const send = usePreflightAction(projectId, (text: string) => preflightApi.message(projectId, text));
   const [text, setText] = useState("");
   const [outgoing, setOutgoing] = useState<string | null>(null);
+  const seconds = usePendingClock(send.isPending);
   return (
     <section aria-label="Talk to the tech lead" className="flex flex-col gap-2">
       <SectionTitle className="m-0">Talk to {plan.planner ?? "the tech lead"}</SectionTitle>
@@ -200,7 +202,7 @@ function Conversation({ projectId, plan }: { projectId: string; plan: PreflightW
         {plan.messages.map((m, i) => (
           <li key={i}><strong>{m.author === "owner" ? "You" : m.author}:</strong> {m.text}</li>
         ))}
-        {outgoing && <li className="text-muted-foreground"><strong>You:</strong> {outgoing} (thinking…)</li>}
+        {outgoing && <li className="text-muted-foreground"><strong>You:</strong> {outgoing} <span className="tabular-nums">(the tech lead is revising the plan… {clock(seconds)})</span></li>}
       </ul>
       {send.error && <Alert variant="error">{send.error.message}</Alert>}
       <form className="flex gap-2" onSubmit={(e: FormEvent) => {

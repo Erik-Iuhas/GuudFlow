@@ -25,7 +25,8 @@ import { BudgetMeter } from "./BudgetMeter";
 import { HumanAnswerBox } from "./HumanAnswerBox";
 import { StoppedBar } from "./StoppedBar";
 import { PlanCheckpoint } from "./PlanCheckpoint";
-import { Deliveries } from "./Deliveries";
+import { Deliveries, type Outgoing } from "./Deliveries";
+import { AnswerReceipt } from "./AnswerReceipt";
 import { WakeOverseer } from "../overseer/WakeOverseer";
 import { LimitsControl } from "./LimitsControl";
 import { ArtifactGallery } from "../artifacts/ArtifactGallery";
@@ -271,6 +272,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
   const connection =
     socket.status === "open" ? (live ? "live" : "finished") : socket.status === "error" ? "error" : socket.status;
 
+  const [outbox, setOutbox] = useState<Outgoing[]>([]);
   // Workers a comment can reach (the overseer is told by the run, not by comments).
   const workerRoles = useMemo(() => allSpecs.map((r) => r.role).filter((r) => !r.includes("overseer")), [allSpecs]);
   const overseerPresent = [...allSpecs.map((r) => r.role), ...Object.keys(names)].some((r) => r.includes("overseer"));
@@ -369,7 +371,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
       )}
       {socket.status === "reconnecting" && (
         <div role="status" className="rounded-md border border-status-blocked/30 bg-status-blocked/10 px-3 py-1.5 text-sm text-status-blocked">
-          Reconnecting to the live feed…
+          Reconnecting to the live feed… The run keeps going and anything you send still lands; what you see catches up when the feed is back.
         </div>
       )}
       {actionError && (
@@ -377,6 +379,7 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
           {actionError}
         </div>
       )}
+      {!stoppedAt && <AnswerReceipt />}
       {humanNeeded && !stoppedAt && humanNeeded.kind === "plan_review" && (
         <PlanCheckpoint runId={runId} role={humanNeeded.role} cards={humanNeeded.cards ?? []}
           onEdit={() => setTab("cards")} />
@@ -474,8 +477,15 @@ function CockpitLayout({ runId, store, socket, meta, project, budgetUsd, onMetaC
         </div>
         {live && !terminal && !stoppedAt ? (
           <div data-testid="comment-bar">
-            <CommentBox runId={runId} inputRef={commentRef} roles={workerRoles} names={names} />
-            <Deliveries workers={workerRoles} />
+            <p className="m-0 mb-1 flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="feed-state">
+              <span className={`inline-block h-2 w-2 rounded-full ${socket.status === "open" ? "bg-status-complete" : "animate-pulse bg-status-blocked"}`} aria-hidden />
+              {socket.status === "open"
+                ? "Live · workers read what you send at the start of their next turn; receipts update here as they do"
+                : "Reconnecting · you can still send; receipts catch up when the live feed is back"}
+            </p>
+            <CommentBox runId={runId} inputRef={commentRef} roles={workerRoles} names={names}
+              onSent={(o) => setOutbox((list) => [...list, o].slice(-6))} />
+            <Deliveries workers={workerRoles} outbox={outbox} />
           </div>
         ) : (
           <StoppedBar runId={runId} projectId={meta?.project_id} finished={meta?.status === "complete"} />

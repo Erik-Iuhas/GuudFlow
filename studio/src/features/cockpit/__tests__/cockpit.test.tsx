@@ -348,6 +348,9 @@ describe("CockpitView", () => {
     render(view(store, { meta: { run_id: "r1", project_id: "p1", status: "running" } }));
     expect(screen.queryByTestId("human-needed")).toBeNull();
     expect(screen.queryByLabelText("Comment for the agents")).toBeNull();
+    // dev is still mid-turn: the bar says it is finishing, then that the run stopped.
+    expect(screen.getByTestId("stopping")).toHaveTextContent("dev is finishing the current turn");
+    act(() => store.getState().ingest(sig("COMPLETE", "dev")));
     expect(screen.getByTestId("stopped-bar")).toHaveTextContent("Stopped by you");
     expect(screen.getByRole("button", { name: "Continue with the open cards" })).toBeInTheDocument();
   });

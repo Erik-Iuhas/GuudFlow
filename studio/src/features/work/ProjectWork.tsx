@@ -1,3 +1,4 @@
+import { clock, usePendingClock } from "../cockpit/receipts";
 import { Interrupted } from "./Interrupted";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -70,6 +71,7 @@ export function ProjectWork({
   const [detail] = useDetailLevel(projectId);
   const [afterSession, setAfterSession] = useState(false);
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
+  const groomSeconds = usePendingClock(groom.isPending);
 
   const [selected, setSelected] = useState<string[] | null>(null);
   const [changes, setChanges] = useState<Record<string, string | undefined>>({});
@@ -148,7 +150,7 @@ export function ProjectWork({
           <SectionTitle className="m-0">Choose items for the next session</SectionTitle>
           <Button size="sm" variant="outline" disabled={groom.isPending}
             onClick={() => groom.mutate(undefined, { onSuccess: (p) => setProposals(p) })}>
-            {groom.isPending ? "Thinking…" : "Suggest items"}
+            {groom.isPending ? `Thinking… ${clock(groomSeconds)}` : "Suggest items"}
           </Button>
         </div>
         <PrepareSession projectId={projectId} chosen={chosen} starting={starting}
