@@ -219,7 +219,9 @@ class TaskFlow:
         if role == self.planner:
             owners = self.owners()
             # Items a continued run already finished need no card (flow hardening §5).
-            items = [i.id for i in self.backlog if i.pending != "done"]
+            # Items the owner does themselves need no card (they are listed for context).
+            items = [i.id for i in self.backlog if i.pending != "done"
+                     and getattr(i, "assignee", "") != "owner"]
             sections: tuple[tuple[str, str], ...] = (
                 ("Budget and card size", self._sizing_text()),
                 ("Your output: the task list", _planner_instructions(owners)))
@@ -258,7 +260,8 @@ class TaskFlow:
                                              require_tasks=not recovering,
                                              require_design_links=designer)
                                   + check_link_problems(r.check_links, spec_ids or [],
-                                                        test_files))
+                                                        test_files)
+                                  + self._assignee_problems(r, owners))
                                  if isinstance(r, PlanResult) else []),
                 extra_sections=sections)
         if role not in self.card_roles:
@@ -618,6 +621,20 @@ class TaskFlow:
     def end_turn(self, role: str) -> None:
         """Always called when a spawn ends."""
         self.board.finish_turn(role)
+
+    def _assignee_problems(self, plan: PlanResult, owners: Sequence[str]) -> list[str]:
+        """A backlog item assigned to a worker must have its cards owned by that worker; one
+        the owner does themselves gets no card."""
+        who = {i.id: getattr(i, "assignee", "") for i in self.backlog}
+        problems: list[str] = []
+        for t in plan.tasks:
+            want = who.get(t.backlog_id or "", "")
+            if want == "owner":
+                problems.append(f"{t.id}: {t.backlog_id} is the owner's own item; it gets no card")
+            elif want and want in owners and t.owner_role != want:
+                problems.append(f"{t.id}: {t.backlog_id} is assigned to {want}; give the card "
+                                f"to {want}, not {t.owner_role}")
+        return problems
 
     def _item_serves(self) -> dict[str, list[str]]:
         """Backlog item id → the requirement ids it serves."""
@@ -987,7 +1004,9 @@ def backlog_text(items: Sequence["BacklogItem"]) -> str:
     """The run's backlog items as a brief section (plan §13)."""
     return ("This project is ongoing work; this run takes these items from its backlog. "
             "Each task that works on an item sets `backlog_id` to it, and every item needs "
-            "at least one task. You may add tasks without `backlog_id` for work you find on "
+            "at least one task, except an item the owner does themselves. An item marked "
+            "\"for <role>\" gets its cards owned by that role. You may add tasks without "
+            "`backlog_id` for work you find on "
             "the way; unfinished ones go back to the backlog. Earlier runs' notes on an "
             "item tell you what was tried.\n\n" + "\n\n".join(_item_text(i) for i in items))
 

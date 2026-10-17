@@ -210,3 +210,18 @@ async def test_accept_waits_for_the_runs_design_draft(client, auth_header, data_
     r = await client.post("/api/projects/p1/runs-review/run_a/accept", headers=auth_header,
                           json={"confirmed_checks": []})
     assert r.status_code == 200
+
+
+async def test_backlog_items_can_be_assigned(client, auth_header) -> None:
+    r = await client.post("/api/projects", headers=auth_header, json={
+        "project_id": "p1", "goal": "x", "agents": [{"role": "dev"}]})
+    assert r.status_code in (200, 201)
+    r = await client.post("/api/projects/p1/backlog", headers=auth_header,
+                          json={"title": "Draw the ship", "assignee": "dev"})
+    assert r.status_code == 201 and r.json()["assignee"] == "dev"
+    r = await client.post("/api/projects/p1/backlog", headers=auth_header,
+                          json={"title": "Pick colours", "assignee": "ghost"})
+    assert r.status_code == 400 and "not on the team" in r.json()["detail"]
+    r = await client.patch("/api/projects/p1/backlog/B1", headers=auth_header,
+                           json={"assignee": "owner"})
+    assert r.status_code == 200 and r.json()["assignee"] == "owner"

@@ -40,7 +40,9 @@ _ID = re.compile(r"^B[0-9]+$")
 _REQ_ID = re.compile(r"^R[0-9]+$")
 _STATUS_ORDER = {"in_run": 0, "open": 1, "done": 2, "dropped": 3}
 _EDITABLE = frozenset({"title", "acceptance", "kind", "size", "priority", "notes", "files_hint",
-                       "depends_on", "serves", "effort"})
+                       "depends_on", "serves", "effort", "assignee"})
+OWNER = "owner"            # an item the owner does themselves: no card, listed apart
+_ASSIGNEE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
 
 class BacklogError(ValueError):
@@ -60,6 +62,9 @@ class BacklogItem:
     # How hard the agents on this item should think ("low" … "max"; "" = the role's effort).
     # Set by the project manager by difficulty: a level spends that much more on thinking.
     effort: str = ""
+    # Who does it: a team role (its card goes to that role), "owner" (the owner does it, no
+    # card), or "" (the planner decides).
+    assignee: str = ""
     status: ItemStatus = "open"
     notes: str = ""
     files_hint: list[str] = field(default_factory=list)
@@ -81,7 +86,9 @@ class BacklogItem:
         """
         after = f", after {', '.join(self.depends_on)}" if self.depends_on else ""
         effort = f", effort {self.effort}" if self.effort else ""
-        lines = [f"- **{self.id}** {self.title} ({self.kind}, size {self.size}{effort}{after})"]
+        who = ("" if not self.assignee else ", the owner does this one: no card"
+               if self.assignee == OWNER else f", for **{self.assignee}**: its card goes to them")
+        lines = [f"- **{self.id}** {self.title} ({self.kind}, size {self.size}{effort}{after}{who})"]
         lines += [f"    - [ ] {a}" for a in self.acceptance]
         if self.notes:
             lines.append(f"    - notes: {self.notes}")
@@ -168,12 +175,12 @@ class Backlog:
             size: str = "M", priority: int = 0, notes: str = "",
             files_hint: Sequence[str] = (), depends_on: Sequence[str] = (),
             source: str = "human", serves: Sequence[str] = (),
-            effort: str = "") -> BacklogItem:
+            effort: str = "", assignee: str = "") -> BacklogItem:
         """Add an open item."""
         with self.db.backlog_doc() as doc:
             return add_to_doc(doc, title, acceptance, kind=kind, size=size, priority=priority,
                               notes=notes, files_hint=files_hint, depends_on=depends_on,
-                              source=source, serves=serves, effort=effort)
+                              source=source, serves=serves, effort=effort, assignee=assignee)
 
     def update(self, item_id: str, **changes: Any) -> BacklogItem:  # Any: validated below
         """Edit fields of an item (any status but `done`)."""
@@ -381,6 +388,11 @@ class Backlog:
                 out[key] = value
             elif key == "notes":
                 out[key] = str(value)[:2000]
+            elif key == "assignee":
+                who = str(value or "").strip()
+                if who and not _ASSIGNEE.match(who):
+                    raise BacklogError("assignee must be a role name, \"owner\" or empty")
+                out[key] = who
             elif key == "depends_on":
                 if not isinstance(value, (list, tuple)) or not all(
                         isinstance(v, str) and _ID.match(v) for v in value):
@@ -398,13 +410,13 @@ def add_to_doc(doc: dict[str, Any], title: str, acceptance: Sequence[str] = (), 
                kind: str = "code", size: str = "M", priority: int = 0, notes: str = "",
                files_hint: Sequence[str] = (), depends_on: Sequence[str] = (),
                source: str = "human", serves: Sequence[str] = (),
-               effort: str = "") -> BacklogItem:
+               effort: str = "", assignee: str = "") -> BacklogItem:
     """Add an open item to an already-open backlog document (inside the caller's transaction)."""
     fields = Backlog._validated({"title": title, "acceptance": list(acceptance), "kind": kind,
                                  "size": size, "priority": priority, "notes": notes,
                                  "files_hint": list(files_hint),
                                  "depends_on": list(depends_on), "serves": list(serves),
-                                 "effort": effort})
+                                 "effort": effort, "assignee": assignee})
     now = time.time()
     item_id = f"B{int(doc.get('next', 1))}"
     _check_deps(doc, item_id, fields["depends_on"])

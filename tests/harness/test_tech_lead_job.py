@@ -85,3 +85,23 @@ def test_a_pinged_worker_without_a_card_gets_one_turn_with_the_message() -> None
     assert flow.begin_turn("tester").skip                         # once only
     flow.pinged["api"] = "Ship is 32x32."
     assert flow.begin_turn("api").card_id == "T1" and "api" not in flow.pinged
+
+
+def test_assigned_items_go_to_their_worker_and_owner_items_get_no_card() -> None:
+    from core.backlog import BacklogItem
+    flow, _ = _flow(None, [])
+    flow.backlog = [BacklogItem(id="B1", title="Draw the ship", assignee="api"),
+                    BacklogItem(id="B2", title="Pick the colours", assignee="owner")]
+    turn = flow.begin_turn("planner")
+    assert turn is not None and turn.check is not None
+    text = "\n".join(body for _, body in turn.extra_sections)
+    assert "for **api**" in text and "the owner does this one" in text
+
+    def card(owner: str, item: str) -> PlannedTask:
+        return PlannedTask(id="T1", title="Draw the ship", owner_role=owner, size="S",
+                           kind="code", acceptance=["the ship is drawn"], backlog_id=item)
+    assert turn.check(PlanResult(tasks=[card("api", "B1")])) == []        # B2 needs no card
+    assert any("assigned to api" in p for p in turn.check(PlanResult(tasks=[card("tester", "B1")])))
+    assert any("owner's own item" in p
+               for p in turn.check(PlanResult(tasks=[card("api", "B1"),
+                                                     card("api", "B2").model_copy(update={"id": "T2"})])))

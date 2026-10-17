@@ -50,6 +50,8 @@ class BacklogCreate(BaseModel):
     files_hint: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     effort: Literal["", "low", "medium", "high", "xhigh", "max"] = ""
+    # A team role, "owner" (the owner does it) or "" (the planner decides).
+    assignee: str = ""
 
 
 class GroomRequest(BaseModel):
@@ -70,6 +72,7 @@ class BacklogPatch(BaseModel):
     files_hint: list[str] | None = None
     depends_on: list[str] | None = None
     effort: Literal["", "low", "medium", "high", "xhigh", "max"] | None = None
+    assignee: str | None = None
     status: Literal["open", "dropped"] | None = None
 
 
@@ -122,6 +125,19 @@ async def list_backlog(request: Request, project_id: str) -> dict[str, Any]:  # 
                       for i in resolve_items(spec, Backlog(data_root, project_id).items())]}
 
 
+async def _assignee(request: Request, project_id: str, who: str) -> str:
+    """A backlog item's assignee must be a role on the team, "owner" or empty (400 otherwise)."""
+    who = (who or "").strip()
+    if who in ("", "owner"):
+        return who
+    project = await request.app.state.project_store.get(project_id) or {}
+    roles = {str(a.get("role")) for a in project.get("agents") or [] if isinstance(a, dict)}
+    if who not in roles:
+        raise HTTPException(status_code=400, detail=f"assignee {who!r} is not on the team "
+                            f"({', '.join(sorted(roles)) or 'no roles yet'})")
+    return who
+
+
 @router.post("/{project_id}/backlog", status_code=201)
 async def add_backlog_item(request: Request, project_id: str,
                            body: BacklogCreate) -> dict[str, Any]:  # Any: JSON
@@ -131,7 +147,8 @@ async def add_backlog_item(request: Request, project_id: str,
         item = Backlog(data_root, project_id).add(
             body.title, body.acceptance, kind=body.kind, size=body.size,
             priority=body.priority, notes=body.notes, files_hint=body.files_hint,
-            depends_on=body.depends_on, effort=body.effort)
+            depends_on=body.depends_on, effort=body.effort,
+            assignee=await _assignee(request, project_id, body.assignee))
     except BacklogError as exc:
         raise _bad(exc) from None
     return asdict(item)
@@ -162,6 +179,8 @@ async def edit_backlog_item(request: Request, project_id: str, item_id: str,
     data_root = await _project(request, project_id)
     backlog = Backlog(data_root, project_id)
     changes = body.model_dump(exclude_none=True, exclude={"status"})
+    if "assignee" in changes:
+        changes["assignee"] = await _assignee(request, project_id, changes["assignee"])
     try:
         item = backlog.get(item_id)
         if changes:
