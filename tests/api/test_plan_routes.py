@@ -402,3 +402,29 @@ async def test_plan_preview_is_inactive_without_a_turn(client, auth_header, app)
     app.state.pm_previews = {"p1": [{"op": "add_item", "title": "One"}]}
     r = await client.get("/api/projects/p1/plan/preview", headers=auth_header)
     assert r.json() == {"active": True, "changes": [{"op": "add_item", "title": "One"}]}
+
+
+async def test_a_message_from_the_dock_carries_the_owner_context(client, auth_header, app) -> None:
+    """Jack anywhere: the page context reaches Jack's prompt and is stored on the message."""
+    await _project(client, auth_header)
+    llm = _llm(app, _call("Nothing is stuck on the Spec page."))
+    r = await client.post("/api/projects/p1/plan/messages", headers=auth_header, json={
+        "text": "Anything blocking?", "mode": "discuss",
+        "context": {"page": "spec", "requirement": "R1", "run_id": "not-ours"}})
+    assert r.status_code == 200, r.text
+    human = r.json()["messages"][0]
+    assert human["context"]["page"] == "spec" and "run_id" not in human["context"]
+    assert human["context"]["label"] == "Spec · R1"
+    prompt = str(llm.calls[0]["messages"][0].content)
+    assert "Where the owner is:" in prompt and "Spec · R1" in prompt
+    assert any(t["name"] == "read_health" for t in llm.calls[0]["tools"])
+
+
+async def test_health_lists_what_blocks_the_next_session(client, auth_header, monkeypatch) -> None:
+    monkeypatch.setattr("core.harness.runtime_check.missing_runtimes", lambda *a, **k: [])
+    await _project(client, auth_header)
+    r = await client.get("/api/projects/p1/health", headers=auth_header)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert any("team is empty" in p for p in body["problems"])
+    assert any("stack is not set" in n for n in body["notes"])

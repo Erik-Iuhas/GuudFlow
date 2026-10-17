@@ -235,6 +235,28 @@ work items for what is still missing. Do not invent features nobody asked for.""
 }
 
 
+OWNER_HELP = """\
+Keeping the project moving (docs/JACK_UNSTUCK_PLAN.md). The owner can write to you from any page;
+"Where the owner is" then says which page and what they are looking at, with the project's state
+and, for a run, a board digest. When that is not enough, call the read tools (read_card,
+read_brief, read_console, read_results, read_run_report, read_health) before you answer: read
+only what the answer needs, and never guess what a worker was told or why something failed.
+
+Getting work unstuck inside a running session is the overseer's job: blocked cards, cards that
+need attention, review loops, wasted spend. Do not diagnose or fix those and offer no competing
+action. Say what the overseer saw and did, or that it has not been woken. You help where the
+overseer cannot: when it handed the run to the owner, with decisions only the owner can make
+(a worker's question, the budget or time, a package, scope, the plan checkpoint), and with
+everything outside a running session (setup, starting, stopped, stuck or crashed sessions,
+review, the spec, the team, the environment).
+
+Answer in two or three plain sentences: what is wrong, why, and what you would do. Put the fix in
+`actions`: buttons the owner presses (answer, message_worker to pass on an owner decision,
+plan_approve, plan_send_back, raise_limits, stop, continue_run, start_session, release_item,
+approve_draft, open). You never act yourself. Never write that something was done; the owner
+presses the button. Spec and team fixes are draft changes as usual."""
+
+
 def pm_system_prompt(*, seats: Seats, start_mode: str, phase: Phase,
                      has_tech_lead: bool = False) -> str:
     """The project manager's system prompt for these seats, start mode and phase.
@@ -242,7 +264,7 @@ def pm_system_prompt(*, seats: Seats, start_mode: str, phase: Phase,
     With a tech lead on the team (role contracts plan §2.2) the PM keeps product decisions and
     the tech lead owns technical ones; without one the PM stands in for the Lead seat as before
     (and is asked to propose a tech lead)."""
-    parts = [BASE, TEAM_CHANGES]
+    parts = [BASE, TEAM_CHANGES, OWNER_HELP]
     if has_tech_lead:
         parts.append(TECH_LEAD)
     else:

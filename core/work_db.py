@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS spec_items (
 CREATE TABLE IF NOT EXISTS plan_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, author TEXT NOT NULL,
     text TEXT NOT NULL, draft_id TEXT, mode TEXT NOT NULL DEFAULT '',
-    cost_usd REAL, tokens INTEGER, status TEXT, problems TEXT, parked TEXT);
+    cost_usd REAL, tokens INTEGER, status TEXT, problems TEXT, parked TEXT, actions TEXT,
+    context TEXT);
 CREATE TABLE IF NOT EXISTS drafts (
     id TEXT PRIMARY KEY, base_version INTEGER NOT NULL, status TEXT NOT NULL,
     data TEXT NOT NULL);
@@ -353,7 +354,9 @@ class WorkDB:
                          mode: str = "", cost_usd: float | None = None,
                          tokens: int | None = None, status: str = "",
                          problems: list[str] | None = None,
-                         parked: list[dict[str, Any]] | None = None  # Any: JSON rows
+                         parked: list[dict[str, Any]] | None = None,  # Any: JSON rows
+                         actions: list[dict[str, Any]] | None = None,  # Any: JSON rows
+                         context: dict[str, Any] | None = None  # Any: JSON
                          ) -> dict[str, Any]:  # Any: JSON row
         """Append one message to the plan conversation.
 
@@ -364,16 +367,20 @@ class WorkDB:
         now = time.time()
         probs = list(problems or [])
         held = list(parked or [])
+        acts = list(actions or [])
         with self._write() as conn:
             cur = conn.execute("INSERT INTO plan_messages(at, author, text, draft_id, mode, "
-                               "cost_usd, tokens, status, problems, parked) "
-                               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                               "cost_usd, tokens, status, problems, parked, actions, context) "
+                               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                (now, author, text, draft_id, mode, cost_usd, tokens, status,
                                 json.dumps(probs) if probs else None,
-                                json.dumps(held) if held else None))
+                                json.dumps(held) if held else None,
+                                json.dumps(acts) if acts else None,
+                                json.dumps(context) if context else None))
             return {"id": cur.lastrowid, "at": now, "author": author, "text": text,
                     "draft_id": draft_id, "mode": mode, "cost_usd": cost_usd, "tokens": tokens,
-                    "status": status, "problems": probs, "parked": held}
+                    "status": status, "problems": probs, "parked": held, "actions": acts,
+                    "context": context}
 
     def set_plan_message_parked(self, message_id: int,
                                 parked: list[dict[str, Any]]) -> None:  # Any: JSON rows
@@ -389,7 +396,8 @@ class WorkDB:
         conn = self._connect()
         try:
             rows = conn.execute("SELECT id, at, author, text, draft_id, mode, "
-                                "cost_usd, tokens, status, problems, parked FROM plan_messages "
+                                "cost_usd, tokens, status, problems, parked, actions, context "
+                                "FROM plan_messages "
                                 "ORDER BY id DESC LIMIT ?", (max(0, limit),)).fetchall()
         finally:
             conn.close()
@@ -400,6 +408,8 @@ class WorkDB:
             row["status"] = r[8] or ""
             row["problems"] = json.loads(r[9]) if r[9] else []
             row["parked"] = json.loads(r[10]) if r[10] else []
+            row["actions"] = json.loads(r[11]) if r[11] else []
+            row["context"] = json.loads(r[12]) if r[12] else None
             out.append(row)
         return out
 
@@ -448,7 +458,8 @@ class WorkDB:
     def _migrate(self, conn: sqlite3.Connection) -> None:
         columns = {r[1] for r in conn.execute("PRAGMA table_info(plan_messages)")}
         for name, kind in (("cost_usd", "REAL"), ("tokens", "INTEGER"), ("status", "TEXT"),
-                           ("problems", "TEXT"), ("parked", "TEXT")):
+                           ("problems", "TEXT"), ("parked", "TEXT"), ("actions", "TEXT"),
+                           ("context", "TEXT")):
             if name not in columns:  # databases made before the PM reported usage
                 conn.execute(f"ALTER TABLE plan_messages ADD COLUMN {name} {kind}")
         backlog = self.project_dir / "backlog.json"

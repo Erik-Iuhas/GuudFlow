@@ -52,6 +52,7 @@ TOOL_NAME = "submit_plan_turn"
 MAX_TOKENS = 32000
 HISTORY_MESSAGES = 20
 PM_COSTS_FILE = "pm_costs.jsonl"
+MAX_READS = 6             # read-tool calls Jack may make in one answer
 REPAIR_ROUNDS = 2          # repair calls after a turn that left changes out
 DEFAULT_TURN_BUDGET_USD = 1.0  # repairs stop once a turn has spent this (pm_turn_budget_usd)
 REPAIR_CHANGE_CAP = 600    # characters of a left-out change shown back in a repair call
@@ -297,11 +298,17 @@ class ProjectManager:
         # (docs/PLAN_STREAMING_PLAN.md). A preview only: the draft still fills from the
         # validated turn. None: no streaming, plain `complete`.
         self.on_preview: Callable[[list[dict[str, Any]]], None] | None = None
+        # Jack anywhere (docs/JACK_UNSTUCK_PLAN.md): read tools he may call in a turn, and the
+        # runs and items his buttons may name.
+        self.read_tools: Any = None  # Any: core.jack_context.ReadTools
+        self.run_ids: set[str] = set()
 
     # ── public ──────────────────────────────────────────────────────────────
     async def turn(self, text: str | None, *, mode: Mode = "update", phase: Phase = "plan",
                    extra_context: str | None = None,
-                   instruction: str | None = None) -> TurnOutcome:
+                   instruction: str | None = None,
+                   owner_context: str | None = None,
+                   context_meta: dict[str, Any] | None = None) -> TurnOutcome:  # Any: JSON
         """One exchange with the project manager.
 
         `text` is the human's message (stored first); `extra_context` is untrusted material
@@ -315,11 +322,13 @@ class ProjectManager:
         new: list[dict[str, Any]] = []  # Any: JSON rows
         if text is not None and text.strip():
             new.append(await asyncio.to_thread(self.drafts.add_message, "human", text.strip(),
-                                               None, mode))
+                                               None, mode, None, None, "", None, None, None,
+                                               context_meta))
         memory = await self._memory_context(text)
 
         async def build() -> str:
-            ctx = await asyncio.to_thread(self._context, text, instruction, extra_context)
+            ctx = await asyncio.to_thread(self._context, text, instruction, extra_context,
+                                          owner_context)
             return _insert_memory(ctx, memory)
 
         sources = [str(m["text"]) for m in await asyncio.to_thread(self.drafts.messages, 500)
@@ -399,9 +408,10 @@ class ProjectManager:
             if problems:
                 reply += ("\n\nLeft out of the draft until fixed:\n"
                           + "\n".join(f"- {p}" for p in problems))
+        actions = self._actions(turn, draft) if turn is not None else []
         new.append(await asyncio.to_thread(
             self.drafts.add_message, "pm", reply, draft.id if draft else None, mode,
-            cost, tokens, status, problems, _parked(left_out)))
+            cost, tokens, status, problems, _parked(left_out), actions))
         if seen_codes:
             from core.pm_memory import record_turn_problems
             await asyncio.to_thread(record_turn_problems, self.data_root, self.project_id,
@@ -469,9 +479,13 @@ class ProjectManager:
             call_kwargs: dict[str, Any] = dict(  # Any: complete()'s keyword arguments
                 system=system, messages=[LLMMessage(role="user",
                                                     content=_cached_content(context, tail))],
-                tools=[turn_tool()], max_tokens=MAX_TOKENS, cache_system=True, **kwargs)
+                tools=[turn_tool()] + (self._read_tool_defs() if self.read_tools else []),
+                max_tokens=MAX_TOKENS, cache_system=True, **kwargs)
             streaming = getattr(self.llm, "complete_streaming", None)
-            if self.on_preview is not None and streaming is not None:
+            if self.read_tools is not None:
+                response, steps = await self._complete_with_reads(call_kwargs, phase, kind, attempt)
+                responses.extend(steps)
+            elif self.on_preview is not None and streaming is not None:
                 response = await streaming(**call_kwargs, on_text=self._previewer())
             else:
                 response = await self.llm.complete(**call_kwargs)
@@ -524,6 +538,46 @@ class ProjectManager:
                                      for g in turn.groups if g.name == data.get("group")), None)
         return AskResult(kept, responses, warnings, notes, left_out)
 
+    def _actions(self, turn: PlanTurn, draft: Draft | None) -> list[dict[str, Any]]:  # Any: JSON
+        """The buttons Jack offered that fit the project (bad ones dropped, never failing)."""
+        if not turn.actions:
+            return []
+        from core.backlog import Backlog
+        from core.jack_actions import check_actions
+        items = {i.id for i in Backlog(self.data_root, self.project_id).items()
+                 if i.status in ("open", "in_run")}
+        kept = check_actions(turn.actions, roles={str(a.get("role")) for a in self._team()},
+                             run_ids=self.run_ids, items=items, has_draft=draft is not None)
+        return [a.model_dump(mode="json", exclude_none=True) for a in kept]
+
+    async def _complete_with_reads(self, call_kwargs: dict[str, Any], phase: str, kind: str,  # Any: kwargs
+                                   attempt: int) -> tuple[LLMResponse, list[LLMResponse]]:
+        """One model answer, letting it call Jack's read tools first (at most MAX_READS calls).
+
+        Returns the final response and every earlier read-step response (for cost)."""
+        from core.jack_context import READ_TOOL_NAMES
+        steps: list[LLMResponse] = []
+        messages = list(call_kwargs["messages"])
+        reads = 0
+        while True:
+            response = await self.llm.complete(**{**call_kwargs, "messages": messages})
+            asks = [c for c in response.tool_calls if c.name in READ_TOOL_NAMES]
+            done = any(c.name == TOOL_NAME for c in response.tool_calls)
+            if done or not asks or self.read_tools is None or reads >= MAX_READS:
+                return response, steps
+            steps.append(response)
+            self._record_call(phase, "read", attempt, response, "read")
+            blocks: list[dict[str, Any]] = ([{"type": "text", "text": response.text}]
+                                            if response.text else [])
+            results: list[dict[str, Any]] = []
+            for c in asks[:MAX_READS - reads]:
+                reads += 1
+                blocks.append({"type": "tool_use", "id": c.id, "name": c.name, "input": c.arguments})
+                out = await asyncio.to_thread(self.read_tools.call, c.name, c.arguments)
+                results.append({"type": "tool_result", "tool_use_id": c.id, "content": out})
+            messages += [LLMMessage(role="assistant", content=blocks),
+                         LLMMessage(role="user", content=results)]
+
     def _previewer(self) -> Callable[[str], None]:
         """An `on_text` that passes newly finished changes to `on_preview`."""
         from core.partial_json import complete_items
@@ -540,6 +594,11 @@ class ProjectManager:
                 except Exception:  # noqa: BLE001 — a preview must never break the turn
                     log.warning("pm: preview callback failed", exc_info=True)
         return on_text
+
+    @staticmethod
+    def _read_tool_defs() -> list[dict[str, Any]]:  # Any: JSON schema
+        from core.jack_context import READ_TOOLS
+        return [dict(t) for t in READ_TOOLS]
 
     def _turn_budget(self) -> float:
         """The most one turn may spend before repairs stop (gate `pm_turn_budget_usd`)."""
@@ -653,7 +712,7 @@ class ProjectManager:
                 "over anything you remember when they disagree.)")
 
     def _context(self, text: str | None, instruction: str | None,
-                 extra: str | None) -> str:
+                 extra: str | None, owner: str | None = None) -> str:
         spec = Spec(self.drafts.db.read_spec_doc())
         parts = [f"Project goal:\n{str(self.doc.get('goal') or '').strip() or '(none given)'}",
                  f"Start mode: {self.start_mode}. Lead seat: "
@@ -690,6 +749,8 @@ class ProjectManager:
                          + wrap_untrusted("extra context", extra.strip()[:EXTRA_CAP]))
         if instruction:
             parts.append(instruction)
+        if owner:
+            parts.append("Where the owner is:\n" + owner)
         if text is not None and text.strip():
             parts.append(f"The human says now:\n{text.strip()}")
         return "\n\n".join(parts)

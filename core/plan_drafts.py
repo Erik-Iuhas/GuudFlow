@@ -22,6 +22,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter, 
 
 from core.backlog import BacklogError, _check_deps, add_to_doc, update_in_doc
 from core.harness.capabilities import ROLE_TYPES, Capabilities, CapabilityError
+from core.jack_actions import JackAction
 from core.spec import (
     CHECK_REF, REQ_ID, STACK_FIELDS, Check, Decision, Param, Requirement, Rule, Spec, SpecError,
     derive_title,
@@ -419,6 +420,8 @@ class PlanTurn(_Model):
     changes: list[Change] = Field(default_factory=list, max_length=MAX_CHANGES)
     reply: str
     questions: list[str] = Field(default_factory=list)
+    # Buttons the owner may press (docs/JACK_UNSTUCK_PLAN.md §5); Jack never acts himself.
+    actions: list[JackAction] = Field(default_factory=list, max_length=4)
 
 
 def parse_change(row: dict[str, Any]) -> Any:  # Any: one member of the `Change` union
@@ -1378,12 +1381,14 @@ class PlanDrafts:
                     mode: str = "", cost_usd: float | None = None,
                     tokens: int | None = None, status: str = "",
                     problems: list[str] | None = None,
-                    parked: list[dict[str, Any]] | None = None  # Any: JSON rows
+                    parked: list[dict[str, Any]] | None = None,  # Any: JSON rows
+                    actions: list[dict[str, Any]] | None = None,  # Any: JSON rows
+                    context: dict[str, Any] | None = None  # Any: JSON
                     ) -> dict[str, Any]:  # Any: JSON row
         """Append a message to the plan conversation (a PM turn's status, open problems and
-        the changes they kept out)."""
+        the changes they kept out; the buttons Jack offered; where the owner wrote from)."""
         return self.db.add_plan_message(author, text, draft_id, mode, cost_usd, tokens,
-                                        status, problems, parked)
+                                        status, problems, parked, actions, context)
 
     def messages(self, limit: int = 100) -> list[dict[str, Any]]:  # Any: JSON rows
         """The latest messages, oldest first."""

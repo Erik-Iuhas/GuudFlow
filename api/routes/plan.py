@@ -37,6 +37,8 @@ class MessageBody(BaseModel):
     text: str
     mode: Literal["update", "discuss"] = "update"
     meta_model: str | None = None
+    # Where the owner wrote from (the Jack dock): page and ids, resolved on the host.
+    context: dict[str, Any] | None = None  # Any: OwnerContext fields, validated in core
 
 
 class StartBody(BaseModel):
@@ -120,14 +122,58 @@ async def _manager(request: Request, project_id: str,
     return ProjectManager(llm, data_root, project_id, doc, model=model_id, effort=effort)
 
 
+def _project_run_ids(data_root: Path, project_id: str, limit: int = 50) -> set[str]:
+    """This project's runs (newest first), from their meta.json."""
+    import json
+    root = data_root / "runs"
+    if not root.is_dir():
+        return set()
+    out: set[str] = set()
+    for d in sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        meta = d / "meta.json"
+        if len(out) >= limit:
+            break
+        try:
+            if meta.is_file() and json.loads(meta.read_text(encoding="utf-8")).get("project_id") == project_id:
+                out.add(d.name)
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+async def _owner_context(request: Request, project_id: str, pm: ProjectManager,
+                         raw: dict[str, Any] | None) -> tuple[str | None, dict[str, Any] | None]:  # Any: JSON
+    """Give Jack the owner's page (digest) and his read tools; returns (digest, stored meta)."""
+    from core.jack_context import OwnerContext, ReadTools, digest
+    data_root, doc = await _project(request, project_id)
+    registry = request.app.state.run_registry
+    runs = getattr(registry, "runs", {}) or {}
+    pm.run_ids = await asyncio.to_thread(_project_run_ids, data_root, project_id)
+    from core.project_health import project_health
+    pm.read_tools = ReadTools(data_root, project_id, doc, workspace_for=runs.get,
+                              health=lambda: project_health(data_root, project_id, doc,
+                                                            set(runs)).text())
+    ctx = OwnerContext.from_dict(raw)
+    if ctx is None:
+        return None, None
+    if ctx.run_id and ctx.run_id not in pm.run_ids:
+        ctx = OwnerContext(page=ctx.page, item=ctx.item, requirement=ctx.requirement,
+                           component=ctx.component)
+    text = await asyncio.to_thread(digest, data_root, project_id, doc, ctx, runs.get)
+    return text, {**ctx.to_dict(), "label": ctx.label()}
+
+
 async def _run_turn(request: Request, project_id: str, meta_model: str | None,
-                    text: str | None, mode: Literal["update", "discuss"]) -> dict[str, Any]:  # Any: JSON
+                    text: str | None, mode: Literal["update", "discuss"],
+                    context: dict[str, Any] | None = None) -> dict[str, Any]:  # Any: JSON
     pm = await _manager(request, project_id, meta_model)
+    owner, meta = await _owner_context(request, project_id, pm, context)
     previews = _previews(request)
     previews[project_id] = []
     pm.on_preview = lambda items: previews.__setitem__(project_id, list(items))
     try:
-        outcome = await (pm.start() if text is None else pm.turn(text, mode=mode))
+        outcome = await (pm.start() if text is None else pm.turn(
+            text, mode=mode, owner_context=owner, context_meta=meta))
     except ProjectManagerError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from None
     except PlanDraftError as exc:
@@ -195,6 +241,15 @@ def _pydantic_detail(exc: ValidationError) -> str:
     return "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors())
 
 
+@router.get("/{project_id}/health")
+async def get_health(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
+    """What could stop the next session: `{problems, notes}` (docs/JACK_UNSTUCK_PLAN.md U6)."""
+    from core.project_health import project_health
+    data_root, doc = await _project(request, project_id)
+    runs = set(getattr(request.app.state.run_registry, "runs", {}) or {})
+    return (await asyncio.to_thread(project_health, data_root, project_id, doc, runs)).to_dict()
+
+
 # ── plan conversation ───────────────────────────────────────────────────────
 @router.get("/{project_id}/plan")
 async def get_plan(request: Request, project_id: str) -> dict[str, Any]:  # Any: JSON
@@ -227,7 +282,8 @@ async def post_message(request: Request, project_id: str,
     """
     if not body.text.strip():
         raise HTTPException(status_code=422, detail="text is empty")
-    return await _run_turn(request, project_id, body.meta_model, body.text, body.mode)
+    return await _run_turn(request, project_id, body.meta_model, body.text, body.mode,
+                           body.context)
 
 
 @router.post("/{project_id}/plan/messages/{message_id}/parked/{parked_id}/accept")
