@@ -4,6 +4,7 @@ import { ApiError, approvePlan, invokeApi, messageWorker, runsApi, sendPlanBack 
 import { Button } from "../../components/ui/button";
 import { planApi, type JackActionWire } from "../plan/api";
 import { workApi } from "../work/api";
+import { LiveReceipt } from "./LiveReceipt";
 
 // Jack's buttons (docs/JACK_UNSTUCK_PLAN.md §5). Jack never acts: each button calls an existing
 // route when the owner presses it, and shows what came back. Stopping and raising the budget
@@ -11,6 +12,7 @@ import { workApi } from "../work/api";
 
 const CONFIRM = new Set(["raise_limits", "stop"]);
 type State = { phase: "idle" | "confirm" | "busy" | "done" | "error" | "gate"; note?: string };
+type Live = { kind: "message" | "answer" | "stop"; refId?: string; role?: string; at: number } | null;
 
 function confirmText(a: JackActionWire): string {
   if (a.kind === "stop") return "Stop the run? Press again";
@@ -34,6 +36,7 @@ export function JackActions({ projectId, actions, onApproved }: {
 function ActionButton({ projectId, action: a, onApproved }: { projectId: string; action: JackActionWire; onApproved?: () => void }) {
   const navigate = useNavigate();
   const [state, setState] = useState<State>({ phase: "idle" });
+  const [live, setLive] = useState<Live>(null);
 
   async function invoke(payload: Record<string, unknown>, confirm: boolean): Promise<string> {
     const res = await invokeApi.invoke(projectId, { ...payload, ...(confirm ? { confirm: true } : {}) });
@@ -65,10 +68,14 @@ function ActionButton({ projectId, action: a, onApproved }: { projectId: string;
     switch (a.kind) {
       case "answer":
         await runsApi.respond(run_id, a.text ?? "");
-        return "Answered · the run carries on";
-      case "message_worker":
-        await messageWorker(run_id, a.role ?? "", a.text ?? "", false);
-        return `Sent · ${a.role} reads it at the start of its next turn`;
+        setLive({ kind: "answer", at: Date.now() });
+        return "Answered";
+      case "message_worker": {
+        const at = Date.now();
+        const res = await messageWorker(run_id, a.role ?? "", a.text ?? "", false);
+        if (res.signal_id) setLive({ kind: "message", refId: res.signal_id, role: a.role, at });
+        return "Sent";
+      }
       case "plan_approve":
         await approvePlan(run_id);
         return "Plan approved · cards start";
@@ -83,7 +90,8 @@ function ActionButton({ projectId, action: a, onApproved }: { projectId: string;
         return "Limits raised";
       case "stop":
         await runsApi.stop(run_id);
-        return "Stopping · running turns finish first";
+        setLive({ kind: "stop", at: Date.now() });
+        return "Stop sent";
       case "continue_run":
         return invoke({ continue_run: run_id, ...(a.text ? { continue_note: a.text } : {}) }, confirmGate);
       case "start_session":
@@ -116,6 +124,7 @@ function ActionButton({ projectId, action: a, onApproved }: { projectId: string;
         {done ? `✓ ${a.label}` : state.phase === "busy" ? "Working…" : state.phase === "confirm" ? confirmText(a)
           : state.phase === "gate" ? "Start anyway" : a.label}
       </Button>
+      {live && a.run_id && <LiveReceipt runId={a.run_id} kind={live.kind} refId={live.refId} role={live.role} at={live.at} />}
       {state.note && (
         <span role={state.phase === "error" ? "alert" : "status"}
           className={`text-[11px] ${state.phase === "error" ? "text-destructive" : "text-muted-foreground"}`}>

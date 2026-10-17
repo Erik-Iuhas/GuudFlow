@@ -68,7 +68,8 @@ describe("Jack dock", () => {
       body: { text: "Why is the run paused?", mode: "discuss", context: { page: "run", run_id: "run_x", card: "T3" } } }));
     fireEvent.click(await within(dock).findByTestId("jack-action-answer"));
     await waitFor(() => expect(writes()[1]).toMatchObject({ path: "/api/runs/run_x/respond", body: { answer: "Run bun test plain." } }));
-    expect(await within(dock).findByText("Answered · the run carries on")).toBeInTheDocument();
+    expect(await within(dock).findByText("Answered")).toBeInTheDocument();
+    expect(within(dock).getByTestId("jack-action-answer")).toHaveTextContent("✓ Answer: run it plain");
     // Stop needs a second press.
     fireEvent.click(within(dock).getByTestId("jack-action-stop"));
     expect(writes()).toHaveLength(2);
